@@ -1,0 +1,94 @@
+-- GCP OAuth2 token exchange via Application Default Credentials
+--
+-- Reads ADC file from ~/.config/gcloud/application_default_credentials.json
+-- and exchanges the refresh token for an access token via Google OAuth2.
+--
+-- Usage:
+--   import pkg/sunholo/gcp-auth/token (getAccessToken, readCredentials, ADCCredentials)
+--
+--   match getAccessToken() {
+--     Ok(token) => -- use token for Bearer auth
+--     Err(e) => println("Auth failed: " ++ e)
+--   }
+
+module sunholo/gcp-auth/token
+
+import std/fs (readFile, fileExists)
+import std/net (httpRequest)
+import std/json (decode, getString)
+import std/option (getOrElse, isSome)
+import std/result (Ok, Err)
+import std/env (getEnvOr)
+import std/string (length, substring, trim)
+
+-- Parsed ADC credentials
+export type ADCCredentials = {
+  clientId: string,
+  clientSecret: string,
+  refreshToken: string
+}
+
+-- Get the path to ADC credentials file
+-- Uses HOME env var with /tmp fallback
+export func getCredentialsPath() -> string ! {FS} {
+  let home = getEnvOr("HOME", "/tmp");
+  home ++ "/.config/gcloud/application_default_credentials.json"
+}
+
+-- Read and parse ADC credentials from the default location
+export func readCredentials() -> Result[ADCCredentials, string] ! {FS} {
+  let path = getCredentialsPath();
+  let found = fileExists(path);
+  if found then parseCredentialsFile(path) else Err("ADC file not found at: " ++ path)
+}
+
+func parseCredentialsFile(path: string) -> Result[ADCCredentials, string] ! {FS} {
+  let content = readFile(path);
+  match decode(content) {
+    Ok(json) => {
+      let clientId = getOrElse(getString(json, "client_id"), "");
+      let clientSecret = getOrElse(getString(json, "client_secret"), "");
+      let refreshToken = getOrElse(getString(json, "refresh_token"), "");
+      if clientId == "" then Err("Missing client_id in ADC file")
+      else if clientSecret == "" then Err("Missing client_secret in ADC file")
+      else if refreshToken == "" then Err("Missing refresh_token in ADC file")
+      else Ok({ clientId: clientId, clientSecret: clientSecret, refreshToken: refreshToken })
+    },
+    Err(e) => Err("Failed to parse ADC file: " ++ e)
+  }
+}
+
+-- Exchange ADC refresh token for a short-lived access token
+-- This is the main entry point for GCP authentication
+export func getAccessToken() -> Result[string, string] ! {FS, Net} {
+  match readCredentials() {
+    Ok(creds) => exchangeRefreshToken(creds),
+    Err(e) => Err(e)
+  }
+}
+
+func exchangeRefreshToken(creds: ADCCredentials) -> Result[string, string] ! {Net} {
+  let url = "https://oauth2.googleapis.com/token";
+  let body = "client_id=" ++ creds.clientId ++
+             "&client_secret=" ++ creds.clientSecret ++
+             "&refresh_token=" ++ creds.refreshToken ++
+             "&grant_type=refresh_token";
+  let headers = [
+    { name: "Content-Type", value: "application/x-www-form-urlencoded" }
+  ];
+  match httpRequest("POST", url, headers, body) {
+    Ok(response) => {
+      if response.ok then {
+        match decode(response.body) {
+          Ok(json) => {
+            let tokenOpt = getString(json, "access_token");
+            if isSome(tokenOpt) then Ok(getOrElse(tokenOpt, ""))
+            else Err("No access_token in OAuth2 response")
+          },
+          Err(e) => Err("Failed to parse OAuth2 response: " ++ e)
+        }
+      } else Err("OAuth2 request failed with status: " ++ show(response.status))
+    },
+    Err(_) => Err("Network error during OAuth2 token exchange")
+  }
+}

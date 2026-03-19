@@ -1,0 +1,37 @@
+-- Structured JSON logging
+--
+-- Outputs JSON log lines to stderr (Cloud Run / container friendly).
+-- Every project currently reinvents println("[Error] ...") differently.
+-- This standardizes to structured JSON that log aggregators can parse.
+--
+-- Usage:
+--   import pkg/sunholo/logging/logger (info, warn, logError, debug)
+--
+--   info("Server started on port 8080")
+--   warn("Rate limit approaching for user: " ++ userId)
+--   logError("Failed to parse document", errorMsg)
+
+module sunholo/logging/logger
+
+import std/io (println)
+import std/json (encode, jo, kv, js)
+
+-- Log at INFO level
+export func info(message: string) -> () ! {IO} =
+  println(encode(jo([kv("severity", js("INFO")), kv("message", js(message))])))
+
+-- Log at WARNING level
+export func warn(message: string) -> () ! {IO} =
+  println(encode(jo([kv("severity", js("WARNING")), kv("message", js(message))])))
+
+-- Log at ERROR level with optional detail
+export func logError(message: string, detail: string) -> () ! {IO} =
+  println(encode(jo([kv("severity", js("ERROR")), kv("message", js(message)), kv("detail", js(detail))])))
+
+-- Log at DEBUG level (only useful when log level is set to debug)
+export func debug(message: string) -> () ! {IO} =
+  println(encode(jo([kv("severity", js("DEBUG")), kv("message", js(message))])))
+
+-- Log with arbitrary key-value context
+export func logWithContext(severity: string, message: string, context: Json) -> () ! {IO} =
+  println(encode(jo([kv("severity", js(severity)), kv("message", js(message)), kv("context", context)])))

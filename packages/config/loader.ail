@@ -1,0 +1,56 @@
+-- Config loading from environment variables
+--
+-- Standardizes the pattern every project uses: getEnvOr for defaults,
+-- getEnv for required vars, with clear error messages.
+--
+-- Usage:
+--   import pkg/sunholo/config/loader (requireEnv, optionalEnv, loadConfig)
+--
+--   let project = requireEnv("GOOGLE_CLOUD_PROJECT")
+--   let port = optionalEnv("PORT", "8080")
+
+module sunholo/config/loader
+
+import std/env (getEnv, getEnvOr)
+import std/result (Ok, Err)
+
+-- Load a required environment variable, fail with clear error if missing
+--
+-- Example:
+--   match requireEnv("GOOGLE_CLOUD_PROJECT") {
+--     Ok(project) => -- use project
+--     Err(e) => println(e)  -- "Required env var GOOGLE_CLOUD_PROJECT is not set"
+--   }
+export func requireEnv(name: string) -> Result[string, string] ! {Env} =
+  match getEnv(name) {
+    Ok(value) => {
+      if value == "" then Err("Required env var " ++ name ++ " is empty")
+      else Ok(value)
+    },
+    Err(_) => Err("Required env var " ++ name ++ " is not set")
+  }
+
+-- Load an optional environment variable with a default
+export func optionalEnv(name: string, defaultValue: string) -> string ! {Env} =
+  getEnvOr(name, defaultValue)
+
+-- Load multiple required env vars, returning first error
+-- Useful for startup validation
+--
+-- Example:
+--   match requireAll(["GOOGLE_CLOUD_PROJECT", "API_KEY", "DATABASE"]) {
+--     Ok(values) => -- values is [projectId, apiKey, dbName]
+--     Err(e) => println("Missing config: " ++ e)
+--   }
+export func requireAll(names: [string]) -> Result[[string], string] ! {Env} =
+  collectRequired(names, [])
+
+func collectRequired(names: [string], acc: [string]) -> Result[[string], string] ! {Env} =
+  match names {
+    [] => Ok(acc),
+    name :: rest =>
+      match requireEnv(name) {
+        Ok(value) => collectRequired(rest, acc ++ [value]),
+        Err(e) => Err(e)
+      }
+  }

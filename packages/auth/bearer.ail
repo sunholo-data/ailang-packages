@@ -1,0 +1,23 @@
+-- Bearer token extraction from HTTP headers
+--
+-- Pure functions for extracting and validating bearer tokens.
+--
+-- Usage:
+--   import pkg/sunholo/auth/bearer (extractBearer, hasBearer)
+
+module sunholo/auth/bearer
+
+import std/string (length, substring, startsWith)
+import std/option (Option, Some, None)
+
+-- Extract bearer token from Authorization header value
+-- "Bearer sk-abc123..." → Some("sk-abc123...")
+-- "Basic xxx" → None
+-- "" → None
+export pure func extractBearer(header: string) -> Option[string] =
+  if startsWith(header, "Bearer ") then Some(substring(header, 7, length(header)))
+  else None
+
+-- Check if header contains a bearer token
+export pure func hasBearer(header: string) -> bool =
+  startsWith(header, "Bearer ")

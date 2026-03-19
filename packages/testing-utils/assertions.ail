@@ -1,0 +1,48 @@
+-- Test assertion helpers
+--
+-- Pure functions that return descriptive pass/fail results.
+-- Use with contracts or manual checking in test files.
+--
+-- Usage:
+--   import pkg/sunholo/testing-utils/assertions (assertEqual, assertContains, assertOk)
+--
+--   let result = assertEqual("expected", actual, "field name")
+
+module sunholo/testing-utils/assertions
+
+import std/result (Result, Ok, Err)
+import std/string (contains)
+
+-- Assert two strings are equal, with context for error messages
+export pure func assertEqual(expected: string, actual: string, context: string) -> Result[string, string] =
+  if expected == actual then Ok("PASS: " ++ context)
+  else Err("FAIL: " ++ context ++ " — expected " ++ show(expected) ++ " but got " ++ show(actual))
+
+-- Assert two ints are equal
+export pure func assertEqualInt(expected: int, actual: int, context: string) -> Result[string, string] =
+  if expected == actual then Ok("PASS: " ++ context)
+  else Err("FAIL: " ++ context ++ " — expected " ++ show(expected) ++ " but got " ++ show(actual))
+
+-- Assert string contains substring
+export pure func assertContains(haystack: string, needle: string, context: string) -> Result[string, string] =
+  if contains(haystack, needle) then Ok("PASS: " ++ context)
+  else Err("FAIL: " ++ context ++ " — expected to contain " ++ show(needle))
+
+-- Assert a Result is Ok
+export pure func assertOk(r: Result[string, string], context: string) -> Result[string, string] =
+  match r {
+    Ok(_) => Ok("PASS: " ++ context),
+    Err(e) => Err("FAIL: " ++ context ++ " — got Err: " ++ e)
+  }
+
+-- Assert a Result is Err
+export pure func assertErr(r: Result[string, string], context: string) -> Result[string, string] =
+  match r {
+    Ok(v) => Err("FAIL: " ++ context ++ " — expected Err but got Ok: " ++ v),
+    Err(_) => Ok("PASS: " ++ context)
+  }
+
+-- Assert a boolean is true
+export pure func assertTrue(value: bool, context: string) -> Result[string, string] =
+  if value then Ok("PASS: " ++ context)
+  else Err("FAIL: " ++ context ++ " — expected true")
