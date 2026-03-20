@@ -22,7 +22,7 @@ import std/string (trim, split, find, length)
 
 -- Get the default GCP project from gcloud config or ADC file
 -- Checks: GOOGLE_CLOUD_PROJECT env → gcloud active config → ADC quota_project_id
-export func getDefaultProject() -> Result[string, string] ! {FS} {
+export func getDefaultProject() -> Result[string, string] ! {FS, Env} {
   let envProject = getEnvOr("GOOGLE_CLOUD_PROJECT", "");
   if envProject != "" then Ok(envProject)
   else {
