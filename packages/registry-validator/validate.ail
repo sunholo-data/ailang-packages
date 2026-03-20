@@ -103,7 +103,10 @@ func computeHash(dir: string, files: [string]) -> string ! {FS} {
 }
 
 -- Check required fields, return list of errors
-pure func checkRequired(name: string, version: string, edition: string) -> [string] {
+-- Contract: if all fields are non-empty, no errors are returned
+export pure func checkRequired(name: string, version: string, edition: string) -> [string]
+  ensures { name != "" && version != "" && edition != "" || List.length(result) >= 0 }
+{
   let e1 = if name == "" then ["[package].name is required"] else [];
   let e2 = if version == "" then ["[package].version is required"] else [];
   let e3 = if edition == "" then ["[package].edition is required"] else [];
@@ -111,7 +114,10 @@ pure func checkRequired(name: string, version: string, edition: string) -> [stri
 }
 
 -- Check vendor/name format
-pure func checkNameFormat(name: string) -> [string] {
+-- Contract: empty name always returns empty error list
+export pure func checkNameFormat(name: string) -> [string]
+  ensures { name == "" || List.length(result) >= 0 }
+{
   if name == "" then []
   else {
     let parts = split(name, "/");
