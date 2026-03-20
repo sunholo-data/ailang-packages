@@ -1,12 +1,12 @@
-# sunholo/gcp-auth
+# sunholo/gcp_auth
 
 ## When to use this package
 Use when your AILANG service runs on GCP and needs to authenticate API calls. Reads Application Default Credentials (ADC) and exchanges refresh tokens for access tokens via OAuth2. Also detects the default GCP project.
 
 ## Quick start
 ```ailang
-import pkg/sunholo/gcp-auth/token (getAccessToken)
-import pkg/sunholo/gcp-auth/project (getDefaultProject)
+import pkg/sunholo/gcp_auth/token (getAccessToken)
+import pkg/sunholo/gcp_auth/project (getDefaultProject)
 import pkg/sunholo/http-helpers/request (authGet)
 
 -- Get OAuth2 access token from ADC

@@ -1,12 +1,12 @@
-# sunholo/http-helpers
+# sunholo/http_helpers
 
 ## When to use this package
 Use when making HTTP API calls. Eliminates repeated Bearer auth header construction and JSON response parsing that every AILANG API project reinvents.
 
 ## Quick start
 ```ailang
-import pkg/sunholo/http-helpers/request (authGet, authPost, bearerHeaders)
-import pkg/sunholo/http-helpers/response (requireOk, parseJsonBody, requireField)
+import pkg/sunholo/http_helpers/request (authGet, authPost, bearerHeaders)
+import pkg/sunholo/http_helpers/response (requireOk, parseJsonBody, requireField)
 
 -- GET with Bearer token
 match authGet("https://api.example.com/data", token) {

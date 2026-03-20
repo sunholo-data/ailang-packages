@@ -1,11 +1,11 @@
-# sunholo/testing-utils
+# sunholo/testing_utils
 
 ## When to use this package
 Use for test assertions in AILANG test files. Pure functions returning `Result[string, string]` — "PASS: context" on success, "FAIL: context — expected X but got Y" on failure.
 
 ## Quick start
 ```ailang
-import pkg/sunholo/testing-utils/assertions (assertEqual, assertContains, assertOk, assertTrue)
+import pkg/sunholo/testing_utils/assertions (assertEqual, assertContains, assertOk, assertTrue)
 
 -- String equality
 assertEqual("hello", actual, "greeting field")
