@@ -1,0 +1,145 @@
+-- AILANG Package Validator — written in AILANG
+--
+-- Validates a package directory before registry publish.
+-- Dogfooding: AILANG validates AILANG packages.
+--
+-- Usage via serve-api:
+--   ailang serve-api --caps IO,FS packages/registry-validator/
+--   curl -X POST http://localhost:8080/api/sunholo/registry_validator/validate/validatePackage \
+--     -H "Content-Type: application/json" -d '{"packageDir": "/path/to/package"}'
+
+module sunholo/registry_validator/validate
+
+import std/fs (readFile, fileExists, listDir)
+import std/json (encode, jo, kv, js, jb, jnum, ja)
+import std/string (endsWith, contains, split, trim, join)
+import std/list (map, filter, foldl, concat)
+import std/math (intToFloat)
+import std/list as List
+import std/option (Option, Some, None, getOrElse)
+import std/result (Ok, Err)
+import std/crypto (sha256Hex)
+import std/io (println)
+
+-- Validate a package at the given directory path.
+-- Returns JSON string with validation results.
+export func validatePackage(packageDir: string) -> string ! {IO, FS} {
+  let manifestPath = packageDir ++ "/ailang.toml";
+  let manifestFound = fileExists(manifestPath);
+  if manifestFound
+  then validateWithManifest(packageDir, manifestPath)
+  else encode(jo([
+    kv("valid", jb(false)),
+    kv("errors", ja([js("ailang.toml not found at " ++ manifestPath)]))
+  ]))
+}
+
+func validateWithManifest(packageDir: string, manifestPath: string) -> string ! {IO, FS} {
+  let content = readFile(manifestPath);
+  let name = getOrElse(extractField(content, "name"), "");
+  let version = getOrElse(extractField(content, "version"), "");
+  let edition = getOrElse(extractField(content, "edition"), "");
+
+  -- Validate required fields
+  let fieldErrors = checkRequired(name, version, edition);
+
+  -- Validate vendor/name format
+  let nameErrors = checkNameFormat(name);
+
+  -- Find .ail files
+  let rootFiles = listDir(packageDir);
+  let ailFiles = filter(func(f: string) -> bool { endsWith(f, ".ail") }, rootFiles);
+
+  -- Check src/ too
+  let srcPath = packageDir ++ "/src";
+  let srcExists = fileExists(srcPath);
+  let srcFiles = if srcExists
+    then {
+      let sf = listDir(srcPath);
+      map(func(f: string) -> string { "src/" ++ f }, filter(func(f: string) -> bool { endsWith(f, ".ail") }, sf))
+    }
+    else [];
+  let allAilFiles = concat(ailFiles, srcFiles);
+
+  -- Must have at least one source file
+  let fileErrors = if List.length(allAilFiles) == 0
+    then ["No .ail source files found"]
+    else [];
+
+  -- Check AGENT.md
+  let hasAgent = fileExists(packageDir ++ "/AGENT.md");
+
+  -- Compute content hash
+  let contentHash = computeHash(packageDir, allAilFiles);
+
+  -- Compute interface hash
+  let ifaceHash = "sha256:" ++ sha256Hex("name:" ++ name ++ "\nedition:" ++ edition);
+
+  let allErrors = concat(concat(fieldErrors, nameErrors), fileErrors);
+  let isValid = List.length(allErrors) == 0;
+
+  -- Log
+  println(encode(jo([kv("action", js("validate")), kv("package", js(name)), kv("valid", jb(isValid))])));
+
+  encode(jo([
+    kv("valid", jb(isValid)),
+    kv("packageName", js(name)),
+    kv("version", js(version)),
+    kv("errors", ja(map(func(e: string) -> Json { js(e) }, allErrors))),
+    kv("contentHash", js(contentHash)),
+    kv("interfaceHash", js(ifaceHash)),
+    kv("ailFileCount", jnum(intToFloat(List.length(allAilFiles)))),
+    kv("hasAgentDoc", jb(hasAgent))
+  ]))
+}
+
+-- Compute SHA-256 content hash from sorted .ail file contents
+func computeHash(dir: string, files: [string]) -> string ! {FS} {
+  let combined = foldl(func(acc: string, f: string) -> string ! {FS} {
+    let c = readFile(dir ++ "/" ++ f);
+    acc ++ "file:" ++ f ++ "\n" ++ c
+  }, "", files);
+  "sha256:" ++ sha256Hex(combined)
+}
+
+-- Check required fields, return list of errors
+pure func checkRequired(name: string, version: string, edition: string) -> [string] {
+  let e1 = if name == "" then ["[package].name is required"] else [];
+  let e2 = if version == "" then ["[package].version is required"] else [];
+  let e3 = if edition == "" then ["[package].edition is required"] else [];
+  concat(concat(e1, e2), e3)
+}
+
+-- Check vendor/name format
+pure func checkNameFormat(name: string) -> [string] {
+  if name == "" then []
+  else {
+    let parts = split(name, "/");
+    if List.length(parts) != 2
+    then ["[package].name must be vendor/name format, got: " ++ name]
+    else []
+  }
+}
+
+-- Extract a quoted value from TOML: key = "value"
+pure func extractField(content: string, key: string) -> Option[string] {
+  let lines = split(content, "\n");
+  findField(lines, key)
+}
+
+pure func findField(lines: [string], key: string) -> Option[string] =
+  match lines {
+    [] => None,
+    line :: rest =>
+      if contains(trim(line), key ++ " =") || contains(trim(line), key ++ "=")
+      then extractQuoted(trim(line))
+      else findField(rest, key)
+  }
+
+pure func extractQuoted(line: string) -> Option[string] {
+  let parts = split(line, "\"");
+  match parts {
+    _ :: value :: _ => Some(value),
+    _ => None
+  }
+}

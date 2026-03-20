@@ -1,0 +1,22 @@
+[package]
+name = "sunholo/registry_validator"
+version = "0.1.0"
+edition = "1"
+description = "AILANG package validator — validates packages before registry publish (dogfooding: validates AILANG packages using AILANG)"
+license = "Apache-2.0"
+
+[exports]
+modules = [
+  "sunholo/registry_validator/validate",
+  "sunholo/registry_validator/metadata"
+]
+
+[effects]
+max = ["IO", "FS"]
+
+[metadata]
+tags = ["registry", "validation", "dogfooding", "packages"]
+ai_summary = "Validate AILANG packages: parse manifest, check exports, compute hashes, generate metadata. Written in AILANG."
+
+[stability]
+level = "experimental"

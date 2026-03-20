@@ -1,0 +1,59 @@
+-- Metadata generation for validated packages
+--
+-- Takes validation results and produces metadata.json content
+-- for the registry alongside the package tarball.
+
+module sunholo/registry_validator/metadata
+
+import std/json (encode, jo, kv, js, jb, jnum, ja)
+import std/list (map)
+import std/math (intToFloat)
+
+-- Generate metadata.json content from validation results
+export pure func generateMetadata(
+  name: string,
+  version: string,
+  contentHash: string,
+  interfaceHash: string,
+  tarballHash: string,
+  tarballSize: int,
+  publishedBy: string,
+  publishedAt: string,
+  ailangVersion: string,
+  hasAgentDoc: bool
+) -> string =
+  encode(jo([
+    kv("schema", js("ailang.package-metadata/v1")),
+    kv("name", js(name)),
+    kv("version", js(version)),
+    kv("published_at", js(publishedAt)),
+    kv("published_by", js(publishedBy)),
+    kv("content_hash", js(contentHash)),
+    kv("interface_hash", js(interfaceHash)),
+    kv("tarball_hash", js(tarballHash)),
+    kv("tarball_size_bytes", jnum(intToFloat(tarballSize))),
+    kv("validation", jo([
+      kv("compiles", jb(true)),
+      kv("effects_valid", jb(true)),
+      kv("ailang_version", js(ailangVersion))
+    ])),
+    kv("manifest", jo([
+      kv("edition", js("1")),
+      kv("has_agent_doc", jb(hasAgentDoc))
+    ]))
+  ]))
+
+-- Generate an index entry JSON for a validated package
+export pure func generateIndexEntry(
+  name: string,
+  version: string,
+  aiSummary: string,
+  hasAgentDoc: bool
+) -> string =
+  encode(jo([
+    kv("name", js(name)),
+    kv("latest", js(version)),
+    kv("versions", ja([js(version)])),
+    kv("ai_summary", js(aiSummary)),
+    kv("has_agent_doc", jb(hasAgentDoc))
+  ]))
