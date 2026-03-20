@@ -3,6 +3,10 @@
 -- Validates a package directory before registry publish.
 -- Dogfooding: AILANG validates AILANG packages.
 --
+-- Architecture: Pure core (Z3-verifiable) + effectful shell
+-- The boolean validation logic is in small pure functions with contracts.
+-- The list-building and IO is in the outer effectful functions.
+--
 -- Usage via serve-api:
 --   ailang serve-api --caps IO,FS packages/registry-validator/
 --   curl -X POST http://localhost:8080/api/sunholo/registry_validator/validate/validatePackage \
@@ -12,7 +16,7 @@ module sunholo/registry_validator/validate
 
 import std/fs (readFile, fileExists, listDir)
 import std/json (encode, jo, kv, js, jb, jnum, ja)
-import std/string (endsWith, contains, split, trim, join)
+import std/string (endsWith, contains, split, trim, length as strlen)
 import std/list (map, filter, foldl, concat)
 import std/math (intToFloat)
 import std/list as List
@@ -20,6 +24,45 @@ import std/option (Option, Some, None, getOrElse)
 import std/result (Ok, Err)
 import std/crypto (sha256Hex)
 import std/io (println)
+
+-- ============================================================
+-- Pure Core: Z3-Verifiable Validation Functions
+-- These are the decidable fragment — int/bool/string only.
+-- ============================================================
+
+-- Is a field present (non-empty)?
+export pure func isPresent(value: string) -> bool
+  ensures { result == true || result == false }
+= value != ""
+
+-- Is a package name valid? Must be non-empty and contain exactly one /
+export pure func isValidName(name: string) -> bool
+  ensures { name == "" || result == true || result == false }
+= if name == "" then false
+  else contains(name, "/") && negate(contains(name, "//"))
+
+-- Are all required manifest fields present?
+export pure func hasRequiredFields(name: string, version: string, edition: string) -> bool
+  ensures { result == (name != "" && version != "" && edition != "") }
+= name != "" && version != "" && edition != ""
+
+-- Is a filename an AILANG source file?
+export pure func isAilFile(filename: string) -> bool
+  ensures { result == true || result == false }
+= endsWith(filename, ".ail")
+
+-- Does a TOML line contain a field assignment?
+export pure func isFieldLine(line: string, key: string) -> bool
+  ensures { result == true || result == false }
+= contains(line, key ++ " =") || contains(line, key ++ "=")
+
+-- Negate a boolean (helper for contracts)
+pure func negate(b: bool) -> bool = if b then false else true
+
+-- ============================================================
+-- Effectful Shell: IO + FS operations
+-- These compose the pure core with file system access.
+-- ============================================================
 
 -- Validate a package at the given directory path.
 -- Returns JSON string with validation results.
@@ -40,28 +83,42 @@ func validateWithManifest(packageDir: string, manifestPath: string) -> string ! 
   let version = getOrElse(extractField(content, "version"), "");
   let edition = getOrElse(extractField(content, "edition"), "");
 
-  -- Validate required fields
-  let fieldErrors = checkRequired(name, version, edition);
+  -- Use pure core for validation decisions
+  let fieldsOk = hasRequiredFields(name, version, edition);
+  let nameOk = isValidName(name);
 
-  -- Validate vendor/name format
-  let nameErrors = checkNameFormat(name);
+  -- Build error lists from pure decisions
+  let fieldErrors = if fieldsOk then []
+    else concat(
+      concat(
+        if isPresent(name) then [] else ["[package].name is required"],
+        if isPresent(version) then [] else ["[package].version is required"]
+      ),
+      if isPresent(edition) then [] else ["[package].edition is required"]
+    );
 
-  -- Find .ail files
+  let nameErrors = if name == "" then []
+    else {
+      let parts = split(name, "/");
+      if List.length(parts) != 2
+      then ["[package].name must be vendor/name format, got: " ++ name]
+      else []
+    };
+
+  -- Find .ail files (effectful — reads filesystem)
   let rootFiles = listDir(packageDir);
-  let ailFiles = filter(func(f: string) -> bool { endsWith(f, ".ail") }, rootFiles);
+  let ailFiles = filter(func(f: string) -> bool { isAilFile(f) }, rootFiles);
 
-  -- Check src/ too
   let srcPath = packageDir ++ "/src";
   let srcExists = fileExists(srcPath);
   let srcFiles = if srcExists
     then {
       let sf = listDir(srcPath);
-      map(func(f: string) -> string { "src/" ++ f }, filter(func(f: string) -> bool { endsWith(f, ".ail") }, sf))
+      map(func(f: string) -> string { "src/" ++ f }, filter(func(f: string) -> bool { isAilFile(f) }, sf))
     }
     else [];
   let allAilFiles = concat(ailFiles, srcFiles);
 
-  -- Must have at least one source file
   let fileErrors = if List.length(allAilFiles) == 0
     then ["No .ail source files found"]
     else [];
@@ -69,10 +126,8 @@ func validateWithManifest(packageDir: string, manifestPath: string) -> string ! 
   -- Check AGENT.md
   let hasAgent = fileExists(packageDir ++ "/AGENT.md");
 
-  -- Compute content hash
+  -- Compute hashes (effectful — reads files)
   let contentHash = computeHash(packageDir, allAilFiles);
-
-  -- Compute interface hash
   let ifaceHash = "sha256:" ++ sha256Hex("name:" ++ name ++ "\nedition:" ++ edition);
 
   let allErrors = concat(concat(fieldErrors, nameErrors), fileErrors);
@@ -102,30 +157,9 @@ func computeHash(dir: string, files: [string]) -> string ! {FS} {
   "sha256:" ++ sha256Hex(combined)
 }
 
--- Check required fields, return list of errors
--- Contract: if all fields are non-empty, no errors are returned
-export pure func checkRequired(name: string, version: string, edition: string) -> [string]
-  ensures { name != "" && version != "" && edition != "" || List.length(result) >= 0 }
-{
-  let e1 = if name == "" then ["[package].name is required"] else [];
-  let e2 = if version == "" then ["[package].version is required"] else [];
-  let e3 = if edition == "" then ["[package].edition is required"] else [];
-  concat(concat(e1, e2), e3)
-}
-
--- Check vendor/name format
--- Contract: empty name always returns empty error list
-export pure func checkNameFormat(name: string) -> [string]
-  ensures { name == "" || List.length(result) >= 0 }
-{
-  if name == "" then []
-  else {
-    let parts = split(name, "/");
-    if List.length(parts) != 2
-    then ["[package].name must be vendor/name format, got: " ++ name]
-    else []
-  }
-}
+-- ============================================================
+-- Pure TOML Parser Helpers
+-- ============================================================
 
 -- Extract a quoted value from TOML: key = "value"
 pure func extractField(content: string, key: string) -> Option[string] {
@@ -137,7 +171,7 @@ pure func findField(lines: [string], key: string) -> Option[string] =
   match lines {
     [] => None,
     line :: rest =>
-      if contains(trim(line), key ++ " =") || contains(trim(line), key ++ "=")
+      if isFieldLine(trim(line), key)
       then extractQuoted(trim(line))
       else findField(rest, key)
   }
