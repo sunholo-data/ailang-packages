@@ -2,16 +2,24 @@
 
 Curated AILANG packages for production use. Extracted from real projects (docparse, ecommerce demos, streaming agents) to eliminate duplication and provide tested, reusable modules.
 
+This is a **monorepo** — multiple packages live in one repository. Each package in `packages/` has its own `ailang.toml` manifest. You can depend on individual packages via path deps or git deps with `subdir`.
+
 ## Quick Start
 
-```bash
-# Clone the package repository
-git clone https://github.com/sunholo-data/ailang-packages.git
+### Option 1: Git dependency (recommended — version pinned)
 
-# In your AILANG project:
+```bash
 ailang init package --name myorg/myapp
-ailang add --path ../ailang-packages/packages/gcp-auth
-ailang add --path ../ailang-packages/packages/logging
+ailang add --git https://github.com/sunholo-data/ailang-packages --subdir packages/auth --tag main
+ailang lock
+```
+
+### Option 2: Clone + path dependency (for local development)
+
+```bash
+git clone https://github.com/sunholo-data/ailang-packages.git
+cd my-project
+ailang add --path ../ailang-packages/packages/auth
 ailang lock
 ```
 
@@ -30,58 +38,57 @@ export func main() -> () ! {IO, FS, Net} =
 
 ## Available Packages
 
-| Package | Description | Effects | Stability |
-|---------|-------------|---------|-----------|
-| [sunholo/gcp-auth](packages/gcp-auth/) | GCP ADC OAuth2 token exchange, project detection | FS, Net | experimental |
-| [sunholo/auth](packages/auth/) | API key validation, HMAC hashing, bearer token extraction | Pure | experimental |
-| [sunholo/http-helpers](packages/http-helpers/) | HTTP request builders, auth headers, JSON response parsing | Net | experimental |
-| [sunholo/logging](packages/logging/) | Structured JSON logging (Cloud Run friendly) | IO | experimental |
-| [sunholo/config](packages/config/) | Config loading from env vars with validation | Env | experimental |
-| [sunholo/testing-utils](packages/testing-utils/) | Test assertion helpers (assertEqual, assertOk, etc.) | Pure | experimental |
+| Package | Description | Effects | AGENT.md |
+|---------|-------------|---------|----------|
+| [sunholo/gcp-auth](packages/gcp-auth/) | GCP ADC OAuth2 token exchange, project detection | FS, Net | [Guide](packages/gcp-auth/AGENT.md) |
+| [sunholo/auth](packages/auth/) | API key validation, HMAC hashing, bearer token extraction | Pure | [Guide](packages/auth/AGENT.md) |
+| [sunholo/http-helpers](packages/http-helpers/) | HTTP request builders, auth headers, JSON response parsing | Net | [Guide](packages/http-helpers/AGENT.md) |
+| [sunholo/logging](packages/logging/) | Structured JSON logging (Cloud Run friendly) | IO | [Guide](packages/logging/AGENT.md) |
+| [sunholo/config](packages/config/) | Config loading from env vars with validation | Env | [Guide](packages/config/AGENT.md) |
+| [sunholo/testing-utils](packages/testing-utils/) | Test assertion helpers (assertEqual, assertOk, etc.) | Pure | [Guide](packages/testing-utils/AGENT.md) |
 
-## Package Details
+## AGENT.md — AI Discovery
 
-### sunholo/gcp-auth
-OAuth2 token exchange via Application Default Credentials. Reads `~/.config/gcloud/application_default_credentials.json`, exchanges refresh tokens for access tokens. Also detects default GCP project from gcloud config.
+Each package includes an `AGENT.md` file — a structured guide for AI agents explaining:
+- **When to use** the package
+- **Quick start** code example
+- **Exported functions** table with signatures
+- **Common patterns** and integration advice
 
-**Extracted from:** `demos/ecommerce/services/gcp_auth.ail` + `demos/streaming/gemini_live/services/gcp_auth.ail` (98% identical code)
+AI agents: read the `AGENT.md` for any package you add as a dependency.
 
-### sunholo/auth
-Pure functions for API key management. SHA-256 hashing with constant-time comparison (prevents timing attacks), bearer token extraction from Authorization headers, key format validation.
+## Monorepo Structure
 
-**Extracted from:** `docparse/services/api_keys.ail` (key validation logic)
+This repo contains multiple packages. Use `subdir` to select specific packages:
 
-### sunholo/http-helpers
-Eliminates the repeated pattern of building Bearer auth headers and parsing JSON responses that appears in every project making API calls.
+```
+ailang-packages/
+  packages/
+    auth/           # sunholo/auth
+    gcp-auth/       # sunholo/gcp-auth (depends on auth)
+    http-helpers/   # sunholo/http-helpers
+    logging/        # sunholo/logging
+    config/         # sunholo/config
+    testing-utils/  # sunholo/testing-utils
+```
 
-**Extracted from:** Common patterns across `claude_haiku_call.ail`, `bigquery.ail`, `api_server.ail`
+### Using git deps with subdir
 
-### sunholo/logging
-Structured JSON logging to stdout. Every project currently writes `println("[Error] " ++ msg)` differently. This standardizes to JSON format that Cloud Run, Cloud Logging, and log aggregators can parse.
+```toml
+[dependencies]
+"sunholo/auth" = { git = "https://github.com/sunholo-data/ailang-packages", subdir = "packages/auth", tag = "main" }
+"sunholo/logging" = { git = "https://github.com/sunholo-data/ailang-packages", subdir = "packages/logging", tag = "main" }
+```
 
-### sunholo/config
-Environment variable loading with required/optional/default patterns. Replaces scattered `getEnvOr` calls with validated config loading.
-
-### sunholo/testing-utils
-Pure assertion functions returning `Result[string, string]` for test output. Provides assertEqual, assertContains, assertOk, assertErr, assertTrue.
+The AILANG package system supports multiple packages per repo via the `subdir` field. You don't need one repo per package.
 
 ## How It Works
 
-AILANG packages use **path dependencies** (no registry needed). Each package has an `ailang.toml` manifest declaring its name, exports, effects, and dependencies.
+Each package has an `ailang.toml` manifest declaring its name, exports, effects, and dependencies. The `ailang.lock` file pins content hashes for reproducible builds.
 
-```
-my-project/
-  ailang.toml           # your project manifest
-  ailang.lock           # resolved deps (commit this)
-  main.ail
-ailang-packages/        # cloned alongside
-  packages/
-    gcp-auth/
-    auth/
-    ...
-```
-
-The `ailang.lock` file pins content hashes so builds are reproducible.
+Two dependency modes:
+- **Path deps** (`{ path = "../..." }`) — local, for development
+- **Git deps** (`{ git = "url", subdir = "...", tag = "..." }`) — remote, version-pinned
 
 ## Contributing
 
@@ -92,4 +99,5 @@ To add a package:
 3. List exported modules in `[exports].modules`
 4. Declare max effects in `[effects].max`
 5. Add `ai_summary` in `[metadata]` for agent discovery
-6. Test with `ailang add --path` from a test project
+6. Write `AGENT.md` with usage guide for AI agents
+7. Test with `ailang add --path` or `ailang add --git` from a test project
