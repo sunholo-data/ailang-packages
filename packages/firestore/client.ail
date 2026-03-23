@@ -15,6 +15,7 @@ import std/net (httpRequest)
 import std/json (encode, decode, jo, js, kv, get, asString)
 import std/result (Ok, Err)
 import std/option (getOrElse)
+import std/string (contains)
 import pkg/sunholo/gcp_auth/token (getAccessToken)
 import pkg/sunholo/config/loader (requireEnv, optionalEnv)
 
@@ -34,7 +35,7 @@ export func baseUrl() -> Result[string, string] ! {Env} =
   }
 
 -- Build auth headers with ADC bearer token
-func authHeaders() -> Result[{headers: [{name: string, value: string}]}, string] ! {Net, FS} =
+func authHeaders() -> Result[{headers: [{name: string, value: string}]}, string] ! {Net, FS, Env} =
   match getAccessToken() {
     Err(e) => Err("Firestore auth error: " ++ e),
     Ok(token) =>

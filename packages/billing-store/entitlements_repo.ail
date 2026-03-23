@@ -9,6 +9,7 @@ import std/json (jo, kv, get)
 import std/result (Ok, Err)
 import pkg/sunholo/firestore/client (getDoc, setDoc)
 import pkg/sunholo/firestore/fields (stringVal, intVal, boolVal, asStr, asInt)
+import pkg/sunholo/billing_entitlements/entitlement (Entitlements)
 
 -- Get entitlements by principal ID
 export func getEntitlements(principalId: string) -> Result[Entitlements, string] ! {Net, FS, Env} =
