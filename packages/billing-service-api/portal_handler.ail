@@ -1,0 +1,41 @@
+-- Customer portal handler
+--
+-- Creates Stripe Customer Portal sessions for subscription management.
+--
+-- POST /billing/portal-session
+-- Body: { "returnUrl": "..." }
+--
+-- Requires: Firebase Auth bearer token
+
+module sunholo/billing_service_api/portal_handler
+
+import std/json (decode, get, asString, encode, jo, js, kv)
+import std/result (Ok, Err)
+import std/option (getOrElse)
+import pkg/sunholo/billing_store/customers_repo (getCustomer)
+import pkg/sunholo/billing_stripe/stripe_portal (createPortalSession)
+
+@route("POST", "/billing/portal-session")
+export func handleCreatePortal(
+  principalId: string,
+  body: string
+) -> Result[string, string] ! {Net, FS, Env} =
+  match decode(body) {
+    Err(e) => Err("Invalid JSON: " ++ e),
+    Ok(json) =>
+      let returnUrl = match get(json, "returnUrl") {
+        Some(v) => getOrElse(asString(v), ""),
+        None => ""
+      }
+      in if returnUrl == "" then Err("Missing returnUrl")
+      else
+        match getCustomer(principalId) {
+          Err(_) => Err("No billing account found. Please subscribe first."),
+          Ok(customer) =>
+            match createPortalSession(customer.stripeCustomerId, returnUrl) {
+              Err(e) => Err(e),
+              Ok(portalUrl) =>
+                Ok(encode(jo([kv("url", js(portalUrl))])))
+            }
+        }
+  }

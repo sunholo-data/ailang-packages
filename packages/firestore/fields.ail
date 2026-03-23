@@ -1,0 +1,165 @@
+-- Firestore field value encoding and decoding
+--
+-- Firestore REST API wraps every value in a type envelope:
+--   { "stringValue": "hello" }
+--   { "integerValue": "42" }
+--   { "booleanValue": true }
+--   { "doubleValue": 3.14 }
+--   { "timestampValue": "2026-03-23T12:00:00Z" }
+--   { "arrayValue": { "values": [...] } }
+--   { "mapValue": { "fields": { ... } } }
+--   { "nullValue": null }
+--
+-- This module provides encode/decode helpers so callers don't need to
+-- build these nested JSON structures manually.
+--
+-- Usage:
+--   import pkg/sunholo/firestore/fields (stringVal, intVal, boolVal, asStr, asInt, asBool)
+
+module sunholo/firestore/fields
+
+import std/json (jo, ja, js, jnum, jn, kv, get, asString, asNumber, asBool, asArray, asObject, has)
+import std/string (stringToInt, stringToFloat)
+import std/option (getOrElse, isSome)
+import std/result (Ok, Err)
+
+-- ══════════════════════════════════════════════════════════════
+-- ENCODE: AILANG values → Firestore field values
+-- ══════════════════════════════════════════════════════════════
+
+-- Wrap a string as a Firestore stringValue
+export pure func stringVal(value: string) -> Json =
+  jo([kv("stringValue", js(value))])
+
+-- Wrap an int as a Firestore integerValue (stored as string per REST API)
+export pure func intVal(value: int) -> Json =
+  jo([kv("integerValue", js(show(value)))])
+
+-- Wrap a bool as a Firestore booleanValue
+export pure func boolVal(value: bool) -> Json =
+  jo([kv("booleanValue", if value then js("true") else js("false"))])
+
+-- Wrap a float as a Firestore doubleValue
+export pure func floatVal(value: float) -> Json =
+  jo([kv("doubleValue", jnum(value))])
+
+-- Wrap a string as a Firestore timestampValue (ISO 8601 format)
+export pure func timestampVal(value: string) -> Json =
+  jo([kv("timestampValue", js(value))])
+
+-- Wrap a list of Firestore values as an arrayValue
+export pure func arrayVal(values: [Json]) -> Json =
+  jo([kv("arrayValue", jo([kv("values", ja(values))]))])
+
+-- Wrap a set of fields as a mapValue (nested document)
+export pure func mapVal(fields: Json) -> Json =
+  jo([kv("mapValue", jo([kv("fields", fields)]))])
+
+-- Wrap null
+export pure func nullVal() -> Json =
+  jo([kv("nullValue", jn())])
+
+-- ══════════════════════════════════════════════════════════════
+-- DECODE: Firestore field values → AILANG values
+-- ══════════════════════════════════════════════════════════════
+
+-- Extract a string from a fields object by field name
+-- Returns "" if field is missing or not a stringValue
+export pure func asStr(fields: Json, fieldName: string) -> string =
+  match get(fields, fieldName) {
+    None => "",
+    Some(field) =>
+      match get(field, "stringValue") {
+        None => "",
+        Some(sv) => getOrElse(asString(sv), "")
+      }
+  }
+
+-- Extract an int from a fields object by field name
+-- Returns 0 if field is missing or not an integerValue
+export pure func asInt(fields: Json, fieldName: string) -> int =
+  match get(fields, fieldName) {
+    None => 0,
+    Some(field) =>
+      match get(field, "integerValue") {
+        None => 0,
+        Some(iv) =>
+          match asString(iv) {
+            None => 0,
+            Some(s) => getOrElse(stringToInt(s), 0)
+          }
+      }
+  }
+
+-- Extract a bool from a fields object by field name
+-- Returns false if field is missing
+export pure func asBoolField(fields: Json, fieldName: string) -> bool =
+  match get(fields, fieldName) {
+    None => false,
+    Some(field) =>
+      match get(field, "booleanValue") {
+        None => false,
+        Some(bv) =>
+          match asString(bv) {
+            Some("true") => true,
+            _ => false
+          }
+      }
+  }
+
+-- Extract a float from a fields object by field name
+-- Returns 0.0 if field is missing
+export pure func asFloat(fields: Json, fieldName: string) -> float =
+  match get(fields, fieldName) {
+    None => 0.0,
+    Some(field) =>
+      match get(field, "doubleValue") {
+        None => 0.0,
+        Some(dv) => getOrElse(asNumber(dv), 0.0)
+      }
+  }
+
+-- Extract a timestamp string from a fields object by field name
+export pure func asTimestamp(fields: Json, fieldName: string) -> string =
+  match get(fields, fieldName) {
+    None => "",
+    Some(field) =>
+      match get(field, "timestampValue") {
+        None => "",
+        Some(tv) => getOrElse(asString(tv), "")
+      }
+  }
+
+-- Extract nested fields from a mapValue
+export pure func asMap(fields: Json, fieldName: string) -> Json =
+  match get(fields, fieldName) {
+    None => jo([]),
+    Some(field) =>
+      match get(field, "mapValue") {
+        None => jo([]),
+        Some(mv) =>
+          match get(mv, "fields") {
+            None => jo([]),
+            Some(f) => f
+          }
+      }
+  }
+
+-- ══════════════════════════════════════════════════════════════
+-- BULK HELPERS
+-- ══════════════════════════════════════════════════════════════
+
+-- Build a fields object from a list of (name, firestoreValue) pairs
+-- Each value should already be wrapped via stringVal/intVal/etc.
+export pure func buildFields(entries: [{key: string, value: Json}]) -> Json =
+  jo(buildKvList(entries))
+
+func buildKvList(entries: [{key: string, value: Json}]) -> [{key: string, value: Json}] =
+  match entries {
+    [] => [],
+    entry :: rest => kv(entry.key, entry.value) :: buildKvList(rest)
+  }
+
+-- Check if a field exists in a fields object
+export pure func hasField(fields: Json, fieldName: string) -> bool =
+  has(fields, fieldName)

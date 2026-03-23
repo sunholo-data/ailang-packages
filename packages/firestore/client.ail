@@ -1,0 +1,181 @@
+-- Firestore REST API client
+--
+-- CRUD operations for Firestore documents via the REST API.
+-- Uses GCP Application Default Credentials for auth.
+--
+-- All operations target:
+--   https://firestore.googleapis.com/v1/projects/{project}/databases/{db}/documents/
+--
+-- Usage:
+--   import pkg/sunholo/firestore/client (getDoc, setDoc, deleteDoc, docExists)
+
+module sunholo/firestore/client
+
+import std/net (httpRequest)
+import std/json (encode, decode, jo, js, kv, get, asString)
+import std/result (Ok, Err)
+import std/option (getOrElse)
+import pkg/sunholo/gcp_auth/token (getAccessToken)
+import pkg/sunholo/config/loader (requireEnv, optionalEnv)
+
+-- ══════════════════════════════════════════════════════════════
+-- CONFIG
+-- ══════════════════════════════════════════════════════════════
+
+-- Build the Firestore REST API base URL
+--
+-- Uses GOOGLE_CLOUD_PROJECT (required) and FIRESTORE_DATABASE (optional, defaults to "(default)")
+export func baseUrl() -> Result[string, string] ! {Env} =
+  match requireEnv("GOOGLE_CLOUD_PROJECT") {
+    Err(e) => Err(e),
+    Ok(project) =>
+      let db = optionalEnv("FIRESTORE_DATABASE", "(default)")
+      in Ok("https://firestore.googleapis.com/v1/projects/" ++ project ++ "/databases/" ++ db ++ "/documents")
+  }
+
+-- Build auth headers with ADC bearer token
+func authHeaders() -> Result[{headers: [{name: string, value: string}]}, string] ! {Net, FS} =
+  match getAccessToken() {
+    Err(e) => Err("Firestore auth error: " ++ e),
+    Ok(token) =>
+      Ok({ headers: [
+        { name: "Authorization", value: "Bearer " ++ token },
+        { name: "Content-Type", value: "application/json" }
+      ]})
+  }
+
+-- ══════════════════════════════════════════════════════════════
+-- CRUD OPERATIONS
+-- ══════════════════════════════════════════════════════════════
+
+-- Get a single document by collection path and document ID
+--
+-- Returns the document's "fields" object on success.
+-- Returns Err if document doesn't exist (404) or on network error.
+--
+-- Example:
+--   match getDoc("users", "uid_123") {
+--     Ok(fields) => asStr(fields, "name"),
+--     Err(e) => "Not found: " ++ e
+--   }
+export func getDoc(collection: string, docId: string) -> Result[Json, string] ! {Net, FS, Env} =
+  match baseUrl() {
+    Err(e) => Err(e),
+    Ok(base) =>
+      match authHeaders() {
+        Err(e) => Err(e),
+        Ok(auth) =>
+          let url = base ++ "/" ++ collection ++ "/" ++ docId
+          in match httpRequest("GET", url, auth.headers, "") {
+            Err(e) => Err("Firestore GET error: " ++ show(e)),
+            Ok(resp) =>
+              if resp.ok then
+                match decode(resp.body) {
+                  Ok(json) =>
+                    match get(json, "fields") {
+                      Some(fields) => Ok(fields),
+                      None => Ok(jo([]))
+                    },
+                  Err(e) => Err("JSON decode error: " ++ e)
+                }
+              else if resp.status == 404 then
+                Err("Document not found: " ++ collection ++ "/" ++ docId)
+              else
+                Err("Firestore GET " ++ show(resp.status) ++ ": " ++ resp.body)
+          }
+      }
+  }
+
+-- Create or overwrite a document
+--
+-- The fields argument should be built using the fields module:
+--   let fields = buildFields([
+--     { key: "name", value: stringVal("Alice") },
+--     { key: "age", value: intVal(30) }
+--   ])
+--   setDoc("users", "uid_123", fields)
+export func setDoc(collection: string, docId: string, fields: Json) -> Result[(), string] ! {Net, FS, Env} =
+  match baseUrl() {
+    Err(e) => Err(e),
+    Ok(base) =>
+      match authHeaders() {
+        Err(e) => Err(e),
+        Ok(auth) =>
+          let url = base ++ "/" ++ collection ++ "/" ++ docId
+          in let body = encode(jo([kv("fields", fields)]))
+          in match httpRequest("PATCH", url, auth.headers, body) {
+            Err(e) => Err("Firestore SET error: " ++ show(e)),
+            Ok(resp) =>
+              if resp.ok then Ok(())
+              else Err("Firestore SET " ++ show(resp.status) ++ ": " ++ resp.body)
+          }
+      }
+  }
+
+-- Delete a document
+--
+-- Returns Ok(()) if deleted or already doesn't exist.
+export func deleteDoc(collection: string, docId: string) -> Result[(), string] ! {Net, FS, Env} =
+  match baseUrl() {
+    Err(e) => Err(e),
+    Ok(base) =>
+      match authHeaders() {
+        Err(e) => Err(e),
+        Ok(auth) =>
+          let url = base ++ "/" ++ collection ++ "/" ++ docId
+          in match httpRequest("DELETE", url, auth.headers, "") {
+            Err(e) => Err("Firestore DELETE error: " ++ show(e)),
+            Ok(resp) =>
+              if resp.ok then Ok(())
+              else if resp.status == 404 then Ok(())
+              else Err("Firestore DELETE " ++ show(resp.status) ++ ": " ++ resp.body)
+          }
+      }
+  }
+
+-- Check if a document exists (GET with 404 check)
+export func docExists(collection: string, docId: string) -> Result[bool, string] ! {Net, FS, Env} =
+  match getDoc(collection, docId) {
+    Ok(_) => Ok(true),
+    Err(e) =>
+      if contains(e, "not found") then Ok(false)
+      else Err(e)
+  }
+
+-- ══════════════════════════════════════════════════════════════
+-- SUBCOLLECTION HELPERS
+-- ══════════════════════════════════════════════════════════════
+
+-- Get a document from a subcollection
+--
+-- Example: getSubDoc("users", "uid_123", "sessions", "sess_abc")
+-- Maps to: users/uid_123/sessions/sess_abc
+export func getSubDoc(
+  parentCollection: string,
+  parentId: string,
+  subCollection: string,
+  docId: string
+) -> Result[Json, string] ! {Net, FS, Env} =
+  let path = parentCollection ++ "/" ++ parentId ++ "/" ++ subCollection
+  in getDoc(path, docId)
+
+-- Set a document in a subcollection
+export func setSubDoc(
+  parentCollection: string,
+  parentId: string,
+  subCollection: string,
+  docId: string,
+  fields: Json
+) -> Result[(), string] ! {Net, FS, Env} =
+  let path = parentCollection ++ "/" ++ parentId ++ "/" ++ subCollection
+  in setDoc(path, docId, fields)
+
+-- Delete a document from a subcollection
+export func deleteSubDoc(
+  parentCollection: string,
+  parentId: string,
+  subCollection: string,
+  docId: string
+) -> Result[(), string] ! {Net, FS, Env} =
+  let path = parentCollection ++ "/" ++ parentId ++ "/" ++ subCollection
+  in deleteDoc(path, docId)

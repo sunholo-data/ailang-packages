@@ -1,0 +1,62 @@
+-- Subscription repository: Stripe subscription state
+--
+-- Usage:
+--   import pkg/sunholo/billing_store/subscriptions_repo (getSubscription, putSubscription, Subscription)
+
+module sunholo/billing_store/subscriptions_repo
+
+import std/json (jo, kv, get)
+import std/result (Ok, Err)
+import pkg/sunholo/firestore/client (getDoc, setDoc)
+import pkg/sunholo/firestore/fields (stringVal, boolVal, asStr)
+
+type Subscription = {
+  provider: string,
+  principalType: string,
+  principalId: string,
+  subscriptionId: string,
+  status: string,
+  priceId: string,
+  productId: string,
+  currentPeriodStart: string,
+  currentPeriodEnd: string,
+  cancelAtPeriodEnd: bool,
+  updatedAt: string
+}
+
+-- Get subscription by principal ID
+export func getSubscription(principalId: string) -> Result[Subscription, string] ! {Net, FS, Env} =
+  match getDoc("subscriptions", principalId) {
+    Err(e) => Err(e),
+    Ok(fields) =>
+      Ok({
+        provider: asStr(fields, "provider"),
+        principalType: asStr(fields, "principalType"),
+        principalId: asStr(fields, "principalId"),
+        subscriptionId: asStr(fields, "subscriptionId"),
+        status: asStr(fields, "status"),
+        priceId: asStr(fields, "priceId"),
+        productId: asStr(fields, "productId"),
+        currentPeriodStart: asStr(fields, "currentPeriodStart"),
+        currentPeriodEnd: asStr(fields, "currentPeriodEnd"),
+        cancelAtPeriodEnd: asStr(fields, "cancelAtPeriodEnd") == "true",
+        updatedAt: asStr(fields, "updatedAt")
+      })
+  }
+
+-- Create or update a subscription record
+export func putSubscription(s: Subscription) -> Result[(), string] ! {Net, FS, Env} =
+  let fields = jo([
+    kv("provider", stringVal(s.provider)),
+    kv("principalType", stringVal(s.principalType)),
+    kv("principalId", stringVal(s.principalId)),
+    kv("subscriptionId", stringVal(s.subscriptionId)),
+    kv("status", stringVal(s.status)),
+    kv("priceId", stringVal(s.priceId)),
+    kv("productId", stringVal(s.productId)),
+    kv("currentPeriodStart", stringVal(s.currentPeriodStart)),
+    kv("currentPeriodEnd", stringVal(s.currentPeriodEnd)),
+    kv("cancelAtPeriodEnd", boolVal(s.cancelAtPeriodEnd)),
+    kv("updatedAt", stringVal(s.updatedAt))
+  ])
+  in setDoc("subscriptions", s.principalId, fields)

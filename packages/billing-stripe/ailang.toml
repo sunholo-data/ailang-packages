@@ -1,0 +1,30 @@
+[package]
+name = "sunholo/billing_stripe"
+version = "0.1.0"
+edition = "1"
+ailang = ">=0.9.5"
+description = "Stripe integration adapter: checkout sessions, customer portal, webhook verification, event mapping"
+license = "Apache-2.0"
+
+[exports]
+modules = [
+  "sunholo/billing_stripe/stripe_customer",
+  "sunholo/billing_stripe/stripe_checkout",
+  "sunholo/billing_stripe/stripe_portal",
+  "sunholo/billing_stripe/stripe_webhook",
+  "sunholo/billing_stripe/stripe_event_mapper"
+]
+
+[dependencies]
+"sunholo/http_helpers" = { path = "../http-helpers" }
+"sunholo/config" = { path = "../config" }
+
+[effects]
+max = ["Net", "Env"]
+
+[metadata]
+tags = ["billing", "stripe", "payments", "checkout"]
+ai_summary = "Stripe API adapter: create checkout sessions, customer portal sessions, verify webhooks, map events to internal subscription state. Uses Stripe REST API."
+
+[stability]
+level = "experimental"

@@ -1,0 +1,42 @@
+-- Usage policy: track and compute usage deltas
+--
+-- Pure functions for computing usage changes after parse operations.
+-- The actual persistence is in billing_store — this module only computes.
+--
+-- Usage:
+--   import pkg/sunholo/billing_entitlements/usage_policy (Usage, UsageDelta, applyDelta)
+
+module sunholo/billing_entitlements/usage_policy
+
+-- Current usage for a billing period
+type Usage = {
+  documentsParsed: int,
+  pagesParsed: int,
+  bytesProcessed: int,
+  ocrPagesParsed: int
+}
+
+-- A delta to apply after a successful parse
+type UsageDelta = {
+  documents: int,
+  pages: int,
+  bytes: int,
+  ocrPages: int
+}
+
+-- Apply a usage delta to current usage (pure computation)
+export pure func applyDelta(current: Usage, delta: UsageDelta) -> Usage =
+  {
+    documentsParsed: current.documentsParsed + delta.documents,
+    pagesParsed: current.pagesParsed + delta.pages,
+    bytesProcessed: current.bytesProcessed + delta.bytes,
+    ocrPagesParsed: current.ocrPagesParsed + delta.ocrPages
+  }
+
+-- Create a zero usage record for a new period
+export pure func emptyUsage() -> Usage =
+  { documentsParsed: 0, pagesParsed: 0, bytesProcessed: 0, ocrPagesParsed: 0 }
+
+-- Create a delta from a single parse operation
+export pure func parseDelta(pages: int, bytes: int, ocrPages: int) -> UsageDelta =
+  { documents: 1, pages: pages, bytes: bytes, ocrPages: ocrPages }

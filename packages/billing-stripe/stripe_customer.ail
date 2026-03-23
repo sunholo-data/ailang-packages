@@ -1,0 +1,53 @@
+-- Stripe customer management
+--
+-- Ensures a Stripe customer exists for a given principal.
+-- Stripe API: POST /v1/customers
+--
+-- Usage:
+--   import pkg/sunholo/billing_stripe/stripe_customer (ensureStripeCustomer)
+
+module sunholo/billing_stripe/stripe_customer
+
+import std/net (httpRequest)
+import std/json (decode, get, asString, encode, jo, js, kv)
+import std/result (Ok, Err)
+import std/option (getOrElse)
+import pkg/sunholo/config/loader (requireEnv)
+
+-- Stripe API base URL
+func stripeApi() -> string = "https://api.stripe.com/v1"
+
+-- Build Stripe auth headers (Basic auth with secret key)
+func stripeHeaders(secretKey: string) -> [{name: string, value: string}] =
+  [
+    { name: "Authorization", value: "Bearer " ++ secretKey },
+    { name: "Content-Type", value: "application/x-www-form-urlencoded" }
+  ]
+
+-- Create a Stripe customer for a principal
+--
+-- Returns the Stripe customer ID (e.g. "cus_...")
+-- Uses form-encoded body per Stripe API convention.
+export func createStripeCustomer(
+  email: string,
+  principalId: string
+) -> Result[string, string] ! {Net, Env} =
+  match requireEnv("STRIPE_SECRET_KEY") {
+    Err(e) => Err(e),
+    Ok(secretKey) =>
+      let body = "email=" ++ email ++ "&metadata[principalId]=" ++ principalId
+      in match httpRequest("POST", stripeApi() ++ "/customers", stripeHeaders(secretKey), body) {
+        Err(e) => Err("Stripe API error: " ++ e),
+        Ok(resp) =>
+          if resp.ok then
+            match decode(resp.body) {
+              Ok(json) =>
+                match get(json, "id") {
+                  Some(idJson) => Ok(getOrElse(asString(idJson), "")),
+                  None => Err("No customer ID in Stripe response")
+                },
+              Err(e) => Err("Stripe response parse error: " ++ e)
+            }
+          else Err("Stripe error " ++ show(resp.status) ++ ": " ++ resp.body)
+      }
+  }

@@ -46,6 +46,18 @@ export func main() -> () ! {IO, FS, Net} =
 | [sunholo/logging](packages/logging/) | Structured JSON logging (Cloud Run friendly) | IO | [Guide](packages/logging/AGENT.md) |
 | [sunholo/config](packages/config/) | Config loading from env vars with validation | Env | [Guide](packages/config/AGENT.md) |
 | [sunholo/testing-utils](packages/testing-utils/) | Test assertion helpers (assertEqual, assertOk, etc.) | Pure | [Guide](packages/testing-utils/AGENT.md) |
+| [sunholo/firestore](packages/firestore/) | Firestore REST API client — CRUD, queries, field encoding | Net, FS, Env | [Guide](packages/firestore/AGENT.md) |
+
+### Billing Packages (DocParse)
+
+| Package | Description | Effects | AGENT.md |
+|---------|-------------|---------|----------|
+| [sunholo/billing_entitlements](packages/billing-entitlements/) | Plan catalog, entitlement resolution, quota checks, usage deltas | Pure | [Guide](packages/billing-entitlements/AGENT.md) |
+| [sunholo/billing_proposals](packages/billing-proposals/) | Payment proposal lifecycle for AI-assisted and human billing | Pure | [Guide](packages/billing-proposals/AGENT.md) |
+| [sunholo/billing_store](packages/billing-store/) | Firestore CRUD for billing records (customers, subscriptions, usage) | Net, FS, Env | [Guide](packages/billing-store/AGENT.md) |
+| [sunholo/billing_stripe](packages/billing-stripe/) | Stripe adapter: checkout, portal, webhooks, event mapping | Net, Env | [Guide](packages/billing-stripe/AGENT.md) |
+| [sunholo/billing_service_api](packages/billing-service-api/) | HTTP handlers for billing Cloud Run service | Net, FS, Env, IO | [Guide](packages/billing-service-api/AGENT.md) |
+| [sunholo/docparse_access_gate](packages/docparse-access-gate/) | Entitlement enforcement and usage recording for DocParse | Net, FS, Env | [Guide](packages/docparse-access-gate/AGENT.md) |
 
 ## AGENT.md — AI Discovery
 
@@ -70,6 +82,13 @@ ailang-packages/
     logging/        # sunholo/logging
     config/         # sunholo/config
     testing-utils/  # sunholo/testing-utils
+    firestore/      # sunholo/firestore
+    billing-entitlements/  # sunholo/billing_entitlements
+    billing-proposals/     # sunholo/billing_proposals
+    billing-store/         # sunholo/billing_store
+    billing-stripe/        # sunholo/billing_stripe
+    billing-service-api/   # sunholo/billing_service_api
+    docparse-access-gate/  # sunholo/docparse_access_gate
 ```
 
 ### Using git deps with subdir

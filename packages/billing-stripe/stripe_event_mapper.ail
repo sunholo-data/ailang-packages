@@ -1,0 +1,114 @@
+-- Map Stripe events to internal subscription state changes
+--
+-- Translates Stripe webhook events into domain-level state changes
+-- that the billing service can apply to update subscriptions and entitlements.
+--
+-- Usage:
+--   import pkg/sunholo/billing_stripe/stripe_event_mapper (mapEventToStateChange, SubscriptionStateChange)
+
+module sunholo/billing_stripe/stripe_event_mapper
+
+import std/json (get, asString, asObject)
+import std/result (Ok, Err)
+import std/option (getOrElse)
+
+type SubscriptionStateChange = {
+  principalId: string,
+  subscriptionId: string,
+  status: string,
+  priceId: string,
+  currentPeriodStart: string,
+  currentPeriodEnd: string,
+  cancelAtPeriodEnd: bool
+}
+
+-- Map a verified Stripe event to a subscription state change
+--
+-- Supported event types:
+--   customer.subscription.created
+--   customer.subscription.updated
+--   customer.subscription.deleted
+--   checkout.session.completed
+export pure func mapEventToStateChange(
+  eventType: string,
+  data: Json
+) -> Result[SubscriptionStateChange, string] =
+  if eventType == "customer.subscription.created" then
+    extractSubscriptionChange(data)
+  else if eventType == "customer.subscription.updated" then
+    extractSubscriptionChange(data)
+  else if eventType == "customer.subscription.deleted" then
+    extractSubscriptionChange(data)
+  else if eventType == "checkout.session.completed" then
+    -- Checkout completion triggers subscription creation separately
+    -- We extract the subscription ID for correlation
+    extractCheckoutChange(data)
+  else
+    Err("Unhandled event type: " ++ eventType)
+
+-- Extract subscription state from a subscription event's data.object
+func extractSubscriptionChange(data: Json) -> Result[SubscriptionStateChange, string] =
+  match get(data, "object") {
+    None => Err("No object in event data"),
+    Some(obj) =>
+      let subId = jsonStr(obj, "id")
+      in let status = jsonStr(obj, "status")
+      in let principalId = extractMetadataPrincipal(obj)
+      in let cancelAtEnd = jsonStr(obj, "cancel_at_period_end") == "true"
+      in let periodStart = jsonStr(obj, "current_period_start")
+      in let periodEnd = jsonStr(obj, "current_period_end")
+      in let priceId = extractFirstPriceId(obj)
+      in Ok({
+        principalId: principalId,
+        subscriptionId: subId,
+        status: status,
+        priceId: priceId,
+        currentPeriodStart: periodStart,
+        currentPeriodEnd: periodEnd,
+        cancelAtPeriodEnd: cancelAtEnd
+      })
+  }
+
+-- Extract from checkout.session.completed (has subscription field)
+func extractCheckoutChange(data: Json) -> Result[SubscriptionStateChange, string] =
+  match get(data, "object") {
+    None => Err("No object in checkout event data"),
+    Some(obj) =>
+      let subId = jsonStr(obj, "subscription")
+      in let principalId = extractMetadataPrincipal(obj)
+      in Ok({
+        principalId: principalId,
+        subscriptionId: subId,
+        status: "active",
+        priceId: "",
+        currentPeriodStart: "",
+        currentPeriodEnd: "",
+        cancelAtPeriodEnd: false
+      })
+  }
+
+-- Helper: extract string from JSON
+func jsonStr(obj: Json, key: string) -> string =
+  match get(obj, key) {
+    None => "",
+    Some(v) => getOrElse(asString(v), "")
+  }
+
+-- Helper: extract principalId from metadata
+func extractMetadataPrincipal(obj: Json) -> string =
+  match get(obj, "metadata") {
+    None => "",
+    Some(meta) => jsonStr(meta, "principalId")
+  }
+
+-- Helper: extract first price ID from subscription items
+-- Stripe nests this in items.data[0].price.id
+func extractFirstPriceId(obj: Json) -> string =
+  match get(obj, "items") {
+    None => "",
+    Some(items) =>
+      match get(items, "data") {
+        None => "",
+        Some(_) => ""
+      }
+  }

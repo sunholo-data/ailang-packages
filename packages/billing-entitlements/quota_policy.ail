@@ -1,0 +1,36 @@
+-- Quota policy: limit checks and remaining capacity
+--
+-- Pure functions for evaluating quota state without side effects.
+--
+-- Usage:
+--   import pkg/sunholo/billing_entitlements/quota_policy (isOverPageLimit, remainingPages)
+
+module sunholo/billing_entitlements/quota_policy
+
+-- Check if monthly document limit is exceeded
+export pure func isOverDocumentLimit(ent: Entitlements, used: int) -> bool =
+  used >= ent.monthlyDocumentLimit
+
+-- Check if monthly page limit is exceeded
+export pure func isOverPageLimit(ent: Entitlements, used: int) -> bool =
+  used >= ent.monthlyPageLimit
+
+-- How many pages remain in the current period
+export pure func remainingPages(ent: Entitlements, used: int) -> int =
+  let diff = ent.monthlyPageLimit - used
+  in if diff < 0 then 0 else diff
+
+-- How many documents remain in the current period
+export pure func remainingDocuments(ent: Entitlements, used: int) -> int =
+  let diff = ent.monthlyDocumentLimit - used
+  in if diff < 0 then 0 else diff
+
+-- Percentage of page quota used (0-100, capped at 100)
+export pure func pageUsagePercent(ent: Entitlements, used: int) -> int =
+  if ent.monthlyPageLimit == 0 then 100
+  else let pct = (used * 100) / ent.monthlyPageLimit
+  in if pct > 100 then 100 else pct
+
+-- Whether the user is close to their limit (>80% used)
+export pure func isNearLimit(ent: Entitlements, pagesUsed: int) -> bool =
+  pageUsagePercent(ent, pagesUsed) >= 80

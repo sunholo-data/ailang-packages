@@ -1,0 +1,26 @@
+[package]
+name = "sunholo/docparse_access_gate"
+version = "0.1.0"
+edition = "1"
+description = "Entitlement enforcement and usage recording for DocParse API service"
+license = "Apache-2.0"
+
+[exports]
+modules = [
+  "sunholo/docparse_access_gate/parse_authorization",
+  "sunholo/docparse_access_gate/usage_recording"
+]
+
+[dependencies]
+"sunholo/billing_entitlements" = { path = "../billing-entitlements" }
+"sunholo/billing_store" = { path = "../billing-store" }
+
+[effects]
+max = ["Net", "FS", "Env"]
+
+[metadata]
+tags = ["docparse", "billing", "authorization", "entitlements"]
+ai_summary = "Entitlement enforcement for DocParse: authorize parse requests against billing plan limits, record usage after successful parses. Drop-in middleware for DocParse API."
+
+[stability]
+level = "experimental"

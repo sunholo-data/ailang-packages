@@ -1,0 +1,39 @@
+-- Events repository: webhook event deduplication and logging
+--
+-- Stores billing provider events to prevent duplicate processing.
+--
+-- Usage:
+--   import pkg/sunholo/billing_store/events_repo (isEventProcessed, recordEvent, BillingEvent)
+
+module sunholo/billing_store/events_repo
+
+import std/json (jo, kv, get)
+import std/result (Ok, Err)
+import pkg/sunholo/firestore/client (getDoc, setDoc)
+import pkg/sunholo/firestore/fields (stringVal, boolVal, asStr)
+
+type BillingEvent = {
+  provider: string,
+  providerEventId: string,
+  eventType: string,
+  processed: bool,
+  processedAt: string
+}
+
+-- Check if a provider event has already been processed (idempotency)
+export func isEventProcessed(providerEventId: string) -> Result[bool, string] ! {Net, FS, Env} =
+  match getDoc("billing_events", providerEventId) {
+    Err(_) => Ok(false),
+    Ok(fields) => Ok(asStr(fields, "processed") == "true")
+  }
+
+-- Record that a provider event was processed
+export func recordEvent(event: BillingEvent) -> Result[(), string] ! {Net, FS, Env} =
+  let fields = jo([
+    kv("provider", stringVal(event.provider)),
+    kv("providerEventId", stringVal(event.providerEventId)),
+    kv("eventType", stringVal(event.eventType)),
+    kv("processed", boolVal(event.processed)),
+    kv("processedAt", stringVal(event.processedAt))
+  ])
+  in setDoc("billing_events", event.providerEventId, fields)

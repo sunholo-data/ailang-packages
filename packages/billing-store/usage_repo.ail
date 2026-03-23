@@ -1,0 +1,37 @@
+-- Usage repository: per-period usage tracking
+--
+-- Usage documents live in a subcollection pattern:
+-- usage/{principalId}/periods/{yyyy_mm}
+--
+-- Usage:
+--   import pkg/sunholo/billing_store/usage_repo (getUsage, putUsage)
+
+module sunholo/billing_store/usage_repo
+
+import std/json (jo, kv, get)
+import std/result (Ok, Err)
+import pkg/sunholo/firestore/client (getSubDoc, setSubDoc)
+import pkg/sunholo/firestore/fields (intVal, asInt)
+
+-- Get usage for a principal in a specific period (e.g. "2026_03")
+export func getUsage(principalId: string, period: string) -> Result[Usage, string] ! {Net, FS, Env} =
+  match getSubDoc("usage", principalId, "periods", period) {
+    Err(_) => Ok(emptyUsage()),
+    Ok(fields) =>
+      Ok({
+        documentsParsed: asInt(fields, "documentsParsed"),
+        pagesParsed: asInt(fields, "pagesParsed"),
+        bytesProcessed: asInt(fields, "bytesProcessed"),
+        ocrPagesParsed: asInt(fields, "ocrPagesParsed")
+      })
+  }
+
+-- Write usage for a principal in a specific period
+export func putUsage(principalId: string, period: string, usage: Usage) -> Result[(), string] ! {Net, FS, Env} =
+  let fields = jo([
+    kv("documentsParsed", intVal(usage.documentsParsed)),
+    kv("pagesParsed", intVal(usage.pagesParsed)),
+    kv("bytesProcessed", intVal(usage.bytesProcessed)),
+    kv("ocrPagesParsed", intVal(usage.ocrPagesParsed))
+  ])
+  in setSubDoc("usage", principalId, "periods", period, fields)

@@ -1,0 +1,28 @@
+[package]
+name = "sunholo/firestore"
+version = "0.1.0"
+edition = "1"
+ailang = ">=0.9.5"
+description = "Firestore REST API client — CRUD operations, queries, field value encoding/decoding, GCP ADC auth"
+license = "Apache-2.0"
+
+[exports]
+modules = [
+  "sunholo/firestore/client",
+  "sunholo/firestore/fields",
+  "sunholo/firestore/query"
+]
+
+[dependencies]
+"sunholo/gcp_auth" = { path = "../gcp-auth" }
+"sunholo/config" = { path = "../config" }
+
+[effects]
+max = ["Net", "FS", "Env"]
+
+[metadata]
+tags = ["firestore", "gcp", "database", "nosql", "cloud-run"]
+ai_summary = "Firestore REST API client for AILANG. CRUD operations (get, set, delete), structured queries, field value encoding/decoding. Uses GCP ADC auth. Designed for Cloud Run services."
+
+[stability]
+level = "experimental"

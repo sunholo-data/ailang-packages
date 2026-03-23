@@ -1,0 +1,47 @@
+-- Stripe Customer Portal session creation
+--
+-- Creates a session for Stripe's hosted customer portal where users
+-- can manage their subscription, update payment, or cancel.
+-- Stripe API: POST /v1/billing_portal/sessions
+--
+-- Usage:
+--   import pkg/sunholo/billing_stripe/stripe_portal (createPortalSession)
+
+module sunholo/billing_stripe/stripe_portal
+
+import std/net (httpRequest)
+import std/json (decode, get, asString)
+import std/result (Ok, Err)
+import std/option (getOrElse)
+import pkg/sunholo/config/loader (requireEnv)
+
+-- Create a Stripe Customer Portal session
+--
+-- Returns the hosted portal URL. User is redirected to returnUrl when done.
+export func createPortalSession(
+  customerId: string,
+  returnUrl: string
+) -> Result[string, string] ! {Net, Env} =
+  match requireEnv("STRIPE_SECRET_KEY") {
+    Err(e) => Err(e),
+    Ok(secretKey) =>
+      let body = "customer=" ++ customerId ++ "&return_url=" ++ returnUrl
+      in let headers = [
+        { name: "Authorization", value: "Bearer " ++ secretKey },
+        { name: "Content-Type", value: "application/x-www-form-urlencoded" }
+      ]
+      in match httpRequest("POST", "https://api.stripe.com/v1/billing_portal/sessions", headers, body) {
+        Err(e) => Err("Stripe API error: " ++ e),
+        Ok(resp) =>
+          if resp.ok then
+            match decode(resp.body) {
+              Ok(json) =>
+                match get(json, "url") {
+                  Some(v) => Ok(getOrElse(asString(v), "")),
+                  None => Err("No portal URL in Stripe response")
+                },
+              Err(e) => Err("Stripe response parse error: " ++ e)
+            }
+          else Err("Stripe error " ++ show(resp.status) ++ ": " ++ resp.body)
+      }
+  }

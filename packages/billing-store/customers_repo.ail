@@ -1,0 +1,44 @@
+-- Customer repository: map principals to Stripe customers
+--
+-- Usage:
+--   import pkg/sunholo/billing_store/customers_repo (getCustomer, putCustomer, Customer)
+
+module sunholo/billing_store/customers_repo
+
+import std/json (jo, kv, get)
+import std/result (Ok, Err)
+import pkg/sunholo/firestore/client (getDoc, setDoc)
+import pkg/sunholo/firestore/fields (stringVal, asStr)
+
+type Customer = {
+  principalType: string,
+  principalId: string,
+  stripeCustomerId: string,
+  email: string,
+  createdAt: string
+}
+
+-- Get a customer record by principal ID
+export func getCustomer(principalId: string) -> Result[Customer, string] ! {Net, FS, Env} =
+  match getDoc("billing_customers", principalId) {
+    Err(e) => Err(e),
+    Ok(fields) =>
+      Ok({
+        principalType: asStr(fields, "principalType"),
+        principalId: asStr(fields, "principalId"),
+        stripeCustomerId: asStr(fields, "stripeCustomerId"),
+        email: asStr(fields, "email"),
+        createdAt: asStr(fields, "createdAt")
+      })
+  }
+
+-- Create or update a customer record
+export func putCustomer(c: Customer) -> Result[(), string] ! {Net, FS, Env} =
+  let fields = jo([
+    kv("principalType", stringVal(c.principalType)),
+    kv("principalId", stringVal(c.principalId)),
+    kv("stripeCustomerId", stringVal(c.stripeCustomerId)),
+    kv("email", stringVal(c.email)),
+    kv("createdAt", stringVal(c.createdAt))
+  ])
+  in setDoc("billing_customers", c.principalId, fields)

@@ -1,0 +1,67 @@
+-- Proposals repository: payment proposal CRUD
+--
+-- Usage:
+--   import pkg/sunholo/billing_store/proposals_repo (getProposal, putProposal)
+
+module sunholo/billing_store/proposals_repo
+
+import std/json (jo, kv, get)
+import std/result (Ok, Err)
+import pkg/sunholo/firestore/client (getDoc, setDoc)
+import pkg/sunholo/firestore/fields (stringVal, asStr)
+
+-- Get a proposal by ID
+export func getProposal(proposalId: string) -> Result[Proposal, string] ! {Net, FS, Env} =
+  match getDoc("payment_proposals", proposalId) {
+    Err(e) => Err(e),
+    Ok(fields) =>
+      let requestedByStr = asStr(fields, "requestedBy")
+      in let requestedByAgent = asStr(fields, "requestedByAgent")
+      in let requestedBy = if requestedByStr == "agent" then Agent(requestedByAgent) else Human
+      in let statusStr = asStr(fields, "status")
+      in Ok({
+        proposalId: asStr(fields, "proposalId"),
+        principalId: asStr(fields, "principalId"),
+        targetPlan: asStr(fields, "targetPlan"),
+        status: parseStatus(statusStr),
+        reason: asStr(fields, "reason"),
+        requestedBy: requestedBy,
+        approvalUrl: asStr(fields, "approvalUrl"),
+        expiresAt: asStr(fields, "expiresAt"),
+        createdAt: asStr(fields, "createdAt")
+      })
+  }
+
+func parseStatus(s: string) -> ProposalStatus =
+  match s {
+    "pending_approval" => PendingApproval,
+    "awaiting_payment" => AwaitingPayment,
+    "approved" => Approved,
+    "expired" => Expired,
+    "rejected" => Rejected,
+    _ => PendingApproval
+  }
+
+-- Create or update a proposal
+export func putProposal(p: Proposal) -> Result[(), string] ! {Net, FS, Env} =
+  let requestedByStr = match p.requestedBy {
+    Human => "human",
+    Agent(_) => "agent"
+  }
+  in let agentName = match p.requestedBy {
+    Human => "",
+    Agent(name) => name
+  }
+  in let fields = jo([
+    kv("proposalId", stringVal(p.proposalId)),
+    kv("principalId", stringVal(p.principalId)),
+    kv("targetPlan", stringVal(p.targetPlan)),
+    kv("status", stringVal(statusLabel(p.status))),
+    kv("reason", stringVal(p.reason)),
+    kv("requestedBy", stringVal(requestedByStr)),
+    kv("requestedByAgent", stringVal(agentName)),
+    kv("approvalUrl", stringVal(p.approvalUrl)),
+    kv("expiresAt", stringVal(p.expiresAt)),
+    kv("createdAt", stringVal(p.createdAt))
+  ])
+  in setDoc("payment_proposals", p.proposalId, fields)

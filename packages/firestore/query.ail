@@ -1,0 +1,210 @@
+-- Firestore structured queries via REST API
+--
+-- Builds and executes Firestore :runQuery requests.
+-- Supports WHERE filters, ORDER BY, LIMIT, and field selection.
+--
+-- Usage:
+--   import pkg/sunholo/firestore/query (runQuery, where, orderBy, limit, QueryFilter)
+
+module sunholo/firestore/query
+
+import std/net (httpRequest)
+import std/json (encode, decode, jo, ja, js, jnum, kv, get, asString, asArray)
+import std/result (Ok, Err)
+import std/option (getOrElse)
+import std/list (map)
+import pkg/sunholo/gcp_auth/token (getAccessToken)
+import pkg/sunholo/config/loader (requireEnv, optionalEnv)
+
+-- ══════════════════════════════════════════════════════════════
+-- QUERY BUILDER TYPES
+-- ══════════════════════════════════════════════════════════════
+
+-- A filter condition for a query
+-- Supported operators: "EQUAL", "NOT_EQUAL", "LESS_THAN", "LESS_THAN_OR_EQUAL",
+--   "GREATER_THAN", "GREATER_THAN_OR_EQUAL", "IN", "ARRAY_CONTAINS"
+type QueryFilter = {
+  field: string,
+  op: string,
+  value: Json
+}
+
+-- Sort direction for a query
+type OrderDirection = Asc | Desc
+
+type QueryOrder = {
+  field: string,
+  direction: OrderDirection
+}
+
+-- ══════════════════════════════════════════════════════════════
+-- QUERY BUILDER HELPERS
+-- ══════════════════════════════════════════════════════════════
+
+-- Create a WHERE filter
+--
+-- Example: where("status", "EQUAL", stringVal("active"))
+export pure func where(field: string, op: string, value: Json) -> QueryFilter =
+  { field: field, op: op, value: value }
+
+-- Create an ORDER BY clause
+export pure func orderBy(field: string, dir: OrderDirection) -> QueryOrder =
+  { field: field, direction: dir }
+
+-- ══════════════════════════════════════════════════════════════
+-- QUERY EXECUTION
+-- ══════════════════════════════════════════════════════════════
+
+-- Run a structured query against a collection
+--
+-- Returns a list of (documentId, fields) pairs.
+-- Each element has the document's fields object.
+--
+-- Example:
+--   let filters = [where("status", "EQUAL", stringVal("active"))]
+--   let orders = [orderBy("createdAt", Desc)]
+--   match runQuery("tasks", filters, orders, 10) {
+--     Ok(docs) => -- docs is [{id: string, fields: Json}]
+--     Err(e) => -- query error
+--   }
+export func runQuery(
+  collection: string,
+  filters: [QueryFilter],
+  orders: [QueryOrder],
+  maxResults: int
+) -> Result[[{id: string, fields: Json}], string] ! {Net, FS, Env} =
+  match requireEnv("GOOGLE_CLOUD_PROJECT") {
+    Err(e) => Err(e),
+    Ok(project) =>
+      let db = optionalEnv("FIRESTORE_DATABASE", "(default)")
+      in match getAccessToken() {
+        Err(e) => Err("Auth error: " ++ e),
+        Ok(token) =>
+          let url = "https://firestore.googleapis.com/v1/projects/" ++ project ++
+                    "/databases/" ++ db ++ "/documents:runQuery"
+          in let queryBody = buildQueryBody(collection, filters, orders, maxResults)
+          in let headers = [
+            { name: "Authorization", value: "Bearer " ++ token },
+            { name: "Content-Type", value: "application/json" }
+          ]
+          in match httpRequest("POST", url, headers, encode(queryBody)) {
+            Err(e) => Err("Firestore query error: " ++ show(e)),
+            Ok(resp) =>
+              if resp.ok then parseQueryResponse(resp.body)
+              else Err("Firestore query " ++ show(resp.status) ++ ": " ++ resp.body)
+          }
+      }
+  }
+
+-- ══════════════════════════════════════════════════════════════
+-- QUERY BODY CONSTRUCTION
+-- ══════════════════════════════════════════════════════════════
+
+func buildQueryBody(
+  collection: string,
+  filters: [QueryFilter],
+  orders: [QueryOrder],
+  maxResults: int
+) -> Json =
+  let from = jo([kv("collectionId", js(collection))])
+  in let queryParts = [kv("from", ja([from]))]
+  in let withFilter = match filters {
+    [] => queryParts,
+    _ => queryParts ++ [kv("where", buildCompositeFilter(filters))]
+  }
+  in let withOrder = match orders {
+    [] => withFilter,
+    _ => withFilter ++ [kv("orderBy", ja(buildOrderClauses(orders)))]
+  }
+  in let withLimit = if maxResults > 0
+    then withOrder ++ [kv("limit", jnum(intToFloat(maxResults)))]
+    else withOrder
+  in jo([kv("structuredQuery", jo(withLimit))])
+
+func buildCompositeFilter(filters: [QueryFilter]) -> Json =
+  match filters {
+    [single] => buildFieldFilter(single),
+    _ =>
+      jo([kv("compositeFilter", jo([
+        kv("op", js("AND")),
+        kv("filters", ja(buildFilterList(filters)))
+      ]))])
+  }
+
+func buildFilterList(filters: [QueryFilter]) -> [Json] =
+  match filters {
+    [] => [],
+    f :: rest => buildFieldFilter(f) :: buildFilterList(rest)
+  }
+
+func buildFieldFilter(f: QueryFilter) -> Json =
+  jo([kv("fieldFilter", jo([
+    kv("field", jo([kv("fieldPath", js(f.field))])),
+    kv("op", js(f.op)),
+    kv("value", f.value)
+  ]))])
+
+func buildOrderClauses(orders: [QueryOrder]) -> [Json] =
+  match orders {
+    [] => [],
+    o :: rest =>
+      let dir = match o.direction {
+        Asc => "ASCENDING",
+        Desc => "DESCENDING"
+      }
+      in jo([
+        kv("field", jo([kv("fieldPath", js(o.field))])),
+        kv("direction", js(dir))
+      ]) :: buildOrderClauses(rest)
+  }
+
+-- ══════════════════════════════════════════════════════════════
+-- RESPONSE PARSING
+-- ══════════════════════════════════════════════════════════════
+
+func parseQueryResponse(body: string) -> Result[[{id: string, fields: Json}], string] =
+  match decode(body) {
+    Err(e) => Err("JSON decode error: " ++ e),
+    Ok(json) =>
+      match asArray(json) {
+        None => Ok([]),
+        Some(results) => Ok(extractDocs(results))
+      }
+  }
+
+func extractDocs(results: [Json]) -> [{id: string, fields: Json}] =
+  match results {
+    [] => [],
+    item :: rest =>
+      match get(item, "document") {
+        None => extractDocs(rest),
+        Some(doc) =>
+          let id = extractDocId(doc)
+          in let fields = match get(doc, "fields") {
+            Some(f) => f,
+            None => jo([])
+          }
+          in { id: id, fields: fields } :: extractDocs(rest)
+      }
+  }
+
+-- Extract document ID from the full document name path
+-- "projects/.../documents/collection/docId" → "docId"
+func extractDocId(doc: Json) -> string =
+  match get(doc, "name") {
+    None => "",
+    Some(nameJson) =>
+      match asString(nameJson) {
+        None => "",
+        Some(name) => lastSegment(name)
+      }
+  }
+
+func lastSegment(path: string) -> string =
+  lastSegmentHelper(path, 0, 0, length(path))
+
+func lastSegmentHelper(path: string, lastSlash: int, i: int, len: int) -> string =
+  if i >= len then substring(path, lastSlash, len)
+  else if substring(path, i, i + 1) == "/" then
+    lastSegmentHelper(path, i + 1, i + 1, len)
+  else lastSegmentHelper(path, lastSlash, i + 1, len)

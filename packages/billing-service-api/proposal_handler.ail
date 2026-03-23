@@ -1,0 +1,124 @@
+-- Payment proposal handlers
+--
+-- POST /billing/proposals          — Create a payment proposal
+-- POST /billing/proposals/:id/approval-link — Generate approval link
+-- GET  /billing/proposals/:id      — Get proposal status
+--
+-- Proposals allow AI agents to prepare billing actions for human approval.
+
+module sunholo/billing_service_api/proposal_handler
+
+import std/json (decode, get, asString, encode, jo, js, kv)
+import std/result (Ok, Err)
+import std/option (getOrElse)
+import pkg/sunholo/billing_proposals/proposal (
+  createProposal, canCreateApprovalLink, markAwaitingPayment,
+  statusLabel, Agent, Human
+)
+import pkg/sunholo/billing_store/proposals_repo (getProposal, putProposal)
+import pkg/sunholo/billing_store/customers_repo (getCustomer)
+import pkg/sunholo/billing_stripe/stripe_checkout (createCheckoutSession)
+
+-- Create a new payment proposal
+--
+-- Body: { "targetPlan": "pro_monthly", "reason": "...", "requestedBy": "agent" }
+@route("POST", "/billing/proposals")
+export func handleCreateProposal(
+  principalId: string,
+  proposalId: string,
+  createdAt: string,
+  body: string
+) -> Result[string, string] ! {Net, FS, Env} =
+  match decode(body) {
+    Err(e) => Err("Invalid JSON: " ++ e),
+    Ok(json) =>
+      let targetPlan = match get(json, "targetPlan") {
+        Some(v) => getOrElse(asString(v), ""),
+        None => ""
+      }
+      in let reason = match get(json, "reason") {
+        Some(v) => getOrElse(asString(v), ""),
+        None => ""
+      }
+      in let requestedByStr = match get(json, "requestedBy") {
+        Some(v) => getOrElse(asString(v), "human"),
+        None => "human"
+      }
+      in let agentName = match get(json, "requestedByAgent") {
+        Some(v) => getOrElse(asString(v), "unknown"),
+        None => "unknown"
+      }
+      in if targetPlan == "" then Err("Missing targetPlan")
+      else
+        let requestedBy = if requestedByStr == "agent" then Agent(agentName) else Human
+        in let proposal = createProposal(proposalId, principalId, targetPlan, reason, requestedBy, createdAt)
+        in match putProposal(proposal) {
+          Err(e) => Err("Failed to save proposal: " ++ e),
+          Ok(_) =>
+            Ok(encode(jo([
+              kv("proposalId", js(proposalId)),
+              kv("status", js("pending_approval"))
+            ])))
+        }
+  }
+
+-- Generate an approval link (Stripe Checkout) for a pending proposal
+@route("POST", "/billing/proposals/:id/approval-link")
+export func handleApprovalLink(
+  principalId: string,
+  email: string,
+  proposalId: string,
+  successUrl: string,
+  cancelUrl: string
+) -> Result[string, string] ! {Net, FS, Env} =
+  match getProposal(proposalId) {
+    Err(e) => Err("Proposal not found: " ++ e),
+    Ok(proposal) =>
+      if proposal.principalId != principalId then
+        Err("Proposal does not belong to this user")
+      else if canCreateApprovalLink(proposal) == false then
+        Err("Proposal is not in a state that allows approval link creation")
+      else
+        match getCustomer(principalId) {
+          Err(_) => Err("No billing account found"),
+          Ok(customer) =>
+            -- Look up price ID from plan catalog (simplified: use targetPlan as priceId prefix)
+            let priceId = "price_docparse_" ++ proposal.targetPlan
+            in match createCheckoutSession(customer.stripeCustomerId, priceId, successUrl, cancelUrl, principalId) {
+              Err(e) => Err("Checkout creation failed: " ++ e),
+              Ok(session) =>
+                let updated = markAwaitingPayment(proposal, session.url, session.expiresAt)
+                in match putProposal(updated) {
+                  Err(e) => Err("Failed to update proposal: " ++ e),
+                  Ok(_) =>
+                    Ok(encode(jo([
+                      kv("proposalId", js(proposalId)),
+                      kv("approvalUrl", js(session.url)),
+                      kv("expiresAt", js(session.expiresAt))
+                    ])))
+                }
+            }
+        }
+  }
+
+-- Get proposal status (for polling)
+@route("GET", "/billing/proposals/:id")
+export func handleGetProposal(
+  principalId: string,
+  proposalId: string
+) -> Result[string, string] ! {Net, FS, Env} =
+  match getProposal(proposalId) {
+    Err(e) => Err("Proposal not found: " ++ e),
+    Ok(proposal) =>
+      if proposal.principalId != principalId then
+        Err("Proposal does not belong to this user")
+      else
+        Ok(encode(jo([
+          kv("proposalId", js(proposal.proposalId)),
+          kv("targetPlan", js(proposal.targetPlan)),
+          kv("status", js(statusLabel(proposal.status))),
+          kv("reason", js(proposal.reason)),
+          kv("approvalUrl", js(proposal.approvalUrl)),
+          kv("createdAt", js(proposal.createdAt))
+        ])))
+  }

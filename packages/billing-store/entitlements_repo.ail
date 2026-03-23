@@ -1,0 +1,46 @@
+-- Entitlements repository: app-level capability state
+--
+-- Usage:
+--   import pkg/sunholo/billing_store/entitlements_repo (getEntitlements, putEntitlements)
+
+module sunholo/billing_store/entitlements_repo
+
+import std/json (jo, kv, get)
+import std/result (Ok, Err)
+import pkg/sunholo/firestore/client (getDoc, setDoc)
+import pkg/sunholo/firestore/fields (stringVal, intVal, boolVal, asStr, asInt)
+
+-- Get entitlements by principal ID
+export func getEntitlements(principalId: string) -> Result[Entitlements, string] ! {Net, FS, Env} =
+  match getDoc("entitlements", principalId) {
+    Err(e) => Err(e),
+    Ok(fields) =>
+      Ok({
+        principalId: asStr(fields, "principalId"),
+        plan: asStr(fields, "plan"),
+        status: asStr(fields, "status"),
+        canParse: asStr(fields, "canParse") == "true",
+        apiAccess: asStr(fields, "apiAccess") == "true",
+        maxFileSizeMb: asInt(fields, "maxFileSizeMb"),
+        monthlyDocumentLimit: asInt(fields, "monthlyDocumentLimit"),
+        monthlyPageLimit: asInt(fields, "monthlyPageLimit"),
+        maxConcurrentJobs: asInt(fields, "maxConcurrentJobs"),
+        gracePeriod: asStr(fields, "gracePeriod") == "true"
+      })
+  }
+
+-- Create or update entitlements
+export func putEntitlements(ent: Entitlements) -> Result[(), string] ! {Net, FS, Env} =
+  let fields = jo([
+    kv("principalId", stringVal(ent.principalId)),
+    kv("plan", stringVal(ent.plan)),
+    kv("status", stringVal(ent.status)),
+    kv("canParse", boolVal(ent.canParse)),
+    kv("apiAccess", boolVal(ent.apiAccess)),
+    kv("maxFileSizeMb", intVal(ent.maxFileSizeMb)),
+    kv("monthlyDocumentLimit", intVal(ent.monthlyDocumentLimit)),
+    kv("monthlyPageLimit", intVal(ent.monthlyPageLimit)),
+    kv("maxConcurrentJobs", intVal(ent.maxConcurrentJobs)),
+    kv("gracePeriod", boolVal(ent.gracePeriod))
+  ])
+  in setDoc("entitlements", ent.principalId, fields)

@@ -1,0 +1,84 @@
+-- Stripe webhook signature verification
+--
+-- Verifies that an incoming webhook request is from Stripe using
+-- HMAC-SHA256 signature validation.
+--
+-- Stripe sends a Stripe-Signature header containing:
+--   t=timestamp,v1=signature
+--
+-- We compute HMAC-SHA256(timestamp.payload, webhook_secret) and compare.
+--
+-- Usage:
+--   import pkg/sunholo/billing_stripe/stripe_webhook (verifyWebhook, VerifiedEvent)
+
+module sunholo/billing_stripe/stripe_webhook
+
+import std/crypto (hmacSha256, constantTimeEqual)
+import std/json (decode, get, asString, getString)
+import std/string (split, startsWith, find)
+import std/result (Ok, Err)
+import std/option (getOrElse)
+import pkg/sunholo/config/loader (requireEnv)
+
+type VerifiedEvent = {
+  eventId: string,
+  eventType: string,
+  data: Json
+}
+
+-- Verify a Stripe webhook signature and parse the event
+--
+-- signatureHeader: the Stripe-Signature header value
+-- rawBody: the raw request body (must match exactly what Stripe signed)
+export func verifyWebhook(
+  signatureHeader: string,
+  rawBody: string
+) -> Result[VerifiedEvent, string] ! {Env} =
+  match requireEnv("STRIPE_WEBHOOK_SECRET") {
+    Err(e) => Err(e),
+    Ok(webhookSecret) =>
+      let parts = split(signatureHeader, ",")
+      in match extractSignatureParts(parts, "", "") {
+        Err(e) => Err(e),
+        Ok(sigParts) =>
+          let signedPayload = sigParts.timestamp ++ "." ++ rawBody
+          in let expected = hmacSha256(signedPayload, webhookSecret)
+          in if constantTimeEqual(expected, sigParts.signature) then
+            match decode(rawBody) {
+              Err(e) => Err("Event parse error: " ++ e),
+              Ok(json) =>
+                let eventId = match get(json, "id") {
+                  Some(v) => getOrElse(asString(v), ""),
+                  None => ""
+                }
+                in let eventType = match get(json, "type") {
+                  Some(v) => getOrElse(asString(v), ""),
+                  None => ""
+                }
+                in let data = match get(json, "data") {
+                  Some(d) => d,
+                  None => json
+                }
+                in Ok({ eventId: eventId, eventType: eventType, data: data })
+            }
+          else Err("Invalid webhook signature")
+      }
+  }
+
+-- Internal: extract timestamp and v1 signature from header parts
+type SignatureParts = { timestamp: string, signature: string }
+
+func extractSignatureParts(parts: [string], ts: string, sig: string) -> Result[SignatureParts, string] =
+  match parts {
+    [] =>
+      if ts == "" then Err("Missing timestamp in Stripe signature")
+      else if sig == "" then Err("Missing v1 signature in Stripe signature")
+      else Ok({ timestamp: ts, signature: sig }),
+    part :: rest =>
+      let trimmed = trim(part)
+      in if startsWith(trimmed, "t=") then
+        extractSignatureParts(rest, substring(trimmed, 2, length(trimmed)), sig)
+      else if startsWith(trimmed, "v1=") then
+        extractSignatureParts(rest, ts, substring(trimmed, 3, length(trimmed)))
+      else extractSignatureParts(rest, ts, sig)
+  }

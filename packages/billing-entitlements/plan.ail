@@ -1,0 +1,68 @@
+-- Plan catalog: types and lookup for billing plans
+--
+-- A Plan defines the capabilities and limits for a billing tier.
+-- The PlanCatalog is a list of (planKey, Plan) pairs loaded from config.
+--
+-- Usage:
+--   import pkg/sunholo/billing_entitlements/plan (Plan, lookupPlan, freePlan)
+
+module sunholo/billing_entitlements/plan
+
+import std/result (Ok, Err)
+
+-- A billing plan with capability limits
+type Plan = {
+  name: string,
+  monthlyPageLimit: int,
+  monthlyDocumentLimit: int,
+  maxFileSizeMb: int,
+  apiAccess: bool,
+  maxConcurrentJobs: int
+}
+
+-- The free tier defaults — always available, never requires Stripe
+export pure func freePlan() -> Plan =
+  {
+    name: "free",
+    monthlyPageLimit: 100,
+    monthlyDocumentLimit: 20,
+    maxFileSizeMb: 10,
+    apiAccess: false,
+    maxConcurrentJobs: 1
+  }
+
+-- Look up a plan by key from a catalog (list of key-plan pairs)
+export pure func lookupPlan(catalog: [{key: string, plan: Plan}], planKey: string) -> Result[Plan, string] =
+  findPlan(catalog, planKey)
+
+func findPlan(entries: [{key: string, plan: Plan}], planKey: string) -> Result[Plan, string] =
+  match entries {
+    [] => Err("Unknown plan: " ++ planKey),
+    entry :: rest =>
+      if entry.key == planKey then Ok(entry.plan)
+      else findPlan(rest, planKey)
+  }
+
+-- Build a default plan catalog with standard tiers
+export pure func defaultCatalog() -> [{key: string, plan: Plan}] =
+  [
+    { key: "free", plan: freePlan() },
+    { key: "pro_monthly", plan: {
+        name: "pro",
+        monthlyPageLimit: 5000,
+        monthlyDocumentLimit: 500,
+        maxFileSizeMb: 50,
+        apiAccess: true,
+        maxConcurrentJobs: 3
+      }
+    },
+    { key: "business_monthly", plan: {
+        name: "business",
+        monthlyPageLimit: 20000,
+        monthlyDocumentLimit: 2000,
+        maxFileSizeMb: 100,
+        apiAccess: true,
+        maxConcurrentJobs: 10
+      }
+    }
+  ]

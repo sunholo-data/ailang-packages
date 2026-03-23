@@ -1,0 +1,73 @@
+-- Entitlement resolution: derive app capabilities from subscription state
+--
+-- Entitlements are the app-facing view of what a user is allowed to do.
+-- They are derived from subscription state + plan catalog, not from Stripe directly.
+--
+-- Usage:
+--   import pkg/sunholo/billing_entitlements/entitlement (Entitlements, resolveEntitlements)
+
+module sunholo/billing_entitlements/entitlement
+
+import std/result (Ok, Err)
+
+-- What DocParse allows for a given principal
+type Entitlements = {
+  principalId: string,
+  plan: string,
+  status: string,
+  canParse: bool,
+  apiAccess: bool,
+  maxFileSizeMb: int,
+  monthlyDocumentLimit: int,
+  monthlyPageLimit: int,
+  maxConcurrentJobs: int,
+  gracePeriod: bool
+}
+
+-- Subscription state as reported by the billing provider
+type SubscriptionState = {
+  status: string,
+  planKey: string,
+  cancelAtPeriodEnd: bool
+}
+
+-- Resolve entitlements from subscription state and plan catalog
+--
+-- If subscription is active or trialing, grant full plan capabilities.
+-- If past_due, grant capabilities with grace period flag.
+-- If canceled/unpaid/no subscription, fall back to free plan.
+export pure func resolveEntitlements(
+  sub: SubscriptionState,
+  catalog: [{key: string, plan: Plan}],
+  principalId: string
+) -> Entitlements =
+  let plan = match lookupPlan(catalog, sub.planKey) {
+    Ok(p) => p,
+    Err(_) => freePlan()
+  }
+  in if sub.status == "active" then
+    planToEntitlements(principalId, plan, "active", false)
+  else if sub.status == "trialing" then
+    planToEntitlements(principalId, plan, "trialing", false)
+  else if sub.status == "past_due" then
+    planToEntitlements(principalId, plan, "grace", true)
+  else
+    planToEntitlements(principalId, freePlan(), "free", false)
+
+-- Build entitlements for a principal with no subscription (free tier)
+export pure func freeEntitlements(principalId: string) -> Entitlements =
+  planToEntitlements(principalId, freePlan(), "free", false)
+
+func planToEntitlements(principalId: string, plan: Plan, status: string, grace: bool) -> Entitlements =
+  {
+    principalId: principalId,
+    plan: plan.name,
+    status: status,
+    canParse: true,
+    apiAccess: plan.apiAccess,
+    maxFileSizeMb: plan.maxFileSizeMb,
+    monthlyDocumentLimit: plan.monthlyDocumentLimit,
+    monthlyPageLimit: plan.monthlyPageLimit,
+    maxConcurrentJobs: plan.maxConcurrentJobs,
+    gracePeriod: grace
+  }

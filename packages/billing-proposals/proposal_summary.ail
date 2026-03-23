@@ -1,0 +1,48 @@
+-- Proposal summaries for human-readable display
+--
+-- Generates descriptions of plan changes for UI or chat presentation.
+-- Used by AI agents to explain proposed upgrades to users.
+--
+-- Usage:
+--   import pkg/sunholo/billing_proposals/proposal_summary (summarizeProposal, ProposalSummary)
+
+module sunholo/billing_proposals/proposal_summary
+
+import std/result (Ok, Err)
+
+-- Human-readable summary of a plan change
+type ProposalSummary = {
+  description: string,
+  currentPlan: string,
+  targetPlan: string,
+  pageLimit: string,
+  documentLimit: string,
+  apiAccess: string
+}
+
+-- Summarize a proposal for display
+--
+-- Looks up both current and target plans to produce a comparison.
+export pure func summarizeProposal(
+  targetPlanKey: string,
+  currentPlanName: string,
+  catalog: [{key: string, plan: Plan}],
+  reason: string
+) -> Result[ProposalSummary, string] =
+  match lookupPlan(catalog, targetPlanKey) {
+    Err(e) => Err(e),
+    Ok(target) =>
+      Ok({
+        description: "Upgrade from " ++ currentPlanName ++ " to " ++ target.name ++ ": " ++ reason,
+        currentPlan: currentPlanName,
+        targetPlan: target.name,
+        pageLimit: show(target.monthlyPageLimit) ++ " pages/month",
+        documentLimit: show(target.monthlyDocumentLimit) ++ " documents/month",
+        apiAccess: if target.apiAccess then "enabled" else "disabled"
+      })
+  }
+
+-- Format a one-line upgrade prompt for chat display
+export pure func upgradePrompt(currentPlan: string, targetPlan: string, reason: string) -> string =
+  "Your current plan (" ++ currentPlan ++ ") " ++ reason ++
+  ". Would you like to upgrade to " ++ targetPlan ++ "?"

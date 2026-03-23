@@ -1,0 +1,32 @@
+[package]
+name = "sunholo/billing_service_api"
+version = "0.1.0"
+edition = "1"
+description = "HTTP handlers for the billing Cloud Run service — checkout, portal, proposals, webhooks, entitlements"
+license = "Apache-2.0"
+
+[exports]
+modules = [
+  "sunholo/billing_service_api/checkout_handler",
+  "sunholo/billing_service_api/portal_handler",
+  "sunholo/billing_service_api/proposal_handler",
+  "sunholo/billing_service_api/webhook_handler",
+  "sunholo/billing_service_api/entitlements_handler"
+]
+
+[dependencies]
+"sunholo/billing_entitlements" = { path = "../billing-entitlements" }
+"sunholo/billing_proposals" = { path = "../billing-proposals" }
+"sunholo/billing_store" = { path = "../billing-store" }
+"sunholo/billing_stripe" = { path = "../billing-stripe" }
+"sunholo/config" = { path = "../config" }
+
+[effects]
+max = ["Net", "FS", "Env", "IO"]
+
+[metadata]
+tags = ["billing", "api", "http", "cloud-run"]
+ai_summary = "HTTP handlers for billing Cloud Run service. Deploy with 'ailang serve-api'. Checkout, portal, proposals, webhooks, entitlements endpoints."
+
+[stability]
+level = "experimental"

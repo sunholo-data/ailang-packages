@@ -1,0 +1,87 @@
+-- Stripe webhook handler
+--
+-- POST /billing/webhooks/stripe
+--
+-- Receives Stripe events, verifies signatures, and processes:
+--   - customer.subscription.created/updated/deleted
+--   - checkout.session.completed
+--
+-- Updates subscriptions, entitlements, and proposals in Firestore.
+
+module sunholo/billing_service_api/webhook_handler
+
+import std/json (encode, jo, js, kv)
+import std/result (Ok, Err)
+import pkg/sunholo/billing_stripe/stripe_webhook (verifyWebhook)
+import pkg/sunholo/billing_stripe/stripe_event_mapper (mapEventToStateChange)
+import pkg/sunholo/billing_store/events_repo (isEventProcessed, recordEvent)
+import pkg/sunholo/billing_store/subscriptions_repo (putSubscription)
+import pkg/sunholo/billing_store/entitlements_repo (putEntitlements)
+import pkg/sunholo/billing_entitlements/plan (defaultCatalog)
+import pkg/sunholo/billing_entitlements/entitlement (resolveEntitlements)
+
+-- Handle incoming Stripe webhook
+@route("POST", "/billing/webhooks/stripe")
+export func handleStripeWebhook(
+  signatureHeader: string,
+  rawBody: string,
+  receivedAt: string
+) -> Result[string, string] ! {Net, FS, Env} =
+  -- 1. Verify signature
+  match verifyWebhook(signatureHeader, rawBody) {
+    Err(e) => Err("Webhook verification failed: " ++ e),
+    Ok(event) =>
+      -- 2. Idempotency check
+      match isEventProcessed(event.eventId) {
+        Err(e) => Err("Event check failed: " ++ e),
+        Ok(true) =>
+          -- Already processed, return success (idempotent)
+          Ok(encode(jo([kv("status", js("already_processed"))]))),
+        Ok(false) =>
+          -- 3. Map event to state change
+          match mapEventToStateChange(event.eventType, event.data) {
+            Err(_) =>
+              -- Unhandled event type — acknowledge but don't process
+              Ok(encode(jo([kv("status", js("ignored"))]))),
+            Ok(change) =>
+              -- 4. Update subscription record
+              let subResult = putSubscription({
+                provider: "stripe",
+                principalType: "user",
+                principalId: change.principalId,
+                subscriptionId: change.subscriptionId,
+                status: change.status,
+                priceId: change.priceId,
+                productId: "",
+                currentPeriodStart: change.currentPeriodStart,
+                currentPeriodEnd: change.currentPeriodEnd,
+                cancelAtPeriodEnd: change.cancelAtPeriodEnd,
+                updatedAt: receivedAt
+              })
+              in match subResult {
+                Err(e) => Err("Failed to update subscription: " ++ e),
+                Ok(_) =>
+                  -- 5. Resolve and write entitlements
+                  let subState = {
+                    status: change.status,
+                    planKey: change.priceId,
+                    cancelAtPeriodEnd: change.cancelAtPeriodEnd
+                  }
+                  in let ent = resolveEntitlements(subState, defaultCatalog(), change.principalId)
+                  in match putEntitlements(ent) {
+                    Err(e) => Err("Failed to update entitlements: " ++ e),
+                    Ok(_) =>
+                      -- 6. Record event as processed
+                      let _ = recordEvent({
+                        provider: "stripe",
+                        providerEventId: event.eventId,
+                        eventType: event.eventType,
+                        processed: true,
+                        processedAt: receivedAt
+                      })
+                      in Ok(encode(jo([kv("status", js("processed"))])))
+                  }
+              }
+          }
+      }
+  }

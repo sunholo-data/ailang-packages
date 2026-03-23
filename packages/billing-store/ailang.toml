@@ -1,0 +1,30 @@
+[package]
+name = "sunholo/billing_store"
+version = "0.2.0"
+edition = "1"
+ailang = ">=0.9.5"
+description = "Firestore storage layer for billing records — customers, subscriptions, entitlements, usage, proposals, events"
+license = "Apache-2.0"
+
+[exports]
+modules = [
+  "sunholo/billing_store/customers_repo",
+  "sunholo/billing_store/subscriptions_repo",
+  "sunholo/billing_store/entitlements_repo",
+  "sunholo/billing_store/usage_repo",
+  "sunholo/billing_store/proposals_repo",
+  "sunholo/billing_store/events_repo"
+]
+
+[dependencies]
+"sunholo/firestore" = { path = "../firestore" }
+
+[effects]
+max = ["Net", "FS", "Env"]
+
+[metadata]
+tags = ["billing", "firestore", "storage", "gcp"]
+ai_summary = "Firestore CRUD for billing records: customers, subscriptions, entitlements, usage, proposals, events. Built on sunholo/firestore package."
+
+[stability]
+level = "experimental"

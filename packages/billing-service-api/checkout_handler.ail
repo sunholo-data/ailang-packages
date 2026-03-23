@@ -1,0 +1,81 @@
+-- Checkout session handler
+--
+-- Creates Stripe Checkout sessions for direct plan purchases (human UI flow).
+--
+-- POST /billing/checkout-session
+-- Body: { "priceId": "price_...", "successUrl": "...", "cancelUrl": "..." }
+--
+-- Requires: Firebase Auth bearer token
+
+module sunholo/billing_service_api/checkout_handler
+
+import std/json (decode, get, asString, encode, jo, js, kv)
+import std/result (Ok, Err)
+import std/option (getOrElse)
+import pkg/sunholo/billing_store/customers_repo (getCustomer, putCustomer)
+import pkg/sunholo/billing_stripe/stripe_customer (createStripeCustomer)
+import pkg/sunholo/billing_stripe/stripe_checkout (createCheckoutSession)
+
+-- Handler for POST /billing/checkout-session
+--
+-- The principalId and email come from Firebase Auth (validated by middleware).
+-- Request body contains priceId, successUrl, cancelUrl.
+@route("POST", "/billing/checkout-session")
+export func handleCreateCheckout(
+  principalId: string,
+  email: string,
+  body: string
+) -> Result[string, string] ! {Net, FS, Env} =
+  match decode(body) {
+    Err(e) => Err("Invalid JSON: " ++ e),
+    Ok(json) =>
+      let priceId = match get(json, "priceId") {
+        Some(v) => getOrElse(asString(v), ""),
+        None => ""
+      }
+      in let successUrl = match get(json, "successUrl") {
+        Some(v) => getOrElse(asString(v), ""),
+        None => ""
+      }
+      in let cancelUrl = match get(json, "cancelUrl") {
+        Some(v) => getOrElse(asString(v), ""),
+        None => ""
+      }
+      in if priceId == "" then Err("Missing priceId")
+      else if successUrl == "" then Err("Missing successUrl")
+      else
+        -- Ensure Stripe customer exists
+        match ensureCustomer(principalId, email) {
+          Err(e) => Err(e),
+          Ok(customerId) =>
+            match createCheckoutSession(customerId, priceId, successUrl, cancelUrl, principalId) {
+              Err(e) => Err(e),
+              Ok(session) =>
+                Ok(encode(jo([
+                  kv("sessionId", js(session.sessionId)),
+                  kv("url", js(session.url)),
+                  kv("expiresAt", js(session.expiresAt))
+                ])))
+            }
+        }
+  }
+
+-- Ensure a Stripe customer exists, creating one if needed
+func ensureCustomer(principalId: string, email: string) -> Result[string, string] ! {Net, FS, Env} =
+  match getCustomer(principalId) {
+    Ok(customer) => Ok(customer.stripeCustomerId),
+    Err(_) =>
+      -- No customer record, create one in Stripe
+      match createStripeCustomer(email, principalId) {
+        Err(e) => Err("Failed to create Stripe customer: " ++ e),
+        Ok(customerId) =>
+          let _ = putCustomer({
+            principalType: "user",
+            principalId: principalId,
+            stripeCustomerId: customerId,
+            email: email,
+            createdAt: ""
+          })
+          in Ok(customerId)
+      }
+  }
