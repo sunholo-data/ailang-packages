@@ -4,14 +4,15 @@
 -- They are derived from subscription state + plan catalog, not from Stripe directly.
 --
 -- Usage:
---   import pkg/sunholo/billing_entitlements/entitlement (Entitlements, resolveEntitlements)
+--   import sunholo/billing_entitlements/entitlement (Entitlements, resolveEntitlements)
 
 module sunholo/billing_entitlements/entitlement
 
 import std/result (Ok, Err)
+import pkg/sunholo/billing_entitlements/plan (Plan, lookupPlan, freePlan)
 
 -- What DocParse allows for a given principal
-type Entitlements = {
+export type Entitlements = {
   principalId: string,
   plan: string,
   status: string,
@@ -25,7 +26,7 @@ type Entitlements = {
 }
 
 -- Subscription state as reported by the billing provider
-type SubscriptionState = {
+export type SubscriptionState = {
   status: string,
   planKey: string,
   cancelAtPeriodEnd: bool

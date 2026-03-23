@@ -13,7 +13,7 @@
 module sunholo/billing_proposals/proposal
 
 -- Proposal status ADT
-type ProposalStatus =
+export type ProposalStatus =
     PendingApproval
   | AwaitingPayment
   | Approved
@@ -21,12 +21,12 @@ type ProposalStatus =
   | Rejected
 
 -- Who initiated the proposal
-type RequestedBy =
+export type RequestedBy =
     Human
   | Agent(string)
 
 -- A payment proposal record
-type Proposal = {
+export type Proposal = {
   proposalId: string,
   principalId: string,
   targetPlan: string,

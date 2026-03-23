@@ -9,6 +9,7 @@ import std/json (jo, kv, get)
 import std/result (Ok, Err)
 import pkg/sunholo/firestore/client (getDoc, setDoc)
 import pkg/sunholo/firestore/fields (stringVal, asStr)
+import pkg/sunholo/billing_proposals/proposal (Proposal, ProposalStatus, RequestedBy, PendingApproval, AwaitingPayment, Approved, Expired, Rejected, Human, Agent, statusLabel)
 
 -- Get a proposal by ID
 export func getProposal(proposalId: string) -> Result[Proposal, string] ! {Net, FS, Env} =

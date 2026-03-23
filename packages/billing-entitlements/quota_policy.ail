@@ -3,9 +3,11 @@
 -- Pure functions for evaluating quota state without side effects.
 --
 -- Usage:
---   import pkg/sunholo/billing_entitlements/quota_policy (isOverPageLimit, remainingPages)
+--   import sunholo/billing_entitlements/quota_policy (isOverPageLimit, remainingPages)
 
 module sunholo/billing_entitlements/quota_policy
+
+import pkg/sunholo/billing_entitlements/entitlement (Entitlements)
 
 -- Check if monthly document limit is exceeded
 export pure func isOverDocumentLimit(ent: Entitlements, used: int) -> bool =

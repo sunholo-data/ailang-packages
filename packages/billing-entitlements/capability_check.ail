@@ -4,15 +4,18 @@
 -- before every parse operation to decide whether to allow or reject.
 --
 -- Usage:
---   import pkg/sunholo/billing_entitlements/capability_check (canParse, canUseApi, AllowDecision)
+--   import sunholo/billing_entitlements/capability_check (canParse, canUseApi, AllowDecision)
 
 module sunholo/billing_entitlements/capability_check
 
+import std/string (intToStr)
+import pkg/sunholo/billing_entitlements/entitlement (Entitlements)
+
 -- Authorization decision
-type AllowDecision = Allow | Deny(string)
+export type AllowDecision = Allow | Deny(string)
 
 -- A parse request with relevant attributes for authorization
-type ParseRequest = {
+export type ParseRequest = {
   fileSizeMb: int,
   isApiRequest: bool
 }
