@@ -20,6 +20,9 @@ import pkg/sunholo/billing_entitlements/usage_policy (Usage, UsageDelta, applyDe
 -- Reads current usage for the period, applies the delta, writes back.
 -- If the read fails, starts from zero (lazy initialization).
 -- If the write fails, returns error but does NOT retry (caller decides).
+--
+-- NOTE: Explicit type annotations are a workaround for cross-package type alias
+-- unification (m-type-cross-package-alias-unification). Remove when fixed.
 export func recordSuccessfulParse(
   principalId: string,
   currentPeriod: string,
@@ -27,7 +30,6 @@ export func recordSuccessfulParse(
   bytes: int,
   ocrPages: int
 ) -> Result[(), string] ! {Net, FS, Env} =
-  -- Load current usage (start from zero if not found)
   let current: Usage = match getUsage(principalId, currentPeriod) {
     Ok(u) => u,
     Err(_) => emptyUsage()
