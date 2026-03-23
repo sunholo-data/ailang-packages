@@ -13,7 +13,7 @@ module sunholo/docparse_access_gate/usage_recording
 
 import std/result (Ok, Err)
 import pkg/sunholo/billing_store/usage_repo (getUsage, putUsage)
-import pkg/sunholo/billing_entitlements/usage_policy (applyDelta, parseDelta, emptyUsage)
+import pkg/sunholo/billing_entitlements/usage_policy (Usage, UsageDelta, applyDelta, parseDelta, emptyUsage)
 
 -- Record usage after a successful parse
 --
@@ -28,10 +28,10 @@ export func recordSuccessfulParse(
   ocrPages: int
 ) -> Result[(), string] ! {Net, FS, Env} =
   -- Load current usage (start from zero if not found)
-  let current = match getUsage(principalId, currentPeriod) {
+  let current: Usage = match getUsage(principalId, currentPeriod) {
     Ok(u) => u,
     Err(_) => emptyUsage()
   }
-  in let delta = parseDelta(pages, bytes, ocrPages)
-  in let updated = applyDelta(current, delta)
+  in let delta: UsageDelta = parseDelta(pages, bytes, ocrPages)
+  in let updated: Usage = applyDelta(current, delta)
   in putUsage(principalId, currentPeriod, updated)
