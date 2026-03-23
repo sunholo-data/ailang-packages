@@ -134,8 +134,11 @@ module sunholo/billing_store/customers_repo
 -- Import Ok/Err explicitly (not in prelude)
 import std/result (Ok, Err)
 
--- Use pkg/ prefix for ALL package imports (including siblings)
-import pkg/sunholo/billing_store/customers_repo (getCustomer)
+-- Use ./ for siblings in SAME package (preferred)
+import ./entitlements_repo (getEntitlements)
+
+-- Use pkg/ for EXTERNAL package dependencies
+import pkg/sunholo/firestore/client (getDoc, setDoc)
 
 -- Export types that other packages will reference
 export type Customer = { name: string, email: string }
