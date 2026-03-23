@@ -113,10 +113,30 @@ Two dependency modes:
 
 To add a package:
 
-1. Create `packages/your-package/ailang.toml` with vendor/name format
-2. Add `.ail` source files with `module vendor/name/module` declarations
-3. List exported modules in `[exports].modules`
-4. Declare max effects in `[effects].max`
-5. Add `ai_summary` in `[metadata]` for agent discovery
-6. Write `AGENT.md` with usage guide for AI agents
-7. Test with `ailang add --path` or `ailang add --git` from a test project
+1. Create `packages/your-package/ailang.toml` with `sunholo/name` format
+2. Add `.ail` source files with `module sunholo/name/module` declarations
+3. **Use underscores** in module paths (not hyphens): `sunholo/billing_store`, not `sunholo/billing-store`
+4. **Use `export type`** for any types other packages will use: `export type MyRecord = { ... }`
+5. **Use `pkg/` prefix** for all imports — including siblings within the same package
+6. List exported modules in `[exports].modules`
+7. Declare max effects in `[effects].max`
+8. Add `ai_summary` in `[metadata]` for agent discovery
+9. Write `AGENT.md` with usage guide for AI agents
+10. **Validate**: `ailang lock && ailang check --package .`
+11. Test with `ailang add --path` or `ailang add --git` from a test project
+
+### Critical Conventions
+
+```ailang
+-- Module names use underscores (directory can have hyphens)
+module sunholo/billing_store/customers_repo
+
+-- Import Ok/Err explicitly (not in prelude)
+import std/result (Ok, Err)
+
+-- Use pkg/ prefix for ALL package imports (including siblings)
+import pkg/sunholo/billing_store/customers_repo (getCustomer)
+
+-- Export types that other packages will reference
+export type Customer = { name: string, email: string }
+```
