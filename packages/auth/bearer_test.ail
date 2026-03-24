@@ -1,0 +1,122 @@
+-- Tests for sunholo/auth/bearer
+--
+-- Covers: extractBearer, hasBearer
+-- All tests are pure expressions that must evaluate to true.
+
+module sunholo/auth/bearer_test
+
+import ./bearer (extractBearer, hasBearer)
+import std/option (isSome, isNone, getOrElse)
+
+-- ============================================================
+-- extractBearer tests
+-- ============================================================
+
+-- Standard "Bearer <token>" header returns Some
+test "extractBearer returns Some for valid Bearer header" {
+  isSome(extractBearer("Bearer sk-abc123"))
+}
+
+-- The extracted token is the substring after "Bearer "
+test "extractBearer extracts correct token value" {
+  getOrElse(extractBearer("Bearer sk-abc123"), "") == "sk-abc123"
+}
+
+-- Token with mixed characters is extracted correctly
+test "extractBearer extracts token with mixed characters" {
+  getOrElse(extractBearer("Bearer dp_a1B2c3D4e5F6"), "") == "dp_a1B2c3D4e5F6"
+}
+
+-- "Basic" auth scheme returns None
+test "extractBearer returns None for Basic auth header" {
+  isNone(extractBearer("Basic dXNlcjpwYXNz"))
+}
+
+-- Empty header string returns None
+test "extractBearer returns None for empty header" {
+  isNone(extractBearer(""))
+}
+
+-- lowercase "bearer" is not recognised (case-sensitive)
+test "extractBearer returns None for lowercase bearer prefix" {
+  isNone(extractBearer("bearer sk-abc123"))
+}
+
+-- Uppercase "BEARER" is not recognised
+test "extractBearer returns None for uppercase BEARER prefix" {
+  isNone(extractBearer("BEARER sk-abc123"))
+}
+
+-- "Bearer " with nothing after the space yields an empty token (edge case)
+test "extractBearer returns Some with empty token for bare Bearer prefix" {
+  getOrElse(extractBearer("Bearer "), "") == ""
+}
+
+-- "Bearer" alone (no trailing space) does not match "Bearer " prefix
+test "extractBearer returns None when no space after Bearer" {
+  isNone(extractBearer("Bearer"))
+}
+
+-- Header that is just whitespace returns None
+test "extractBearer returns None for whitespace-only header" {
+  isNone(extractBearer("   "))
+}
+
+-- Token containing spaces is fully captured (substring goes to end of string)
+test "extractBearer captures token that contains a space" {
+  getOrElse(extractBearer("Bearer tok en with spaces"), "") == "tok en with spaces"
+}
+
+-- Token that looks like another scheme is kept verbatim
+test "extractBearer preserves token that looks like a scheme" {
+  getOrElse(extractBearer("Bearer Basic xyz"), "") == "Basic xyz"
+}
+
+-- ============================================================
+-- hasBearer tests
+-- ============================================================
+
+-- Standard Bearer header is detected
+test "hasBearer returns true for valid Bearer header" {
+  hasBearer("Bearer sk-abc123")
+}
+
+-- "Bearer " prefix alone is detected
+test "hasBearer returns true for Bearer prefix only" {
+  hasBearer("Bearer ")
+}
+
+-- Basic auth is not a bearer
+test "hasBearer returns false for Basic auth" {
+  not hasBearer("Basic dXNlcjpwYXNz")
+}
+
+-- Empty string is not a bearer
+test "hasBearer returns false for empty string" {
+  not hasBearer("")
+}
+
+-- Lowercase "bearer" is not recognised (case-sensitive)
+test "hasBearer returns false for lowercase bearer prefix" {
+  not hasBearer("bearer sk-abc123")
+}
+
+-- Uppercase "BEARER" is not recognised
+test "hasBearer returns false for uppercase BEARER prefix" {
+  not hasBearer("BEARER sk-abc123")
+}
+
+-- Bearer not at the start of the string is not detected
+test "hasBearer returns false when Bearer is not at start" {
+  not hasBearer("X-Bearer sk-abc123")
+}
+
+-- hasBearer and isSome(extractBearer) agree on a positive case
+test "hasBearer and extractBearer agree on valid header" {
+  hasBearer("Bearer mytoken") == isSome(extractBearer("Bearer mytoken"))
+}
+
+-- hasBearer and isSome(extractBearer) agree on a negative case
+test "hasBearer and extractBearer agree on invalid header" {
+  hasBearer("Basic xxx") == isSome(extractBearer("Basic xxx"))
+}

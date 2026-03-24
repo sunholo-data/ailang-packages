@@ -1,0 +1,120 @@
+-- Tests for sunholo/auth/keys
+--
+-- Covers: hashKey, validateKeyHash, isValidKeyFormat
+-- All tests are pure expressions that must evaluate to true.
+
+module sunholo/auth/keys_test
+
+import ./keys (validateKeyHash, hashKey, isValidKeyFormat)
+
+-- ============================================================
+-- hashKey tests
+-- ============================================================
+
+-- SHA-256 is deterministic: same input always produces same hash
+test "hashKey is deterministic" {
+  hashKey("dp_a1b2c3d4e5f6") == hashKey("dp_a1b2c3d4e5f6")
+}
+
+-- Known SHA-256 hex value for "hello"
+test "hashKey matches known SHA-256 of hello" {
+  hashKey("hello") == "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824"
+}
+
+-- Empty string has a known SHA-256 (the hash of nothing)
+test "hashKey handles empty string" {
+  hashKey("") == "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+}
+
+-- Different inputs produce different hashes
+test "hashKey produces different hashes for different inputs" {
+  hashKey("dp_key_one") != hashKey("dp_key_two")
+}
+
+-- hashKey output does not equal the raw input
+test "hashKey output differs from input" {
+  hashKey("hello") != "hello"
+}
+
+-- ============================================================
+-- validateKeyHash tests
+-- ============================================================
+
+-- A key validates against its own hash
+test "validateKeyHash returns true for matching key and hash" {
+  validateKeyHash("dp_a1b2c3d4e5f6", hashKey("dp_a1b2c3d4e5f6"))
+}
+
+-- A different key does not validate against a stored hash
+test "validateKeyHash returns false for mismatched key" {
+  not validateKeyHash("dp_wrong_key", hashKey("dp_a1b2c3d4e5f6"))
+}
+
+-- Empty key validates against hash of empty string
+test "validateKeyHash handles empty key with its hash" {
+  validateKeyHash("", hashKey(""))
+}
+
+-- Supplying a raw key string as the hash fails validation (not a hash)
+test "validateKeyHash returns false when expectedHash is raw key not hash" {
+  not validateKeyHash("dp_a1b2c3d4e5f6", "dp_a1b2c3d4e5f6")
+}
+
+-- A key with a known pre-computed hash validates correctly
+test "validateKeyHash works with known pre-computed hash" {
+  validateKeyHash("hello", "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824")
+}
+
+-- Providing an empty string as expectedHash does not match a non-empty key
+test "validateKeyHash returns false when expectedHash is empty" {
+  not validateKeyHash("dp_somekey", "")
+}
+
+-- ============================================================
+-- isValidKeyFormat tests
+-- ============================================================
+
+-- Valid key with correct prefix and sufficient length
+test "isValidKeyFormat returns true for valid key" {
+  isValidKeyFormat("dp_", 10, "dp_a1b2c3d4e5f6")
+}
+
+-- Exactly at the minimum length boundary
+test "isValidKeyFormat accepts key at exact minimum length" {
+  isValidKeyFormat("dp_", 3, "dp_")
+}
+
+-- Wrong prefix returns false even if length is sufficient
+test "isValidKeyFormat returns false for wrong prefix" {
+  not isValidKeyFormat("dp_", 10, "sk_a1b2c3d4e5f6")
+}
+
+-- Key shorter than minLength returns false
+test "isValidKeyFormat returns false when key is too short" {
+  not isValidKeyFormat("dp_", 35, "dp_short")
+}
+
+-- Empty key never satisfies a non-trivial prefix check
+test "isValidKeyFormat returns false for empty key" {
+  not isValidKeyFormat("dp_", 3, "")
+}
+
+-- A key one character below minLength fails
+test "isValidKeyFormat returns false for key one char below minimum" {
+  not isValidKeyFormat("dp_", 5, "dp_x")
+}
+
+-- Longer than minLength is accepted
+test "isValidKeyFormat accepts key longer than minimum" {
+  isValidKeyFormat("dp_", 5, "dp_averylongapikeywithlotsofrandomcharacters")
+}
+
+-- Prefix-only key is valid when minLength equals prefix length
+test "isValidKeyFormat accepts prefix-only when minLength matches prefix length" {
+  isValidKeyFormat("sk_", 3, "sk_")
+}
+
+-- Prefix embedded within key but not at start: startsWith check fails
+test "isValidKeyFormat returns false when prefix is not at start" {
+  not isValidKeyFormat("dp_", 5, "xdp_abc")
+}
