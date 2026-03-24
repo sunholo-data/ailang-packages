@@ -1,7 +1,9 @@
--- GCP OAuth2 token exchange via Application Default Credentials
+-- GCP authentication: get access tokens for service-to-service calls
 --
--- Reads ADC file from ~/.config/gcloud/application_default_credentials.json
--- and exchanges the refresh token for an access token via Google OAuth2.
+-- Three-tier fallback:
+--   1. GOOGLE_ACCESS_TOKEN env var (explicit override, local dev)
+--   2. ADC file (~/.config/gcloud/application_default_credentials.json)
+--   3. Metadata server (http://metadata.google.internal/...) — Cloud Run
 --
 -- Usage:
 --   import pkg/sunholo/gcp_auth/token (getAccessToken, readCredentials, ADCCredentials)
@@ -20,6 +22,7 @@ import std/option (getOrElse, isSome)
 import std/result (Ok, Err)
 import std/env (getEnvOr)
 import std/string (length, substring, trim)
+-- Note: no IO import — logging in gcp_auth would infect all downstream effect signatures
 
 -- Parsed ADC credentials
 export type ADCCredentials = {
@@ -58,12 +61,36 @@ func parseCredentialsFile(path: string) -> Result[ADCCredentials, string] ! {FS,
   }
 }
 
--- Exchange ADC refresh token for a short-lived access token
--- This is the main entry point for GCP authentication
+-- Get an access token via the best available method
+-- Priority: env var → ADC file → metadata server (Cloud Run)
 export func getAccessToken() -> Result[string, string] ! {FS, Net, Env} {
-  match readCredentials() {
-    Ok(creds) => exchangeRefreshToken(creds),
-    Err(e) => Err(e)
+  let envToken = getEnvOr("GOOGLE_ACCESS_TOKEN", "");
+  if length(envToken) > 0 then Ok(envToken)
+  else {
+    match readCredentials() {
+      Ok(creds) => exchangeRefreshToken(creds),
+      Err(_) => getMetadataToken()
+    }
+  }
+}
+
+-- Get access token from GCP metadata server (Cloud Run, GCE, GKE)
+func getMetadataToken() -> Result[string, string] ! {Net} {
+  let url = "http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token";
+  let headers = [{ name: "Metadata-Flavor", value: "Google" }];
+  match httpRequest("GET", url, headers, "") {
+    Ok(response) =>
+      if response.ok then {
+        match decode(response.body) {
+          Ok(json) => {
+            let tokenOpt = getString(json, "access_token");
+            if isSome(tokenOpt) then Ok(getOrElse(tokenOpt, ""))
+            else Err("No access_token in metadata response")
+          },
+          Err(e) => Err("Failed to parse metadata response: " ++ e)
+        }
+      } else Err("Metadata server returned status: " ++ show(response.status)),
+    Err(_) => Err("Auth failed: no env var, no ADC file, no metadata server")
   }
 }
 

@@ -8,11 +8,12 @@
 
 module sunholo/billing_stripe/stripe_event_mapper
 
-import std/json (get, asString, asObject)
+import std/json (get, getArray, asString, asObject)
 import std/result (Ok, Err)
-import std/option (getOrElse)
+import std/option (Some, None, getOrElse)
+import std/list (nth)
 
-type SubscriptionStateChange = {
+export type SubscriptionStateChange = {
   principalId: string,
   subscriptionId: string,
   status: string,
@@ -107,8 +108,16 @@ func extractFirstPriceId(obj: Json) -> string =
   match get(obj, "items") {
     None => "",
     Some(items) =>
-      match get(items, "data") {
+      match getArray(items, "data") {
         None => "",
-        Some(_) => ""
+        Some(dataList) =>
+          match nth(dataList, 0) {
+            None => "",
+            Some(item) =>
+              match get(item, "price") {
+                None => "",
+                Some(price) => jsonStr(price, "id")
+              }
+          }
       }
   }

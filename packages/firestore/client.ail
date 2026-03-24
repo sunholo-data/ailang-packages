@@ -12,10 +12,10 @@
 module sunholo/firestore/client
 
 import std/net (httpRequest)
-import std/json (encode, decode, jo, js, kv, get, asString)
+import std/json (encode, decode, jo, js, kv, get, getArray, asString)
 import std/result (Ok, Err)
-import std/option (getOrElse)
-import std/string (contains)
+import std/option (Some, None, getOrElse)
+import std/string (contains, intToStr)
 import pkg/sunholo/gcp_auth/token (getAccessToken)
 import pkg/sunholo/config/loader (requireEnv, optionalEnv)
 
@@ -141,6 +141,43 @@ export func docExists(collection: string, docId: string) -> Result[bool, string]
     Err(e) =>
       if contains(e, "not found") then Ok(false)
       else Err(e)
+  }
+
+-- List documents in a collection
+--
+-- Returns a list of {name, fields} objects. Each "name" is the full document
+-- path and "fields" is the document's field data.
+-- Returns empty list if collection is empty.
+--
+-- Example:
+--   match listDocs("api_keys", 100) {
+--     Ok(docs) => -- docs is a Json array of document objects
+--     Err(e) => -- error
+--   }
+export func listDocs(collection: string, pageSize: int) -> Result[Json, string] ! {Net, FS, Env} =
+  match baseUrl() {
+    Err(e) => Err(e),
+    Ok(base) =>
+      match authHeaders() {
+        Err(e) => Err(e),
+        Ok(auth) =>
+          let url = base ++ "/" ++ collection ++ "?pageSize=" ++ intToStr(pageSize)
+          in match httpRequest("GET", url, auth.headers, "") {
+            Err(e) => Err("Firestore LIST error: " ++ show(e)),
+            Ok(resp) =>
+              if resp.ok then
+                match decode(resp.body) {
+                  Ok(json) =>
+                    match get(json, "documents") {
+                      Some(docs) => Ok(docs),
+                      None => Ok(jo([]))
+                    },
+                  Err(e) => Err("JSON decode error: " ++ e)
+                }
+              else
+                Err("Firestore LIST " ++ show(resp.status) ++ ": " ++ resp.body)
+          }
+      }
   }
 
 -- ══════════════════════════════════════════════════════════════
