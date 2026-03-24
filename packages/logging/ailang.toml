@@ -1,20 +1,20 @@
 [package]
 name = "sunholo/logging"
-version = "0.1.2"
+version = "0.2.0"
 edition = "1"
 ailang = ">=0.9.5"
-description = "Structured JSON logging to stderr"
+description = "Structured JSON logging via Debug effect (ghost effect, zero-cost in release)"
 license = "Apache-2.0"
 
 [exports]
 modules = ["sunholo/logging/logger"]
 
 [effects]
-max = ["IO"]
+max = ["Debug"]
 
 [metadata]
-tags = ["logging", "observability", "json"]
-ai_summary = "Structured JSON logging (info/warn/error/debug) to stderr for Cloud Run and container environments"
+tags = ["logging", "observability", "json", "debug"]
+ai_summary = "Structured JSON logging (info/warn/err/trace) via Debug ghost effect. No IO cascade. Zero-cost in release mode. Host-collected for Cloud Run and log aggregators."
 repository = "https://github.com/sunholo-data/ailang-packages/tree/main/packages/logging"
 homepage = "https://ailang.sunholo.com/docs/packages/sunholo/logging"
 license_url = "https://github.com/sunholo-data/ailang-packages/blob/main/LICENSE"
