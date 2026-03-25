@@ -11,6 +11,8 @@ module sunholo/billing_service_api/proposal_handler
 import std/json (decode, get, asString, encode, jo, js, kv)
 import std/result (Ok, Err)
 import std/option (getOrElse)
+import std/string (split, find, substring, length as strLength)
+import pkg/sunholo/config/loader (optionalEnv)
 import pkg/sunholo/billing_proposals/proposal (
   createProposal, canCreateApprovalLink, markAwaitingPayment,
   statusLabel, Agent, Human
@@ -86,8 +88,8 @@ export func handleApprovalLink(
         match getCustomer(principalId) {
           Err(_) => Err("No billing account found"),
           Ok(customer) =>
-            -- Look up price ID from plan catalog (simplified: use targetPlan as priceId prefix)
-            let priceId = "price_docparse_" ++ proposal.targetPlan
+            -- Look up Stripe price ID from STRIPE_PRICE_MAP (reverse: planKey → priceId)
+            let priceId = proposalReverseLookupPriceId(proposal.targetPlan)
             in match createCheckoutSession(customer.stripeCustomerId, priceId, successUrl, cancelUrl, principalId) {
               Err(e) => Err("Checkout creation failed: " ++ e),
               Ok(session) =>
@@ -127,4 +129,24 @@ export func handleGetProposal(
           kv("approvalUrl", js(proposal.approvalUrl)),
           kv("createdAt", js(proposal.createdAt))
         ])))
+  }
+
+-- Reverse-lookup: given a planKey (e.g. "pro_monthly"), find the Stripe priceId
+-- from STRIPE_PRICE_MAP (format: "price_xxx=pro_monthly,price_yyy=business_monthly")
+func proposalReverseLookupPriceId(planKey: string) -> string ! {Env} =
+  let mapStr = optionalEnv("STRIPE_PRICE_MAP", "")
+  in if mapStr == "" then planKey
+  else proposalReverseFindInMap(split(mapStr, ","), planKey)
+
+func proposalReverseFindInMap(entries: [string], planKey: string) -> string =
+  match entries {
+    [] => planKey,
+    entry :: rest =>
+      let idx = find(entry, "=")
+      in if idx < 0 then proposalReverseFindInMap(rest, planKey)
+      else
+        let priceId = substring(entry, 0, idx)
+        in let key = substring(entry, idx + 1, strLength(entry))
+        in if key == planKey then priceId
+        else proposalReverseFindInMap(rest, planKey)
   }

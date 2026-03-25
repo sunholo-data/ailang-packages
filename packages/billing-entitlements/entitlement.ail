@@ -2,16 +2,17 @@
 --
 -- Entitlements are the app-facing view of what a user is allowed to do.
 -- They are derived from subscription state + plan catalog, not from Stripe directly.
+-- Plan values come from config (BILLING_PLAN_CATALOG env var), not hardcoded.
 --
 -- Usage:
---   import sunholo/billing_entitlements/entitlement (Entitlements, resolveEntitlements)
+--   import pkg/sunholo/billing_entitlements/entitlement (Entitlements, resolveEntitlements, freeEntitlements)
 
 module sunholo/billing_entitlements/entitlement
 
 import std/result (Ok, Err)
-import ./plan (Plan, lookupPlan, freePlan)
+import ./plan (Plan, lookupPlan, fallbackPlan, freePlanFromCatalog)
 
--- What DocParse allows for a given principal
+-- What the app allows for a given principal
 export type Entitlements = {
   principalId: string,
   plan: string,
@@ -36,7 +37,7 @@ export type SubscriptionState = {
 --
 -- If subscription is active or trialing, grant full plan capabilities.
 -- If past_due, grant capabilities with grace period flag.
--- If canceled/unpaid/no subscription, fall back to free plan.
+-- If canceled/unpaid/no subscription, fall back to free plan from catalog.
 export pure func resolveEntitlements(
   sub: SubscriptionState,
   catalog: [{key: string, plan: Plan}],
@@ -46,13 +47,11 @@ export pure func resolveEntitlements(
   ensures {
     result.principalId == principalId
     && result.canParse == true
-    && result.monthlyPageLimit > 0
-    && result.maxFileSizeMb > 0
   }
 =
   let plan = match lookupPlan(catalog, sub.planKey) {
     Ok(p) => p,
-    Err(_) => freePlan()
+    Err(_) => freePlanFromCatalog(catalog)
   }
   in if sub.status == "active" then
     planToEntitlements(principalId, plan, "active", false)
@@ -61,19 +60,17 @@ export pure func resolveEntitlements(
   else if sub.status == "past_due" then
     planToEntitlements(principalId, plan, "grace", true)
   else
-    planToEntitlements(principalId, freePlan(), "free", false)
+    planToEntitlements(principalId, freePlanFromCatalog(catalog), "free", false)
 
--- Build entitlements for a principal with no subscription (free tier)
-export pure func freeEntitlements(principalId: string) -> Entitlements
+-- Build entitlements for a principal with no subscription (free tier from config)
+export pure func freeEntitlements(principalId: string, catalog: [{key: string, plan: Plan}]) -> Entitlements
   requires { length(principalId) > 0 }
   ensures {
-    result.plan == "free"
-    && result.principalId == principalId
-    && result.apiAccess == true
+    result.principalId == principalId
     && result.canParse == true
   }
 =
-  planToEntitlements(principalId, freePlan(), "free", false)
+  planToEntitlements(principalId, freePlanFromCatalog(catalog), "free", false)
 
 func planToEntitlements(principalId: string, plan: Plan, status: string, grace: bool) -> Entitlements
   requires { length(principalId) > 0 && length(status) > 0 }
@@ -97,4 +94,3 @@ func planToEntitlements(principalId: string, plan: Plan, status: string, grace: 
     maxConcurrentJobs: plan.maxConcurrentJobs,
     gracePeriod: grace
   }
-

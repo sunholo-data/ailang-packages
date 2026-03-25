@@ -20,6 +20,8 @@ import pkg/sunholo/billing_store/usage_repo (getUsage)
 import pkg/sunholo/billing_entitlements/entitlement (freeEntitlements)
 import pkg/sunholo/billing_entitlements/capability_check (canParse, AllowDecision, Allow, Deny)
 import pkg/sunholo/billing_entitlements/usage_policy (emptyUsage)
+import pkg/sunholo/billing_entitlements/plan (Plan, parseCatalog)
+import pkg/sunholo/config/loader (optionalEnv)
 
 -- Authorize a parse request against the principal's entitlements
 --
@@ -31,10 +33,11 @@ export func authorizeParse(
   isApiRequest: bool,
   currentPeriod: string
 ) -> Result[AllowDecision, string] ! {Net, FS, Env} =
-  -- Load entitlements (fall back to free tier)
-  let ent = match getEntitlements(principalId) {
+  -- Load entitlements (fall back to free tier from config)
+  let catalog = parseCatalog(optionalEnv("BILLING_PLAN_CATALOG", "[]"))
+  in let ent = match getEntitlements(principalId) {
     Ok(e) => e,
-    Err(_) => freeEntitlements(principalId)
+    Err(_) => freeEntitlements(principalId, catalog)
   }
   in -- Load current usage (fall back to zero)
   let usage = match getUsage(principalId, currentPeriod) {

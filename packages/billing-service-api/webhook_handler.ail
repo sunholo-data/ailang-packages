@@ -16,13 +16,36 @@ module sunholo/billing_service_api/webhook_handler
 import std/json (encode, jo, js, kv, getString)
 import std/result (Ok, Err)
 import std/option (getOrElse)
+import std/string (split, find, substring, length as strLength)
+import pkg/sunholo/config/loader (optionalEnv)
 import pkg/sunholo/billing_stripe/stripe_webhook (verifyWebhook)
 import pkg/sunholo/billing_stripe/stripe_event_mapper (mapEventToStateChange)
 import pkg/sunholo/billing_store/events_repo (isEventProcessed, recordEvent)
 import pkg/sunholo/billing_store/subscriptions_repo (putSubscription)
 import pkg/sunholo/billing_store/entitlements_repo (putEntitlements)
-import pkg/sunholo/billing_entitlements/plan (defaultCatalog)
+import pkg/sunholo/billing_entitlements/plan (Plan, parseCatalog)
 import pkg/sunholo/billing_entitlements/entitlement (resolveEntitlements)
+
+-- Resolve a Stripe price ID to a plan catalog key using STRIPE_PRICE_MAP env var.
+-- Format: "price_xxx=pro_monthly,price_yyy=business_monthly"
+-- Falls back to the raw priceId if no mapping found.
+func webhookResolvePlanKey(priceId: string) -> string ! {Env} =
+  let mapStr = optionalEnv("STRIPE_PRICE_MAP", "")
+  in if mapStr == "" then priceId
+  else webhookFindInMap(split(mapStr, ","), priceId)
+
+func webhookFindInMap(entries: [string], priceId: string) -> string =
+  match entries {
+    [] => priceId,
+    entry :: rest =>
+      let idx = find(entry, "=")
+      in if idx < 0 then webhookFindInMap(rest, priceId)
+      else
+        let key = substring(entry, 0, idx)
+        in let value = substring(entry, idx + 1, strLength(entry))
+        in if key == priceId then value
+        else webhookFindInMap(rest, priceId)
+  }
 
 -- Handle incoming Stripe webhook
 -- @raw gives us the full HTTP request as an inline record.
@@ -73,12 +96,15 @@ export func handleStripeWebhook(
                 Err(e) => Err("Failed to update subscription: " ++ e),
                 Ok(_) =>
                   -- 5. Resolve and write entitlements
-                  let subState = {
+                  -- Translate Stripe priceId to catalog key via STRIPE_PRICE_MAP
+                  let planKey = webhookResolvePlanKey(change.priceId)
+                  in let catalog = parseCatalog(optionalEnv("BILLING_PLAN_CATALOG", "[]"))
+                  in let subState = {
                     status: change.status,
-                    planKey: change.priceId,
+                    planKey: planKey,
                     cancelAtPeriodEnd: change.cancelAtPeriodEnd
                   }
-                  in let ent = resolveEntitlements(subState, defaultCatalog(), change.principalId)
+                  in let ent = resolveEntitlements(subState, catalog, change.principalId)
                   in match putEntitlements(ent) {
                     Err(e) => Err("Failed to update entitlements: " ++ e),
                     Ok(_) =>

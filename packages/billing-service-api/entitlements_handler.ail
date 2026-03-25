@@ -12,6 +12,8 @@ import std/result (Ok, Err)
 import pkg/sunholo/billing_store/entitlements_repo (getEntitlements)
 import pkg/sunholo/billing_store/usage_repo (getUsage)
 import pkg/sunholo/billing_entitlements/entitlement (freeEntitlements)
+import pkg/sunholo/billing_entitlements/plan (Plan, parseCatalog)
+import pkg/sunholo/config/loader (optionalEnv)
 import pkg/sunholo/billing_entitlements/quota_policy (remainingPages, remainingDocuments, pageUsagePercent)
 
 -- Get current entitlements for the authenticated user
@@ -22,10 +24,11 @@ export func handleGetEntitlements(
 ) -> Result[string, string] ! {Net, FS, Env}
   requires { length(principalId) > 0 && length(currentPeriod) > 0 }
 =
-  -- Load entitlements (fall back to free tier if not found)
-  let ent = match getEntitlements(principalId) {
+  -- Load entitlements (fall back to free tier from config if not found)
+  let catalog = parseCatalog(optionalEnv("BILLING_PLAN_CATALOG", "[]"))
+  in let ent = match getEntitlements(principalId) {
     Ok(e) => e,
-    Err(_) => freeEntitlements(principalId)
+    Err(_) => freeEntitlements(principalId, catalog)
   }
   in -- Load current usage
   let usage = match getUsage(principalId, currentPeriod) {

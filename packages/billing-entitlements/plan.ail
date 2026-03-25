@@ -1,14 +1,18 @@
--- Plan catalog: types and lookup for billing plans
+-- Plan catalog: types, lookup, and config-driven loading
 --
 -- A Plan defines the capabilities and limits for a billing tier.
--- The PlanCatalog is a list of (planKey, Plan) pairs loaded from config.
+-- Plan values are NOT hardcoded — they come from the BILLING_PLAN_CATALOG
+-- env var (JSON array) set by each product (e.g. DocParse, etc.).
 --
 -- Usage:
---   import pkg/sunholo/billing_entitlements/plan (Plan, lookupPlan, freePlan)
+--   import pkg/sunholo/billing_entitlements/plan (Plan, lookupPlan, parseCatalog, fallbackPlan)
 
 module sunholo/billing_entitlements/plan
 
 import std/result (Ok, Err)
+import std/json (decode, get, getString, getInt, asBool, asArray)
+import std/option (Some, None, getOrElse)
+import std/list (map)
 
 -- A billing plan with capability limits
 export type Plan = {
@@ -20,22 +24,21 @@ export type Plan = {
   maxConcurrentJobs: int
 }
 
--- The free tier defaults — always available, never requires Stripe
--- API access enabled (rate-limited) to support AI agent evaluation
-export pure func freePlan() -> Plan
+-- Minimal fallback plan when no config is loaded.
+-- Zero limits, no access — forces products to provide real config.
+export pure func fallbackPlan() -> Plan
   ensures {
-    result.name == "free"
-    && result.apiAccess == true
-    && result.monthlyPageLimit > 0
+    result.name == "fallback"
+    && result.apiAccess == false
     && result.maxConcurrentJobs >= 1
   }
 =
   {
-    name: "free",
-    monthlyPageLimit: 500,
-    monthlyDocumentLimit: 50,
-    maxFileSizeMb: 10,
-    apiAccess: true,
+    name: "fallback",
+    monthlyPageLimit: 1,
+    monthlyDocumentLimit: 1,
+    maxFileSizeMb: 1,
+    apiAccess: false,
     maxConcurrentJobs: 1
   }
 
@@ -44,12 +47,21 @@ export pure func lookupPlan(catalog: [{key: string, plan: Plan}], planKey: strin
   requires { length(planKey) > 0 }
   ensures {
     match result {
-      Ok(p) => length(p.name) > 0 && p.monthlyPageLimit > 0,
+      Ok(p) => length(p.name) > 0,
       Err(e) => length(e) > 0
     }
   }
 =
   findPlan(catalog, planKey)
+
+-- Look up the "free" plan from a catalog, falling back to fallbackPlan
+export pure func freePlanFromCatalog(catalog: [{key: string, plan: Plan}]) -> Plan
+  ensures { length(result.name) > 0 }
+=
+  match lookupPlan(catalog, "free") {
+    Ok(p) => p,
+    Err(_) => fallbackPlan()
+  }
 
 func findPlan(entries: [{key: string, plan: Plan}], planKey: string) -> Result[Plan, string]
   requires { length(planKey) > 0 }
@@ -67,29 +79,37 @@ func findPlan(entries: [{key: string, plan: Plan}], planKey: string) -> Result[P
       else findPlan(rest, planKey)
   }
 
--- Build a default plan catalog with standard tiers
-export pure func defaultCatalog() -> [{key: string, plan: Plan}]
-  ensures { length(result) == 3 }
-=
-  [
-    { key: "free", plan: freePlan() },
-    { key: "pro_monthly", plan: {
-        name: "pro",
-        monthlyPageLimit: 10000,
-        monthlyDocumentLimit: 1000,
-        maxFileSizeMb: 50,
-        apiAccess: true,
-        maxConcurrentJobs: 5
-      }
-    },
-    { key: "business_monthly", plan: {
-        name: "business",
-        monthlyPageLimit: 50000,
-        monthlyDocumentLimit: 5000,
-        maxFileSizeMb: 200,
-        apiAccess: true,
-        maxConcurrentJobs: 20
-      }
+-- Parse a JSON string into a plan catalog.
+-- Expected format: [{"key":"free","name":"free","monthlyPageLimit":500,...}, ...]
+-- Returns empty list on parse failure (fail-safe: no plans = fallback behavior).
+export pure func parseCatalog(json: string) -> [{key: string, plan: Plan}] =
+  match decode(json) {
+    Err(_) => [],
+    Ok(val) => match asArray(val) {
+      None => [],
+      Some(entries) => map(planCatalogParseEntry, entries)
     }
-  ]
+  }
 
+pure func planCatalogParseEntry(entry: Json) -> {key: string, plan: Plan} =
+  let key = getOrElse(getString(entry, "key"), "unknown")
+  in let name = getOrElse(getString(entry, "name"), key)
+  in let pageLimit = getOrElse(getInt(entry, "monthlyPageLimit"), 0)
+  in let docLimit = getOrElse(getInt(entry, "monthlyDocumentLimit"), 0)
+  in let fileSize = getOrElse(getInt(entry, "maxFileSizeMb"), 0)
+  in let concurrent = getOrElse(getInt(entry, "maxConcurrentJobs"), 1)
+  in let apiFlag = match get(entry, "apiAccess") {
+    Some(v) => getOrElse(asBool(v), false),
+    None => false
+  }
+  in {
+    key: key,
+    plan: {
+      name: name,
+      monthlyPageLimit: pageLimit,
+      monthlyDocumentLimit: docLimit,
+      maxFileSizeMb: fileSize,
+      apiAccess: apiFlag,
+      maxConcurrentJobs: concurrent
+    }
+  }
