@@ -1,0 +1,188 @@
+-- Tests for capability checks and quota policy
+--
+-- Covers: canParse, canUseApi, isOverPageLimit, isOverDocumentLimit,
+--         remainingPages, remainingDocuments, pageUsagePercent, isNearLimit,
+--         applyDelta, emptyUsage, parseDelta
+
+module sunholo/billing_entitlements/capability_check_test
+
+import ./entitlement (Entitlements, resolveEntitlements, freeEntitlements)
+import ./capability_check (canParse, canUseApi, AllowDecision, ParseRequest)
+import ./quota_policy (isOverPageLimit, isOverDocumentLimit, remainingPages, remainingDocuments, pageUsagePercent, isNearLimit)
+import ./usage_policy (applyDelta, emptyUsage, parseDelta)
+import ./plan (defaultCatalog)
+
+-- ============================================================
+-- canParse tests
+-- ============================================================
+
+test "canParse allows free tier web request under limits" {
+  let ent = freeEntitlements("u1")
+  in let req = { fileSizeMb: 5, isApiRequest: false }
+  in match canParse(ent, req, 0, 0) {
+    Allow => true,
+    Deny(_) => false
+  }
+}
+
+test "canParse denies API request on free tier" {
+  let ent = freeEntitlements("u2")
+  in let req = { fileSizeMb: 5, isApiRequest: true }
+  in match canParse(ent, req, 0, 0) {
+    Allow => false,
+    Deny(msg) => length(msg) > 0
+  }
+}
+
+test "canParse allows API request on pro tier" {
+  let sub = { status: "active", planKey: "pro_monthly", cancelAtPeriodEnd: false }
+  in let ent = resolveEntitlements(sub, defaultCatalog(), "u3")
+  in let req = { fileSizeMb: 25, isApiRequest: true }
+  in match canParse(ent, req, 100, 10) {
+    Allow => true,
+    Deny(_) => false
+  }
+}
+
+test "canParse denies file exceeding size limit" {
+  let ent = freeEntitlements("u4")
+  in let req = { fileSizeMb: 15, isApiRequest: false }
+  in match canParse(ent, req, 0, 0) {
+    Allow => false,
+    Deny(msg) => length(msg) > 0
+  }
+}
+
+test "canParse denies when page limit reached" {
+  let ent = freeEntitlements("u5")
+  in let req = { fileSizeMb: 5, isApiRequest: false }
+  in match canParse(ent, req, 100, 0) {
+    Allow => false,
+    Deny(_) => true
+  }
+}
+
+test "canParse denies when document limit reached" {
+  let ent = freeEntitlements("u6")
+  in let req = { fileSizeMb: 5, isApiRequest: false }
+  in match canParse(ent, req, 0, 20) {
+    Allow => false,
+    Deny(_) => true
+  }
+}
+
+test "canParse allows pro tier with large file under limit" {
+  let sub = { status: "active", planKey: "pro_monthly", cancelAtPeriodEnd: false }
+  in let ent = resolveEntitlements(sub, defaultCatalog(), "u7")
+  in let req = { fileSizeMb: 50, isApiRequest: false }
+  in match canParse(ent, req, 4999, 499) {
+    Allow => true,
+    Deny(_) => false
+  }
+}
+
+test "canParse denies pro tier at exact page limit" {
+  let sub = { status: "active", planKey: "pro_monthly", cancelAtPeriodEnd: false }
+  in let ent = resolveEntitlements(sub, defaultCatalog(), "u8")
+  in let req = { fileSizeMb: 1, isApiRequest: false }
+  in match canParse(ent, req, 5000, 0) {
+    Allow => false,
+    Deny(_) => true
+  }
+}
+
+-- ============================================================
+-- canUseApi tests
+-- ============================================================
+
+test "canUseApi returns false for free tier" {
+  canUseApi(freeEntitlements("u9")) == false
+}
+
+test "canUseApi returns true for pro tier" {
+  let sub = { status: "active", planKey: "pro_monthly", cancelAtPeriodEnd: false }
+  in let ent = resolveEntitlements(sub, defaultCatalog(), "u10")
+  in canUseApi(ent) == true
+}
+
+-- ============================================================
+-- Quota policy tests
+-- ============================================================
+
+test "isOverPageLimit false when under limit" {
+  isOverPageLimit(freeEntitlements("u11"), 50) == false
+}
+
+test "isOverPageLimit true at exact limit" {
+  isOverPageLimit(freeEntitlements("u12"), 100) == true
+}
+
+test "isOverDocumentLimit false when under" {
+  isOverDocumentLimit(freeEntitlements("u13"), 19) == false
+}
+
+test "isOverDocumentLimit true at limit" {
+  isOverDocumentLimit(freeEntitlements("u14"), 20) == true
+}
+
+test "remainingPages returns correct value" {
+  remainingPages(freeEntitlements("u15"), 30) == 70
+}
+
+test "remainingPages returns 0 when over limit" {
+  remainingPages(freeEntitlements("u16"), 150) == 0
+}
+
+test "remainingDocuments returns correct value" {
+  remainingDocuments(freeEntitlements("u17"), 5) == 15
+}
+
+test "pageUsagePercent at 50% usage" {
+  pageUsagePercent(freeEntitlements("u18"), 50) == 50
+}
+
+test "pageUsagePercent caps at 100" {
+  pageUsagePercent(freeEntitlements("u19"), 200) == 100
+}
+
+test "pageUsagePercent is 0 with no usage" {
+  pageUsagePercent(freeEntitlements("u20"), 0) == 0
+}
+
+test "isNearLimit false at 79%" {
+  isNearLimit(freeEntitlements("u21"), 79) == false
+}
+
+test "isNearLimit true at 80%" {
+  isNearLimit(freeEntitlements("u22"), 80) == true
+}
+
+-- ============================================================
+-- Usage policy tests
+-- ============================================================
+
+test "emptyUsage is all zeros" {
+  let u = emptyUsage()
+  in u.documentsParsed == 0 && u.pagesParsed == 0
+    && u.bytesProcessed == 0 && u.ocrPagesParsed == 0
+}
+
+test "parseDelta creates single-doc delta" {
+  let d = parseDelta(5, 1024, 2)
+  in d.documents == 1 && d.pages == 5 && d.bytes == 1024 && d.ocrPages == 2
+}
+
+test "applyDelta adds to current usage" {
+  let current = { documentsParsed: 10, pagesParsed: 50, bytesProcessed: 5000, ocrPagesParsed: 3 }
+  in let delta = parseDelta(5, 1024, 2)
+  in let updated = applyDelta(current, delta)
+  in updated.documentsParsed == 11 && updated.pagesParsed == 55
+    && updated.bytesProcessed == 6024 && updated.ocrPagesParsed == 5
+}
+
+test "applyDelta from empty usage" {
+  let delta = parseDelta(10, 2048, 0)
+  in let updated = applyDelta(emptyUsage(), delta)
+  in updated.documentsParsed == 1 && updated.pagesParsed == 10
+    && updated.bytesProcessed == 2048 && updated.ocrPagesParsed == 0
+}
