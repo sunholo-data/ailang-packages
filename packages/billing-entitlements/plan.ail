@@ -21,20 +21,21 @@ export type Plan = {
 }
 
 -- The free tier defaults — always available, never requires Stripe
+-- API access enabled (rate-limited) to support AI agent evaluation
 export pure func freePlan() -> Plan
   ensures {
     result.name == "free"
-    && result.apiAccess == false
+    && result.apiAccess == true
     && result.monthlyPageLimit > 0
     && result.maxConcurrentJobs >= 1
   }
 =
   {
     name: "free",
-    monthlyPageLimit: 100,
-    monthlyDocumentLimit: 20,
+    monthlyPageLimit: 500,
+    monthlyDocumentLimit: 50,
     maxFileSizeMb: 10,
-    apiAccess: false,
+    apiAccess: true,
     maxConcurrentJobs: 1
   }
 
@@ -74,20 +75,20 @@ export pure func defaultCatalog() -> [{key: string, plan: Plan}]
     { key: "free", plan: freePlan() },
     { key: "pro_monthly", plan: {
         name: "pro",
-        monthlyPageLimit: 5000,
-        monthlyDocumentLimit: 500,
+        monthlyPageLimit: 10000,
+        monthlyDocumentLimit: 1000,
         maxFileSizeMb: 50,
         apiAccess: true,
-        maxConcurrentJobs: 3
+        maxConcurrentJobs: 5
       }
     },
     { key: "business_monthly", plan: {
         name: "business",
-        monthlyPageLimit: 20000,
-        monthlyDocumentLimit: 2000,
-        maxFileSizeMb: 100,
+        monthlyPageLimit: 50000,
+        monthlyDocumentLimit: 5000,
+        maxFileSizeMb: 200,
         apiAccess: true,
-        maxConcurrentJobs: 10
+        maxConcurrentJobs: 20
       }
     }
   ]
