@@ -8,7 +8,7 @@ module sunholo/billing_store/entitlements_repo
 import std/json (jo, kv, get)
 import std/result (Ok, Err)
 import pkg/sunholo/firestore/client (getDoc, setDoc)
-import pkg/sunholo/firestore/fields (stringVal, intVal, boolVal, asStr, asInt)
+import pkg/sunholo/firestore/fields (stringVal, intVal, boolVal, asStr, asInt, asBoolField)
 import pkg/sunholo/billing_entitlements/entitlement (Entitlements)
 
 -- Get entitlements by principal ID
@@ -22,13 +22,13 @@ export func getEntitlements(principalId: string) -> Result[Entitlements, string]
         principalId: asStr(fields, "principalId"),
         plan: asStr(fields, "plan"),
         status: asStr(fields, "status"),
-        canParse: asStr(fields, "canParse") == "true",
-        apiAccess: asStr(fields, "apiAccess") == "true",
+        canParse: asBoolField(fields, "canParse"),
+        apiAccess: asBoolField(fields, "apiAccess"),
         maxFileSizeMb: asInt(fields, "maxFileSizeMb"),
         monthlyDocumentLimit: asInt(fields, "monthlyDocumentLimit"),
         monthlyPageLimit: asInt(fields, "monthlyPageLimit"),
         maxConcurrentJobs: asInt(fields, "maxConcurrentJobs"),
-        gracePeriod: asStr(fields, "gracePeriod") == "true"
+        gracePeriod: asBoolField(fields, "gracePeriod")
       })
   }
 

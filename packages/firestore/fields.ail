@@ -18,7 +18,7 @@
 
 module sunholo/firestore/fields
 
-import std/json (jo, ja, js, jnum, jn, kv, get, asString, asNumber, asBool, asArray, asObject, has)
+import std/json (jo, ja, js, jb, jnum, jn, kv, get, getString, asString, asNumber, asBool, asArray, asObject, has)
 import std/string (stringToInt, stringToFloat)
 import std/option (getOrElse, isSome)
 import std/result (Ok, Err)
@@ -37,7 +37,7 @@ export pure func intVal(value: int) -> Json =
 
 -- Wrap a bool as a Firestore booleanValue
 export pure func boolVal(value: bool) -> Json =
-  jo([kv("booleanValue", if value then js("true") else js("false"))])
+  jo([kv("booleanValue", jb(value))])
 
 -- Wrap a float as a Firestore doubleValue
 export pure func floatVal(value: float) -> Json =
@@ -68,11 +68,7 @@ export pure func nullVal() -> Json =
 export pure func asStr(fields: Json, fieldName: string) -> string =
   match get(fields, fieldName) {
     None => "",
-    Some(field) =>
-      match get(field, "stringValue") {
-        None => "",
-        Some(sv) => getOrElse(asString(sv), "")
-      }
+    Some(field) => getOrElse(getString(field, "stringValue"), "")
   }
 
 -- Extract an int from a fields object by field name
@@ -81,18 +77,15 @@ export pure func asInt(fields: Json, fieldName: string) -> int =
   match get(fields, fieldName) {
     None => 0,
     Some(field) =>
-      match get(field, "integerValue") {
+      match getString(field, "integerValue") {
         None => 0,
-        Some(iv) =>
-          match asString(iv) {
-            None => 0,
-            Some(s) => getOrElse(stringToInt(s), 0)
-          }
+        Some(s) => getOrElse(stringToInt(s), 0)
       }
   }
 
 -- Extract a bool from a fields object by field name
 -- Returns false if field is missing
+-- Handles both JSON boolean and string-wrapped ("true"/"false") booleanValue
 export pure func asBoolField(fields: Json, fieldName: string) -> bool =
   match get(fields, fieldName) {
     None => false,
@@ -100,9 +93,12 @@ export pure func asBoolField(fields: Json, fieldName: string) -> bool =
       match get(field, "booleanValue") {
         None => false,
         Some(bv) =>
-          match asString(bv) {
-            Some("true") => true,
-            _ => false
+          match asBool(bv) {
+            Some(b) => b,
+            None => match asString(bv) {
+              Some("true") => true,
+              _ => false
+            }
           }
       }
   }
@@ -123,11 +119,7 @@ export pure func asFloat(fields: Json, fieldName: string) -> float =
 export pure func asTimestamp(fields: Json, fieldName: string) -> string =
   match get(fields, fieldName) {
     None => "",
-    Some(field) =>
-      match get(field, "timestampValue") {
-        None => "",
-        Some(tv) => getOrElse(asString(tv), "")
-      }
+    Some(field) => getOrElse(getString(field, "timestampValue"), "")
   }
 
 -- Extract nested fields from a mapValue

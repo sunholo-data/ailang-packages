@@ -39,7 +39,8 @@ export func createCheckoutSession(
         "&line_items[0][quantity]=1" ++
         "&success_url=" ++ successUrl ++
         "&cancel_url=" ++ cancelUrl ++
-        "&metadata[principalId]=" ++ principalId
+        "&metadata[principalId]=" ++ principalId ++
+        "&subscription_data[metadata][principalId]=" ++ principalId
       in let headers = [
         { name: "Authorization", value: "Bearer " ++ secretKey },
         { name: "Content-Type", value: "application/x-www-form-urlencoded" }
