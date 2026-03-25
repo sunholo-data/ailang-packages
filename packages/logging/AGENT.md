@@ -1,9 +1,9 @@
 # sunholo/logging
 
 ## When to use this package
-Use for structured logging in any AILANG package or application. Built on the **Debug effect** (ghost effect) — no IO cascade, zero-cost in release mode. Replaces `println("[Error] ...")` patterns and avoids forcing `! {IO}` on every caller.
+Use for structured logging in any AILANG package or application. Built on the **Debug effect** (ghost effect) — completely invisible to callers, zero-cost in release mode. Replaces `println("[Error] ...")` patterns without forcing any effect on callers.
 
-**Why Debug instead of IO?** The `IO` effect cascades: if your library uses `println`, every function that calls it must also declare `! {IO}`, all the way up to `main`. The `Debug` effect is a ghost effect — it doesn't cascade, the host collects logs after execution, and `--release` erases all Debug calls to zero cost.
+**Why Debug instead of IO?** The `IO` effect cascades: if your library uses `println`, every function that calls it must also declare `! {IO}`, all the way up to `main`. The `Debug` effect is a **true ghost effect** — callers don't need to declare it at all, the host collects logs after execution, and `--release` erases all Debug calls to zero cost.
 
 ## Quick start
 ```ailang
@@ -11,8 +11,9 @@ module myapp/server
 
 import pkg/sunholo/logging/logger (info, warn, err, trace)
 
--- No IO cascade! Only Debug effect required
-export func handleRequest(path: string) -> Response ! {Net, Debug} {
+-- Debug is ghost: no effect declaration needed for logging!
+-- Only declare effects you actually need (Net for HTTP)
+export func handleRequest(path: string) -> Response ! {Net} {
   info("Handling request: " ++ path);
   let result = httpGet("https://api.example.com" ++ path);
   info("Request complete");
@@ -33,25 +34,27 @@ Output (collected by host, routed to stderr/Cloud Logging):
 
 ## Exported functions
 
-| Function | Signature | Effect | Description |
-|----------|-----------|--------|-------------|
-| `info` | `string -> () ! {Debug}` | Debug | Log at INFO level |
-| `warn` | `string -> () ! {Debug}` | Debug | Log at WARNING level |
-| `err` | `(string, string) -> () ! {Debug}` | Debug | Log at ERROR with detail |
-| `trace` | `string -> () ! {Debug}` | Debug | Log at DEBUG/TRACE level |
-| `withContext` | `(string, string, Json) -> () ! {Debug}` | Debug | Log with structured JSON context |
-| `verify` | `(bool, string) -> () ! {Debug}` | Debug | Record assertion (continues on failure) |
+| Function | Signature | Description |
+|----------|-----------|-------------|
+| `info` | `string -> ()` | Log at INFO level |
+| `warn` | `string -> ()` | Log at WARNING level |
+| `err` | `(string, string) -> ()` | Log at ERROR with detail |
+| `trace` | `string -> ()` | Log at DEBUG/TRACE level |
+| `withContext` | `(string, string, Json) -> ()` | Log with structured JSON context |
+| `verify` | `(bool, string) -> ()` | Record assertion (continues on failure) |
+
+Note: These functions use the Debug effect internally, but **callers never need to declare it** — Debug is a ghost effect.
 
 ## Common patterns
 
-### Logging in library packages (no IO cascade)
+### Logging in library packages (zero signature impact)
 ```ailang
 module mylib/parser
 
 import pkg/sunholo/logging/logger (trace, err)
 
--- Callers only need to declare their OWN effects, not IO
-export func parse(input: string) -> Result ! {Debug} {
+-- Pure function signature — logging is invisible to callers
+export func parse(input: string) -> Result {
   trace("Parsing input of length " ++ show(length(input)));
   match tokenize(input) {
     Ok(tokens) -> Ok(buildAst(tokens)),
@@ -101,15 +104,16 @@ func process(x: int) -> int ! {IO} =
   let _ = println("[INFO] processing " ++ show(x));
   x * 2
 
--- AFTER (Debug ghost effect — no cascade)
+-- AFTER (Debug ghost effect — no cascade, no effect declaration)
 import pkg/sunholo/logging/logger (info)
-func process(x: int) -> int ! {Debug} =
+func process(x: int) -> int =
   let _ = info("processing " ++ show(x));
   x * 2
 ```
 
 ## Effect: Debug (ghost effect)
 - **Max effect**: `Debug` (declared in `ailang.toml`)
-- **Capability needed**: `--caps Debug`
-- **Ghost property**: Does not cascade to callers; erased in `--release`
+- **Capability needed**: `--caps Debug` at runtime
+- **Ghost property**: Completely invisible to callers — no `! {Debug}` needed in signatures
+- **Release mode**: `--release` erases all Debug calls to `()` (zero cost)
 - **Host collection**: `DebugContext.Collect()` returns all logs + assertions after execution
