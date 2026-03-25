@@ -55,7 +55,15 @@ func checkLimits(
   req: ParseRequest,
   pagesUsed: int,
   docsUsed: int
-) -> AllowDecision =
+) -> AllowDecision
+  requires { pagesUsed >= 0 && docsUsed >= 0 && req.fileSizeMb >= 0 }
+  ensures {
+    match result {
+      Allow => ent.canParse == true,
+      Deny(msg) => length(msg) > 0
+    }
+  }
+=
   if req.fileSizeMb > ent.maxFileSizeMb then
     Deny("File size " ++ show(req.fileSizeMb) ++ "MB exceeds limit of " ++ show(ent.maxFileSizeMb) ++ "MB")
   else if pagesUsed >= ent.monthlyPageLimit then

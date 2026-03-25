@@ -21,14 +21,18 @@ export type BillingEvent = {
 }
 
 -- Check if a provider event has already been processed (idempotency)
-export func isEventProcessed(providerEventId: string) -> Result[bool, string] ! {Net, FS, Env} =
+export func isEventProcessed(providerEventId: string) -> Result[bool, string] ! {Net, FS, Env}
+  requires { length(providerEventId) > 0 }
+=
   match getDoc("billing_events", providerEventId) {
     Err(_) => Ok(false),
     Ok(fields) => Ok(asStr(fields, "processed") == "true")
   }
 
 -- Record that a provider event was processed
-export func recordEvent(event: BillingEvent) -> Result[(), string] ! {Net, FS, Env} =
+export func recordEvent(event: BillingEvent) -> Result[(), string] ! {Net, FS, Env}
+  requires { length(event.providerEventId) > 0 && length(event.provider) > 0 }
+=
   let fields = jo([
     kv("provider", stringVal(event.provider)),
     kv("providerEventId", stringVal(event.providerEventId)),

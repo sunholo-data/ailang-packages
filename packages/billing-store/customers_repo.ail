@@ -19,7 +19,9 @@ export type Customer = {
 }
 
 -- Get a customer record by principal ID
-export func getCustomer(principalId: string) -> Result[Customer, string] ! {Net, FS, Env} =
+export func getCustomer(principalId: string) -> Result[Customer, string] ! {Net, FS, Env}
+  requires { length(principalId) > 0 }
+=
   match getDoc("billing_customers", principalId) {
     Err(e) => Err(e),
     Ok(fields) =>
@@ -33,7 +35,9 @@ export func getCustomer(principalId: string) -> Result[Customer, string] ! {Net,
   }
 
 -- Create or update a customer record
-export func putCustomer(c: Customer) -> Result[(), string] ! {Net, FS, Env} =
+export func putCustomer(c: Customer) -> Result[(), string] ! {Net, FS, Env}
+  requires { length(c.principalId) > 0 }
+=
   let fields = jo([
     kv("principalType", stringVal(c.principalType)),
     kv("principalId", stringVal(c.principalId)),

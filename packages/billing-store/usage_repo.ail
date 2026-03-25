@@ -15,7 +15,9 @@ import pkg/sunholo/firestore/fields (intVal, asInt)
 import pkg/sunholo/billing_entitlements/usage_policy (Usage, emptyUsage)
 
 -- Get usage for a principal in a specific period (e.g. "2026_03")
-export func getUsage(principalId: string, period: string) -> Result[Usage, string] ! {Net, FS, Env} =
+export func getUsage(principalId: string, period: string) -> Result[Usage, string] ! {Net, FS, Env}
+  requires { length(principalId) > 0 && length(period) > 0 }
+=
   match getSubDoc("usage", principalId, "periods", period) {
     Err(_) => Ok(emptyUsage()),
     Ok(fields) =>
@@ -28,7 +30,9 @@ export func getUsage(principalId: string, period: string) -> Result[Usage, strin
   }
 
 -- Write usage for a principal in a specific period
-export func putUsage(principalId: string, period: string, usage: Usage) -> Result[(), string] ! {Net, FS, Env} =
+export func putUsage(principalId: string, period: string, usage: Usage) -> Result[(), string] ! {Net, FS, Env}
+  requires { length(principalId) > 0 && length(period) > 0 }
+=
   let fields = jo([
     kv("documentsParsed", intVal(usage.documentsParsed)),
     kv("pagesParsed", intVal(usage.pagesParsed)),

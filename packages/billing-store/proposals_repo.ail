@@ -12,7 +12,9 @@ import pkg/sunholo/firestore/fields (stringVal, asStr)
 import pkg/sunholo/billing_proposals/proposal (Proposal, ProposalStatus, RequestedBy, PendingApproval, AwaitingPayment, Approved, Expired, Rejected, Human, Agent, statusLabel)
 
 -- Get a proposal by ID
-export func getProposal(proposalId: string) -> Result[Proposal, string] ! {Net, FS, Env} =
+export func getProposal(proposalId: string) -> Result[Proposal, string] ! {Net, FS, Env}
+  requires { length(proposalId) > 0 }
+=
   match getDoc("payment_proposals", proposalId) {
     Err(e) => Err(e),
     Ok(fields) =>
@@ -33,7 +35,7 @@ export func getProposal(proposalId: string) -> Result[Proposal, string] ! {Net, 
       })
   }
 
-func parseStatus(s: string) -> ProposalStatus =
+pure func parseStatus(s: string) -> ProposalStatus =
   match s {
     "pending_approval" => PendingApproval,
     "awaiting_payment" => AwaitingPayment,
@@ -44,7 +46,9 @@ func parseStatus(s: string) -> ProposalStatus =
   }
 
 -- Create or update a proposal
-export func putProposal(p: Proposal) -> Result[(), string] ! {Net, FS, Env} =
+export func putProposal(p: Proposal) -> Result[(), string] ! {Net, FS, Env}
+  requires { length(p.proposalId) > 0 && length(p.principalId) > 0 }
+=
   let requestedByStr = match p.requestedBy {
     Human => "human",
     Agent(_) => "agent"

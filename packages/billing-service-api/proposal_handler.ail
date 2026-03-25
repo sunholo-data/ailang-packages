@@ -28,7 +28,9 @@ export func handleCreateProposal(
   proposalId: string,
   createdAt: string,
   body: string
-) -> Result[string, string] ! {Net, FS, Env} =
+) -> Result[string, string] ! {Net, FS, Env}
+  requires { length(principalId) > 0 && length(proposalId) > 0 && length(body) > 0 }
+=
   match decode(body) {
     Err(e) => Err("Invalid JSON: " ++ e),
     Ok(json) =>
@@ -70,7 +72,9 @@ export func handleApprovalLink(
   proposalId: string,
   successUrl: string,
   cancelUrl: string
-) -> Result[string, string] ! {Net, FS, Env} =
+) -> Result[string, string] ! {Net, FS, Env}
+  requires { length(principalId) > 0 && length(proposalId) > 0 && length(successUrl) > 0 && length(cancelUrl) > 0 }
+=
   match getProposal(proposalId) {
     Err(e) => Err("Proposal not found: " ++ e),
     Ok(proposal) =>
@@ -106,7 +110,9 @@ export func handleApprovalLink(
 export func handleGetProposal(
   principalId: string,
   proposalId: string
-) -> Result[string, string] ! {Net, FS, Env} =
+) -> Result[string, string] ! {Net, FS, Env}
+  requires { length(principalId) > 0 && length(proposalId) > 0 }
+=
   match getProposal(proposalId) {
     Err(e) => Err("Proposal not found: " ++ e),
     Ok(proposal) =>

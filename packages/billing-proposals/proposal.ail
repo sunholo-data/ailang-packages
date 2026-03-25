@@ -49,7 +49,16 @@ export pure func createProposal(
   reason: string,
   requestedBy: RequestedBy,
   createdAt: string
-) -> Proposal =
+) -> Proposal
+  requires { length(proposalId) > 0 && length(principalId) > 0 && length(targetPlan) > 0 }
+  ensures {
+    result.proposalId == proposalId
+    && result.principalId == principalId
+    && result.targetPlan == targetPlan
+    && result.approvalUrl == ""
+    && result.expiresAt == ""
+  }
+=
   {
     proposalId: proposalId,
     principalId: principalId,
@@ -71,19 +80,43 @@ export pure func canCreateApprovalLink(p: Proposal) -> bool =
   }
 
 -- Transition to AwaitingPayment after Stripe Checkout session is created
-export pure func markAwaitingPayment(p: Proposal, url: string, expires: string) -> Proposal =
+export pure func markAwaitingPayment(p: Proposal, url: string, expires: string) -> Proposal
+  requires { length(url) > 0 && length(expires) > 0 }
+  ensures {
+    result.proposalId == p.proposalId
+    && result.principalId == p.principalId
+    && result.approvalUrl == url
+    && result.expiresAt == expires
+  }
+=
   { p | status: AwaitingPayment, approvalUrl: url, expiresAt: expires }
 
 -- Transition to Approved after successful payment
-export pure func markApproved(p: Proposal) -> Proposal =
+export pure func markApproved(p: Proposal) -> Proposal
+  ensures {
+    result.proposalId == p.proposalId
+    && result.principalId == p.principalId
+    && result.targetPlan == p.targetPlan
+  }
+=
   { p | status: Approved }
 
 -- Transition to Expired (checkout session timed out)
-export pure func markExpired(p: Proposal) -> Proposal =
+export pure func markExpired(p: Proposal) -> Proposal
+  ensures {
+    result.proposalId == p.proposalId
+    && result.principalId == p.principalId
+  }
+=
   { p | status: Expired }
 
 -- Transition to Rejected (user explicitly declined)
-export pure func markRejected(p: Proposal) -> Proposal =
+export pure func markRejected(p: Proposal) -> Proposal
+  ensures {
+    result.proposalId == p.proposalId
+    && result.principalId == p.principalId
+  }
+=
   { p | status: Rejected }
 
 -- Is this proposal still actionable?
@@ -102,7 +135,9 @@ export pure func isAgentInitiated(p: Proposal) -> bool =
   }
 
 -- Status as a display string
-export pure func statusLabel(status: ProposalStatus) -> string =
+export pure func statusLabel(status: ProposalStatus) -> string
+  ensures { length(result) > 0 }
+=
   match status {
     PendingApproval => "pending_approval",
     AwaitingPayment => "awaiting_payment",

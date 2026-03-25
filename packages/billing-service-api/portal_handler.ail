@@ -19,7 +19,9 @@ import pkg/sunholo/billing_stripe/stripe_portal (createPortalSession)
 export func handleCreatePortal(
   principalId: string,
   body: string
-) -> Result[string, string] ! {Net, FS, Env} =
+) -> Result[string, string] ! {Net, FS, Env}
+  requires { length(principalId) > 0 && length(body) > 0 }
+=
   match decode(body) {
     Err(e) => Err("Invalid JSON: " ++ e),
     Ok(json) =>

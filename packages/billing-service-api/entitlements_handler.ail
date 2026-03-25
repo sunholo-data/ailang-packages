@@ -19,7 +19,9 @@ import pkg/sunholo/billing_entitlements/quota_policy (remainingPages, remainingD
 export func handleGetEntitlements(
   principalId: string,
   currentPeriod: string
-) -> Result[string, string] ! {Net, FS, Env} =
+) -> Result[string, string] ! {Net, FS, Env}
+  requires { length(principalId) > 0 && length(currentPeriod) > 0 }
+=
   -- Load entitlements (fall back to free tier if not found)
   let ent = match getEntitlements(principalId) {
     Ok(e) => e,

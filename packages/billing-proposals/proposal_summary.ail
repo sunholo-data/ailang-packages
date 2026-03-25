@@ -29,7 +29,15 @@ export pure func summarizeProposal(
   currentPlanName: string,
   catalog: [{key: string, plan: Plan}],
   reason: string
-) -> Result[ProposalSummary, string] =
+) -> Result[ProposalSummary, string]
+  requires { length(targetPlanKey) > 0 && length(currentPlanName) > 0 }
+  ensures {
+    match result {
+      Ok(s) => length(s.description) > 0 && s.currentPlan == currentPlanName,
+      Err(e) => length(e) > 0
+    }
+  }
+=
   match lookupPlan(catalog, targetPlanKey) {
     Err(e) => Err(e),
     Ok(target) =>
@@ -44,6 +52,9 @@ export pure func summarizeProposal(
   }
 
 -- Format a one-line upgrade prompt for chat display
-export pure func upgradePrompt(currentPlan: string, targetPlan: string, reason: string) -> string =
+export pure func upgradePrompt(currentPlan: string, targetPlan: string, reason: string) -> string
+  requires { length(currentPlan) > 0 && length(targetPlan) > 0 }
+  ensures { length(result) > 0 }
+=
   "Your current plan (" ++ currentPlan ++ ") " ++ reason ++
   ". Would you like to upgrade to " ++ targetPlan ++ "?"

@@ -31,7 +31,9 @@ import pkg/sunholo/billing_entitlements/entitlement (resolveEntitlements)
 @route("POST", "/billing/webhooks/stripe")
 export func handleStripeWebhook(
   request: {body: string, headers: Json, method: string, path: string}
-) -> Result[string, string] ! {Net, FS, Env} =
+) -> Result[string, string] ! {Net, FS, Env}
+  requires { length(request.body) > 0 }
+=
   let rawBody = request.body
   in let signatureHeader = getOrElse(getString(request.headers, "Stripe-Signature"), "")
   in if signatureHeader == "" then Err("Missing Stripe-Signature header")

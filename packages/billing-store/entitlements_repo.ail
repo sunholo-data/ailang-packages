@@ -12,7 +12,9 @@ import pkg/sunholo/firestore/fields (stringVal, intVal, boolVal, asStr, asInt)
 import pkg/sunholo/billing_entitlements/entitlement (Entitlements)
 
 -- Get entitlements by principal ID
-export func getEntitlements(principalId: string) -> Result[Entitlements, string] ! {Net, FS, Env} =
+export func getEntitlements(principalId: string) -> Result[Entitlements, string] ! {Net, FS, Env}
+  requires { length(principalId) > 0 }
+=
   match getDoc("entitlements", principalId) {
     Err(e) => Err(e),
     Ok(fields) =>
@@ -31,7 +33,9 @@ export func getEntitlements(principalId: string) -> Result[Entitlements, string]
   }
 
 -- Create or update entitlements
-export func putEntitlements(ent: Entitlements) -> Result[(), string] ! {Net, FS, Env} =
+export func putEntitlements(ent: Entitlements) -> Result[(), string] ! {Net, FS, Env}
+  requires { length(ent.principalId) > 0 }
+=
   let fields = jo([
     kv("principalId", stringVal(ent.principalId)),
     kv("plan", stringVal(ent.plan)),

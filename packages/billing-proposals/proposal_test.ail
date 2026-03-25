@@ -1,0 +1,149 @@
+-- Tests for proposal lifecycle and state transitions
+--
+-- Covers: createProposal, canCreateApprovalLink, markAwaitingPayment,
+--         markApproved, markExpired, markRejected, isActionable,
+--         isAgentInitiated, statusLabel
+
+module sunholo/billing_proposals/proposal_test
+
+import ./proposal (
+  createProposal, canCreateApprovalLink, markAwaitingPayment,
+  markApproved, markExpired, markRejected, isActionable,
+  isAgentInitiated, statusLabel,
+  PendingApproval, AwaitingPayment, Approved, Expired, Rejected,
+  Human, Agent
+)
+
+-- ============================================================
+-- createProposal tests
+-- ============================================================
+
+test "createProposal sets PendingApproval status" {
+  let p = createProposal("p1", "user1", "pro_monthly", "need more pages", Human, "2026-03-25")
+  in p.proposalId == "p1" && p.principalId == "user1"
+    && p.targetPlan == "pro_monthly" && p.approvalUrl == ""
+    && p.expiresAt == ""
+}
+
+test "createProposal preserves agent requestedBy" {
+  let p = createProposal("p2", "user2", "business_monthly", "quota exceeded", Agent("claude"), "2026-03-25")
+  in isAgentInitiated(p) == true
+}
+
+-- ============================================================
+-- canCreateApprovalLink tests
+-- ============================================================
+
+test "canCreateApprovalLink true for pending" {
+  let p = createProposal("p3", "u", "pro", "test", Human, "now")
+  in canCreateApprovalLink(p) == true
+}
+
+test "canCreateApprovalLink false after awaiting payment" {
+  let p = createProposal("p4", "u", "pro", "test", Human, "now")
+  in let p2 = markAwaitingPayment(p, "https://checkout.stripe.com/x", "2026-04-01")
+  in canCreateApprovalLink(p2) == false
+}
+
+test "canCreateApprovalLink false after approved" {
+  let p = createProposal("p5", "u", "pro", "test", Human, "now")
+  in canCreateApprovalLink(markApproved(p)) == false
+}
+
+-- ============================================================
+-- State transition tests
+-- ============================================================
+
+test "markAwaitingPayment sets URL and expiry" {
+  let p = createProposal("p6", "u", "pro", "test", Human, "now")
+  in let p2 = markAwaitingPayment(p, "https://pay.example.com", "2026-04-01T00:00:00Z")
+  in p2.approvalUrl == "https://pay.example.com"
+    && p2.expiresAt == "2026-04-01T00:00:00Z"
+    && p2.proposalId == "p6"
+}
+
+test "markApproved preserves identity fields" {
+  let p = createProposal("p7", "user7", "business_monthly", "growth", Human, "now")
+  in let approved = markApproved(p)
+  in approved.proposalId == "p7" && approved.principalId == "user7"
+    && approved.targetPlan == "business_monthly"
+}
+
+test "markExpired preserves identity fields" {
+  let p = createProposal("p8", "user8", "pro", "test", Human, "now")
+  in let expired = markExpired(p)
+  in expired.proposalId == "p8" && expired.principalId == "user8"
+}
+
+test "markRejected preserves identity fields" {
+  let p = createProposal("p9", "user9", "pro", "test", Human, "now")
+  in let rejected = markRejected(p)
+  in rejected.proposalId == "p9" && rejected.principalId == "user9"
+}
+
+-- ============================================================
+-- isActionable tests
+-- ============================================================
+
+test "isActionable true for PendingApproval" {
+  let p = createProposal("p10", "u", "pro", "test", Human, "now")
+  in isActionable(p) == true
+}
+
+test "isActionable true for AwaitingPayment" {
+  let p = createProposal("p11", "u", "pro", "test", Human, "now")
+  in isActionable(markAwaitingPayment(p, "url", "exp")) == true
+}
+
+test "isActionable false for Approved" {
+  let p = createProposal("p12", "u", "pro", "test", Human, "now")
+  in isActionable(markApproved(p)) == false
+}
+
+test "isActionable false for Expired" {
+  let p = createProposal("p13", "u", "pro", "test", Human, "now")
+  in isActionable(markExpired(p)) == false
+}
+
+test "isActionable false for Rejected" {
+  let p = createProposal("p14", "u", "pro", "test", Human, "now")
+  in isActionable(markRejected(p)) == false
+}
+
+-- ============================================================
+-- isAgentInitiated tests
+-- ============================================================
+
+test "isAgentInitiated false for Human" {
+  let p = createProposal("p15", "u", "pro", "test", Human, "now")
+  in isAgentInitiated(p) == false
+}
+
+test "isAgentInitiated true for Agent" {
+  let p = createProposal("p16", "u", "pro", "test", Agent("gemini"), "now")
+  in isAgentInitiated(p) == true
+}
+
+-- ============================================================
+-- statusLabel tests
+-- ============================================================
+
+test "statusLabel PendingApproval" {
+  statusLabel(PendingApproval) == "pending_approval"
+}
+
+test "statusLabel AwaitingPayment" {
+  statusLabel(AwaitingPayment) == "awaiting_payment"
+}
+
+test "statusLabel Approved" {
+  statusLabel(Approved) == "approved"
+}
+
+test "statusLabel Expired" {
+  statusLabel(Expired) == "expired"
+}
+
+test "statusLabel Rejected" {
+  statusLabel(Rejected) == "rejected"
+}

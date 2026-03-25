@@ -33,7 +33,9 @@ type VerifiedEvent = {
 export func verifyWebhook(
   signatureHeader: string,
   rawBody: string
-) -> Result[VerifiedEvent, string] ! {Env} =
+) -> Result[VerifiedEvent, string] ! {Env}
+  requires { length(signatureHeader) > 0 && length(rawBody) > 0 }
+=
   match requireEnv("STRIPE_WEBHOOK_SECRET") {
     Err(e) => Err(e),
     Ok(webhookSecret) =>

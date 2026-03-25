@@ -25,7 +25,9 @@ export type Subscription = {
 }
 
 -- Get subscription by principal ID
-export func getSubscription(principalId: string) -> Result[Subscription, string] ! {Net, FS, Env} =
+export func getSubscription(principalId: string) -> Result[Subscription, string] ! {Net, FS, Env}
+  requires { length(principalId) > 0 }
+=
   match getDoc("subscriptions", principalId) {
     Err(e) => Err(e),
     Ok(fields) =>
@@ -45,7 +47,9 @@ export func getSubscription(principalId: string) -> Result[Subscription, string]
   }
 
 -- Create or update a subscription record
-export func putSubscription(s: Subscription) -> Result[(), string] ! {Net, FS, Env} =
+export func putSubscription(s: Subscription) -> Result[(), string] ! {Net, FS, Env}
+  requires { length(s.principalId) > 0 }
+=
   let fields = jo([
     kv("provider", stringVal(s.provider)),
     kv("principalType", stringVal(s.principalType)),
