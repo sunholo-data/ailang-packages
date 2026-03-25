@@ -33,7 +33,15 @@ export pure func canParse(
   req: ParseRequest,
   pagesUsed: int,
   docsUsed: int
-) -> AllowDecision =
+) -> AllowDecision
+  requires { pagesUsed >= 0 && docsUsed >= 0 && req.fileSizeMb >= 0 }
+  ensures {
+    match result {
+      Allow => ent.canParse == true,
+      Deny(msg) => length(msg) > 0
+    }
+  }
+=
   if ent.canParse == false then
     Deny("Parsing is not enabled for your account")
   else if req.isApiRequest == true then
@@ -57,5 +65,7 @@ func checkLimits(
   else Allow
 
 -- Check whether a principal has API access
-export pure func canUseApi(ent: Entitlements) -> bool =
+export pure func canUseApi(ent: Entitlements) -> bool
+  ensures { result == ent.apiAccess }
+=
   ent.apiAccess

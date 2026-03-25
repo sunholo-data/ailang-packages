@@ -41,7 +41,15 @@ export pure func resolveEntitlements(
   sub: SubscriptionState,
   catalog: [{key: string, plan: Plan}],
   principalId: string
-) -> Entitlements =
+) -> Entitlements
+  requires { length(principalId) > 0 && length(sub.status) > 0 }
+  ensures {
+    result.principalId == principalId
+    && result.canParse == true
+    && result.monthlyPageLimit > 0
+    && result.maxFileSizeMb > 0
+  }
+=
   let plan = match lookupPlan(catalog, sub.planKey) {
     Ok(p) => p,
     Err(_) => freePlan()
@@ -56,10 +64,27 @@ export pure func resolveEntitlements(
     planToEntitlements(principalId, freePlan(), "free", false)
 
 -- Build entitlements for a principal with no subscription (free tier)
-export pure func freeEntitlements(principalId: string) -> Entitlements =
+export pure func freeEntitlements(principalId: string) -> Entitlements
+  requires { length(principalId) > 0 }
+  ensures {
+    result.plan == "free"
+    && result.principalId == principalId
+    && result.apiAccess == false
+    && result.canParse == true
+  }
+=
   planToEntitlements(principalId, freePlan(), "free", false)
 
-func planToEntitlements(principalId: string, plan: Plan, status: string, grace: bool) -> Entitlements =
+func planToEntitlements(principalId: string, plan: Plan, status: string, grace: bool) -> Entitlements
+  requires { length(principalId) > 0 && length(status) > 0 }
+  ensures {
+    result.principalId == principalId
+    && result.plan == plan.name
+    && result.status == status
+    && result.gracePeriod == grace
+    && result.canParse == true
+  }
+=
   {
     principalId: principalId,
     plan: plan.name,
@@ -72,3 +97,4 @@ func planToEntitlements(principalId: string, plan: Plan, status: string, grace: 
     maxConcurrentJobs: plan.maxConcurrentJobs,
     gracePeriod: grace
   }
+

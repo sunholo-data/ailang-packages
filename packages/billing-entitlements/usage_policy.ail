@@ -25,7 +25,15 @@ export type UsageDelta = {
 }
 
 -- Apply a usage delta to current usage (pure computation)
-export pure func applyDelta(current: Usage, delta: UsageDelta) -> Usage =
+export pure func applyDelta(current: Usage, delta: UsageDelta) -> Usage
+  requires { delta.documents >= 0 && delta.pages >= 0 && delta.bytes >= 0 && delta.ocrPages >= 0 }
+  ensures {
+    result.documentsParsed >= current.documentsParsed
+    && result.pagesParsed >= current.pagesParsed
+    && result.bytesProcessed >= current.bytesProcessed
+    && result.ocrPagesParsed >= current.ocrPagesParsed
+  }
+=
   {
     documentsParsed: current.documentsParsed + delta.documents,
     pagesParsed: current.pagesParsed + delta.pages,
@@ -34,9 +42,19 @@ export pure func applyDelta(current: Usage, delta: UsageDelta) -> Usage =
   }
 
 -- Create a zero usage record for a new period
-export pure func emptyUsage() -> Usage =
+export pure func emptyUsage() -> Usage
+  ensures {
+    result.documentsParsed == 0
+    && result.pagesParsed == 0
+    && result.bytesProcessed == 0
+    && result.ocrPagesParsed == 0
+  }
+=
   { documentsParsed: 0, pagesParsed: 0, bytesProcessed: 0, ocrPagesParsed: 0 }
 
 -- Create a delta from a single parse operation
-export pure func parseDelta(pages: int, bytes: int, ocrPages: int) -> UsageDelta =
+export pure func parseDelta(pages: int, bytes: int, ocrPages: int) -> UsageDelta
+  requires { pages >= 0 && bytes >= 0 && ocrPages >= 0 }
+  ensures { result.documents == 1 && result.pages == pages && result.bytes == bytes && result.ocrPages == ocrPages }
+=
   { documents: 1, pages: pages, bytes: bytes, ocrPages: ocrPages }

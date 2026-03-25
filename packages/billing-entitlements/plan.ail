@@ -21,7 +21,14 @@ export type Plan = {
 }
 
 -- The free tier defaults — always available, never requires Stripe
-export pure func freePlan() -> Plan =
+export pure func freePlan() -> Plan
+  ensures {
+    result.name == "free"
+    && result.apiAccess == false
+    && result.monthlyPageLimit > 0
+    && result.maxConcurrentJobs >= 1
+  }
+=
   {
     name: "free",
     monthlyPageLimit: 100,
@@ -32,10 +39,26 @@ export pure func freePlan() -> Plan =
   }
 
 -- Look up a plan by key from a catalog (list of key-plan pairs)
-export pure func lookupPlan(catalog: [{key: string, plan: Plan}], planKey: string) -> Result[Plan, string] =
+export pure func lookupPlan(catalog: [{key: string, plan: Plan}], planKey: string) -> Result[Plan, string]
+  requires { length(planKey) > 0 }
+  ensures {
+    match result {
+      Ok(p) => length(p.name) > 0 && p.monthlyPageLimit > 0,
+      Err(e) => length(e) > 0
+    }
+  }
+=
   findPlan(catalog, planKey)
 
-func findPlan(entries: [{key: string, plan: Plan}], planKey: string) -> Result[Plan, string] =
+func findPlan(entries: [{key: string, plan: Plan}], planKey: string) -> Result[Plan, string]
+  requires { length(planKey) > 0 }
+  ensures {
+    match result {
+      Ok(p) => length(p.name) > 0,
+      Err(e) => length(e) > 0
+    }
+  }
+=
   match entries {
     [] => Err("Unknown plan: " ++ planKey),
     entry :: rest =>
@@ -44,7 +67,9 @@ func findPlan(entries: [{key: string, plan: Plan}], planKey: string) -> Result[P
   }
 
 -- Build a default plan catalog with standard tiers
-export pure func defaultCatalog() -> [{key: string, plan: Plan}] =
+export pure func defaultCatalog() -> [{key: string, plan: Plan}]
+  ensures { length(result) == 3 }
+=
   [
     { key: "free", plan: freePlan() },
     { key: "pro_monthly", plan: {
@@ -66,3 +91,4 @@ export pure func defaultCatalog() -> [{key: string, plan: Plan}] =
       }
     }
   ]
+

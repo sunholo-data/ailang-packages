@@ -1,0 +1,93 @@
+-- Tests for entitlement resolution and plan catalog
+--
+-- Covers: resolveEntitlements, freeEntitlements, freePlan, lookupPlan, defaultCatalog
+
+module sunholo/billing_entitlements/entitlement_test
+
+import ./entitlement (resolveEntitlements, freeEntitlements)
+import ./plan (freePlan, lookupPlan, defaultCatalog)
+import std/result (Ok, Err)
+
+-- ============================================================
+-- Plan catalog tests
+-- ============================================================
+
+test "freePlan has expected limits" {
+  let p = freePlan()
+  in p.name == "free" && p.monthlyPageLimit == 100
+    && p.monthlyDocumentLimit == 20 && p.maxFileSizeMb == 10
+    && p.apiAccess == false && p.maxConcurrentJobs == 1
+}
+
+test "lookupPlan finds pro in default catalog" {
+  match lookupPlan(defaultCatalog(), "pro_monthly") {
+    Ok(p) => p.name == "pro" && p.monthlyPageLimit == 5000,
+    Err(_) => false
+  }
+}
+
+test "lookupPlan finds business in default catalog" {
+  match lookupPlan(defaultCatalog(), "business_monthly") {
+    Ok(p) => p.name == "business" && p.maxConcurrentJobs == 10,
+    Err(_) => false
+  }
+}
+
+test "lookupPlan returns Err for unknown key" {
+  match lookupPlan(defaultCatalog(), "enterprise_yearly") {
+    Ok(_) => false,
+    Err(_) => true
+  }
+}
+
+-- ============================================================
+-- Entitlement resolution tests
+-- ============================================================
+
+test "active subscription gets full plan entitlements" {
+  let sub = { status: "active", planKey: "pro_monthly", cancelAtPeriodEnd: false }
+  in let ent = resolveEntitlements(sub, defaultCatalog(), "user_1")
+  in ent.plan == "pro" && ent.status == "active"
+    && ent.apiAccess == true && ent.monthlyPageLimit == 5000
+    && ent.gracePeriod == false
+}
+
+test "trialing subscription gets full plan entitlements" {
+  let sub = { status: "trialing", planKey: "pro_monthly", cancelAtPeriodEnd: false }
+  in let ent = resolveEntitlements(sub, defaultCatalog(), "user_2")
+  in ent.status == "trialing" && ent.apiAccess == true
+}
+
+test "past_due subscription gets grace period" {
+  let sub = { status: "past_due", planKey: "pro_monthly", cancelAtPeriodEnd: false }
+  in let ent = resolveEntitlements(sub, defaultCatalog(), "user_3")
+  in ent.status == "grace" && ent.gracePeriod == true
+    && ent.apiAccess == true
+}
+
+test "canceled subscription falls back to free" {
+  let sub = { status: "canceled", planKey: "pro_monthly", cancelAtPeriodEnd: false }
+  in let ent = resolveEntitlements(sub, defaultCatalog(), "user_4")
+  in ent.plan == "free" && ent.status == "free"
+    && ent.apiAccess == false && ent.monthlyPageLimit == 100
+}
+
+test "unknown plan key falls back to free" {
+  let sub = { status: "active", planKey: "nonexistent_plan", cancelAtPeriodEnd: false }
+  in let ent = resolveEntitlements(sub, defaultCatalog(), "user_5")
+  in ent.plan == "free"
+}
+
+test "freeEntitlements returns free tier defaults" {
+  let ent = freeEntitlements("user_6")
+  in ent.plan == "free" && ent.maxFileSizeMb == 10
+    && ent.monthlyPageLimit == 100 && ent.maxConcurrentJobs == 1
+    && ent.canParse == true
+}
+
+test "business plan gets full limits" {
+  let sub = { status: "active", planKey: "business_monthly", cancelAtPeriodEnd: false }
+  in let ent = resolveEntitlements(sub, defaultCatalog(), "user_7")
+  in ent.plan == "business" && ent.monthlyPageLimit == 20000
+    && ent.maxConcurrentJobs == 10 && ent.maxFileSizeMb == 100
+}

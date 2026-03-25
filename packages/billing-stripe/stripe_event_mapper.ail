@@ -33,7 +33,16 @@ export type SubscriptionStateChange = {
 export pure func mapEventToStateChange(
   eventType: string,
   data: Json
-) -> Result[SubscriptionStateChange, string] =
+) -> Result[SubscriptionStateChange, string]
+  requires { length(eventType) > 0 }
+  ensures {
+    -- Ok results always have non-empty subscriptionId or status
+    match result {
+      Ok(c) => length(c.subscriptionId) > 0 || length(c.status) > 0,
+      Err(e) => length(e) > 0
+    }
+  }
+=
   if eventType == "customer.subscription.created" then
     extractSubscriptionChange(data)
   else if eventType == "customer.subscription.updated" then
@@ -89,7 +98,9 @@ func extractCheckoutChange(data: Json) -> Result[SubscriptionStateChange, string
   }
 
 -- Helper: extract string from JSON
-func jsonStr(obj: Json, key: string) -> string =
+func jsonStr(obj: Json, key: string) -> string
+  requires { length(key) > 0 }
+=
   match get(obj, key) {
     None => "",
     Some(v) => getOrElse(asString(v), "")
@@ -121,3 +132,4 @@ func extractFirstPriceId(obj: Json) -> string =
           }
       }
   }
+

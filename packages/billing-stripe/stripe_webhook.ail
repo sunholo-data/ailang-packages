@@ -68,7 +68,14 @@ export func verifyWebhook(
 -- Internal: extract timestamp and v1 signature from header parts
 type SignatureParts = { timestamp: string, signature: string }
 
-func extractSignatureParts(parts: [string], ts: string, sig: string) -> Result[SignatureParts, string] =
+func extractSignatureParts(parts: [string], ts: string, sig: string) -> Result[SignatureParts, string]
+  ensures {
+    match result {
+      Ok(s) => length(s.timestamp) > 0 && length(s.signature) > 0,
+      Err(e) => length(e) > 0
+    }
+  }
+=
   match parts {
     [] =>
       if ts == "" then Err("Missing timestamp in Stripe signature")

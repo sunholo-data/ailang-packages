@@ -1,0 +1,90 @@
+-- Tests for stripe_event_mapper
+--
+-- Covers: mapEventToStateChange for subscription and checkout events
+
+module sunholo/billing_stripe/stripe_event_mapper_test
+
+import ./stripe_event_mapper (mapEventToStateChange)
+import std/json (jo, js, kv, ja)
+import std/result (Ok, Err)
+
+test "subscription.created extracts all fields" {
+  let data = jo([kv("object", jo([
+    kv("id", js("sub_123")),
+    kv("status", js("active")),
+    kv("metadata", jo([kv("principalId", js("user_abc"))])),
+    kv("cancel_at_period_end", js("false")),
+    kv("current_period_start", js("1700000000")),
+    kv("current_period_end", js("1702592000")),
+    kv("items", jo([kv("data", ja([
+      jo([kv("price", jo([kv("id", js("price_pro"))]))])
+    ]))]))
+  ]))])
+  in match mapEventToStateChange("customer.subscription.created", data) {
+    Ok(c) => c.principalId == "user_abc"
+      && c.subscriptionId == "sub_123"
+      && c.status == "active"
+      && c.priceId == "price_pro"
+      && c.cancelAtPeriodEnd == false,
+    Err(_) => false
+  }
+}
+
+test "subscription.updated extracts fields" {
+  let data = jo([kv("object", jo([
+    kv("id", js("sub_456")),
+    kv("status", js("past_due")),
+    kv("metadata", jo([kv("principalId", js("user_def"))])),
+    kv("cancel_at_period_end", js("true")),
+    kv("current_period_start", js("1700000000")),
+    kv("current_period_end", js("1702592000"))
+  ]))])
+  in match mapEventToStateChange("customer.subscription.updated", data) {
+    Ok(c) => c.status == "past_due" && c.cancelAtPeriodEnd == true,
+    Err(_) => false
+  }
+}
+
+test "subscription.deleted extracts canceled status" {
+  let data = jo([kv("object", jo([
+    kv("id", js("sub_789")),
+    kv("status", js("canceled")),
+    kv("metadata", jo([kv("principalId", js("user_xyz"))])),
+    kv("cancel_at_period_end", js("false")),
+    kv("current_period_start", js("")),
+    kv("current_period_end", js(""))
+  ]))])
+  in match mapEventToStateChange("customer.subscription.deleted", data) {
+    Ok(c) => c.status == "canceled" && c.principalId == "user_xyz",
+    Err(_) => false
+  }
+}
+
+test "checkout.session.completed extracts subscription" {
+  let data = jo([kv("object", jo([
+    kv("subscription", js("sub_checkout_1")),
+    kv("metadata", jo([kv("principalId", js("user_checkout"))]))
+  ]))])
+  in match mapEventToStateChange("checkout.session.completed", data) {
+    Ok(c) => c.subscriptionId == "sub_checkout_1"
+      && c.principalId == "user_checkout"
+      && c.status == "active",
+    Err(_) => false
+  }
+}
+
+test "unhandled event type returns Err" {
+  let data = jo([])
+  in match mapEventToStateChange("charge.succeeded", data) {
+    Ok(_) => false,
+    Err(e) => e == "Unhandled event type: charge.succeeded"
+  }
+}
+
+test "missing object in data returns Err" {
+  let data = jo([kv("other", js("value"))])
+  in match mapEventToStateChange("customer.subscription.created", data) {
+    Ok(_) => false,
+    Err(_) => true
+  }
+}

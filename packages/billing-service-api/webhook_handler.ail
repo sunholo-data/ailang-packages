@@ -7,11 +7,15 @@
 --   - checkout.session.completed
 --
 -- Updates subscriptions, entitlements, and proposals in Firestore.
+--
+-- Uses @raw to receive the full HttpRequest with headers for
+-- Stripe-Signature HMAC verification.
 
 module sunholo/billing_service_api/webhook_handler
 
-import std/json (encode, jo, js, kv)
+import std/json (encode, jo, js, kv, getString)
 import std/result (Ok, Err)
+import std/option (getOrElse)
 import pkg/sunholo/billing_stripe/stripe_webhook (verifyWebhook)
 import pkg/sunholo/billing_stripe/stripe_event_mapper (mapEventToStateChange)
 import pkg/sunholo/billing_store/events_repo (isEventProcessed, recordEvent)
@@ -21,12 +25,17 @@ import pkg/sunholo/billing_entitlements/plan (defaultCatalog)
 import pkg/sunholo/billing_entitlements/entitlement (resolveEntitlements)
 
 -- Handle incoming Stripe webhook
+-- @raw gives us the full HTTP request as an inline record.
+-- headers is Json (JObject) — use getString() for header access.
+@raw
 @route("POST", "/billing/webhooks/stripe")
 export func handleStripeWebhook(
-  signatureHeader: string,
-  rawBody: string,
-  receivedAt: string
+  request: {body: string, headers: Json, method: string, path: string}
 ) -> Result[string, string] ! {Net, FS, Env} =
+  let rawBody = request.body
+  in let signatureHeader = getOrElse(getString(request.headers, "Stripe-Signature"), "")
+  in if signatureHeader == "" then Err("Missing Stripe-Signature header")
+  else
   -- 1. Verify signature
   match verifyWebhook(signatureHeader, rawBody) {
     Err(e) => Err("Webhook verification failed: " ++ e),
@@ -56,7 +65,7 @@ export func handleStripeWebhook(
                 currentPeriodStart: change.currentPeriodStart,
                 currentPeriodEnd: change.currentPeriodEnd,
                 cancelAtPeriodEnd: change.cancelAtPeriodEnd,
-                updatedAt: receivedAt
+                updatedAt: ""
               })
               in match subResult {
                 Err(e) => Err("Failed to update subscription: " ++ e),
@@ -77,7 +86,7 @@ export func handleStripeWebhook(
                         providerEventId: event.eventId,
                         eventType: event.eventType,
                         processed: true,
-                        processedAt: receivedAt
+                        processedAt: ""
                       })
                       in Ok(encode(jo([kv("status", js("processed"))])))
                   }

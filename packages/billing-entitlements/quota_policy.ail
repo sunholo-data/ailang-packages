@@ -10,29 +10,44 @@ module sunholo/billing_entitlements/quota_policy
 import ./entitlement (Entitlements)
 
 -- Check if monthly document limit is exceeded
-export pure func isOverDocumentLimit(ent: Entitlements, used: int) -> bool =
+export pure func isOverDocumentLimit(ent: Entitlements, used: int) -> bool
+  requires { used >= 0 }
+=
   used >= ent.monthlyDocumentLimit
 
 -- Check if monthly page limit is exceeded
-export pure func isOverPageLimit(ent: Entitlements, used: int) -> bool =
+export pure func isOverPageLimit(ent: Entitlements, used: int) -> bool
+  requires { used >= 0 }
+=
   used >= ent.monthlyPageLimit
 
 -- How many pages remain in the current period
-export pure func remainingPages(ent: Entitlements, used: int) -> int =
+export pure func remainingPages(ent: Entitlements, used: int) -> int
+  requires { used >= 0 && ent.monthlyPageLimit >= 0 }
+  ensures { result >= 0 && result <= ent.monthlyPageLimit }
+=
   let diff = ent.monthlyPageLimit - used
   in if diff < 0 then 0 else diff
 
 -- How many documents remain in the current period
-export pure func remainingDocuments(ent: Entitlements, used: int) -> int =
+export pure func remainingDocuments(ent: Entitlements, used: int) -> int
+  requires { used >= 0 && ent.monthlyDocumentLimit >= 0 }
+  ensures { result >= 0 && result <= ent.monthlyDocumentLimit }
+=
   let diff = ent.monthlyDocumentLimit - used
   in if diff < 0 then 0 else diff
 
 -- Percentage of page quota used (0-100, capped at 100)
-export pure func pageUsagePercent(ent: Entitlements, used: int) -> int =
+export pure func pageUsagePercent(ent: Entitlements, used: int) -> int
+  requires { used >= 0 && ent.monthlyPageLimit >= 0 }
+  ensures { result >= 0 && result <= 100 }
+=
   if ent.monthlyPageLimit == 0 then 100
   else let pct = (used * 100) / ent.monthlyPageLimit
   in if pct > 100 then 100 else pct
 
 -- Whether the user is close to their limit (>80% used)
-export pure func isNearLimit(ent: Entitlements, pagesUsed: int) -> bool =
+export pure func isNearLimit(ent: Entitlements, pagesUsed: int) -> bool
+  requires { pagesUsed >= 0 }
+=
   pageUsagePercent(ent, pagesUsed) >= 80

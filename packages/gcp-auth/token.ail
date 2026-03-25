@@ -22,7 +22,7 @@ import std/option (getOrElse, isSome)
 import std/result (Ok, Err)
 import std/env (getEnvOr)
 import std/string (length, substring, trim)
--- Note: no IO import — logging in gcp_auth would infect all downstream effect signatures
+-- Debug logging removed — cascades through effect ceilings. Error messages include diagnostic info instead.
 
 -- Parsed ADC credentials
 export type ADCCredentials = {
@@ -85,12 +85,12 @@ func getMetadataToken() -> Result[string, string] ! {Net} {
           Ok(json) => {
             let tokenOpt = getString(json, "access_token");
             if isSome(tokenOpt) then Ok(getOrElse(tokenOpt, ""))
-            else Err("No access_token in metadata response")
+            else Err("gcp_auth: metadata ok but no access_token in body: " ++ response.body)
           },
-          Err(e) => Err("Failed to parse metadata response: " ++ e)
+          Err(e) => Err("gcp_auth: metadata ok but JSON decode failed: " ++ e ++ " body=" ++ response.body)
         }
-      } else Err("Metadata server returned status: " ++ show(response.status)),
-    Err(_) => Err("Auth failed: no env var, no ADC file, no metadata server")
+      } else Err("gcp_auth: metadata status=" ++ show(response.status) ++ " body=" ++ response.body),
+    Err(e) => Err("gcp_auth: metadata httpRequest failed: " ++ show(e))
   }
 }
 
