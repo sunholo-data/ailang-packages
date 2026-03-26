@@ -12,7 +12,7 @@
 module sunholo/firestore/client
 
 import std/net (httpRequest)
-import std/json (encode, decode, jo, js, kv, get, getArray, asString)
+import std/json (encode, decode, jo, js, kv, get, getArray, asString, has)
 import std/result (Ok, Err)
 import std/option (Some, None, getOrElse)
 import std/string (contains, intToStr)
@@ -89,29 +89,34 @@ export func getDoc(collection: string, docId: string) -> Result[Json, string] ! 
 
 -- Create or overwrite a document
 --
--- The fields argument should be built using the fields module:
---   let fields = buildFields([
---     { key: "name", value: stringVal("Alice") },
---     { key: "age", value: intVal(30) }
---   ])
---   setDoc("users", "uid_123", fields)
-export func setDoc(collection: string, docId: string, fields: Json) -> Result[(), string] ! {Net, FS, Env} =
-  match baseUrl() {
-    Err(e) => Err(e),
-    Ok(base) =>
-      match authHeaders() {
-        Err(e) => Err(e),
-        Ok(auth) =>
-          let url = base ++ "/" ++ collection ++ "/" ++ docId
-          in let body = encode(jo([kv("fields", fields)]))
-          in match httpRequest("PATCH", url, auth.headers, body) {
-            Err(e) => Err("Firestore SET error: " ++ show(e)),
-            Ok(resp) =>
-              if resp.ok then Ok(())
-              else Err("Firestore SET " ++ show(resp.status) ++ ": " ++ resp.body)
-          }
-      }
-  }
+-- Pass field values directly as a flat JObject — do NOT wrap in a "fields" key,
+-- setDoc adds the Firestore {"fields": ...} envelope automatically.
+--
+-- Example:
+--   setDoc("users", "uid_123", jo([
+--     kv("name", stringVal("Alice")),
+--     kv("age", intVal(30))
+--   ]))
+export func setDoc(collection: string, docId: string, data: Json) -> Result[(), string] ! {Net, FS, Env} =
+  if has(data, "fields") then
+    Err("setDoc: 'data' already contains a 'fields' key. Pass field values directly, e.g. jo([kv(\"name\", stringVal(\"Alice\"))]). setDoc wraps in {\"fields\": ...} automatically.")
+  else
+    match baseUrl() {
+      Err(e) => Err(e),
+      Ok(base) =>
+        match authHeaders() {
+          Err(e) => Err(e),
+          Ok(auth) =>
+            let url = base ++ "/" ++ collection ++ "/" ++ docId
+            in let body = encode(jo([kv("fields", data)]))
+            in match httpRequest("PATCH", url, auth.headers, body) {
+              Err(e) => Err("Firestore SET error: " ++ show(e)),
+              Ok(resp) =>
+                if resp.ok then Ok(())
+                else Err("Firestore SET " ++ show(resp.status) ++ ": " ++ resp.body)
+            }
+        }
+    }
 
 -- Delete a document
 --
@@ -203,10 +208,10 @@ export func setSubDoc(
   parentId: string,
   subCollection: string,
   docId: string,
-  fields: Json
+  data: Json
 ) -> Result[(), string] ! {Net, FS, Env} =
   let path = parentCollection ++ "/" ++ parentId ++ "/" ++ subCollection
-  in setDoc(path, docId, fields)
+  in setDoc(path, docId, data)
 
 -- Delete a document from a subcollection
 export func deleteSubDoc(
