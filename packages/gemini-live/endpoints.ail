@@ -27,5 +27,5 @@ export pure func googleAiUrl(apiKey: string, apiVersion: string) -> string =
 -- useAlpha: true for v1alpha (proactive/affective), false for v1beta
 export pure func aiStudioUrl(apiKey: string, useAlpha: bool) -> string {
   let version = if useAlpha then "v1alpha" else "v1beta";
-  googleAiUrl(apiKey, version)
+  "wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage." ++ version ++ ".GenerativeService.BidiGenerateContent?key=" ++ apiKey
 }

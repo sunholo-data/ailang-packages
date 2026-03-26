@@ -25,7 +25,8 @@ export pure func defaultVoice() -> string = "Sulafat"
 -- Voice catalog as JSON array string.
 -- Each entry: {"name": "VoiceName", "desc": "Style description"}
 -- 30 voices total.
-export pure func voiceCatalog() -> string =
+export pure func voiceCatalog() -> string {
+  let v = \n d. jo([kv("name", js(n)), kv("desc", js(d))]);
   encode(ja([
     v("Sulafat", "Warm"), v("Zephyr", "Bright"), v("Puck", "Upbeat"),
     v("Charon", "Informative"), v("Kore", "Firm"), v("Fenrir", "Excitable"),
@@ -38,7 +39,4 @@ export pure func voiceCatalog() -> string =
     v("Pulcherrima", "Forward"), v("Achird", "Friendly"), v("Zubenelgenubi", "Casual"),
     v("Vindemiatrix", "Gentle"), v("Sadachbia", "Lively"), v("Sadaltager", "Knowledgeable")
   ]))
-
--- Helper to build a voice entry.
-pure func v(name: string, desc: string) -> Json =
-  jo([kv("name", js(name)), kv("desc", js(desc))])
+}
