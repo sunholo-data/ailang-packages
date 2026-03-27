@@ -1,0 +1,139 @@
+-- Firebase ID token verification via local JWT/RSA
+--
+-- Verifies Firebase ID tokens locally by checking the RS256 signature
+-- against Google's public keys. Faster than the REST API approach
+-- (firebase_token.ail) — no per-request HTTP call to Google, and no
+-- FIREBASE_WEB_API_KEY env var needed.
+--
+-- Usage:
+--   import pkg/sunholo/firebase_auth/firebase_jwt (verifyFirebaseJWTFull, fetchFirebasePublicKeys, verifyFirebaseJWT)
+--
+--   -- Option 1: Full flow (fetch keys + verify + validate claims)
+--   match verifyFirebaseJWTFull(idToken, "my-project-id", nowUnix) {
+--     Ok(user) => println("Verified: " ++ user.uid),
+--     Err(e) => println("Auth failed: " ++ e)
+--   }
+--
+--   -- Option 2: Fetch keys once, verify many tokens
+--   match fetchFirebasePublicKeys() {
+--     Ok(keys) => {
+--       let result1 = verifyFirebaseJWT(token1, "my-project", keys);
+--       let result2 = verifyFirebaseJWT(token2, "my-project", keys)
+--     },
+--     Err(e) => println("Key fetch failed: " ++ e)
+--   }
+
+module sunholo/firebase_auth/firebase_jwt
+
+import std/jwt (verifyWithKid, isExpired, checkIssuer, checkAudience)
+import std/json (Json, decode, getString)
+import std/result (Result, Ok, Err)
+import std/option (Option, Some, None)
+import std/net (httpRequest)
+import ./firebase_token (FirebaseUser)
+
+-- Google's public key endpoint for Firebase token verification.
+-- Returns a JSON object mapping key IDs to X.509 PEM certificates.
+let firebaseKeysURL = "https://www.googleapis.com/robot/v1/metadata/x509/securetoken@system.gserviceaccount.com"
+
+-- Fetch Firebase public keys from Google.
+-- Returns a JObject mapping kid strings to PEM certificate strings.
+-- Keys should be cached — they rotate infrequently (every few hours).
+export func fetchFirebasePublicKeys() -> Result[Json, string] ! {Net} = {
+  match httpRequest("GET", firebaseKeysURL, [], "") {
+    Ok(response) =>
+      if response.ok then
+        match decode(response.body) {
+          Ok(keys) => Ok(keys),
+          Err(e) => Err("Failed to parse Firebase public keys: " ++ e)
+        }
+      else
+        Err("Failed to fetch Firebase public keys: HTTP " ++ show(response.status)),
+    Err(e) => Err("Network error fetching Firebase keys: " ++ show(e))
+  }
+}
+
+-- Verify a Firebase ID token using pre-fetched public keys.
+-- Pure function — caller provides keys (from fetchFirebasePublicKeys).
+-- Does NOT check expiry (no clock access). Use verifyFirebaseJWTFull for full validation.
+--
+-- Validates:
+--   - RS256 signature against kid-selected public key
+--   - iss = "https://securetoken.google.com/{projectId}"
+--   - aud = projectId
+--
+-- Args:
+--   token: string - The raw Firebase ID token (JWT)
+--   projectId: string - Your Firebase project ID
+--   keys: Json - JObject of kid→PEM from fetchFirebasePublicKeys
+--
+-- Returns:
+--   Result[FirebaseUser, string] - Verified user or error message
+export pure func verifyFirebaseJWT(
+  token: string,
+  projectId: string,
+  keys: Json
+) -> Result[FirebaseUser, string] = {
+  match verifyWithKid(token, keys) {
+    Err(e) => Err("JWT verification failed: " ++ e),
+    Ok(claims) => {
+      let expectedIss = "https://securetoken.google.com/" ++ projectId;
+      if not(checkIssuer(claims, expectedIss)) then
+        Err("Invalid issuer: expected " ++ expectedIss)
+      else if not(checkAudience(claims, projectId)) then
+        Err("Invalid audience: expected " ++ projectId)
+      else
+        extractFirebaseUser(claims)
+    }
+  }
+}
+
+-- Full Firebase JWT verification: fetch keys, verify signature, validate claims.
+-- Convenience function that combines fetchFirebasePublicKeys + verifyFirebaseJWT
+-- with expiry checking.
+--
+-- Args:
+--   token: string - The raw Firebase ID token (JWT)
+--   projectId: string - Your Firebase project ID
+--   nowUnix: int - Current Unix timestamp in seconds (for expiry check)
+--
+-- Returns:
+--   Result[FirebaseUser, string] - Verified user or error message
+export func verifyFirebaseJWTFull(
+  token: string,
+  projectId: string,
+  nowUnix: int
+) -> Result[FirebaseUser, string] ! {Net} = {
+  match fetchFirebasePublicKeys() {
+    Err(e) => Err(e),
+    Ok(keys) =>
+      match verifyWithKid(token, keys) {
+        Err(e) => Err("JWT verification failed: " ++ e),
+        Ok(claims) => {
+          let expectedIss = "https://securetoken.google.com/" ++ projectId;
+          if isExpired(claims, nowUnix) then
+            Err("Token expired")
+          else if not(checkIssuer(claims, expectedIss)) then
+            Err("Invalid issuer: expected " ++ expectedIss)
+          else if not(checkAudience(claims, projectId)) then
+            Err("Invalid audience: expected " ++ projectId)
+          else
+            extractFirebaseUser(claims)
+        }
+      }
+  }
+}
+
+-- Extract FirebaseUser from verified JWT claims.
+pure func extractFirebaseUser(claims: Json) -> Result[FirebaseUser, string] = {
+  match getString(claims, "sub") {
+    None => Err("Missing 'sub' claim in token"),
+    Some(uid) => {
+      let email = match getString(claims, "email") {
+        Some(e) => e,
+        None => ""
+      };
+      Ok({ uid: uid, email: email })
+    }
+  }
+}

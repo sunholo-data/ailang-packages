@@ -4,14 +4,14 @@
 -- This avoids needing JWT/RSA verification in AILANG — just an HTTP call.
 --
 -- Usage:
---   import pkg/sunholo/auth/firebase_token (verifyIdToken)
+--   import pkg/sunholo/firebase_auth/firebase_token (verifyIdToken)
 --
 --   match verifyIdToken(idToken) {
 --     Ok(user) => println("Verified: " ++ user.uid),
 --     Err(e) => println("Auth failed: " ++ e)
 --   }
 
-module sunholo/auth/firebase_token
+module sunholo/firebase_auth/firebase_token
 
 import std/net (httpRequest)
 import std/json (decode, encode, jo, kv, js, getString, getArray)

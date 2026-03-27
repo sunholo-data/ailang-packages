@@ -1,25 +1,23 @@
 [package]
 name = "sunholo/auth"
-version = "0.3.1"
+version = "0.4.0"
 edition = "1"
 ailang = ">=0.9.5"
-description = "API key validation, bearer token extraction, Firebase ID token verification (REST and local JWT/RSA)"
+description = "API key validation via hash comparison, bearer token extraction"
 license = "Apache-2.0"
 
 [exports]
 modules = [
   "sunholo/auth/keys",
-  "sunholo/auth/bearer",
-  "sunholo/auth/firebase_token",
-  "sunholo/auth/firebase_jwt"
+  "sunholo/auth/bearer"
 ]
 
 [effects]
-max = ["Net", "Env"]
+max = []
 
 [metadata]
-tags = ["auth", "security", "api-key", "firebase", "jwt", "rsa"]
-ai_summary = "Validate API keys via hash comparison, extract bearer tokens, Firebase ID token verification (REST API or local JWT/RSA)"
+tags = ["auth", "security", "api-key", "bearer"]
+ai_summary = "Pure API key validation (SHA-256 hash comparison, constant-time) and bearer token extraction"
 repository = "https://github.com/sunholo-data/ailang-packages/tree/main/packages/auth"
 homepage = "https://ailang.sunholo.com/docs/packages/sunholo/auth"
 license_url = "https://github.com/sunholo-data/ailang-packages/blob/main/LICENSE"
