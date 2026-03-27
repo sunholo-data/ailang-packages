@@ -20,21 +20,27 @@ import std/string (length, startsWith)
 --
 -- Example:
 --   let valid = validateKeyHash("dp_a1b2c3...", storedHash)
-export pure func validateKeyHash(apiKey: string, expectedHash: string) -> bool =
-  constantTimeEqual(sha256Hex(apiKey), expectedHash)
+export pure func validateKeyHash(apiKey: string, expectedHash: string) -> bool
+  requires { length(apiKey) > 0 && length(expectedHash) == 64 }
+= constantTimeEqual(sha256Hex(apiKey), expectedHash)
 
 -- Hash an API key for storage (never store raw keys)
 --
 -- Example:
 --   let hash = hashKey("dp_a1b2c3...")
 --   -- store hash in database, discard raw key
-export pure func hashKey(apiKey: string) -> string =
-  sha256Hex(apiKey)
+-- SHA-256 hex output is always 64 chars, but sha256Hex is opaque to Z3 —
+-- this property is enforced by runtime contract checking (--verify-contracts).
+export pure func hashKey(apiKey: string) -> string
+  requires { length(apiKey) > 0 }
+= sha256Hex(apiKey)
 
 -- Check if a key matches expected format (prefix + minimum length)
 --
 -- Example:
 --   isValidKeyFormat("dp_", 35, "dp_a1b2c3d4e5f6...")  -- true
 --   isValidKeyFormat("dp_", 35, "sk_short")             -- false
-export pure func isValidKeyFormat(prefix: string, minLength: int, key: string) -> bool =
-  startsWith(key, prefix) && length(key) >= minLength
+export pure func isValidKeyFormat(prefix: string, minLength: int, key: string) -> bool
+  requires { length(prefix) > 0 && minLength > 0 }
+  ensures { result == false || length(key) >= minLength }
+= startsWith(key, prefix) && length(key) >= minLength

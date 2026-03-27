@@ -30,7 +30,9 @@ export type FirebaseUser = {
 -- Verify a Firebase ID token against the Identity Toolkit REST API.
 -- Requires FIREBASE_WEB_API_KEY env var to be set.
 -- Returns the user's uid and email on success.
-export func verifyIdToken(idToken: string) -> Result[FirebaseUser, string] ! {Net, Env} {
+export func verifyIdToken(idToken: string) -> Result[FirebaseUser, string] ! {Net, Env}
+  requires { length(idToken) > 0 }
+{
   let apiKey = getEnvOr("FIREBASE_WEB_API_KEY", "");
   if length(apiKey) == 0 then
     Err("FIREBASE_WEB_API_KEY not configured")

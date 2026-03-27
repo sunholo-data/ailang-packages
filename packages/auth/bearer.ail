@@ -14,10 +14,13 @@ import std/option (Option, Some, None)
 -- "Bearer sk-abc123..." → Some("sk-abc123...")
 -- "Basic xxx" → None
 -- "" → None
+-- Z3 cannot verify Option[string] return type (sort encoding limitation).
+-- The implication (Some → length(header) >= 7) holds but is runtime-only.
 export pure func extractBearer(header: string) -> Option[string] =
   if startsWith(header, "Bearer ") then Some(substring(header, 7, length(header)))
   else None
 
 -- Check if header contains a bearer token
-export pure func hasBearer(header: string) -> bool =
-  startsWith(header, "Bearer ")
+export pure func hasBearer(header: string) -> bool
+  ensures { result == false || length(header) >= 7 }
+= startsWith(header, "Bearer ")

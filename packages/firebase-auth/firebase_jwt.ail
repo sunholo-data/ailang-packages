@@ -73,7 +73,9 @@ export pure func verifyFirebaseJWT(
   token: string,
   projectId: string,
   keys: Json
-) -> Result[FirebaseUser, string] = {
+) -> Result[FirebaseUser, string]
+  requires { length(token) > 0 && length(projectId) > 0 }
+= {
   match verifyWithKid(token, keys) {
     Err(e) => Err("JWT verification failed: " ++ e),
     Ok(claims) => {
@@ -103,7 +105,9 @@ export func verifyFirebaseJWTFull(
   token: string,
   projectId: string,
   nowUnix: int
-) -> Result[FirebaseUser, string] ! {Net} = {
+) -> Result[FirebaseUser, string] ! {Net}
+  requires { length(token) > 0 && length(projectId) > 0 && nowUnix > 0 }
+= {
   match fetchFirebasePublicKeys() {
     Err(e) => Err(e),
     Ok(keys) =>
