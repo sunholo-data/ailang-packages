@@ -1,0 +1,82 @@
+-- Firebase ID token verification via REST API
+--
+-- Verifies Firebase ID tokens by calling the Identity Toolkit REST API.
+-- This avoids needing JWT/RSA verification in AILANG — just an HTTP call.
+--
+-- Usage:
+--   import pkg/sunholo/auth/firebase_token (verifyIdToken)
+--
+--   match verifyIdToken(idToken) {
+--     Ok(user) => println("Verified: " ++ user.uid),
+--     Err(e) => println("Auth failed: " ++ e)
+--   }
+
+module sunholo/auth/firebase_token
+
+import std/net (httpRequest)
+import std/json (decode, encode, jo, kv, js, getString, getArray)
+import std/option (getOrElse, isSome)
+import std/result (Ok, Err)
+import std/env (getEnvOr)
+import std/string (length, substring)
+import std/list (nth)
+
+-- Verified Firebase user identity
+export type FirebaseUser = {
+  uid: string,
+  email: string
+}
+
+-- Verify a Firebase ID token against the Identity Toolkit REST API.
+-- Requires FIREBASE_WEB_API_KEY env var to be set.
+-- Returns the user's uid and email on success.
+export func verifyIdToken(idToken: string) -> Result[FirebaseUser, string] ! {Net, Env} {
+  let apiKey = getEnvOr("FIREBASE_WEB_API_KEY", "");
+  if length(apiKey) == 0 then
+    Err("FIREBASE_WEB_API_KEY not configured")
+  else if length(idToken) == 0 then
+    Err("Empty ID token")
+  else {
+    let url = "https://identitytoolkit.googleapis.com/v1/accounts:lookup?key=" ++ apiKey;
+    let body = encode(jo([kv("idToken", js(idToken))]));
+    let headers = [{ name: "Content-Type", value: "application/json" }];
+    match httpRequest("POST", url, headers, body) {
+      Ok(response) =>
+        if response.ok then
+          firebaseTokenParseResponse(response.body)
+        else {
+          -- Truncate body to avoid newlines in Firebase error responses breaking JSON serialization
+          let bodyLen = length(response.body);
+          let bodyPreview = if bodyLen > 100 then substring(response.body, 0, 100) else response.body;
+          Err("Firebase token verification failed: HTTP " ++ show(response.status) ++ " " ++ bodyPreview)
+        },
+      Err(e) => Err("Firebase token verification network error: " ++ show(e))
+    }
+  }
+}
+
+-- Parse the Identity Toolkit response to extract uid and email.
+-- Response format: {"users": [{"localId": "uid", "email": "..."}]}
+func firebaseTokenParseResponse(body: string) -> Result[FirebaseUser, string] ! {} {
+  match decode(body) {
+    Ok(json) => {
+      let usersOpt = getArray(json, "users");
+      if isSome(usersOpt) then {
+        let users = getOrElse(usersOpt, []);
+        match nth(users, 0) {
+          Some(user) => {
+            let uid = getOrElse(getString(user, "localId"), "");
+            let email = getOrElse(getString(user, "email"), "");
+            if length(uid) > 0 then
+              Ok({ uid: uid, email: email })
+            else
+              Err("Firebase token valid but no localId in response")
+          },
+          None => Err("Firebase token valid but empty users array")
+        }
+      } else
+        Err("Firebase token invalid or expired: " ++ body)
+    },
+    Err(e) => Err("Failed to parse Firebase response: " ++ e)
+  }
+}
