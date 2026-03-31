@@ -16,7 +16,7 @@ type ProposalSummary = {
   description: string,
   currentPlan: string,
   targetPlan: string,
-  pageLimit: string,
+  requestLimit: string,
   documentLimit: string,
   apiAccess: string
 }
@@ -45,7 +45,7 @@ export pure func summarizeProposal(
         description: "Upgrade from " ++ currentPlanName ++ " to " ++ target.name ++ ": " ++ reason,
         currentPlan: currentPlanName,
         targetPlan: target.name,
-        pageLimit: show(target.monthlyPageLimit) ++ " pages/month",
+        requestLimit: show(target.monthlyRequestLimit) ++ " requests/month",
         documentLimit: show(target.monthlyDocumentLimit) ++ " documents/month",
         apiAccess: if target.apiAccess then "enabled" else "disabled"
       })

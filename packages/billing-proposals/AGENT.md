@@ -15,7 +15,7 @@ import pkg/sunholo/billing_entitlements/plan (defaultCatalog)
 -- Agent creates a payment proposal
 let prop = createProposal(
   "prop_abc", "uid_123", "pro_monthly",
-  "Monthly page limit nearly exhausted",
+  "Monthly request limit nearly exhausted",
   Agent("docparse-assistant"), "2026-03-23T12:00:00Z"
 )
 
@@ -28,8 +28,8 @@ if canCreateApprovalLink(prop) then
 else ()
 
 -- Generate human-readable summary
-match summarizeProposal("pro_monthly", "free", defaultCatalog(), "page limit reached") {
-  Ok(summary) => -- summary.description, summary.pageLimit, etc.
+match summarizeProposal("pro_monthly", "free", defaultCatalog(), "request limit reached") {
+  Ok(summary) => -- summary.description, summary.requestLimit, etc.
   Err(e) => -- unknown plan
 }
 ```
