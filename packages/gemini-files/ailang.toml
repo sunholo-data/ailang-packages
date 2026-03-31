@@ -1,0 +1,30 @@
+[package]
+name = "sunholo/gemini_files"
+version = "0.1.0"
+edition = "1"
+ailang = ">=0.9.5"
+description = "Upload files for Gemini AI — GCS (Vertex AI) and AI Studio Files API, with auto-backend detection"
+license = "Apache-2.0"
+
+[exports]
+modules = [
+  "sunholo/gemini_files/endpoints",
+  "sunholo/gemini_files/upload"
+]
+
+[dependencies]
+"sunholo/gcp_auth" = { path = "../gcp-auth" }
+"sunholo/http_helpers" = { path = "../http-helpers" }
+
+[effects]
+max = ["Net", "FS", "Env", "Clock"]
+
+[metadata]
+tags = ["gemini", "files-api", "gcs", "upload", "pdf", "vertex-ai"]
+ai_summary = "Upload large files (PDF, images) for Gemini AI calls. Auto-detects backend: GCS for Vertex AI (ADC), or AI Studio Files API (API key). Returns file URI for use in multimodal AI requests."
+repository = "https://github.com/sunholo-data/ailang-packages/tree/main/packages/gemini-files"
+homepage = "https://ailang.sunholo.com/docs/packages/sunholo/gemini_files"
+license_url = "https://github.com/sunholo-data/ailang-packages/blob/main/LICENSE"
+
+[stability]
+level = "experimental"
