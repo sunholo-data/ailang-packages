@@ -7,7 +7,7 @@
 --   import pkg/sunholo/docparse_access_gate/usage_recording (recordSuccessfulParse)
 --
 --   -- After a successful parse:
---   let _ = recordSuccessfulParse("uid_123", "2026_03", 12, 1048576, 3)
+--   let _ = recordSuccessfulParse("uid_123", "2026_03", 1, 1048576, 3)
 
 module sunholo/docparse_access_gate/usage_recording
 
@@ -23,7 +23,7 @@ import pkg/sunholo/billing_entitlements/usage_policy (applyDelta, parseDelta, em
 export func recordSuccessfulParse(
   principalId: string,
   currentPeriod: string,
-  pages: int,
+  requests: int,
   bytes: int,
   ocrPages: int
 ) -> Result[(), string] ! {Net, FS, Env} =
@@ -31,6 +31,6 @@ export func recordSuccessfulParse(
     Ok(u) => u,
     Err(_) => emptyUsage()
   }
-  in let delta = parseDelta(pages, bytes, ocrPages)
+  in let delta = parseDelta(requests, bytes, ocrPages)
   in let updated = applyDelta(current, delta)
   in putUsage(principalId, currentPeriod, updated)

@@ -15,7 +15,7 @@ match authorizeParse("uid_123", 5, true, "2026_03") {
     -- Proceed with parse...
     let result = doParse(file);
     -- After successful parse:
-    let _ = recordSuccessfulParse("uid_123", "2026_03", result.pages, result.bytes, result.ocrPages);
+    let _ = recordSuccessfulParse("uid_123", "2026_03", result.requests, result.bytes, result.ocrPages);
     Ok(result)
   },
   Ok(Deny(reason)) => Err("Forbidden: " ++ reason),
@@ -32,7 +32,7 @@ match authorizeParse("uid_123", 5, true, "2026_03") {
 | Function | Module | Signature | Description |
 |----------|--------|-----------|-------------|
 | `authorizeParse` | parse_authorization | `(principalId, fileSizeMb, isApiRequest, period) -> Result[AllowDecision, string] ! {Net, FS, Env}` | Check if parse is allowed |
-| `recordSuccessfulParse` | usage_recording | `(principalId, period, pages, bytes, ocrPages) -> Result[(), string] ! {Net, FS, Env}` | Record usage after parse |
+| `recordSuccessfulParse` | usage_recording | `(principalId, period, requests, bytes, ocrPages) -> Result[(), string] ! {Net, FS, Env}` | Record usage after parse |
 
 ## Design decisions
 - **Fail-open**: If Firestore is unavailable, falls back to free tier (availability > enforcement)

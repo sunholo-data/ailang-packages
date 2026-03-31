@@ -6,14 +6,14 @@ module sunholo/billing_entitlements/capability_check_test
 
 import ./entitlement (Entitlements, resolveEntitlements, freeEntitlements)
 import ./capability_check (canParse, canUseApi, AllowDecision, ParseRequest)
-import ./quota_policy (isOverPageLimit, isOverDocumentLimit, remainingPages, remainingDocuments, pageUsagePercent, isNearLimit)
+import ./quota_policy (isOverRequestLimit, isOverDocumentLimit, remainingRequests, remainingDocuments, requestUsagePercent, isNearLimit)
 import ./usage_policy (applyDelta, emptyUsage, parseDelta)
 import ./plan (Plan)
 
 -- Test fixture: known plan values for deterministic assertions
 func testCatalog() -> [{key: string, plan: Plan}] = [
-  { key: "free", plan: { name: "free", monthlyPageLimit: 100, monthlyDocumentLimit: 20, maxFileSizeMb: 10, apiAccess: false, maxConcurrentJobs: 1 } },
-  { key: "pro_monthly", plan: { name: "pro", monthlyPageLimit: 5000, monthlyDocumentLimit: 500, maxFileSizeMb: 50, apiAccess: true, maxConcurrentJobs: 3 } }
+  { key: "free", plan: { name: "free", monthlyRequestLimit: 100, monthlyDocumentLimit: 20, maxFileSizeMb: 10, apiAccess: false, maxConcurrentJobs: 1 } },
+  { key: "pro_monthly", plan: { name: "pro", monthlyRequestLimit: 5000, monthlyDocumentLimit: 500, maxFileSizeMb: 50, apiAccess: true, maxConcurrentJobs: 3 } }
 ]
 
 func testFreeEnt(id: string) -> Entitlements = freeEntitlements(id, testCatalog())
@@ -59,7 +59,7 @@ test "canParse denies file exceeding size limit" {
   }
 }
 
-test "canParse denies when page limit reached" {
+test "canParse denies when request limit reached" {
   let ent = testFreeEnt("u5")
   in let req = { fileSizeMb: 5, isApiRequest: false }
   in match canParse(ent, req, 100, 0) {
@@ -87,7 +87,7 @@ test "canParse allows pro tier with large file under limit" {
   }
 }
 
-test "canParse denies pro tier at exact page limit" {
+test "canParse denies pro tier at exact request limit" {
   let sub = { status: "active", planKey: "pro_monthly", cancelAtPeriodEnd: false }
   in let ent = resolveEntitlements(sub, testCatalog(), "u8")
   in let req = { fileSizeMb: 1, isApiRequest: false }
@@ -115,12 +115,12 @@ test "canUseApi returns true for pro tier" {
 -- Quota policy tests
 -- ============================================================
 
-test "isOverPageLimit false when under limit" {
-  isOverPageLimit(testFreeEnt("u11"), 50) == false
+test "isOverRequestLimit false when under limit" {
+  isOverRequestLimit(testFreeEnt("u11"), 50) == false
 }
 
-test "isOverPageLimit true at exact limit" {
-  isOverPageLimit(testFreeEnt("u12"), 100) == true
+test "isOverRequestLimit true at exact limit" {
+  isOverRequestLimit(testFreeEnt("u12"), 100) == true
 }
 
 test "isOverDocumentLimit false when under" {
@@ -131,28 +131,28 @@ test "isOverDocumentLimit true at limit" {
   isOverDocumentLimit(testFreeEnt("u14"), 20) == true
 }
 
-test "remainingPages returns correct value" {
-  remainingPages(testFreeEnt("u15"), 30) == 70
+test "remainingRequests returns correct value" {
+  remainingRequests(testFreeEnt("u15"), 30) == 70
 }
 
-test "remainingPages returns 0 when over limit" {
-  remainingPages(testFreeEnt("u16"), 150) == 0
+test "remainingRequests returns 0 when over limit" {
+  remainingRequests(testFreeEnt("u16"), 150) == 0
 }
 
 test "remainingDocuments returns correct value" {
   remainingDocuments(testFreeEnt("u17"), 5) == 15
 }
 
-test "pageUsagePercent at 50% usage" {
-  pageUsagePercent(testFreeEnt("u18"), 50) == 50
+test "requestUsagePercent at 50% usage" {
+  requestUsagePercent(testFreeEnt("u18"), 50) == 50
 }
 
-test "pageUsagePercent caps at 100" {
-  pageUsagePercent(testFreeEnt("u19"), 200) == 100
+test "requestUsagePercent caps at 100" {
+  requestUsagePercent(testFreeEnt("u19"), 200) == 100
 }
 
-test "pageUsagePercent is 0 with no usage" {
-  pageUsagePercent(testFreeEnt("u20"), 0) == 0
+test "requestUsagePercent is 0 with no usage" {
+  requestUsagePercent(testFreeEnt("u20"), 0) == 0
 }
 
 test "isNearLimit false at 79%" {
@@ -169,26 +169,26 @@ test "isNearLimit true at 80%" {
 
 test "emptyUsage is all zeros" {
   let u = emptyUsage()
-  in u.documentsParsed == 0 && u.pagesParsed == 0
+  in u.documentsParsed == 0 && u.requestsParsed == 0
     && u.bytesProcessed == 0 && u.ocrPagesParsed == 0
 }
 
 test "parseDelta creates single-doc delta" {
   let d = parseDelta(5, 1024, 2)
-  in d.documents == 1 && d.pages == 5 && d.bytes == 1024 && d.ocrPages == 2
+  in d.documents == 1 && d.requests == 5 && d.bytes == 1024 && d.ocrPages == 2
 }
 
 test "applyDelta adds to current usage" {
-  let current = { documentsParsed: 10, pagesParsed: 50, bytesProcessed: 5000, ocrPagesParsed: 3 }
+  let current = { documentsParsed: 10, requestsParsed: 50, bytesProcessed: 5000, ocrPagesParsed: 3 }
   in let delta = parseDelta(5, 1024, 2)
   in let updated = applyDelta(current, delta)
-  in updated.documentsParsed == 11 && updated.pagesParsed == 55
+  in updated.documentsParsed == 11 && updated.requestsParsed == 55
     && updated.bytesProcessed == 6024 && updated.ocrPagesParsed == 5
 }
 
 test "applyDelta from empty usage" {
   let delta = parseDelta(10, 2048, 0)
   in let updated = applyDelta(emptyUsage(), delta)
-  in updated.documentsParsed == 1 && updated.pagesParsed == 10
+  in updated.documentsParsed == 1 && updated.requestsParsed == 10
     && updated.bytesProcessed == 2048 && updated.ocrPagesParsed == 0
 }

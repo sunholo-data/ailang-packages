@@ -23,7 +23,7 @@ export func getUsage(principalId: string, period: string) -> Result[Usage, strin
     Ok(fields) =>
       Ok({
         documentsParsed: asInt(fields, "documentsParsed"),
-        pagesParsed: asInt(fields, "pagesParsed"),
+        requestsParsed: asInt(fields, "requestsParsed"),
         bytesProcessed: asInt(fields, "bytesProcessed"),
         ocrPagesParsed: asInt(fields, "ocrPagesParsed")
       })
@@ -35,7 +35,7 @@ export func putUsage(principalId: string, period: string, usage: Usage) -> Resul
 =
   let fields = jo([
     kv("documentsParsed", intVal(usage.documentsParsed)),
-    kv("pagesParsed", intVal(usage.pagesParsed)),
+    kv("requestsParsed", intVal(usage.requestsParsed)),
     kv("bytesProcessed", intVal(usage.bytesProcessed)),
     kv("ocrPagesParsed", intVal(usage.ocrPagesParsed))
   ])

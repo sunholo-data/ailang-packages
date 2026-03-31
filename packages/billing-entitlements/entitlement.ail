@@ -21,7 +21,7 @@ export type Entitlements = {
   apiAccess: bool,
   maxFileSizeMb: int,
   monthlyDocumentLimit: int,
-  monthlyPageLimit: int,
+  monthlyRequestLimit: int,
   maxConcurrentJobs: int,
   gracePeriod: bool
 }
@@ -90,7 +90,7 @@ func planToEntitlements(principalId: string, plan: Plan, status: string, grace: 
     apiAccess: plan.apiAccess,
     maxFileSizeMb: plan.maxFileSizeMb,
     monthlyDocumentLimit: plan.monthlyDocumentLimit,
-    monthlyPageLimit: plan.monthlyPageLimit,
+    monthlyRequestLimit: plan.monthlyRequestLimit,
     maxConcurrentJobs: plan.maxConcurrentJobs,
     gracePeriod: grace
   }

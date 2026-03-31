@@ -17,7 +17,7 @@ import std/list (map)
 -- A billing plan with capability limits
 export type Plan = {
   name: string,
-  monthlyPageLimit: int,
+  monthlyRequestLimit: int,
   monthlyDocumentLimit: int,
   maxFileSizeMb: int,
   apiAccess: bool,
@@ -35,7 +35,7 @@ export pure func fallbackPlan() -> Plan
 =
   {
     name: "fallback",
-    monthlyPageLimit: 1,
+    monthlyRequestLimit: 1,
     monthlyDocumentLimit: 1,
     maxFileSizeMb: 1,
     apiAccess: false,
@@ -80,7 +80,7 @@ func findPlan(entries: [{key: string, plan: Plan}], planKey: string) -> Result[P
   }
 
 -- Parse a JSON string into a plan catalog.
--- Expected format: [{"key":"free","name":"free","monthlyPageLimit":500,...}, ...]
+-- Expected format: [{"key":"free","name":"free","monthlyRequestLimit":500,...}, ...]
 -- Returns empty list on parse failure (fail-safe: no plans = fallback behavior).
 export pure func parseCatalog(json: string) -> [{key: string, plan: Plan}] =
   match decode(json) {
@@ -94,7 +94,7 @@ export pure func parseCatalog(json: string) -> [{key: string, plan: Plan}] =
 pure func planCatalogParseEntry(entry: Json) -> {key: string, plan: Plan} =
   let key = getOrElse(getString(entry, "key"), "unknown")
   in let name = getOrElse(getString(entry, "name"), key)
-  in let pageLimit = getOrElse(getInt(entry, "monthlyPageLimit"), 0)
+  in let requestLimit = getOrElse(getInt(entry, "monthlyRequestLimit"), 0)
   in let docLimit = getOrElse(getInt(entry, "monthlyDocumentLimit"), 0)
   in let fileSize = getOrElse(getInt(entry, "maxFileSizeMb"), 0)
   in let concurrent = getOrElse(getInt(entry, "maxConcurrentJobs"), 1)
@@ -106,7 +106,7 @@ pure func planCatalogParseEntry(entry: Json) -> {key: string, plan: Plan} =
     key: key,
     plan: {
       name: name,
-      monthlyPageLimit: pageLimit,
+      monthlyRequestLimit: requestLimit,
       monthlyDocumentLimit: docLimit,
       maxFileSizeMb: fileSize,
       apiAccess: apiFlag,

@@ -26,7 +26,7 @@ export func getEntitlements(principalId: string) -> Result[Entitlements, string]
         apiAccess: asBoolField(fields, "apiAccess"),
         maxFileSizeMb: asInt(fields, "maxFileSizeMb"),
         monthlyDocumentLimit: asInt(fields, "monthlyDocumentLimit"),
-        monthlyPageLimit: asInt(fields, "monthlyPageLimit"),
+        monthlyRequestLimit: asInt(fields, "monthlyRequestLimit"),
         maxConcurrentJobs: asInt(fields, "maxConcurrentJobs"),
         gracePeriod: asBoolField(fields, "gracePeriod")
       })
@@ -44,7 +44,7 @@ export func putEntitlements(ent: Entitlements) -> Result[(), string] ! {Net, FS,
     kv("apiAccess", boolVal(ent.apiAccess)),
     kv("maxFileSizeMb", intVal(ent.maxFileSizeMb)),
     kv("monthlyDocumentLimit", intVal(ent.monthlyDocumentLimit)),
-    kv("monthlyPageLimit", intVal(ent.monthlyPageLimit)),
+    kv("monthlyRequestLimit", intVal(ent.monthlyRequestLimit)),
     kv("maxConcurrentJobs", intVal(ent.maxConcurrentJobs)),
     kv("gracePeriod", boolVal(ent.gracePeriod))
   ])

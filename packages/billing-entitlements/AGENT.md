@@ -10,7 +10,7 @@ Use for billing authorization decisions: checking if a user can perform an actio
 import pkg/sunholo/billing_entitlements/plan (lookupPlan, parseCatalog, fallbackPlan, freePlanFromCatalog)
 import pkg/sunholo/billing_entitlements/entitlement (resolveEntitlements, freeEntitlements)
 import pkg/sunholo/billing_entitlements/capability_check (canParse, AllowDecision, Allow, Deny)
-import pkg/sunholo/billing_entitlements/quota_policy (remainingPages, isNearLimit)
+import pkg/sunholo/billing_entitlements/quota_policy (remainingRequests, isNearLimit)
 import pkg/sunholo/billing_entitlements/usage_policy (parseDelta, applyDelta, emptyUsage)
 
 -- Load plan catalog from config (env var)
@@ -34,8 +34,8 @@ let freeEnt = freeEntitlements("uid_456", catalog)
 ## Config format (BILLING_PLAN_CATALOG)
 ```json
 [
-  {"key": "free", "name": "free", "monthlyPageLimit": 500, "monthlyDocumentLimit": 50, "maxFileSizeMb": 10, "apiAccess": true, "maxConcurrentJobs": 1},
-  {"key": "pro_monthly", "name": "pro", "monthlyPageLimit": 10000, "monthlyDocumentLimit": 1000, "maxFileSizeMb": 50, "apiAccess": true, "maxConcurrentJobs": 5}
+  {"key": "free", "name": "free", "monthlyRequestLimit": 500, "monthlyDocumentLimit": 50, "maxFileSizeMb": 10, "apiAccess": true, "maxConcurrentJobs": 1},
+  {"key": "pro_monthly", "name": "pro", "monthlyRequestLimit": 10000, "monthlyDocumentLimit": 1000, "maxFileSizeMb": 50, "apiAccess": true, "maxConcurrentJobs": 5}
 ]
 ```
 
@@ -44,18 +44,18 @@ let freeEnt = freeEntitlements("uid_456", catalog)
 | Function | Module | Signature | Description |
 |----------|--------|-----------|-------------|
 | `parseCatalog` | plan | `(json: string) -> [{key, plan}]` | Parse JSON config into plan catalog |
-| `fallbackPlan` | plan | `() -> Plan` | Minimal safe fallback (1 page, no API) |
+| `fallbackPlan` | plan | `() -> Plan` | Minimal safe fallback (1 request, no API) |
 | `freePlanFromCatalog` | plan | `(catalog) -> Plan` | Look up "free" plan, fall back to fallbackPlan |
 | `lookupPlan` | plan | `(catalog, key) -> Result[Plan, string]` | Find plan by key |
 | `resolveEntitlements` | entitlement | `(SubscriptionState, catalog, principalId) -> Entitlements` | Derive capabilities from subscription |
 | `freeEntitlements` | entitlement | `(principalId, catalog) -> Entitlements` | Free tier entitlements from config |
-| `canParse` | capability_check | `(Entitlements, ParseRequest, pagesUsed, docsUsed) -> AllowDecision` | Authorization check |
+| `canParse` | capability_check | `(Entitlements, ParseRequest, requestsUsed, docsUsed) -> AllowDecision` | Authorization check |
 | `canUseApi` | capability_check | `(Entitlements) -> bool` | API access check |
-| `isOverPageLimit` | quota_policy | `(Entitlements, used) -> bool` | Page limit exceeded? |
-| `remainingPages` | quota_policy | `(Entitlements, used) -> int` | Pages remaining |
-| `isNearLimit` | quota_policy | `(Entitlements, pagesUsed) -> bool` | >80% quota used? |
+| `isOverRequestLimit` | quota_policy | `(Entitlements, used) -> bool` | Request limit exceeded? |
+| `remainingRequests` | quota_policy | `(Entitlements, used) -> int` | Requests remaining |
+| `isNearLimit` | quota_policy | `(Entitlements, requestsUsed) -> bool` | >80% quota used? |
 | `applyDelta` | usage_policy | `(Usage, UsageDelta) -> Usage` | Apply usage delta |
-| `parseDelta` | usage_policy | `(pages, bytes, ocrPages) -> UsageDelta` | Create delta from parse |
+| `parseDelta` | usage_policy | `(requests, bytes, ocrPages) -> UsageDelta` | Create delta from parse |
 | `emptyUsage` | usage_policy | `() -> Usage` | Zero usage record |
 
 ## Common patterns
