@@ -57,7 +57,6 @@ export func main() -> () ! {IO, FS, Net} =
 | [sunholo/billing_store](packages/billing-store/) | Firestore CRUD for billing records (customers, subscriptions, usage) | Net, FS, Env | [Guide](packages/billing-store/AGENT.md) |
 | [sunholo/billing_stripe](packages/billing-stripe/) | Stripe adapter: checkout, portal, webhooks, event mapping | Net, Env | [Guide](packages/billing-stripe/AGENT.md) |
 | [sunholo/billing_service_api](packages/billing-service-api/) | HTTP handlers for billing Cloud Run service | Net, FS, Env, IO | [Guide](packages/billing-service-api/AGENT.md) |
-| [sunholo/docparse_access_gate](packages/docparse-access-gate/) | Entitlement enforcement and usage recording for DocParse | Net, FS, Env | [Guide](packages/docparse-access-gate/AGENT.md) |
 
 ## AGENT.md — AI Discovery
 
@@ -88,7 +87,6 @@ ailang-packages/
     billing-store/         # sunholo/billing_store
     billing-stripe/        # sunholo/billing_stripe
     billing-service-api/   # sunholo/billing_service_api
-    docparse-access-gate/  # sunholo/docparse_access_gate
 ```
 
 ### Using git deps with subdir
