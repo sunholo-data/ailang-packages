@@ -14,7 +14,7 @@ module sunholo/gcs_storage/uri
 
 import std/string (length, substring, find, contains)
 import std/result (Ok, Err)
-import std/option (Some, None)
+-- std/option not needed: find() returns int (-1 or index), not Option
 
 -- Parsed components of a gs:// URI.
 export type GcsRef = {
@@ -45,9 +45,10 @@ export pure func parseGcsUri(uri: string) -> Result[GcsRef, string] {
   else {
     let rest = substring(uri, 5, length(uri));
     if length(rest) == 0 then Err("gcs_storage: empty bucket in URI: " ++ uri)
-    else match find(rest, "/") {
-      None => Err("gcs_storage: no object path in URI: " ++ uri),
-      Some(slashIdx) => {
+    else {
+      let slashIdx = find(rest, "/");
+      if slashIdx < 0 then Err("gcs_storage: no object path in URI: " ++ uri)
+      else {
         let bucket = substring(rest, 0, slashIdx);
         let object = substring(rest, slashIdx + 1, length(rest));
         if length(bucket) == 0 then Err("gcs_storage: empty bucket in URI: " ++ uri)
