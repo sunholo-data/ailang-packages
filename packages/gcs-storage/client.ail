@@ -1,0 +1,148 @@
+-- GCS client — download objects and initiate resumable uploads.
+--
+-- Uses ADC (Application Default Credentials) via sunholo/gcp_auth.
+-- Designed for Cloud Run services that need to read/write GCS objects.
+--
+-- Usage:
+--   import pkg/sunholo/gcs_storage/client (downloadToTemp, initResumableUpload)
+--
+--   -- Download a file from GCS to /tmp
+--   match downloadToTemp("gs://bucket/path/file.pdf") {
+--     Ok(localPath) => readFile(localPath),
+--     Err(e) => "download failed: " ++ e
+--   }
+--
+--   -- Get a resumable upload URL for direct client upload
+--   match initResumableUpload("bucket", "prefix/user123", "doc.pdf", "application/pdf") {
+--     Ok(result) => result.uploadUrl,  -- client PUTs file here
+--     Err(e) => "upload init failed: " ++ e
+--   }
+
+module sunholo/gcs_storage/client
+
+import std/net (httpRequest)
+import std/fs (writeFile)
+import std/string (length, intToStr, substring, toLower)
+import std/list (foldl)
+import std/result (Ok, Err)
+import std/clock (now)
+import pkg/sunholo/gcp_auth/token (getAccessToken)
+import pkg/sunholo/gcs_storage/uri (parseGcsUri, gcsDownloadUrl, gcsResumableUploadUrl, gcsUri)
+
+-- Result of a resumable upload initiation.
+export type ResumableUpload = {
+  uploadUrl: string,  -- pre-authenticated URL; client PUTs file content here
+  gcsRef: string      -- gs:// URI of the object (for use after upload completes)
+}
+
+-- Download a GCS object to /tmp/ and return the local file path.
+-- The gs:// URI must be valid (use validateGcsUri first for untrusted input).
+export func downloadToTemp(gsUri: string) -> Result[string, string] ! {Net, FS, Env} {
+  match parseGcsUri(gsUri) {
+    Err(e) => Err(e),
+    Ok(ref) => {
+      match getAccessToken() {
+        Err(e) => Err("gcs_storage: auth failed: " ++ e),
+        Ok(token) => {
+          let url = gcsDownloadUrl(ref.bucket, ref.object);
+          let headers = [
+            { name: "Authorization", value: "Bearer " ++ token }
+          ];
+          match httpRequest("GET", url, headers, "") {
+            Err(e) => Err("gcs_storage: download network error: " ++ show(e)),
+            Ok(resp) =>
+              if resp.ok then {
+                let ts = intToStr(now());
+                let basename = gcsClientBasename(ref.object);
+                let localPath = "/tmp/gcs-" ++ ts ++ "-" ++ basename;
+                let _ = writeFile(localPath, resp.body);
+                Ok(localPath)
+              }
+              else Err("gcs_storage: download failed HTTP " ++ intToStr(resp.status) ++ ": " ++ resp.body)
+          }
+        }
+      }
+    }
+  }
+}
+
+-- Initiate a resumable upload session on GCS.
+-- Returns a pre-authenticated upload URL that the client can PUT file content to directly.
+-- The upload URL is valid for ~1 week (GCS default) and does not require further auth.
+--
+-- bucket: GCS bucket name (e.g. from GCS_TEMP_BUCKET env var)
+-- objectPrefix: path prefix for the object (e.g. "docparse-temp/user123")
+-- filename: original filename (sanitized for object naming)
+-- mimeType: content type (e.g. "application/pdf")
+export func initResumableUpload(bucket: string, objectPrefix: string, filename: string, mimeType: string)
+  -> Result[ResumableUpload, string] ! {Net, FS, Env, Clock} {
+  match getAccessToken() {
+    Err(e) => Err("gcs_storage: auth failed: " ++ e),
+    Ok(token) => {
+      let ts = intToStr(now());
+      let safeName = gcsClientSanitize(filename);
+      let objectName = objectPrefix ++ "/" ++ ts ++ "-" ++ safeName;
+      let url = gcsResumableUploadUrl(bucket, objectName);
+
+      let headers = [
+        { name: "Authorization", value: "Bearer " ++ token },
+        { name: "Content-Type", value: "application/json" },
+        { name: "X-Upload-Content-Type", value: mimeType }
+      ];
+
+      -- POST with empty JSON body initiates the resumable session
+      match httpRequest("POST", url, headers, "{}") {
+        Err(e) => Err("gcs_storage: resumable upload init network error: " ++ show(e)),
+        Ok(resp) =>
+          if resp.ok then {
+            let ref = gcsUri(bucket, objectName);
+            let uploadUrl = gcsClientFindHeader(resp.headers, "location");
+            if length(uploadUrl) == 0 then
+              Err("gcs_storage: resumable upload init succeeded but no Location header in response")
+            else
+              Ok({uploadUrl: uploadUrl, gcsRef: ref})
+          }
+          else Err("gcs_storage: resumable upload init failed HTTP " ++ intToStr(resp.status) ++ ": " ++ resp.body)
+      }
+    }
+  }
+}
+
+-- Extract basename from an object path (everything after the last /).
+-- Uses find to locate the last "/" and take everything after it.
+pure func gcsClientBasename(path: string) -> string {
+  gcsClientFindLastSlash(path, length(path) - 1)
+}
+
+-- Scan backwards for the last "/" to extract the basename.
+pure func gcsClientFindLastSlash(path: string, i: int) -> string =
+  if i < 0 then path
+  else if substring(path, i, i + 1) == "/" then substring(path, i + 1, length(path))
+  else gcsClientFindLastSlash(path, i - 1)
+
+-- Sanitize a filename for use as a GCS object name component.
+-- Replace spaces, slashes, and backslashes with underscores.
+pure func gcsClientSanitize(name: string) -> string =
+  gcsClientSanitizeChars(name, 0, length(name), "")
+
+pure func gcsClientSanitizeChars(s: string, i: int, len: int, acc: string) -> string {
+  if i >= len then acc
+  else {
+    let ch = substring(s, i, i + 1);
+    let safe = if ch == " " then "_"
+      else if ch == "/" then "_"
+      else if ch == "\\" then "_"
+      else ch;
+    gcsClientSanitizeChars(s, i + 1, len, acc ++ safe)
+  }
+}
+
+-- Find a header value by name (case-insensitive).
+-- Uses foldl to scan all headers — first match wins (accumulated into result).
+pure func gcsClientFindHeader(headers: [{name: string, value: string}], target: string) -> string {
+  let targetLower = toLower(target);
+  foldl(\acc h. if length(acc) > 0 then acc
+                else if toLower(h.name) == targetLower then h.value
+                else "",
+        "", headers)
+}

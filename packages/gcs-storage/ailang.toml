@@ -1,0 +1,29 @@
+[package]
+name = "sunholo/gcs_storage"
+version = "0.1.0"
+edition = "1"
+ailang = ">=0.9.5"
+description = "Google Cloud Storage operations — download, resumable upload URLs, URI validation"
+license = "Apache-2.0"
+
+[exports]
+modules = [
+  "sunholo/gcs_storage/uri",
+  "sunholo/gcs_storage/client"
+]
+
+[dependencies]
+"sunholo/gcp_auth" = { path = "../gcp-auth" }
+
+[effects]
+max = ["Net", "FS", "Env", "Clock"]
+
+[metadata]
+tags = ["gcp", "gcs", "storage", "upload", "download", "cloud-storage"]
+ai_summary = "Generic GCS operations for AILANG services. Download objects to temp files, initiate resumable uploads (returns pre-authenticated URL for direct client upload), validate and parse gs:// URIs."
+repository = "https://github.com/sunholo-data/ailang-packages/tree/main/packages/gcs-storage"
+homepage = "https://ailang.sunholo.com/docs/packages/sunholo/gcs_storage"
+license_url = "https://github.com/sunholo-data/ailang-packages/blob/main/LICENSE"
+
+[stability]
+level = "experimental"
