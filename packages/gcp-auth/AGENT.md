@@ -15,10 +15,10 @@ match getAccessToken() {
     -- Use token for authenticated API calls
     match authGet("https://storage.googleapis.com/...", token) {
       Ok(resp) => resp.body,
-      Err(e) => "API error: " ++ e
+      Err(e) => "API error: ${e}"
     }
   },
-  Err(e) => "Auth failed: " ++ e
+  Err(e) => "Auth failed: ${e}"
 }
 
 -- Detect GCP project (checks GOOGLE_CLOUD_PROJECT env, then gcloud config, then ADC)
