@@ -58,7 +58,7 @@ export func uploadFile(base64Data: string, mimeType: string, displayName: string
 export func deleteFile(uploaded: UploadedFile) -> Result[(), string] ! {Net, FS, Env} {
   if uploaded.backend == "gcs" then deleteFromGcs(uploaded)
   else if uploaded.backend == "ai_studio" then deleteFromAiStudio(uploaded)
-  else Err("gemini_files: unknown backend: " ++ uploaded.backend)
+  else Err("gemini_files: unknown backend: ${uploaded.backend}")
 }
 
 -- === Backend A: GCS Upload ===
@@ -67,21 +67,21 @@ func uploadToGcs(base64Data: string, mimeType: string, displayName: string, buck
   -> Result[UploadedFile, string] ! {Net, FS, Env} {
   -- Get OAuth2 token via ADC
   match getAccessToken() {
-    Err(e) => Err("gemini_files: GCS auth failed: " ++ e),
+    Err(e) => Err("gemini_files: GCS auth failed: ${e}"),
     Ok(token) => {
       -- Generate unique object name
       let ts = intToStr(now());
-      let objectName = "docparse-temp/" ++ ts ++ "-" ++ sanitizeName(displayName);
+      let objectName = "docparse-temp/${ts}-${sanitizeName(displayName)}";
       let url = gcsUploadUrl(bucket, objectName);
 
       let headers = [
-        { name: "Authorization", value: "Bearer " ++ token },
+        { name: "Authorization", value: "Bearer ${token}" },
         { name: "Content-Type", value: mimeType },
         { name: "Content-Transfer-Encoding", value: "base64" }
       ];
 
       match httpRequest("POST", url, headers, base64Data) {
-        Err(e) => Err("gemini_files: GCS upload network error: " ++ show(e)),
+        Err(e) => Err("gemini_files: GCS upload network error: ${show(e)}"),
         Ok(resp) =>
           if resp.ok then Ok({
             uri: gcsUri(bucket, objectName),
@@ -89,7 +89,7 @@ func uploadToGcs(base64Data: string, mimeType: string, displayName: string, buck
             backend: "gcs",
             ref: objectName
           })
-          else Err("gemini_files: GCS upload failed HTTP " ++ intToStr(resp.status) ++ ": " ++ resp.body)
+          else Err("gemini_files: GCS upload failed HTTP ${intToStr(resp.status)}: ${resp.body}")
       }
     }
   }
@@ -98,17 +98,17 @@ func uploadToGcs(base64Data: string, mimeType: string, displayName: string, buck
 func deleteFromGcs(uploaded: UploadedFile) -> Result[(), string] ! {Net, FS, Env} {
   let bucket = getEnvOr("GCS_TEMP_BUCKET", "");
   match getAccessToken() {
-    Err(e) => Err("gemini_files: GCS auth failed on delete: " ++ e),
+    Err(e) => Err("gemini_files: GCS auth failed on delete: ${e}"),
     Ok(token) => {
       let url = gcsObjectUrl(bucket, uploaded.ref);
       let headers = [
-        { name: "Authorization", value: "Bearer " ++ token }
+        { name: "Authorization", value: "Bearer ${token}" }
       ];
       match httpRequest("DELETE", url, headers, "") {
-        Err(e) => Err("gemini_files: GCS delete network error: " ++ show(e)),
+        Err(e) => Err("gemini_files: GCS delete network error: ${show(e)}"),
         Ok(resp) =>
           if resp.ok then Ok(())
-          else Err("gemini_files: GCS delete failed HTTP " ++ intToStr(resp.status))
+          else Err("gemini_files: GCS delete failed HTTP ${intToStr(resp.status)}")
       }
     }
   }
@@ -122,30 +122,24 @@ func uploadToAiStudio(base64Data: string, mimeType: string, displayName: string,
   let boundary = "----AILANGFileBoundary";
 
   -- Build multipart/related body
-  let body = "--" ++ boundary ++ "\r\n" ++
-    "Content-Type: application/json\r\n\r\n" ++
-    encode(jo([kv("file", jo([kv("displayName", js(displayName))]))])) ++ "\r\n" ++
-    "--" ++ boundary ++ "\r\n" ++
-    "Content-Type: " ++ mimeType ++ "\r\n" ++
-    "Content-Transfer-Encoding: base64\r\n\r\n" ++
-    base64Data ++ "\r\n" ++
-    "--" ++ boundary ++ "--";
+  let metaJson = encode(jo([kv("file", jo([kv("displayName", js(displayName))]))]));
+  let body = "--${boundary}\r\nContent-Type: application/json\r\n\r\n${metaJson}\r\n--${boundary}\r\nContent-Type: ${mimeType}\r\nContent-Transfer-Encoding: base64\r\n\r\n${base64Data}\r\n--${boundary}--";
 
   let headers = [
-    { name: "Content-Type", value: "multipart/related; boundary=" ++ boundary }
+    { name: "Content-Type", value: "multipart/related; boundary=${boundary}" }
   ];
 
   match httpRequest("POST", url, headers, body) {
-    Err(e) => Err("gemini_files: AI Studio upload network error: " ++ show(e)),
+    Err(e) => Err("gemini_files: AI Studio upload network error: ${show(e)}"),
     Ok(resp) =>
       if resp.ok then parseAiStudioUploadResponse(resp.body, mimeType)
-      else Err("gemini_files: AI Studio upload failed HTTP " ++ intToStr(resp.status) ++ ": " ++ resp.body)
+      else Err("gemini_files: AI Studio upload failed HTTP ${intToStr(resp.status)}: ${resp.body}")
   }
 }
 
 func parseAiStudioUploadResponse(body: string, mimeType: string) -> Result[UploadedFile, string] {
   match decode(body) {
-    Err(e) => Err("gemini_files: AI Studio response parse error: " ++ e),
+    Err(e) => Err("gemini_files: AI Studio response parse error: ${e}"),
     Ok(json) => {
       let fileJson = match get(json, "file") {
         Some(f) => f,
@@ -160,7 +154,7 @@ func parseAiStudioUploadResponse(body: string, mimeType: string) -> Result[Uploa
         ref: name
       })
       else if length(name) > 0 then Ok({
-        uri: "https://generativelanguage.googleapis.com/v1beta/" ++ name,
+        uri: "https://generativelanguage.googleapis.com/v1beta/${name}",
         mimeType: mimeType,
         backend: "ai_studio",
         ref: name
@@ -174,10 +168,10 @@ func deleteFromAiStudio(uploaded: UploadedFile) -> Result[(), string] ! {Net, En
   let apiKey = getEnvOr("GOOGLE_API_KEY", "");
   let url = aiStudioFileUrl(apiKey, uploaded.ref);
   match httpRequest("DELETE", url, [], "") {
-    Err(e) => Err("gemini_files: AI Studio delete network error: " ++ show(e)),
+    Err(e) => Err("gemini_files: AI Studio delete network error: ${show(e)}"),
     Ok(resp) =>
       if resp.ok then Ok(())
-      else Err("gemini_files: AI Studio delete failed HTTP " ++ intToStr(resp.status))
+      else Err("gemini_files: AI Studio delete failed HTTP ${intToStr(resp.status)}")
   }
 }
 
@@ -197,6 +191,6 @@ pure func sanitizeChars(s: string, i: int, len: int, acc: string) -> string {
       else if ch == "/" then "_"
       else if ch == "\\" then "_"
       else ch;
-    sanitizeChars(s, i + 1, len, acc ++ safe)
+    sanitizeChars(s, i + 1, len, "${acc}${safe}")
   }
 }

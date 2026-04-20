@@ -13,14 +13,14 @@ match uploadFile(base64Data, "application/pdf", "contract.pdf") {
     -- Use uploaded.uri in AI calls:
     -- For GCS backend: "gs://bucket/docparse-temp/123-contract.pdf"
     -- For AI Studio:   "https://generativelanguage.googleapis.com/v1beta/files/abc123"
-    println("Uploaded: " ++ uploaded.uri);
+    println("Uploaded: ${uploaded.uri}");
 
     -- ... make AI calls with fileUri instead of inline data ...
 
     -- Cleanup
     deleteFile(uploaded)
   },
-  Err(e) => println("Upload unavailable, using inline: " ++ e)
+  Err(e) => println("Upload unavailable, using inline: ${e}")
 }
 ```
 
