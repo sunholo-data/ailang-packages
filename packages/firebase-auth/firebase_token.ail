@@ -7,8 +7,8 @@
 --   import pkg/sunholo/firebase_auth/firebase_token (verifyIdToken)
 --
 --   match verifyIdToken(idToken) {
---     Ok(user) => println("Verified: " ++ user.uid),
---     Err(e) => println("Auth failed: " ++ e)
+--     Ok(user) => println("Verified: ${user.uid}"),
+--     Err(e) => println("Auth failed: ${e}")
 --   }
 
 module sunholo/firebase_auth/firebase_token
@@ -39,7 +39,7 @@ export func verifyIdToken(idToken: string) -> Result[FirebaseUser, string] ! {Ne
   else if length(idToken) == 0 then
     Err("Empty ID token")
   else {
-    let url = "https://identitytoolkit.googleapis.com/v1/accounts:lookup?key=" ++ apiKey;
+    let url = "https://identitytoolkit.googleapis.com/v1/accounts:lookup?key=${apiKey}";
     let body = encode(jo([kv("idToken", js(idToken))]));
     let headers = [{ name: "Content-Type", value: "application/json" }];
     match httpRequest("POST", url, headers, body) {
@@ -50,9 +50,9 @@ export func verifyIdToken(idToken: string) -> Result[FirebaseUser, string] ! {Ne
           -- Truncate body to avoid newlines in Firebase error responses breaking JSON serialization
           let bodyLen = length(response.body);
           let bodyPreview = if bodyLen > 100 then substring(response.body, 0, 100) else response.body;
-          Err("Firebase token verification failed: HTTP " ++ show(response.status) ++ " " ++ bodyPreview)
+          Err("Firebase token verification failed: HTTP ${show(response.status)} ${bodyPreview}")
         },
-      Err(e) => Err("Firebase token verification network error: " ++ show(e))
+      Err(e) => Err("Firebase token verification network error: ${show(e)}")
     }
   }
 }
@@ -77,8 +77,8 @@ func firebaseTokenParseResponse(body: string) -> Result[FirebaseUser, string] ! 
           None => Err("Firebase token valid but empty users array")
         }
       } else
-        Err("Firebase token invalid or expired: " ++ body)
+        Err("Firebase token invalid or expired: ${body}")
     },
-    Err(e) => Err("Failed to parse Firebase response: " ++ e)
+    Err(e) => Err("Failed to parse Firebase response: ${e}")
   }
 }

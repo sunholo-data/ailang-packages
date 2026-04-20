@@ -9,12 +9,13 @@ module sunholo/billing_service_api/entitlements_handler
 
 import std/json (encode, jo, js, kv)
 import std/result (Ok, Err)
+import std/string (intToStr)
 import pkg/sunholo/billing_store/entitlements_repo (getEntitlements)
 import pkg/sunholo/billing_store/usage_repo (getUsage)
 import pkg/sunholo/billing_entitlements/entitlement (freeEntitlements)
 import pkg/sunholo/billing_entitlements/plan (Plan, parseCatalog)
 import pkg/sunholo/config/loader (optionalEnv)
-import pkg/sunholo/billing_entitlements/quota_policy (remainingRequests, remainingDocuments, requestUsagePercent)
+import pkg/sunholo/billing_entitlements/quota_policy (remainingRequests, remainingUnits, requestUsagePercent)
 
 -- Get current entitlements for the authenticated user
 @route("GET", "/billing/me/entitlements")
@@ -33,24 +34,24 @@ export func handleGetEntitlements(
   in -- Load current usage
   let usage = match getUsage(principalId, currentPeriod) {
     Ok(u) => u,
-    Err(_) => { documentsParsed: 0, requestsParsed: 0, bytesProcessed: 0, ocrRequestsParsed: 0 }
+    Err(_) => { unitsCompleted: 0, requests: 0, bytesProcessed: 0, subUnits: 0 }
   }
-  in let requestsLeft = remainingRequests(ent, usage.requestsParsed)
-  in let docsLeft = remainingDocuments(ent, usage.documentsParsed)
-  in let usagePct = requestUsagePercent(ent, usage.requestsParsed)
+  in let requestsLeft = remainingRequests(ent, usage.requests)
+  in let unitsLeft = remainingUnits(ent, usage.unitsCompleted)
+  in let usagePct = requestUsagePercent(ent, usage.requests)
   in Ok(encode(jo([
     kv("plan", js(ent.plan)),
     kv("status", js(ent.status)),
-    kv("canParse", js(if ent.canParse then "true" else "false")),
+    kv("canOperate", js(if ent.canOperate then "true" else "false")),
     kv("apiAccess", js(if ent.apiAccess then "true" else "false")),
-    kv("maxFileSizeMb", js(show(ent.maxFileSizeMb))),
-    kv("monthlyRequestLimit", js(show(ent.monthlyRequestLimit))),
-    kv("monthlyRequestsUsed", js(show(usage.requestsParsed))),
-    kv("remainingRequests", js(show(requestsLeft))),
-    kv("monthlyDocumentLimit", js(show(ent.monthlyDocumentLimit))),
-    kv("documentsUsed", js(show(usage.documentsParsed))),
-    kv("remainingDocuments", js(show(docsLeft))),
-    kv("usagePercent", js(show(usagePct))),
-    kv("maxConcurrentJobs", js(show(ent.maxConcurrentJobs))),
+    kv("maxFileSizeMb", js(intToStr(ent.maxFileSizeMb))),
+    kv("monthlyRequestLimit", js(intToStr(ent.monthlyRequestLimit))),
+    kv("monthlyRequestsUsed", js(intToStr(usage.requests))),
+    kv("remainingRequests", js(intToStr(requestsLeft))),
+    kv("monthlyUnitLimit", js(intToStr(ent.monthlyUnitLimit))),
+    kv("unitsUsed", js(intToStr(usage.unitsCompleted))),
+    kv("remainingUnits", js(intToStr(unitsLeft))),
+    kv("usagePercent", js(intToStr(usagePct))),
+    kv("maxConcurrentJobs", js(intToStr(ent.maxConcurrentJobs))),
     kv("gracePeriod", js(if ent.gracePeriod then "true" else "false"))
   ])))

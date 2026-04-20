@@ -18,7 +18,7 @@ import std/list (map)
 export type Plan = {
   name: string,
   monthlyRequestLimit: int,
-  monthlyDocumentLimit: int,
+  monthlyUnitLimit: int,
   maxFileSizeMb: int,
   apiAccess: bool,
   maxConcurrentJobs: int
@@ -36,7 +36,7 @@ export pure func fallbackPlan() -> Plan
   {
     name: "fallback",
     monthlyRequestLimit: 1,
-    monthlyDocumentLimit: 1,
+    monthlyUnitLimit: 1,
     maxFileSizeMb: 1,
     apiAccess: false,
     maxConcurrentJobs: 1
@@ -73,7 +73,7 @@ func findPlan(entries: [{key: string, plan: Plan}], planKey: string) -> Result[P
   }
 =
   match entries {
-    [] => Err("Unknown plan: " ++ planKey),
+    [] => Err("Unknown plan: ${planKey}"),
     entry :: rest =>
       if entry.key == planKey then Ok(entry.plan)
       else findPlan(rest, planKey)
@@ -95,7 +95,7 @@ pure func planCatalogParseEntry(entry: Json) -> {key: string, plan: Plan} =
   let key = getOrElse(getString(entry, "key"), "unknown")
   in let name = getOrElse(getString(entry, "name"), key)
   in let requestLimit = getOrElse(getInt(entry, "monthlyRequestLimit"), 0)
-  in let docLimit = getOrElse(getInt(entry, "monthlyDocumentLimit"), 0)
+  in let unitLimit = getOrElse(getInt(entry, "monthlyUnitLimit"), 0)
   in let fileSize = getOrElse(getInt(entry, "maxFileSizeMb"), 0)
   in let concurrent = getOrElse(getInt(entry, "maxConcurrentJobs"), 1)
   in let apiFlag = match get(entry, "apiAccess") {
@@ -107,7 +107,7 @@ pure func planCatalogParseEntry(entry: Json) -> {key: string, plan: Plan} =
     plan: {
       name: name,
       monthlyRequestLimit: requestLimit,
-      monthlyDocumentLimit: docLimit,
+      monthlyUnitLimit: unitLimit,
       maxFileSizeMb: fileSize,
       apiAccess: apiFlag,
       maxConcurrentJobs: concurrent

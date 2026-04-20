@@ -5,93 +5,93 @@
 module sunholo/billing_entitlements/capability_check_test
 
 import ./entitlement (Entitlements, resolveEntitlements, freeEntitlements)
-import ./capability_check (canParse, canUseApi, AllowDecision, ParseRequest)
-import ./quota_policy (isOverRequestLimit, isOverDocumentLimit, remainingRequests, remainingDocuments, requestUsagePercent, isNearLimit)
-import ./usage_policy (applyDelta, emptyUsage, parseDelta)
+import ./capability_check (canOperate, canUseApi, AllowDecision, OperationRequest)
+import ./quota_policy (isOverRequestLimit, isOverUnitLimit, remainingRequests, remainingUnits, requestUsagePercent, isNearLimit)
+import ./usage_policy (applyDelta, emptyUsage, usageDelta)
 import ./plan (Plan)
 
 -- Test fixture: known plan values for deterministic assertions
 func testCatalog() -> [{key: string, plan: Plan}] = [
-  { key: "free", plan: { name: "free", monthlyRequestLimit: 100, monthlyDocumentLimit: 20, maxFileSizeMb: 10, apiAccess: false, maxConcurrentJobs: 1 } },
-  { key: "pro_monthly", plan: { name: "pro", monthlyRequestLimit: 5000, monthlyDocumentLimit: 500, maxFileSizeMb: 50, apiAccess: true, maxConcurrentJobs: 3 } }
+  { key: "free", plan: { name: "free", monthlyRequestLimit: 100, monthlyUnitLimit: 20, maxFileSizeMb: 10, apiAccess: false, maxConcurrentJobs: 1 } },
+  { key: "pro_monthly", plan: { name: "pro", monthlyRequestLimit: 5000, monthlyUnitLimit: 500, maxFileSizeMb: 50, apiAccess: true, maxConcurrentJobs: 3 } }
 ]
 
 func testFreeEnt(id: string) -> Entitlements = freeEntitlements(id, testCatalog())
 
 -- ============================================================
--- canParse tests
+-- canOperate tests
 -- ============================================================
 
-test "canParse allows free tier web request under limits" {
+test "canOperate allows free tier web request under limits" {
   let ent = testFreeEnt("u1")
   in let req = { fileSizeMb: 5, isApiRequest: false }
-  in match canParse(ent, req, 0, 0) {
+  in match canOperate(ent, req, 0, 0) {
     Allow => true,
     Deny(_) => false
   }
 }
 
-test "canParse denies API request when apiAccess is false" {
+test "canOperate denies API request when apiAccess is false" {
   let ent = testFreeEnt("u2")
   in let req = { fileSizeMb: 5, isApiRequest: true }
-  in match canParse(ent, req, 0, 0) {
+  in match canOperate(ent, req, 0, 0) {
     Allow => false,
     Deny(msg) => length(msg) > 0
   }
 }
 
-test "canParse allows API request on pro tier" {
+test "canOperate allows API request on pro tier" {
   let sub = { status: "active", planKey: "pro_monthly", cancelAtPeriodEnd: false }
   in let ent = resolveEntitlements(sub, testCatalog(), "u3")
   in let req = { fileSizeMb: 25, isApiRequest: true }
-  in match canParse(ent, req, 100, 10) {
+  in match canOperate(ent, req, 100, 10) {
     Allow => true,
     Deny(_) => false
   }
 }
 
-test "canParse denies file exceeding size limit" {
+test "canOperate denies file exceeding size limit" {
   let ent = testFreeEnt("u4")
   in let req = { fileSizeMb: 15, isApiRequest: false }
-  in match canParse(ent, req, 0, 0) {
+  in match canOperate(ent, req, 0, 0) {
     Allow => false,
     Deny(msg) => length(msg) > 0
   }
 }
 
-test "canParse denies when request limit reached" {
+test "canOperate denies when request limit reached" {
   let ent = testFreeEnt("u5")
   in let req = { fileSizeMb: 5, isApiRequest: false }
-  in match canParse(ent, req, 100, 0) {
+  in match canOperate(ent, req, 100, 0) {
     Allow => false,
     Deny(_) => true
   }
 }
 
-test "canParse denies when document limit reached" {
+test "canOperate denies when unit limit reached" {
   let ent = testFreeEnt("u6")
   in let req = { fileSizeMb: 5, isApiRequest: false }
-  in match canParse(ent, req, 0, 20) {
+  in match canOperate(ent, req, 0, 20) {
     Allow => false,
     Deny(_) => true
   }
 }
 
-test "canParse allows pro tier with large file under limit" {
+test "canOperate allows pro tier with large file under limit" {
   let sub = { status: "active", planKey: "pro_monthly", cancelAtPeriodEnd: false }
   in let ent = resolveEntitlements(sub, testCatalog(), "u7")
   in let req = { fileSizeMb: 50, isApiRequest: false }
-  in match canParse(ent, req, 4999, 499) {
+  in match canOperate(ent, req, 4999, 499) {
     Allow => true,
     Deny(_) => false
   }
 }
 
-test "canParse denies pro tier at exact request limit" {
+test "canOperate denies pro tier at exact request limit" {
   let sub = { status: "active", planKey: "pro_monthly", cancelAtPeriodEnd: false }
   in let ent = resolveEntitlements(sub, testCatalog(), "u8")
   in let req = { fileSizeMb: 1, isApiRequest: false }
-  in match canParse(ent, req, 5000, 0) {
+  in match canOperate(ent, req, 5000, 0) {
     Allow => false,
     Deny(_) => true
   }
@@ -123,12 +123,12 @@ test "isOverRequestLimit true at exact limit" {
   isOverRequestLimit(testFreeEnt("u12"), 100) == true
 }
 
-test "isOverDocumentLimit false when under" {
-  isOverDocumentLimit(testFreeEnt("u13"), 19) == false
+test "isOverUnitLimit false when under" {
+  isOverUnitLimit(testFreeEnt("u13"), 19) == false
 }
 
-test "isOverDocumentLimit true at limit" {
-  isOverDocumentLimit(testFreeEnt("u14"), 20) == true
+test "isOverUnitLimit true at limit" {
+  isOverUnitLimit(testFreeEnt("u14"), 20) == true
 }
 
 test "remainingRequests returns correct value" {
@@ -139,8 +139,8 @@ test "remainingRequests returns 0 when over limit" {
   remainingRequests(testFreeEnt("u16"), 150) == 0
 }
 
-test "remainingDocuments returns correct value" {
-  remainingDocuments(testFreeEnt("u17"), 5) == 15
+test "remainingUnits returns correct value" {
+  remainingUnits(testFreeEnt("u17"), 5) == 15
 }
 
 test "requestUsagePercent at 50% usage" {
@@ -169,26 +169,26 @@ test "isNearLimit true at 80%" {
 
 test "emptyUsage is all zeros" {
   let u = emptyUsage()
-  in u.documentsParsed == 0 && u.requestsParsed == 0
-    && u.bytesProcessed == 0 && u.ocrPagesParsed == 0
+  in u.unitsCompleted == 0 && u.requests == 0
+    && u.bytesProcessed == 0 && u.subUnits == 0
 }
 
-test "parseDelta creates single-doc delta" {
-  let d = parseDelta(5, 1024, 2)
-  in d.documents == 1 && d.requests == 5 && d.bytes == 1024 && d.ocrPages == 2
+test "usageDelta creates single-unit delta" {
+  let d = usageDelta(5, 1024, 2)
+  in d.units == 1 && d.requests == 5 && d.bytes == 1024 && d.subUnits == 2
 }
 
 test "applyDelta adds to current usage" {
-  let current = { documentsParsed: 10, requestsParsed: 50, bytesProcessed: 5000, ocrPagesParsed: 3 }
-  in let delta = parseDelta(5, 1024, 2)
+  let current = { unitsCompleted: 10, requests: 50, bytesProcessed: 5000, subUnits: 3 }
+  in let delta = usageDelta(5, 1024, 2)
   in let updated = applyDelta(current, delta)
-  in updated.documentsParsed == 11 && updated.requestsParsed == 55
-    && updated.bytesProcessed == 6024 && updated.ocrPagesParsed == 5
+  in updated.unitsCompleted == 11 && updated.requests == 55
+    && updated.bytesProcessed == 6024 && updated.subUnits == 5
 }
 
 test "applyDelta from empty usage" {
-  let delta = parseDelta(10, 2048, 0)
+  let delta = usageDelta(10, 2048, 0)
   in let updated = applyDelta(emptyUsage(), delta)
-  in updated.documentsParsed == 1 && updated.requestsParsed == 10
-    && updated.bytesProcessed == 2048 && updated.ocrPagesParsed == 0
+  in updated.unitsCompleted == 1 && updated.requests == 10
+    && updated.bytesProcessed == 2048 && updated.subUnits == 0
 }

@@ -10,8 +10,8 @@
 --
 --   -- Option 1: Full flow (fetch keys + verify + validate claims)
 --   match verifyFirebaseJWTFull(idToken, "my-project-id", nowUnix) {
---     Ok(user) => println("Verified: " ++ user.uid),
---     Err(e) => println("Auth failed: " ++ e)
+--     Ok(user) => println("Verified: ${user.uid}"),
+--     Err(e) => println("Auth failed: ${e}")
 --   }
 --
 --   -- Option 2: Fetch keys once, verify many tokens
@@ -20,7 +20,7 @@
 --       let result1 = verifyFirebaseJWT(token1, "my-project", keys);
 --       let result2 = verifyFirebaseJWT(token2, "my-project", keys)
 --     },
---     Err(e) => println("Key fetch failed: " ++ e)
+--     Err(e) => println("Key fetch failed: ${e}")
 --   }
 
 module sunholo/firebase_auth/firebase_jwt
@@ -45,11 +45,11 @@ export func fetchFirebasePublicKeys() -> Result[Json, string] ! {Net} = {
       if response.ok then
         match decode(response.body) {
           Ok(keys) => Ok(keys),
-          Err(e) => Err("Failed to parse Firebase public keys: " ++ e)
+          Err(e) => Err("Failed to parse Firebase public keys: ${e}")
         }
       else
-        Err("Failed to fetch Firebase public keys: HTTP " ++ show(response.status)),
-    Err(e) => Err("Network error fetching Firebase keys: " ++ show(e))
+        Err("Failed to fetch Firebase public keys: HTTP ${show(response.status)}"),
+    Err(e) => Err("Network error fetching Firebase keys: ${show(e)}")
   }
 }
 
@@ -77,13 +77,13 @@ export pure func verifyFirebaseJWT(
   requires { length(token) > 0 && length(projectId) > 0 }
 = {
   match verifyWithKid(token, keys) {
-    Err(e) => Err("JWT verification failed: " ++ e),
+    Err(e) => Err("JWT verification failed: ${e}"),
     Ok(claims) => {
-      let expectedIss = "https://securetoken.google.com/" ++ projectId;
+      let expectedIss = "https://securetoken.google.com/${projectId}";
       if not(checkIssuer(claims, expectedIss)) then
-        Err("Invalid issuer: expected " ++ expectedIss)
+        Err("Invalid issuer: expected ${expectedIss}")
       else if not(checkAudience(claims, projectId)) then
-        Err("Invalid audience: expected " ++ projectId)
+        Err("Invalid audience: expected ${projectId}")
       else
         extractFirebaseUser(claims)
     }
@@ -112,15 +112,15 @@ export func verifyFirebaseJWTFull(
     Err(e) => Err(e),
     Ok(keys) =>
       match verifyWithKid(token, keys) {
-        Err(e) => Err("JWT verification failed: " ++ e),
+        Err(e) => Err("JWT verification failed: ${e}"),
         Ok(claims) => {
-          let expectedIss = "https://securetoken.google.com/" ++ projectId;
+          let expectedIss = "https://securetoken.google.com/${projectId}";
           if isExpired(claims, nowUnix) then
             Err("Token expired")
           else if not(checkIssuer(claims, expectedIss)) then
-            Err("Invalid issuer: expected " ++ expectedIss)
+            Err("Invalid issuer: expected ${expectedIss}")
           else if not(checkAudience(claims, projectId)) then
-            Err("Invalid audience: expected " ++ projectId)
+            Err("Invalid audience: expected ${projectId}")
           else
             extractFirebaseUser(claims)
         }

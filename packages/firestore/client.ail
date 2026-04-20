@@ -31,16 +31,16 @@ export func baseUrl() -> Result[string, string] ! {Env} =
     Err(e) => Err(e),
     Ok(project) =>
       let db = optionalEnv("FIRESTORE_DATABASE", "(default)")
-      in Ok("https://firestore.googleapis.com/v1/projects/" ++ project ++ "/databases/" ++ db ++ "/documents")
+      in Ok("https://firestore.googleapis.com/v1/projects/${project}/databases/${db}/documents")
   }
 
 -- Build auth headers with ADC bearer token
 func authHeaders() -> Result[{headers: [{name: string, value: string}]}, string] ! {Net, FS, Env} =
   match getAccessToken() {
-    Err(e) => Err("Firestore auth error: " ++ e),
+    Err(e) => Err("Firestore auth error: ${e}"),
     Ok(token) =>
       Ok({ headers: [
-        { name: "Authorization", value: "Bearer " ++ token },
+        { name: "Authorization", value: "Bearer ${token}" },
         { name: "Content-Type", value: "application/json" }
       ]})
   }
@@ -57,7 +57,7 @@ func authHeaders() -> Result[{headers: [{name: string, value: string}]}, string]
 -- Example:
 --   match getDoc("users", "uid_123") {
 --     Ok(fields) => asStr(fields, "name"),
---     Err(e) => "Not found: " ++ e
+--     Err(e) => "Not found: ${e}"
 --   }
 export func getDoc(collection: string, docId: string) -> Result[Json, string] ! {Net, FS, Env} =
   match baseUrl() {
@@ -66,9 +66,9 @@ export func getDoc(collection: string, docId: string) -> Result[Json, string] ! 
       match authHeaders() {
         Err(e) => Err(e),
         Ok(auth) =>
-          let url = base ++ "/" ++ collection ++ "/" ++ docId
+          let url = "${base}/${collection}/${docId}"
           in match httpRequest("GET", url, auth.headers, "") {
-            Err(e) => Err("Firestore GET error: " ++ show(e)),
+            Err(e) => Err("Firestore GET error: ${show(e)}"),
             Ok(resp) =>
               if resp.ok then
                 match decode(resp.body) {
@@ -77,12 +77,12 @@ export func getDoc(collection: string, docId: string) -> Result[Json, string] ! 
                       Some(fields) => Ok(fields),
                       None => Ok(jo([]))
                     },
-                  Err(e) => Err("JSON decode error: " ++ e)
+                  Err(e) => Err("JSON decode error: ${e}")
                 }
               else if resp.status == 404 then
-                Err("Document not found: " ++ collection ++ "/" ++ docId)
+                Err("Document not found: ${collection}/${docId}")
               else
-                Err("Firestore GET " ++ show(resp.status) ++ ": " ++ resp.body)
+                Err("Firestore GET ${show(resp.status)}: ${resp.body}")
           }
       }
   }
@@ -107,13 +107,13 @@ export func setDoc(collection: string, docId: string, data: Json) -> Result[(), 
         match authHeaders() {
           Err(e) => Err(e),
           Ok(auth) =>
-            let url = base ++ "/" ++ collection ++ "/" ++ docId
+            let url = "${base}/${collection}/${docId}"
             in let body = encode(jo([kv("fields", data)]))
             in match httpRequest("PATCH", url, auth.headers, body) {
-              Err(e) => Err("Firestore SET error: " ++ show(e)),
+              Err(e) => Err("Firestore SET error: ${show(e)}"),
               Ok(resp) =>
                 if resp.ok then Ok(())
-                else Err("Firestore SET " ++ show(resp.status) ++ ": " ++ resp.body)
+                else Err("Firestore SET ${show(resp.status)}: ${resp.body}")
             }
         }
     }
@@ -128,13 +128,13 @@ export func deleteDoc(collection: string, docId: string) -> Result[(), string] !
       match authHeaders() {
         Err(e) => Err(e),
         Ok(auth) =>
-          let url = base ++ "/" ++ collection ++ "/" ++ docId
+          let url = "${base}/${collection}/${docId}"
           in match httpRequest("DELETE", url, auth.headers, "") {
-            Err(e) => Err("Firestore DELETE error: " ++ show(e)),
+            Err(e) => Err("Firestore DELETE error: ${show(e)}"),
             Ok(resp) =>
               if resp.ok then Ok(())
               else if resp.status == 404 then Ok(())
-              else Err("Firestore DELETE " ++ show(resp.status) ++ ": " ++ resp.body)
+              else Err("Firestore DELETE ${show(resp.status)}: ${resp.body}")
           }
       }
   }
@@ -166,9 +166,9 @@ export func listDocs(collection: string, pageSize: int) -> Result[Json, string] 
       match authHeaders() {
         Err(e) => Err(e),
         Ok(auth) =>
-          let url = base ++ "/" ++ collection ++ "?pageSize=" ++ intToStr(pageSize)
+          let url = "${base}/${collection}?pageSize=${intToStr(pageSize)}"
           in match httpRequest("GET", url, auth.headers, "") {
-            Err(e) => Err("Firestore LIST error: " ++ show(e)),
+            Err(e) => Err("Firestore LIST error: ${show(e)}"),
             Ok(resp) =>
               if resp.ok then
                 match decode(resp.body) {
@@ -177,10 +177,10 @@ export func listDocs(collection: string, pageSize: int) -> Result[Json, string] 
                       Some(docs) => Ok(docs),
                       None => Ok(jo([]))
                     },
-                  Err(e) => Err("JSON decode error: " ++ e)
+                  Err(e) => Err("JSON decode error: ${e}")
                 }
               else
-                Err("Firestore LIST " ++ show(resp.status) ++ ": " ++ resp.body)
+                Err("Firestore LIST ${show(resp.status)}: ${resp.body}")
           }
       }
   }
@@ -199,7 +199,7 @@ export func getSubDoc(
   subCollection: string,
   docId: string
 ) -> Result[Json, string] ! {Net, FS, Env} =
-  let path = parentCollection ++ "/" ++ parentId ++ "/" ++ subCollection
+  let path = "${parentCollection}/${parentId}/${subCollection}"
   in getDoc(path, docId)
 
 -- Set a document in a subcollection
@@ -210,7 +210,7 @@ export func setSubDoc(
   docId: string,
   data: Json
 ) -> Result[(), string] ! {Net, FS, Env} =
-  let path = parentCollection ++ "/" ++ parentId ++ "/" ++ subCollection
+  let path = "${parentCollection}/${parentId}/${subCollection}"
   in setDoc(path, docId, data)
 
 -- Delete a document from a subcollection
@@ -220,5 +220,5 @@ export func deleteSubDoc(
   subCollection: string,
   docId: string
 ) -> Result[(), string] ! {Net, FS, Env} =
-  let path = parentCollection ++ "/" ++ parentId ++ "/" ++ subCollection
+  let path = "${parentCollection}/${parentId}/${subCollection}"
   in deleteDoc(path, docId)

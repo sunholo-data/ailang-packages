@@ -25,13 +25,13 @@ export func createPortalSession(
   match requireEnv("STRIPE_SECRET_KEY") {
     Err(e) => Err(e),
     Ok(secretKey) =>
-      let body = "customer=" ++ customerId ++ "&return_url=" ++ returnUrl
+      let body = "customer=${customerId}&return_url=${returnUrl}"
       in let headers = [
-        { name: "Authorization", value: "Bearer " ++ secretKey },
+        { name: "Authorization", value: "Bearer ${secretKey}" },
         { name: "Content-Type", value: "application/x-www-form-urlencoded" }
       ]
       in match httpRequest("POST", "https://api.stripe.com/v1/billing_portal/sessions", headers, body) {
-        Err(e) => Err("Stripe API error: " ++ e),
+        Err(e) => Err("Stripe API error: ${e}"),
         Ok(resp) =>
           if resp.ok then
             match decode(resp.body) {
@@ -40,8 +40,8 @@ export func createPortalSession(
                   Some(v) => Ok(getOrElse(asString(v), "")),
                   None => Err("No portal URL in Stripe response")
                 },
-              Err(e) => Err("Stripe response parse error: " ++ e)
+              Err(e) => Err("Stripe response parse error: ${e}")
             }
-          else Err("Stripe error " ++ show(resp.status) ++ ": " ++ resp.body)
+          else Err("Stripe error ${show(resp.status)}: ${resp.body}")
       }
   }

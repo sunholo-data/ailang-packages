@@ -22,10 +22,10 @@ export func getUsage(principalId: string, period: string) -> Result[Usage, strin
     Err(_) => Ok(emptyUsage()),
     Ok(fields) =>
       Ok({
-        documentsParsed: asInt(fields, "documentsParsed"),
-        requestsParsed: asInt(fields, "requestsParsed"),
+        unitsCompleted: asInt(fields, "unitsCompleted"),
+        requests: asInt(fields, "requests"),
         bytesProcessed: asInt(fields, "bytesProcessed"),
-        ocrPagesParsed: asInt(fields, "ocrPagesParsed")
+        subUnits: asInt(fields, "subUnits")
       })
   }
 
@@ -34,9 +34,9 @@ export func putUsage(principalId: string, period: string, usage: Usage) -> Resul
   requires { length(principalId) > 0 && length(period) > 0 }
 =
   let fields = jo([
-    kv("documentsParsed", intVal(usage.documentsParsed)),
-    kv("requestsParsed", intVal(usage.requestsParsed)),
+    kv("unitsCompleted", intVal(usage.unitsCompleted)),
+    kv("requests", intVal(usage.requests)),
     kv("bytesProcessed", intVal(usage.bytesProcessed)),
-    kv("ocrPagesParsed", intVal(usage.ocrPagesParsed))
+    kv("subUnits", intVal(usage.subUnits))
   ])
   in setSubDoc("usage", principalId, "periods", period, fields)

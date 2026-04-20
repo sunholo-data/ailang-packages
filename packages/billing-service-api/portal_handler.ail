@@ -23,7 +23,7 @@ export func handleCreatePortal(
   requires { length(principalId) > 0 && length(body) > 0 }
 =
   match decode(body) {
-    Err(e) => Err("Invalid JSON: " ++ e),
+    Err(e) => Err("Invalid JSON: ${e}"),
     Ok(json) =>
       let returnUrl = match get(json, "returnUrl") {
         Some(v) => getOrElse(asString(v), ""),

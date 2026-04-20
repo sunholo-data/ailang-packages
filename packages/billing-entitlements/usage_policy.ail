@@ -1,7 +1,9 @@
 -- Usage policy: track and compute usage deltas
 --
--- Pure functions for computing usage changes after parse operations.
+-- Pure functions for computing usage changes after operations.
 -- The actual persistence is in billing_store — this module only computes.
+-- Field names are product-neutral: each product maps its own semantics
+-- (e.g. docparse: units=documents, subUnits=ocrPages).
 --
 -- Usage:
 --   import pkg/sunholo/billing_entitlements/usage_policy (Usage, UsageDelta, applyDelta)
@@ -10,51 +12,51 @@ module sunholo/billing_entitlements/usage_policy
 
 -- Current usage for a billing period
 export type Usage = {
-  documentsParsed: int,
-  requestsParsed: int,
+  unitsCompleted: int,
+  requests: int,
   bytesProcessed: int,
-  ocrPagesParsed: int
+  subUnits: int
 }
 
--- A delta to apply after a successful parse
+-- A delta to apply after a successful operation
 export type UsageDelta = {
-  documents: int,
+  units: int,
   requests: int,
   bytes: int,
-  ocrPages: int
+  subUnits: int
 }
 
 -- Apply a usage delta to current usage (pure computation)
 export pure func applyDelta(current: Usage, delta: UsageDelta) -> Usage
-  requires { delta.documents >= 0 && delta.requests >= 0 && delta.bytes >= 0 && delta.ocrPages >= 0 }
+  requires { delta.units >= 0 && delta.requests >= 0 && delta.bytes >= 0 && delta.subUnits >= 0 }
   ensures {
-    result.documentsParsed >= current.documentsParsed
-    && result.requestsParsed >= current.requestsParsed
+    result.unitsCompleted >= current.unitsCompleted
+    && result.requests >= current.requests
     && result.bytesProcessed >= current.bytesProcessed
-    && result.ocrPagesParsed >= current.ocrPagesParsed
+    && result.subUnits >= current.subUnits
   }
 =
   {
-    documentsParsed: current.documentsParsed + delta.documents,
-    requestsParsed: current.requestsParsed + delta.requests,
+    unitsCompleted: current.unitsCompleted + delta.units,
+    requests: current.requests + delta.requests,
     bytesProcessed: current.bytesProcessed + delta.bytes,
-    ocrPagesParsed: current.ocrPagesParsed + delta.ocrPages
+    subUnits: current.subUnits + delta.subUnits
   }
 
 -- Create a zero usage record for a new period
 export pure func emptyUsage() -> Usage
   ensures {
-    result.documentsParsed == 0
-    && result.requestsParsed == 0
+    result.unitsCompleted == 0
+    && result.requests == 0
     && result.bytesProcessed == 0
-    && result.ocrPagesParsed == 0
+    && result.subUnits == 0
   }
 =
-  { documentsParsed: 0, requestsParsed: 0, bytesProcessed: 0, ocrPagesParsed: 0 }
+  { unitsCompleted: 0, requests: 0, bytesProcessed: 0, subUnits: 0 }
 
--- Create a delta from a single parse operation
-export pure func parseDelta(requests: int, bytes: int, ocrPages: int) -> UsageDelta
-  requires { requests >= 0 && bytes >= 0 && ocrPages >= 0 }
-  ensures { result.documents == 1 && result.requests == requests && result.bytes == bytes && result.ocrPages == ocrPages }
+-- Create a delta from a single operation
+export pure func usageDelta(numRequests: int, numBytes: int, numSubUnits: int) -> UsageDelta
+  requires { numRequests >= 0 && numBytes >= 0 && numSubUnits >= 0 }
+  ensures { result.units == 1 && result.requests == numRequests && result.bytes == numBytes && result.subUnits == numSubUnits }
 =
-  { documents: 1, requests: requests, bytes: bytes, ocrPages: ocrPages }
+  { units: 1, requests: numRequests, bytes: numBytes, subUnits: numSubUnits }

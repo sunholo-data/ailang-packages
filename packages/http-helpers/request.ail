@@ -15,7 +15,7 @@ import std/result (Ok, Err)
 -- Build Authorization: Bearer headers
 export pure func bearerHeaders(token: string) -> [{name: string, value: string}] =
   [
-    { name: "Authorization", value: "Bearer " ++ token },
+    { name: "Authorization", value: "Bearer ${token}" },
     { name: "Content-Type", value: "application/json" }
   ]
 
@@ -34,14 +34,14 @@ export pure func apiKeyHeaders(key: string) -> [{name: string, value: string}] =
 export func authGet(url: string, token: string) -> Result[{status: int, headers: [{name: string, value: string}], body: string, ok: bool}, string] ! {Net} =
   match httpRequest("GET", url, bearerHeaders(token), "") {
     Ok(resp) => Ok(resp),
-    Err(_) => Err("Network error: GET " ++ url)
+    Err(_) => Err("Network error: GET ${url}")
   }
 
 -- POST with Bearer token and JSON body
 export func authPost(url: string, token: string, body: string) -> Result[{status: int, headers: [{name: string, value: string}], body: string, ok: bool}, string] ! {Net} =
   match httpRequest("POST", url, bearerHeaders(token), body) {
     Ok(resp) => Ok(resp),
-    Err(_) => Err("Network error: POST " ++ url)
+    Err(_) => Err("Network error: POST ${url}")
   }
 
 -- POST JSON object with Bearer token (encodes body automatically)

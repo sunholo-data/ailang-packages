@@ -9,13 +9,13 @@
 --   -- Download a file from GCS to /tmp
 --   match downloadToTemp("gs://bucket/path/file.pdf") {
 --     Ok(localPath) => readFile(localPath),
---     Err(e) => "download failed: " ++ e
+--     Err(e) => "download failed: ${e}"
 --   }
 --
 --   -- Get a resumable upload URL for direct client upload
 --   match initResumableUpload("bucket", "prefix/user123", "doc.pdf", "application/pdf") {
 --     Ok(result) => result.uploadUrl,  -- client PUTs file here
---     Err(e) => "upload init failed: " ++ e
+--     Err(e) => "upload init failed: ${e}"
 --   }
 
 module sunholo/gcs_storage/client
@@ -42,23 +42,23 @@ export func downloadToTemp(gsUri: string) -> Result[string, string] ! {Net, FS, 
     Err(e) => Err(e),
     Ok(ref) => {
       match getAccessToken() {
-        Err(e) => Err("gcs_storage: auth failed: " ++ e),
+        Err(e) => Err("gcs_storage: auth failed: ${e}"),
         Ok(token) => {
           let url = gcsDownloadUrl(ref.bucket, ref.object);
           let headers = [
-            { name: "Authorization", value: "Bearer " ++ token }
+            { name: "Authorization", value: "Bearer ${token}" }
           ];
           match httpRequest("GET", url, headers, "") {
-            Err(e) => Err("gcs_storage: download network error: " ++ show(e)),
+            Err(e) => Err("gcs_storage: download network error: ${show(e)}"),
             Ok(resp) =>
               if resp.ok then {
                 let ts = intToStr(now());
                 let basename = gcsClientBasename(ref.object);
-                let localPath = "/tmp/gcs-" ++ ts ++ "-" ++ basename;
+                let localPath = "/tmp/gcs-${ts}-${basename}";
                 let _ = writeFile(localPath, resp.body);
                 Ok(localPath)
               }
-              else Err("gcs_storage: download failed HTTP " ++ intToStr(resp.status) ++ ": " ++ resp.body)
+              else Err("gcs_storage: download failed HTTP ${intToStr(resp.status)}: ${resp.body}")
           }
         }
       }
@@ -77,22 +77,22 @@ export func downloadToTemp(gsUri: string) -> Result[string, string] ! {Net, FS, 
 export func initResumableUpload(bucket: string, objectPrefix: string, filename: string, mimeType: string)
   -> Result[ResumableUpload, string] ! {Net, FS, Env, Clock} {
   match getAccessToken() {
-    Err(e) => Err("gcs_storage: auth failed: " ++ e),
+    Err(e) => Err("gcs_storage: auth failed: ${e}"),
     Ok(token) => {
       let ts = intToStr(now());
       let safeName = gcsClientSanitize(filename);
-      let objectName = objectPrefix ++ "/" ++ ts ++ "-" ++ safeName;
+      let objectName = "${objectPrefix}/${ts}-${safeName}";
       let url = gcsResumableUploadUrl(bucket, objectName);
 
       let headers = [
-        { name: "Authorization", value: "Bearer " ++ token },
+        { name: "Authorization", value: "Bearer ${token}" },
         { name: "Content-Type", value: "application/json" },
         { name: "X-Upload-Content-Type", value: mimeType }
       ];
 
       -- POST with empty JSON body initiates the resumable session
       match httpRequest("POST", url, headers, "{}") {
-        Err(e) => Err("gcs_storage: resumable upload init network error: " ++ show(e)),
+        Err(e) => Err("gcs_storage: resumable upload init network error: ${show(e)}"),
         Ok(resp) =>
           if resp.ok then {
             let ref = gcsUri(bucket, objectName);
@@ -102,7 +102,7 @@ export func initResumableUpload(bucket: string, objectPrefix: string, filename: 
             else
               Ok({uploadUrl: uploadUrl, gcsRef: ref})
           }
-          else Err("gcs_storage: resumable upload init failed HTTP " ++ intToStr(resp.status) ++ ": " ++ resp.body)
+          else Err("gcs_storage: resumable upload init failed HTTP ${intToStr(resp.status)}: ${resp.body}")
       }
     }
   }
@@ -133,7 +133,7 @@ pure func gcsClientSanitizeChars(s: string, i: int, len: int, acc: string) -> st
       else if ch == "/" then "_"
       else if ch == "\\" then "_"
       else ch;
-    gcsClientSanitizeChars(s, i + 1, len, acc ++ safe)
+    gcsClientSanitizeChars(s, i + 1, len, "${acc}${safe}")
   }
 }
 

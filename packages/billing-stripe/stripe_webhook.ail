@@ -43,11 +43,11 @@ export func verifyWebhook(
       in match extractSignatureParts(parts, "", "") {
         Err(e) => Err(e),
         Ok(sigParts) =>
-          let signedPayload = sigParts.timestamp ++ "." ++ rawBody
+          let signedPayload = "${sigParts.timestamp}.${rawBody}"
           in let expected = hmacSha256(signedPayload, webhookSecret)
           in if constantTimeEqual(expected, sigParts.signature) then
             match decode(rawBody) {
-              Err(e) => Err("Event parse error: " ++ e),
+              Err(e) => Err("Event parse error: ${e}"),
               Ok(json) =>
                 let eventId = match get(json, "id") {
                   Some(v) => getOrElse(asString(v), ""),

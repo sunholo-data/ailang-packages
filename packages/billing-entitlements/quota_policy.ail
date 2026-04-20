@@ -9,11 +9,11 @@ module sunholo/billing_entitlements/quota_policy
 
 import ./entitlement (Entitlements)
 
--- Check if monthly document limit is exceeded
-export pure func isOverDocumentLimit(ent: Entitlements, used: int) -> bool
+-- Check if monthly unit limit is exceeded
+export pure func isOverUnitLimit(ent: Entitlements, used: int) -> bool
   requires { used >= 0 }
 =
-  used >= ent.monthlyDocumentLimit
+  used >= ent.monthlyUnitLimit
 
 -- Check if monthly request limit is exceeded
 export pure func isOverRequestLimit(ent: Entitlements, used: int) -> bool
@@ -29,12 +29,12 @@ export pure func remainingRequests(ent: Entitlements, used: int) -> int
   let diff = ent.monthlyRequestLimit - used
   in if diff < 0 then 0 else diff
 
--- How many documents remain in the current period
-export pure func remainingDocuments(ent: Entitlements, used: int) -> int
-  requires { used >= 0 && ent.monthlyDocumentLimit >= 0 }
-  ensures { result >= 0 && result <= ent.monthlyDocumentLimit }
+-- How many units remain in the current period
+export pure func remainingUnits(ent: Entitlements, used: int) -> int
+  requires { used >= 0 && ent.monthlyUnitLimit >= 0 }
+  ensures { result >= 0 && result <= ent.monthlyUnitLimit }
 =
-  let diff = ent.monthlyDocumentLimit - used
+  let diff = ent.monthlyUnitLimit - used
   in if diff < 0 then 0 else diff
 
 -- Percentage of request quota used (0-100, capped at 100)

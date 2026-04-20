@@ -17,7 +17,7 @@ type ProposalSummary = {
   currentPlan: string,
   targetPlan: string,
   requestLimit: string,
-  documentLimit: string,
+  unitLimit: string,
   apiAccess: string
 }
 
@@ -42,11 +42,11 @@ export pure func summarizeProposal(
     Err(e) => Err(e),
     Ok(target) =>
       Ok({
-        description: "Upgrade from " ++ currentPlanName ++ " to " ++ target.name ++ ": " ++ reason,
+        description: "Upgrade from ${currentPlanName} to ${target.name}: ${reason}",
         currentPlan: currentPlanName,
         targetPlan: target.name,
-        requestLimit: show(target.monthlyRequestLimit) ++ " requests/month",
-        documentLimit: show(target.monthlyDocumentLimit) ++ " documents/month",
+        requestLimit: "${show(target.monthlyRequestLimit)} requests/month",
+        unitLimit: "${show(target.monthlyUnitLimit)} units/month",
         apiAccess: if target.apiAccess then "enabled" else "disabled"
       })
   }
@@ -56,5 +56,4 @@ export pure func upgradePrompt(currentPlan: string, targetPlan: string, reason: 
   requires { length(currentPlan) > 0 && length(targetPlan) > 0 }
   ensures { length(result) > 0 }
 =
-  "Your current plan (" ++ currentPlan ++ ") " ++ reason ++
-  ". Would you like to upgrade to " ++ targetPlan ++ "?"
+  "Your current plan (${currentPlan}) ${reason}. Would you like to upgrade to ${targetPlan}?"

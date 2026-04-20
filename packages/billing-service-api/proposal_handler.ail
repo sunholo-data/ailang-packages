@@ -34,7 +34,7 @@ export func handleCreateProposal(
   requires { length(principalId) > 0 && length(proposalId) > 0 && length(body) > 0 }
 =
   match decode(body) {
-    Err(e) => Err("Invalid JSON: " ++ e),
+    Err(e) => Err("Invalid JSON: ${e}"),
     Ok(json) =>
       let targetPlan = match get(json, "targetPlan") {
         Some(v) => getOrElse(asString(v), ""),
@@ -57,7 +57,7 @@ export func handleCreateProposal(
         let requestedBy = if requestedByStr == "agent" then Agent(agentName) else Human
         in let proposal = createProposal(proposalId, principalId, targetPlan, reason, requestedBy, createdAt)
         in match putProposal(proposal) {
-          Err(e) => Err("Failed to save proposal: " ++ e),
+          Err(e) => Err("Failed to save proposal: ${e}"),
           Ok(_) =>
             Ok(encode(jo([
               kv("proposalId", js(proposalId)),
@@ -78,7 +78,7 @@ export func handleApprovalLink(
   requires { length(principalId) > 0 && length(proposalId) > 0 && length(successUrl) > 0 && length(cancelUrl) > 0 }
 =
   match getProposal(proposalId) {
-    Err(e) => Err("Proposal not found: " ++ e),
+    Err(e) => Err("Proposal not found: ${e}"),
     Ok(proposal) =>
       if proposal.principalId != principalId then
         Err("Proposal does not belong to this user")
@@ -91,11 +91,11 @@ export func handleApprovalLink(
             -- Look up Stripe price ID from STRIPE_PRICE_MAP (reverse: planKey → priceId)
             let priceId = proposalReverseLookupPriceId(proposal.targetPlan)
             in match createCheckoutSession(customer.stripeCustomerId, priceId, successUrl, cancelUrl, principalId) {
-              Err(e) => Err("Checkout creation failed: " ++ e),
+              Err(e) => Err("Checkout creation failed: ${e}"),
               Ok(session) =>
                 let updated = markAwaitingPayment(proposal, session.url, session.expiresAt)
                 in match putProposal(updated) {
-                  Err(e) => Err("Failed to update proposal: " ++ e),
+                  Err(e) => Err("Failed to update proposal: ${e}"),
                   Ok(_) =>
                     Ok(encode(jo([
                       kv("proposalId", js(proposalId)),
@@ -116,7 +116,7 @@ export func handleGetProposal(
   requires { length(principalId) > 0 && length(proposalId) > 0 }
 =
   match getProposal(proposalId) {
-    Err(e) => Err("Proposal not found: " ++ e),
+    Err(e) => Err("Proposal not found: ${e}"),
     Ok(proposal) =>
       if proposal.principalId != principalId then
         Err("Proposal does not belong to this user")

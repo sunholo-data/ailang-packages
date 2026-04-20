@@ -17,10 +17,10 @@ export type Entitlements = {
   principalId: string,
   plan: string,
   status: string,
-  canParse: bool,
+  canOperate: bool,
   apiAccess: bool,
   maxFileSizeMb: int,
-  monthlyDocumentLimit: int,
+  monthlyUnitLimit: int,
   monthlyRequestLimit: int,
   maxConcurrentJobs: int,
   gracePeriod: bool
@@ -46,7 +46,7 @@ export pure func resolveEntitlements(
   requires { length(principalId) > 0 && length(sub.status) > 0 }
   ensures {
     result.principalId == principalId
-    && result.canParse == true
+    && result.canOperate == true
   }
 =
   let plan = match lookupPlan(catalog, sub.planKey) {
@@ -67,7 +67,7 @@ export pure func freeEntitlements(principalId: string, catalog: [{key: string, p
   requires { length(principalId) > 0 }
   ensures {
     result.principalId == principalId
-    && result.canParse == true
+    && result.canOperate == true
   }
 =
   planToEntitlements(principalId, freePlanFromCatalog(catalog), "free", false)
@@ -79,17 +79,17 @@ func planToEntitlements(principalId: string, plan: Plan, status: string, grace: 
     && result.plan == plan.name
     && result.status == status
     && result.gracePeriod == grace
-    && result.canParse == true
+    && result.canOperate == true
   }
 =
   {
     principalId: principalId,
     plan: plan.name,
     status: status,
-    canParse: true,
+    canOperate: true,
     apiAccess: plan.apiAccess,
     maxFileSizeMb: plan.maxFileSizeMb,
-    monthlyDocumentLimit: plan.monthlyDocumentLimit,
+    monthlyUnitLimit: plan.monthlyUnitLimit,
     monthlyRequestLimit: plan.monthlyRequestLimit,
     maxConcurrentJobs: plan.maxConcurrentJobs,
     gracePeriod: grace

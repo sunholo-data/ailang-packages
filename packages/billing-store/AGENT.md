@@ -1,7 +1,7 @@
 # sunholo/billing_store
 
 ## When to use this package
-Use when you need to read or write billing records to Firestore. This package provides typed CRUD operations for all billing collections in the `docparse` Firestore database. Built on `sunholo/firestore` for Firestore operations.
+Use when you need to read or write billing records to Firestore. This package provides typed CRUD operations for all billing collections. Built on `sunholo/firestore` for Firestore operations. Product-neutral — the Firestore database is configured via `FIRESTORE_DATABASE` env var.
 
 ## Quick start
 ```ailang
@@ -13,7 +13,7 @@ import pkg/sunholo/billing_store/events_repo (isEventProcessed, recordEvent)
 
 -- Read entitlements
 match getEntitlements("uid_123") {
-  Ok(ent) => -- use ent.plan, ent.canParse, etc.
+  Ok(ent) => -- use ent.plan, ent.canOperate, etc.
   Err(e) => -- not found or error
 }
 

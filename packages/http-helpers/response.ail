@@ -23,17 +23,17 @@ type HttpResponse = {
 -- Check response status is 2xx, return body or error with status
 export pure func requireOk(resp: HttpResponse) -> Result[string, string] =
   if resp.ok then Ok(resp.body)
-  else Err("HTTP " ++ show(resp.status) ++ ": " ++ resp.body)
+  else Err("HTTP ${show(resp.status)}: ${resp.body}")
 
 -- Parse response body as JSON
 export pure func parseJsonBody(body: string) -> Result[Json, string] =
   match decode(body) {
     Ok(json) => Ok(json),
-    Err(e) => Err("JSON parse error: " ++ e)
+    Err(e) => Err("JSON parse error: ${e}")
   }
 
 -- Extract a required string field from JSON, with context for errors
 export pure func requireField(json: Json, field: string) -> Result[string, string] =
   let val = getString(json, field)
   in if isSome(val) then Ok(getOrElse(val, ""))
-     else Err("Missing required field: " ++ field)
+     else Err("Missing required field: ${field}")

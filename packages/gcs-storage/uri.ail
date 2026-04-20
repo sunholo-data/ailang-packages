@@ -6,8 +6,8 @@
 --   import pkg/sunholo/gcs_storage/uri (parseGcsUri, validateGcsUri, gcsUri)
 --
 --   match parseGcsUri("gs://my-bucket/path/to/file.pdf") {
---     Ok(parsed) => parsed.bucket ++ " / " ++ parsed.object,
---     Err(e) => "invalid: " ++ e
+--     Ok(parsed) => "${parsed.bucket} / ${parsed.object}",
+--     Err(e) => "invalid: ${e}"
 --   }
 
 module sunholo/gcs_storage/uri
@@ -24,35 +24,33 @@ export type GcsRef = {
 
 -- Construct a gs:// URI from bucket and object name.
 export pure func gcsUri(bucket: string, objectName: string) -> string =
-  "gs://" ++ bucket ++ "/" ++ objectName
+  "gs://${bucket}/${objectName}"
 
 -- GCS JSON API download URL (alt=media streams the object content).
 export pure func gcsDownloadUrl(bucket: string, objectName: string) -> string =
-  "https://storage.googleapis.com/storage/v1/b/" ++ bucket ++
-  "/o/" ++ urlEncodePath(objectName) ++ "?alt=media"
+  "https://storage.googleapis.com/storage/v1/b/${bucket}/o/${urlEncodePath(objectName)}?alt=media"
 
 -- GCS JSON API resumable upload initiation URL.
 export pure func gcsResumableUploadUrl(bucket: string, objectName: string) -> string =
-  "https://storage.googleapis.com/upload/storage/v1/b/" ++ bucket ++
-  "/o?uploadType=resumable&name=" ++ urlEncodePath(objectName)
+  "https://storage.googleapis.com/upload/storage/v1/b/${bucket}/o?uploadType=resumable&name=${urlEncodePath(objectName)}"
 
 -- Parse a gs:// URI into bucket and object components.
 -- Returns Err if the URI is malformed.
 export pure func parseGcsUri(uri: string) -> Result[GcsRef, string] {
   let prefix = "gs://";
-  if length(uri) < 6 then Err("gcs_storage: URI too short: " ++ uri)
-  else if substring(uri, 0, 5) == prefix == false then Err("gcs_storage: URI must start with gs:// — got: " ++ uri)
+  if length(uri) < 6 then Err("gcs_storage: URI too short: ${uri}")
+  else if substring(uri, 0, 5) == prefix == false then Err("gcs_storage: URI must start with gs:// — got: ${uri}")
   else {
     let rest = substring(uri, 5, length(uri));
-    if length(rest) == 0 then Err("gcs_storage: empty bucket in URI: " ++ uri)
+    if length(rest) == 0 then Err("gcs_storage: empty bucket in URI: ${uri}")
     else {
       let slashIdx = find(rest, "/");
-      if slashIdx < 0 then Err("gcs_storage: no object path in URI: " ++ uri)
+      if slashIdx < 0 then Err("gcs_storage: no object path in URI: ${uri}")
       else {
         let bucket = substring(rest, 0, slashIdx);
         let object = substring(rest, slashIdx + 1, length(rest));
-        if length(bucket) == 0 then Err("gcs_storage: empty bucket in URI: " ++ uri)
-        else if length(object) == 0 then Err("gcs_storage: empty object path in URI: " ++ uri)
+        if length(bucket) == 0 then Err("gcs_storage: empty bucket in URI: ${uri}")
+        else if length(object) == 0 then Err("gcs_storage: empty object path in URI: ${uri}")
         else Ok({bucket: bucket, object: object})
       }
     }
@@ -65,8 +63,8 @@ export pure func validateGcsUri(uri: string) -> Result[string, string] {
   match parseGcsUri(uri) {
     Err(e) => Err(e),
     Ok(ref) =>
-      if contains(ref.object, "..") then Err("gcs_storage: path traversal not allowed in URI: " ++ uri)
-      else if contains(ref.bucket, "..") then Err("gcs_storage: path traversal not allowed in bucket: " ++ uri)
+      if contains(ref.object, "..") then Err("gcs_storage: path traversal not allowed in URI: ${uri}")
+      else if contains(ref.bucket, "..") then Err("gcs_storage: path traversal not allowed in bucket: ${uri}")
       else Ok(uri)
   }
 }
@@ -89,6 +87,6 @@ pure func urlEncodeChars(s: string, i: int, len: int, acc: string) -> string {
   else {
     let ch = substring(s, i, i + 1);
     let encoded = if ch == "/" then "%2F" else ch;
-    urlEncodeChars(s, i + 1, len, acc ++ encoded)
+    urlEncodeChars(s, i + 1, len, "${acc}${encoded}")
   }
 }

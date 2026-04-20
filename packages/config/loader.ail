@@ -24,10 +24,10 @@ import std/result (Ok, Err)
 export func requireEnv(name: string) -> Result[string, string] ! {Env} =
   match getEnv(name) {
     Ok(value) => {
-      if value == "" then Err("Required env var " ++ name ++ " is empty")
+      if value == "" then Err("Required env var ${name} is empty")
       else Ok(value)
     },
-    Err(_) => Err("Required env var " ++ name ++ " is not set")
+    Err(_) => Err("Required env var ${name} is not set")
   }
 
 -- Load an optional environment variable with a default
@@ -40,7 +40,7 @@ export func optionalEnv(name: string, defaultValue: string) -> string ! {Env} =
 -- Example:
 --   match requireAll(["GOOGLE_CLOUD_PROJECT", "API_KEY", "DATABASE"]) {
 --     Ok(values) => -- values is [projectId, apiKey, dbName]
---     Err(e) => println("Missing config: " ++ e)
+--     Err(e) => println("Missing config: ${e}")
 --   }
 export func requireAll(names: [string]) -> Result[[string], string] ! {Env} =
   collectRequired(names, [])

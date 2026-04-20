@@ -54,7 +54,7 @@ export pure func mapEventToStateChange(
     -- We extract the subscription ID for correlation
     extractCheckoutChange(data)
   else
-    Err("Unhandled event type: " ++ eventType)
+    Err("Unhandled event type: ${eventType}")
 
 -- Extract subscription state from a subscription event's data.object
 func extractSubscriptionChange(data: Json) -> Result[SubscriptionStateChange, string] =

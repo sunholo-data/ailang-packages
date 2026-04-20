@@ -1,0 +1,44 @@
+-- Billing config endpoint
+--
+-- GET /billing/config
+--
+-- Returns Stripe price IDs and billing mode for the dashboard.
+-- Price IDs come from STRIPE_PRICE_MAP env var so the dashboard
+-- never hardcodes them — each environment (dev/test/prod) serves
+-- its own price IDs.
+
+module sunholo/billing_service_api/config_handler
+
+import std/json (encode, jo, js, kv)
+import std/string (split, find, substring, length as strLength)
+import pkg/sunholo/config/loader (optionalEnv)
+
+-- Parse STRIPE_PRICE_MAP into individual price IDs
+-- Format: "price_xxx=pro_monthly,price_yyy=business_monthly"
+func configFindPrice(entries: [string], planKey: string) -> string =
+  match entries {
+    [] => "",
+    entry :: rest =>
+      let idx = find(entry, "=")
+      in if idx < 0 then configFindPrice(rest, planKey)
+      else
+        let key = substring(entry, 0, idx)
+        in let value = substring(entry, idx + 1, strLength(entry))
+        in if value == planKey then key
+        else configFindPrice(rest, planKey)
+  }
+
+@route("GET", "/billing/config")
+export func handleGetConfig() -> string ! {Env} =
+  let mapStr = optionalEnv("STRIPE_PRICE_MAP", "")
+  in let entries = if mapStr == "" then [] else split(mapStr, ",")
+  in let proPriceId = configFindPrice(entries, "pro_monthly")
+  in let bizPriceId = configFindPrice(entries, "business_monthly")
+  in let mode = optionalEnv("STRIPE_MODE", "test")
+  in encode(jo([
+    kv("mode", js(mode)),
+    kv("prices", jo([
+      kv("pro_monthly", js(proPriceId)),
+      kv("business_monthly", js(bizPriceId))
+    ]))
+  ]))

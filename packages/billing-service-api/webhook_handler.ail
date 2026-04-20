@@ -63,11 +63,11 @@ export func handleStripeWebhook(
   else
   -- 1. Verify signature
   match verifyWebhook(signatureHeader, rawBody) {
-    Err(e) => Err("Webhook verification failed: " ++ e),
+    Err(e) => Err("Webhook verification failed: ${e}"),
     Ok(event) =>
       -- 2. Idempotency check
       match isEventProcessed(event.eventId) {
-        Err(e) => Err("Event check failed: " ++ e),
+        Err(e) => Err("Event check failed: ${e}"),
         Ok(true) =>
           -- Already processed, return success (idempotent)
           Ok(encode(jo([kv("status", js("already_processed"))]))),
@@ -93,7 +93,7 @@ export func handleStripeWebhook(
                 updatedAt: ""
               })
               in match subResult {
-                Err(e) => Err("Failed to update subscription: " ++ e),
+                Err(e) => Err("Failed to update subscription: ${e}"),
                 Ok(_) =>
                   -- 5. Resolve and write entitlements
                   -- Translate Stripe priceId to catalog key via STRIPE_PRICE_MAP
@@ -106,7 +106,7 @@ export func handleStripeWebhook(
                   }
                   in let ent = resolveEntitlements(subState, catalog, change.principalId)
                   in match putEntitlements(ent) {
-                    Err(e) => Err("Failed to update entitlements: " ++ e),
+                    Err(e) => Err("Failed to update entitlements: ${e}"),
                     Ok(_) =>
                       -- 6. Record event as processed
                       let _ = recordEvent({

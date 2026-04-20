@@ -1,10 +1,10 @@
 -- Capability checks: can a principal perform an action given their entitlements?
 --
--- These are the core authorization decisions. The consuming app calls canParse()
+-- These are the core authorization decisions. The consuming app calls canOperate()
 -- before every operation to decide whether to allow or reject.
 --
 -- Usage:
---   import pkg/sunholo/billing_entitlements/capability_check (canParse, canUseApi, AllowDecision)
+--   import pkg/sunholo/billing_entitlements/capability_check (canOperate, canUseApi, AllowDecision)
 
 module sunholo/billing_entitlements/capability_check
 
@@ -14,62 +14,44 @@ import ./entitlement (Entitlements)
 -- Authorization decision
 export type AllowDecision = Allow | Deny(string)
 
--- A parse request with relevant attributes for authorization
-export type ParseRequest = {
+-- An operation request with relevant attributes for authorization
+export type OperationRequest = {
   fileSizeMb: int,
   isApiRequest: bool
 }
 
--- Check whether a parse operation is allowed
+-- Check whether an operation is allowed
 --
 -- Checks in order:
---   1. Is parsing enabled at all?
+--   1. Is this operation enabled at all?
 --   2. Is this an API request on a plan without API access?
 --   3. Is file size within limits?
 --   4. Is monthly request limit exceeded?
---   5. Is monthly document limit exceeded?
-export pure func canParse(
+--   5. Is monthly unit limit exceeded?
+export pure func canOperate(
   ent: Entitlements,
-  req: ParseRequest,
+  req: OperationRequest,
   requestsUsed: int,
-  docsUsed: int
+  unitsUsed: int
 ) -> AllowDecision
-  requires { requestsUsed >= 0 && docsUsed >= 0 && req.fileSizeMb >= 0 }
+  requires { requestsUsed >= 0 && unitsUsed >= 0 && req.fileSizeMb >= 0 }
   ensures {
     match result {
-      Allow => ent.canParse == true,
+      Allow => ent.canOperate == true,
       Deny(msg) => length(msg) > 0
     }
   }
 =
-  if ent.canParse == false then
-    Deny("Parsing is not enabled for your account")
-  else if req.isApiRequest == true then
-    if ent.apiAccess == false then
-      Deny("API access requires a paid plan. Current plan: " ++ ent.plan)
-    else checkLimits(ent, req, requestsUsed, docsUsed)
-  else checkLimits(ent, req, requestsUsed, docsUsed)
-
-func checkLimits(
-  ent: Entitlements,
-  req: ParseRequest,
-  requestsUsed: int,
-  docsUsed: int
-) -> AllowDecision
-  requires { requestsUsed >= 0 && docsUsed >= 0 && req.fileSizeMb >= 0 }
-  ensures {
-    match result {
-      Allow => ent.canParse == true,
-      Deny(msg) => length(msg) > 0
-    }
-  }
-=
-  if req.fileSizeMb > ent.maxFileSizeMb then
-    Deny("File size " ++ show(req.fileSizeMb) ++ "MB exceeds limit of " ++ show(ent.maxFileSizeMb) ++ "MB")
+  if ent.canOperate == false then
+    Deny("Operations are not enabled for your account")
+  else if req.isApiRequest == true && ent.apiAccess == false then
+    Deny("API access requires a paid plan. Current plan: ${ent.plan}")
+  else if req.fileSizeMb > ent.maxFileSizeMb then
+    Deny("File size ${show(req.fileSizeMb)}MB exceeds limit of ${show(ent.maxFileSizeMb)}MB")
   else if requestsUsed >= ent.monthlyRequestLimit then
-    Deny("Monthly request limit reached (" ++ show(ent.monthlyRequestLimit) ++ " requests). Upgrade for more.")
-  else if docsUsed >= ent.monthlyDocumentLimit then
-    Deny("Monthly document limit reached (" ++ show(ent.monthlyDocumentLimit) ++ " documents). Upgrade for more.")
+    Deny("Monthly request limit reached (${show(ent.monthlyRequestLimit)} requests). Upgrade for more.")
+  else if unitsUsed >= ent.monthlyUnitLimit then
+    Deny("Monthly unit limit reached (${show(ent.monthlyUnitLimit)} units). Upgrade for more.")
   else Allow
 
 -- Check whether a principal has API access

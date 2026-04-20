@@ -29,7 +29,7 @@ export func handleCreateCheckout(
   requires { length(principalId) > 0 && length(email) > 0 && length(body) > 0 }
 =
   match decode(body) {
-    Err(e) => Err("Invalid JSON: " ++ e),
+    Err(e) => Err("Invalid JSON: ${e}"),
     Ok(json) =>
       let priceId = match get(json, "priceId") {
         Some(v) => getOrElse(asString(v), ""),
@@ -69,7 +69,7 @@ func ensureCustomer(principalId: string, email: string) -> Result[string, string
     Err(_) =>
       -- No customer record, create one in Stripe
       match createStripeCustomer(email, principalId) {
-        Err(e) => Err("Failed to create Stripe customer: " ++ e),
+        Err(e) => Err("Failed to create Stripe customer: ${e}"),
         Ok(customerId) =>
           let _ = putCustomer({
             principalType: "user",

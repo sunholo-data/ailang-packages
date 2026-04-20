@@ -79,20 +79,19 @@ export func runQuery(
     Ok(project) =>
       let db = optionalEnv("FIRESTORE_DATABASE", "(default)")
       in match getAccessToken() {
-        Err(e) => Err("Auth error: " ++ e),
+        Err(e) => Err("Auth error: ${e}"),
         Ok(token) =>
-          let url = "https://firestore.googleapis.com/v1/projects/" ++ project ++
-                    "/databases/" ++ db ++ "/documents:runQuery"
+          let url = "https://firestore.googleapis.com/v1/projects/${project}/databases/${db}/documents:runQuery"
           in let queryBody = buildQueryBody(collection, filters, orders, maxResults)
           in let headers = [
-            { name: "Authorization", value: "Bearer " ++ token },
+            { name: "Authorization", value: "Bearer ${token}" },
             { name: "Content-Type", value: "application/json" }
           ]
           in match httpRequest("POST", url, headers, encode(queryBody)) {
-            Err(e) => Err("Firestore query error: " ++ show(e)),
+            Err(e) => Err("Firestore query error: ${show(e)}"),
             Ok(resp) =>
               if resp.ok then parseQueryResponse(resp.body)
-              else Err("Firestore query " ++ show(resp.status) ++ ": " ++ resp.body)
+              else Err("Firestore query ${show(resp.status)}: ${resp.body}")
           }
       }
   }
@@ -165,7 +164,7 @@ func buildOrderClauses(orders: [QueryOrder]) -> [Json] =
 
 func parseQueryResponse(body: string) -> Result[[{id: string, fields: Json}], string] =
   match decode(body) {
-    Err(e) => Err("JSON decode error: " ++ e),
+    Err(e) => Err("JSON decode error: ${e}"),
     Ok(json) =>
       match asArray(json) {
         None => Ok([]),

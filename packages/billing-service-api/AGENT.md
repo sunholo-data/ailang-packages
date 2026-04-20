@@ -28,7 +28,7 @@ ailang serve-api --caps Net,FS,Env,IO --port 8080 \
 
 ## Environment variables
 - `GOOGLE_CLOUD_PROJECT` — GCP project ID
-- `FIRESTORE_DATABASE` — Firestore database name (default: `docparse`)
+- `FIRESTORE_DATABASE` — Firestore database name (set per product, e.g. `docparse`)
 - `STRIPE_SECRET_KEY` — Stripe API secret key
 - `STRIPE_WEBHOOK_SECRET` — Stripe webhook signing secret
 

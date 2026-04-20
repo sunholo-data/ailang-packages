@@ -20,7 +20,7 @@ func stripeApi() -> string = "https://api.stripe.com/v1"
 -- Build Stripe auth headers (Basic auth with secret key)
 func stripeHeaders(secretKey: string) -> [{name: string, value: string}] =
   [
-    { name: "Authorization", value: "Bearer " ++ secretKey },
+    { name: "Authorization", value: "Bearer ${secretKey}" },
     { name: "Content-Type", value: "application/x-www-form-urlencoded" }
   ]
 
@@ -35,9 +35,9 @@ export func createStripeCustomer(
   match requireEnv("STRIPE_SECRET_KEY") {
     Err(e) => Err(e),
     Ok(secretKey) =>
-      let body = "email=" ++ email ++ "&metadata[principalId]=" ++ principalId
-      in match httpRequest("POST", stripeApi() ++ "/customers", stripeHeaders(secretKey), body) {
-        Err(e) => Err("Stripe API error: " ++ e),
+      let body = "email=${email}&metadata[principalId]=${principalId}"
+      in match httpRequest("POST", "${stripeApi()}/customers", stripeHeaders(secretKey), body) {
+        Err(e) => Err("Stripe API error: ${e}"),
         Ok(resp) =>
           if resp.ok then
             match decode(resp.body) {
@@ -46,8 +46,8 @@ export func createStripeCustomer(
                   Some(idJson) => Ok(getOrElse(asString(idJson), "")),
                   None => Err("No customer ID in Stripe response")
                 },
-              Err(e) => Err("Stripe response parse error: " ++ e)
+              Err(e) => Err("Stripe response parse error: ${e}")
             }
-          else Err("Stripe error " ++ show(resp.status) ++ ": " ++ resp.body)
+          else Err("Stripe error ${show(resp.status)}: ${resp.body}")
       }
   }
