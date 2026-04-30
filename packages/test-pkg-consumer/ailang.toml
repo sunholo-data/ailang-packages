@@ -1,0 +1,32 @@
+[package]
+name = "sunholo/test_pkg_consumer"
+version = "0.0.1"
+edition = "1"
+description = "Cascade-fixture: depends on sunholo/test_pkg so M-PKG-AUTONOMOUS-CASCADE-SAFE smoke tests have a real dependent to bump"
+license = "Apache-2.0"
+ailang = ">=0.14.0"
+
+[exports]
+modules = ["sunholo/test_pkg_consumer/wrap"]
+
+[dependencies]
+"sunholo/test_pkg" = "0.0.3"
+
+[effects]
+max = []
+
+[metadata]
+tags = ["test", "integration", "cascade-fixture"]
+ai_summary = "Smoke-test dependent of sunholo/test_pkg — exists solely to be bumped by the autonomous cascade in M-PKG-AUTONOMOUS-CASCADE-SAFE smoke tests. Not for production use."
+repository = "https://github.com/sunholo-data/ailang-packages/tree/main/packages/test-pkg-consumer"
+homepage = "https://ailang.sunholo.com/docs/packages/sunholo/test_pkg_consumer"
+license_url = "https://github.com/sunholo-data/ailang-packages/blob/main/LICENSE"
+
+# M-PKG-AUTONOMOUS-CASCADE-SAFE M3: keep the per-cascade ceiling tight on
+# this fixture so the smoke test's forced-fail variant trips the budget
+# gate quickly without burning real money on the agent's Sonnet calls.
+[cascade]
+max_cost_usd = 0.50
+
+[stability]
+api = "experimental"

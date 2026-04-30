@@ -1,0 +1,12 @@
+module sunholo/test_pkg_consumer/wrap
+
+-- Wraps sunholo/test_pkg/hello so a bump to test_pkg cascades into a
+-- bump here. Used by the M-PKG-AUTONOMOUS-CASCADE-SAFE smoke tests.
+
+import pkg/sunholo/test_pkg/hello (greet, version)
+
+export func greetExcited(name: string) -> string =
+  greet(name) ++ " (via " ++ version() ++ "_consumer)"
+
+export func consumerVersion() -> string =
+  "test-pkg-consumer wrapping " ++ version()
