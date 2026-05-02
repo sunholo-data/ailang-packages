@@ -1,0 +1,20 @@
+module sunholo/duckdb/types
+
+import std/json (Json)
+
+-- A single result row from duckdb -json output (always a JObject).
+-- Use std/json helpers to extract fields: get, asString, asNumber, asBool, etc.
+export type Row = Json
+
+-- Full query result including column ordering
+export type QueryResult = {
+  columns:  [string],
+  rows:     [Row],
+  rowCount: int
+}
+
+-- Lightweight DB handle
+export type DB = { path: string }
+
+export pure func openDB(path: string) -> DB =
+  { path: path }

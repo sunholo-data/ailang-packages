@@ -1,0 +1,101 @@
+-- Integration test for sunholo/duckdb — requires duckdb CLI on PATH.
+-- Run with: ailang run --relax-modules --caps Process integration_test.ail
+--
+-- Each test prints ✓ or ✗ and exits non-zero on any failure.
+
+module sunholo/duckdb/integration_test
+
+import std/io     (println)
+import std/option (Some, None)
+import std/json   (asString, asNumber, get)
+import std/list   (length, head)
+import std/result (Ok, Err)
+import ./types    (openDB)
+import ./query    (queryAll, queryOne, scalar)
+import ./schema   (execScript, tableExists)
+
+func pass(name: string) -> () ! {IO} =
+  println("✓ ${name}")
+
+func fail(name: string, reason: string) -> () ! {IO} =
+  println("✗ ${name}: ${reason}")
+
+export func main() -> () ! {IO, Process} = {
+  let db = openDB("/tmp/duckdb_integration_test.db") in
+
+  -- Test 1: create table and insert rows
+  match execScript(db, """
+    CREATE OR REPLACE TABLE people (id INTEGER, name VARCHAR);
+    INSERT INTO people VALUES (1, 'Alice');
+    INSERT INTO people VALUES (2, 'Bob');
+  """) {
+    Err(e) => fail("execScript", e),
+    Ok(_)  => pass("execScript: create and insert")
+  };
+
+  -- Test 2: queryAll returns correct row count
+  match queryAll(db, "SELECT * FROM people ORDER BY id") {
+    Err(e)   => fail("queryAll", e),
+    Ok(rows) =>
+      if length(rows) == 2 then pass("queryAll: row count")
+      else fail("queryAll", "expected 2 rows, got ${show(length(rows))}")
+  };
+
+  -- Test 3: queryOne returns first row
+  match queryOne(db, "SELECT * FROM people ORDER BY id LIMIT 1") {
+    Err(e)      => fail("queryOne", e),
+    Ok(None)    => fail("queryOne", "expected a row"),
+    Ok(Some(row)) =>
+      match get(row, "name") {
+        None    => fail("queryOne", "expected name field"),
+        Some(v) =>
+          match asString(v) {
+            None    => fail("queryOne", "expected string"),
+            Some(s) =>
+              if s == "Alice" then pass("queryOne: first row name")
+              else fail("queryOne", "expected Alice, got ${s}")
+          }
+      }
+  };
+
+  -- Test 4: scalar returns count
+  match scalar(db, "SELECT COUNT(*) AS n FROM people") {
+    Err(e)        => fail("scalar", e),
+    Ok(None)      => fail("scalar", "expected a value"),
+    Ok(Some(val)) =>
+      match asNumber(val) {
+        None    => fail("scalar", "expected number"),
+        Some(n) =>
+          if n == 2.0 then pass("scalar: COUNT")
+          else fail("scalar", "expected 2.0, got ${show(n)}")
+      }
+  };
+
+  -- Test 5: queryOne returns None on empty
+  match execScript(db, "CREATE OR REPLACE TABLE empty_t (x INTEGER)") {
+    Err(e) => fail("empty table setup", e),
+    Ok(_)  =>
+      match queryOne(db, "SELECT * FROM empty_t") {
+        Err(e)      => fail("queryOne empty", e),
+        Ok(None)    => pass("queryOne: None on empty table"),
+        Ok(Some(_)) => fail("queryOne empty", "expected None")
+      }
+  };
+
+  -- Test 6: tableExists
+  match tableExists(db, "people") {
+    Err(e)     => fail("tableExists people", e),
+    Ok(exists) =>
+      if exists then pass("tableExists: existing table")
+      else fail("tableExists", "expected people to exist")
+  };
+
+  match tableExists(db, "no_such_table") {
+    Err(e)     => fail("tableExists missing", e),
+    Ok(exists) =>
+      if not exists then pass("tableExists: missing table returns false")
+      else fail("tableExists", "expected no_such_table to not exist")
+  };
+
+  println("Integration tests complete.")
+}

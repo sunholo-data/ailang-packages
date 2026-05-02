@@ -1,0 +1,26 @@
+[package]
+name = "sunholo/duckdb"
+version = "0.1.0"
+edition = "1"
+ailang = ">=0.14.0"
+description = "DuckDB query client — execute SQL and parse results via the duckdb CLI"
+license = "Apache-2.0"
+
+[exports]
+modules = [
+  "sunholo/duckdb/types",
+  "sunholo/duckdb/query",
+  "sunholo/duckdb/schema"
+]
+
+[effects]
+max = ["Process", "FS"]
+
+[metadata]
+tags = ["duckdb", "database", "sql", "analytics", "query"]
+ai_summary = "Pure AILANG DuckDB client using std/process. Execute SQL queries against a local .db file, parse JSON results into typed Row maps. No FFI — shells out to the duckdb CLI binary."
+repository = "https://github.com/sunholo-data/ailang-packages/tree/main/packages/duckdb"
+license_url = "https://github.com/sunholo-data/ailang-packages/blob/main/LICENSE"
+
+[stability]
+level = "experimental"

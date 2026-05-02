@@ -1,0 +1,23 @@
+-- Pure unit tests for sunholo/duckdb
+-- These test type correctness and helper logic only.
+-- Integration tests (actual duckdb CLI calls) live in examples/duckdb_integration.ail
+-- and require --caps Process.
+
+module sunholo/duckdb/query_test
+
+import std/json   (js, jnum, jo, kv, ja)
+import std/option (Some, None)
+import ./types    (openDB, DB)
+
+-- openDB returns a record with the given path
+test "openDB sets path correctly" {
+  let db = openDB("/tmp/test.db") in
+  db.path == "/tmp/test.db"
+}
+
+-- openDB with different paths produces different DB values
+test "openDB distinguishes paths" {
+  let db1 = openDB("/tmp/a.db") in
+  let db2 = openDB("/tmp/b.db") in
+  db1.path != db2.path
+}

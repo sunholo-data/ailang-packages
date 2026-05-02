@@ -1,0 +1,28 @@
+module sunholo/duckdb/schema
+
+import std/json   (asNumber)
+import std/option (Some, None)
+import std/result (Result, Ok, Err)
+import ./types    (DB)
+import ./query    (query, scalar)
+
+-- Execute a multi-statement DDL/DML script.
+-- duckdb CLI accepts multiple semicolon-separated statements via -c.
+export func execScript(db: DB, sql: string) -> Result[(), string] ! {Process} =
+  match query(db, sql) {
+    Err(e) => Err(e),
+    Ok(_)  => Ok(())
+  }
+
+-- Return true if a table with the given name exists in the database.
+export func tableExists(db: DB, name: string) -> Result[bool, string] ! {Process} =
+  let sql = "SELECT COUNT(*) AS n FROM information_schema.tables WHERE table_name = '${name}'" in
+  match scalar(db, sql) {
+    Err(e)        => Err(e),
+    Ok(None)      => Ok(false),
+    Ok(Some(val)) =>
+      match asNumber(val) {
+        None    => Ok(false),
+        Some(n) => Ok(n > 0.0)
+      }
+  }

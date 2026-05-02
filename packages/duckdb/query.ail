@@ -1,0 +1,76 @@
+module sunholo/duckdb/query
+
+import std/process (exec)
+import std/bytes   (toString)
+import std/json    (Json, decode, asArray, keys, get)
+import std/list    (map, length, head)
+import std/option  (Option, Some, None)
+import std/result  (Result, Ok, Err)
+import std/string  (trim)
+import ./types     (DB, Row, QueryResult)
+
+-- Execute SQL and return full QueryResult.
+-- Row values are Json — use std/json helpers (get, asString, asNumber, etc.) to extract fields.
+export func query(db: DB, sql: string) -> Result[QueryResult, string] ! {Process} =
+  match exec("duckdb", [db.path, "-json", "-c", sql]) {
+    Err(e)  => Err("duckdb process error: ${show(e)}"),
+    Ok(out) =>
+      if out.exitCode != 0
+      then Err("duckdb error (exit ${show(out.exitCode)}): ${trim(toString(out.stderr))}")
+      else parseResult(trim(toString(out.stdout)))
+  }
+
+-- Execute SQL and return all rows.
+export func queryAll(db: DB, sql: string) -> Result[[Row], string] ! {Process} =
+  match query(db, sql) {
+    Err(e)  => Err(e),
+    Ok(qr)  => Ok(qr.rows)
+  }
+
+-- Execute SQL and return the first row, or None if empty.
+export func queryOne(db: DB, sql: string) -> Result[Option[Row], string] ! {Process} =
+  match query(db, sql) {
+    Err(e)   => Err(e),
+    Ok(qr)   =>
+      match head(qr.rows) {
+        None    => Ok(None),
+        Some(r) => Ok(Some(r))
+      }
+  }
+
+-- Execute SQL returning a single scalar value (first column of first row).
+export func scalar(db: DB, sql: string) -> Result[Option[Json], string] ! {Process} =
+  match queryOne(db, sql) {
+    Err(e)        => Err(e),
+    Ok(None)      => Ok(None),
+    Ok(Some(row)) =>
+      match head(keys(row)) {
+        None      => Ok(None),
+        Some(col) => Ok(get(row, col))
+      }
+  }
+
+-- ── Internal ──────────────────────────────────────────────────────────────────
+
+-- duckdb -json outputs a JSON array of objects: [{"col": val, ...}, ...]
+-- Empty result set outputs "" or "[]".
+-- Each Row is a Json (JObject) — callers use std/json.get / asString / asNumber.
+func parseResult(raw: string) -> Result[QueryResult, string] =
+  if raw == "" || raw == "[]"
+  then Ok({ columns: [], rows: [], rowCount: 0 })
+  else
+    match decode(raw) {
+      Err(e)      => Err("failed to parse duckdb output: ${e}"),
+      Ok(json)    =>
+        match asArray(json) {
+          None        => Err("expected JSON array from duckdb, got: ${raw}"),
+          Some([])    => Ok({ columns: [], rows: [], rowCount: 0 }),
+          Some(items) => Ok({ columns: colsFromFirst(items), rows: items, rowCount: length(items) })
+        }
+    }
+
+func colsFromFirst(items: [Json]) -> [string] =
+  match head(items) {
+    None    => [],
+    Some(r) => keys(r)
+  }
