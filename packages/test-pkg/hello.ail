@@ -4,7 +4,9 @@ module sunholo/test_pkg/hello
 -- Used by the coordinator package update pipeline tests.
 
 export func greet(name: string) -> string =
-  "Hello, ${name}!"
+  "Hello, ${name}! (cascade-test)"
 
-export func version() -> string =
-  "test-pkg"
+-- M-PKG-CASCADE-DETERMINISTIC-FIRST class C smoke: removed `version` export.
+-- This forces change_class=C (export removed) → wrapper skips deterministic
+-- path and dispatches AI from the start, with full hash context.
+-- The AI agent must repair test_pkg_consumer/wrap.ail to stop using version().
