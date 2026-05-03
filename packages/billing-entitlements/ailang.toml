@@ -25,5 +25,13 @@ repository = "https://github.com/sunholo-data/ailang-packages/tree/main/packages
 homepage = "https://ailang.sunholo.com/docs/packages/sunholo/billing_entitlements"
 license_url = "https://github.com/sunholo-data/ailang-packages/blob/main/LICENSE"
 
+# Per-cascade AI repair budget ceiling (USD). The cloud wrapper aborts
+# the run and labels the PR `cascade-budget-exceeded` rather than overrunning.
+# Tune up for packages with deeply-coupled consumers; tune down for
+# trivial ones. Default $1.00 leaves ~17x headroom over the observed
+# test_pkg signature-change repair ($0.058).
+[cascade]
+max_cost_usd = 1.00
+
 [stability]
 level = "experimental"
