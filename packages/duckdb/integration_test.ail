@@ -1,14 +1,14 @@
 -- Integration test for sunholo/duckdb — requires duckdb CLI on PATH.
 -- Run with: ailang run --relax-modules --caps Process integration_test.ail
 --
--- Each test prints ✓ or ✗ and exits non-zero on any failure.
+-- Each test prints ✓ or ✗.
 
 module sunholo/duckdb/integration_test
 
 import std/io     (println)
 import std/option (Some, None)
 import std/json   (asString, asNumber, get)
-import std/list   (length, head)
+import std/list   (length)
 import std/result (Ok, Err)
 import ./types    (openDB)
 import ./query    (queryAll, queryOne, scalar)
@@ -20,31 +20,28 @@ func pass(name: string) -> () ! {IO} =
 func fail(name: string, reason: string) -> () ! {IO} =
   println("✗ ${name}: ${reason}")
 
-export func main() -> () ! {IO, Process} = {
+export func main() -> () ! {IO, Process} =
   let db = openDB("/tmp/duckdb_integration_test.db") in
 
-  -- Test 1: create table and insert rows
-  match execScript(db, """
-    CREATE OR REPLACE TABLE people (id INTEGER, name VARCHAR);
-    INSERT INTO people VALUES (1, 'Alice');
-    INSERT INTO people VALUES (2, 'Bob');
-  """) {
+  -- Test 1: create table and insert rows (single-line SQL; triple-quoted strings not supported)
+  let _ = match execScript(db,
+    "CREATE OR REPLACE TABLE people (id INTEGER, name VARCHAR); INSERT INTO people VALUES (1, 'Alice'); INSERT INTO people VALUES (2, 'Bob');") {
     Err(e) => fail("execScript", e),
     Ok(_)  => pass("execScript: create and insert")
-  };
+  } in
 
   -- Test 2: queryAll returns correct row count
-  match queryAll(db, "SELECT * FROM people ORDER BY id") {
+  let _ = match queryAll(db, "SELECT * FROM people ORDER BY id") {
     Err(e)   => fail("queryAll", e),
     Ok(rows) =>
       if length(rows) == 2 then pass("queryAll: row count")
       else fail("queryAll", "expected 2 rows, got ${show(length(rows))}")
-  };
+  } in
 
   -- Test 3: queryOne returns first row
-  match queryOne(db, "SELECT * FROM people ORDER BY id LIMIT 1") {
-    Err(e)      => fail("queryOne", e),
-    Ok(None)    => fail("queryOne", "expected a row"),
+  let _ = match queryOne(db, "SELECT * FROM people ORDER BY id LIMIT 1") {
+    Err(e)        => fail("queryOne", e),
+    Ok(None)      => fail("queryOne", "expected a row"),
     Ok(Some(row)) =>
       match get(row, "name") {
         None    => fail("queryOne", "expected name field"),
@@ -56,10 +53,10 @@ export func main() -> () ! {IO, Process} = {
               else fail("queryOne", "expected Alice, got ${s}")
           }
       }
-  };
+  } in
 
   -- Test 4: scalar returns count
-  match scalar(db, "SELECT COUNT(*) AS n FROM people") {
+  let _ = match scalar(db, "SELECT COUNT(*) AS n FROM people") {
     Err(e)        => fail("scalar", e),
     Ok(None)      => fail("scalar", "expected a value"),
     Ok(Some(val)) =>
@@ -69,10 +66,10 @@ export func main() -> () ! {IO, Process} = {
           if n == 2.0 then pass("scalar: COUNT")
           else fail("scalar", "expected 2.0, got ${show(n)}")
       }
-  };
+  } in
 
-  -- Test 5: queryOne returns None on empty
-  match execScript(db, "CREATE OR REPLACE TABLE empty_t (x INTEGER)") {
+  -- Test 5: queryOne returns None on empty table
+  let _ = match execScript(db, "CREATE OR REPLACE TABLE empty_t (x INTEGER)") {
     Err(e) => fail("empty table setup", e),
     Ok(_)  =>
       match queryOne(db, "SELECT * FROM empty_t") {
@@ -80,22 +77,21 @@ export func main() -> () ! {IO, Process} = {
         Ok(None)    => pass("queryOne: None on empty table"),
         Ok(Some(_)) => fail("queryOne empty", "expected None")
       }
-  };
+  } in
 
-  -- Test 6: tableExists
-  match tableExists(db, "people") {
-    Err(e)     => fail("tableExists people", e),
-    Ok(exists) =>
-      if exists then pass("tableExists: existing table")
+  -- Test 6: tableExists — `exists` is a reserved word, use `found` instead
+  let _ = match tableExists(db, "people") {
+    Err(e)      => fail("tableExists people", e),
+    Ok(found)   =>
+      if found then pass("tableExists: existing table")
       else fail("tableExists", "expected people to exist")
-  };
+  } in
 
-  match tableExists(db, "no_such_table") {
-    Err(e)     => fail("tableExists missing", e),
-    Ok(exists) =>
-      if not exists then pass("tableExists: missing table returns false")
+  let _ = match tableExists(db, "no_such_table") {
+    Err(e)    => fail("tableExists missing", e),
+    Ok(found) =>
+      if not found then pass("tableExists: missing table returns false")
       else fail("tableExists", "expected no_such_table to not exist")
-  };
+  } in
 
   println("Integration tests complete.")
-}
