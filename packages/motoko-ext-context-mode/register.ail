@@ -1,0 +1,59 @@
+module sunholo/motoko_ext_context_mode/register
+
+import std/env (getEnvOr)
+import std/string (stringToInt)
+import std/option (Option, None, Some)
+import pkg/sunholo/motoko_ext_abi/types (
+  ExtensionHooks, ExtCtx, BudgetPlan, BudgetPatch,
+  ToolCallEnvelope, ToolHandleDecision, ResponseInterceptDecision, FinalizeDecision,
+  NoIntercept
+)
+import sunholo/motoko_ext_context_mode/types (CtxConfig)
+import sunholo/motoko_ext_context_mode/context_mode (
+  provided_tools, on_tool_policy, on_tool_handle, on_build_system_prompt, finalize_with_index
+)
+import sunholo/motoko_ext_context_mode/prompts (load_agent_prompt)
+
+func parse_int_or(raw: string, fallback: int) -> int {
+  match stringToInt(raw) {
+    Some(n) => n,
+    None => fallback
+  }
+}
+
+func no_budget_patch() -> BudgetPatch {
+  { requested_total: None, requested_solver: None, requested_verifier: None }
+}
+
+-- register_with_config uses a type variable for cfg so this extension is
+-- host-config-agnostic. Config is read from env vars (set by the host at
+-- startup), with sensible defaults matching the motoko_agent config.json defaults.
+export func register_with_config(_cfg: a) -> ExtensionHooks ! {Env, FS} {
+  let workdir = getEnvOr("MOTOKO_WORKDIR", ".");
+  let cfg: CtxConfig = {
+    bin: getEnvOr("CONTEXT_MODE_BIN", "context-mode"),
+    timeout_ms: parse_int_or(getEnvOr("CONTEXT_MODE_TIMEOUT_MS", "25000"), 25000),
+    max_output_chars: parse_int_or(getEnvOr("CONTEXT_MODE_MAX_OUTPUT_CHARS", "6000"), 6000),
+    snapshot_key_prefix: getEnvOr("CONTEXT_MODE_SNAPSHOT_KEY_PREFIX", "ctxmode:snapshot:")
+  };
+  let cached_prompt = load_agent_prompt(workdir);
+  {
+    id: "context_mode",
+    provided_tools: provided_tools(),
+    on_describe_tools: \_ . [],
+    on_build_system_prompt: \ctx. on_build_system_prompt(cached_prompt, ctx),
+    on_budget_plan: func(_ctx: ExtCtx, _plan: BudgetPlan) -> BudgetPatch ! {Env, FS} {
+      no_budget_patch()
+    },
+    on_tool_policy: on_tool_policy,
+    on_tool_handle: func(ctx: ExtCtx, call: ToolCallEnvelope) -> ToolHandleDecision ! {IO, Process, FS, AI, Env, Net, SharedMem, Clock, Stream} {
+      on_tool_handle(cfg, ctx, call)
+    },
+    on_response_intercept: func(_ctx: ExtCtx, _response_text: string) -> ResponseInterceptDecision ! {IO, Process, FS, AI, Env, Net, SharedMem, Clock, Stream} {
+      NoIntercept
+    },
+    on_solver_candidate: func(ctx: ExtCtx, candidate: string) -> FinalizeDecision ! {IO, Process, FS, AI, Env, Net, SharedMem, Clock, Stream} {
+      finalize_with_index(cfg, ctx, candidate)
+    }
+  }
+}
