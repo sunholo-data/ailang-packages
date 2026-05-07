@@ -45,12 +45,26 @@ func get_task_text(call: ToolCallEnvelope) -> string {
   }
 }
 
-func build_task_request(task_id: string, task_text: string) -> string {
+-- Build a JSON-RPC 2.0 tasks/send envelope for the AILANG serve-api A2A
+-- endpoint. The remote function is selected via params.metadata.skill_id
+-- ("module.path.function"); arguments are passed as a JSON {"args": [...]}
+-- text part, which the AILANG handler unwraps into positional args.
+func build_task_request(task_id: string, skill_id: string, task_text: string) -> string {
+  let args_payload = encode(jo([kv("args", ja([js(task_text)]))]));
   encode(jo([
-    kv("id", js(task_id)),
-    kv("message", jo([
-      kv("role", js("user")),
-      kv("parts", ja([jo([kv("text", js(task_text))])]))
+    kv("jsonrpc", js("2.0")),
+    kv("id",      js(task_id)),
+    kv("method",  js("tasks/send")),
+    kv("params",  jo([
+      kv("id",       js(task_id)),
+      kv("metadata", jo([kv("skill_id", js(skill_id))])),
+      kv("message",  jo([
+        kv("role",  js("user")),
+        kv("parts", ja([jo([
+          kv("type", js("text")),
+          kv("text", js(args_payload))
+        ])]))
+      ]))
     ]))
   ]))
 }
@@ -76,22 +90,36 @@ func extract_artifact_text(artifact: Json) -> string {
   }
 }
 
+-- Unwrap a JSON-RPC 2.0 response (or a bare task object) and pull the
+-- first artifact's text. Falls back to the raw response on any decode
+-- failure so the caller can still surface diagnostics.
+--
+-- Handles three response shapes:
+--   1. {"jsonrpc":"2.0","result":{"artifacts":[...]}}  — JSON-RPC envelope
+--   2. {"artifacts":[...]}                              — bare task object
+--   3. {"result":"<plain string>"}                      — legacy/non-AILANG
 func extract_response_text(response: string) -> string {
   match decode(response) {
     Err(_) => response,
     Ok(j)  =>
-      match get(j, "artifacts") {
-        None => match getString(j, "result") {
-          Some(s) => s,
-          None    => response
-        },
-        Some(arr) => match asArray(arr) {
-          None     => response,
-          Some(xs) => match xs {
-            []      => response,
-            a :: _  => {
-              let text = extract_artifact_text(a);
-              if text == "" then response else text
+      match getString(j, "result") {
+        Some(s) => s,
+        None => {
+          let inner = match get(j, "result") {
+            Some(r) => r,
+            None    => j
+          };
+          match get(inner, "artifacts") {
+            None => response,
+            Some(arr) => match asArray(arr) {
+              None     => response,
+              Some(xs) => match xs {
+                []      => response,
+                a :: _  => {
+                  let text = extract_artifact_text(a);
+                  if text == "" then response else text
+                }
+              }
             }
           }
         }
@@ -99,10 +127,10 @@ func extract_response_text(response: string) -> string {
   }
 }
 
-func delegate(base_url: string, task_text: string) -> string ! {Net, Rand} {
+func delegate(base_url: string, skill_id: string, task_text: string) -> string ! {Net, Rand} {
   let task_id = uuid4();
-  let body = build_task_request(task_id, task_text);
-  let response = httpPost("${base_url}/tasks/send", body);
+  let body = build_task_request(task_id, skill_id, task_text);
+  let response = httpPost("${base_url}/a2a/", body);
   extract_response_text(response)
 }
 
@@ -132,7 +160,7 @@ export func make_hooks(cfg: A2AConfig) -> ExtensionHooks {
       None  => Delegate,
       Some(a) => {
         let task_text = get_task_text(call);
-        let result = delegate(a.url, task_text);
+        let result = delegate(a.url, a.skill_id, task_text);
         Handled(make_result(call, result, 0))
       }
     }
@@ -170,6 +198,13 @@ pure func extract_artifact_text_from_valid_response() -> bool
     extract_response_text(response) == "Hello from agent"
   }
 
+pure func extract_unwraps_jsonrpc_result() -> bool
+  tests [((), true)]
+  {
+    let response = "{\"jsonrpc\":\"2.0\",\"id\":\"task-1\",\"result\":{\"artifacts\":[{\"parts\":[{\"text\":\"Hello via JSON-RPC\"}]}]}}";
+    extract_response_text(response) == "Hello via JSON-RPC"
+  }
+
 pure func extract_fallback_to_raw_on_bad_json() -> bool
   tests [((), true)]
   {
@@ -181,4 +216,37 @@ pure func extract_uses_result_field_as_fallback() -> bool
   {
     let response = "{\"result\":\"direct result\"}";
     extract_response_text(response) == "direct result"
+  }
+
+pure func build_request_includes_jsonrpc_envelope() -> bool
+  tests [((), true)]
+  {
+    let body = build_task_request("task-1", "main.handle_typefix", "fix this code");
+    match decode(body) {
+      Err(_) => false,
+      Ok(j)  => {
+        let jsonrpc_ok = match getString(j, "jsonrpc") { Some(s) => s == "2.0", None => false };
+        let method_ok  = match getString(j, "method")  { Some(s) => s == "tasks/send", None => false };
+        jsonrpc_ok && method_ok
+      }
+    }
+  }
+
+pure func build_request_carries_skill_id() -> bool
+  tests [((), true)]
+  {
+    let body = build_task_request("t1", "main.handle_typefix", "code");
+    match decode(body) {
+      Err(_) => false,
+      Ok(j)  => match get(j, "params") {
+        None => false,
+        Some(p) => match get(p, "metadata") {
+          None => false,
+          Some(m) => match getString(m, "skill_id") {
+            Some(s) => s == "main.handle_typefix",
+            None    => false
+          }
+        }
+      }
+    }
   }

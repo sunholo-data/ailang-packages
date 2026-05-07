@@ -13,7 +13,8 @@ func parse_agent(j: Json) -> A2AAgent {
   {
     name:        jstr(j, "name",        ""),
     url:         jstr(j, "url",         ""),
-    description: jstr(j, "description", "")
+    description: jstr(j, "description", ""),
+    skill_id:    jstr(j, "skill_id",    "")
   }
 }
 
@@ -57,14 +58,30 @@ pure func empty_config_has_no_agents() -> bool
 pure func single_agent_parsed() -> bool
   tests [((), true)]
   {
-    let raw = "{\"agents\":[{\"name\":\"hello\",\"url\":\"http://localhost:8080\",\"description\":\"Hello agent\"}]}";
+    let raw = "{\"agents\":[{\"name\":\"hello\",\"url\":\"http://localhost:8080\",\"description\":\"Hello agent\",\"skill_id\":\"main.handle_hello\"}]}";
     match decode(raw) {
       Err(_) => false,
       Ok(j)  => {
         let cfg = parse_a2a_json(j);
         match cfg.agents {
           [] => false,
-          a :: _ => a.name == "hello" && a.url == "http://localhost:8080"
+          a :: _ => a.name == "hello" && a.url == "http://localhost:8080" && a.skill_id == "main.handle_hello"
+        }
+      }
+    }
+  }
+
+pure func skill_id_defaults_to_empty() -> bool
+  tests [((), true)]
+  {
+    let raw = "{\"agents\":[{\"name\":\"legacy\",\"url\":\"http://localhost:8080\",\"description\":\"\"}]}";
+    match decode(raw) {
+      Err(_) => false,
+      Ok(j)  => {
+        let cfg = parse_a2a_json(j);
+        match cfg.agents {
+          [] => false,
+          a :: _ => a.skill_id == ""
         }
       }
     }
