@@ -16,7 +16,7 @@ Every `motoko-ext-*` package depends on this package and must export a `register
 -- In your extension's register.ail
 module motoko-ext-myplugin/register
 
-import motoko-ext-abi/types (ExtensionHooks, ExtCtx, ToolPolicyDecision, Allow, NoOpinion)
+import pkg/sunholo/motoko_ext_abi/types (ExtensionHooks, ExtCtx, ToolPolicyDecision, Allow, NoOpinion)
 import src/core/config (RuntimeConfig)
 
 export func register_with_config(cfg: RuntimeConfig) -> ExtensionHooks ! {} {

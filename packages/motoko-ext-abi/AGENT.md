@@ -7,7 +7,7 @@ Use when building a `motoko_agent` extension package (`motoko-ext-*`). This pack
 ## Quick start
 
 ```ailang
-import motoko-ext-abi/types (ExtensionHooks, ExtCtx, ToolPolicyDecision, NoOpinion, Delegate, NoIntercept, NoDecision)
+import pkg/sunholo/motoko_ext_abi/types (ExtensionHooks, ExtCtx, ToolPolicyDecision, NoOpinion, Delegate, NoIntercept, NoDecision)
 import src/core/config (RuntimeConfig)
 
 export func register_with_config(cfg: RuntimeConfig) -> ExtensionHooks ! {} {
