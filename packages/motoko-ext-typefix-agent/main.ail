@@ -1,0 +1,86 @@
+-- motoko-ext-typefix-agent: toy A2A sub-agent for AILANG type-error suggestions.
+--
+-- Hosted via:
+--   ailang serve-api --a2a --caps "" --port 9100 \
+--     packages/motoko-ext-typefix-agent/
+--
+-- Endpoints (auto-derived):
+--   GET  /.well-known/agent.json   — agent card with the auto-generated skill
+--   POST /a2a/                     — JSON-RPC tasks/send
+--
+-- Skill ID (auto-derived from module path): main.handle_typefix
+--
+-- (Note: package-namespaced module declarations like
+-- `module sunholo/motoko_ext_typefix_agent/main` were silently dropped by
+-- serve-api's registerModule under-basePath filter when hosted via
+-- `ailang serve-api <pkg-dir>/`. The flat `module main` declaration
+-- registers cleanly. Filed as feedback against AILANG.)
+--
+-- The function takes a single `compile_error` string (the failed `make
+-- check_core` output, an IMP010 line, etc.) and returns a JSON-encoded
+-- suggestion. Pure pattern-match — deterministic, easy to verify, and
+-- intentionally trivial: a real type-fixer would use microRAG + an LLM call,
+-- but the toy proves the wire-a2a-agent plumbing without that complexity.
+
+module main
+
+import std/string (contains)
+import std/json (encode, jo, kv, js, jnum)
+
+pure func suggest_for(err: string) -> string {
+  if contains(err, "stringify") then
+    "Use `encode` from std/json — `stringify` was renamed in 0.13."
+  else if contains(err, "from_int") then
+    "Use `show` from prelude — `from_int` is not an AILANG function."
+  else if contains(err, ".drop(") || contains(err, ".take(") then
+    "AILANG has no method-syntax `.drop`/`.take`. Use head/tail recursion or std/list helpers."
+  else if contains(err, "IMP010") then
+    "IMP010 means an imported symbol is not exported by the target module. Check the export list in that module, or pick a different symbol with the same role."
+  else if contains(err, "TC_") || contains(err, "type-check") then
+    "Type-check failure — re-read the function signature and the call site. Most often the inferred type and declared type disagree on a row variable or an effect."
+  else
+    "Generic suggestion: re-read the failing function, check imports, and run `ailang check` on the smallest possible reproduction to localise the error."
+}
+
+pure func confidence_for(err: string) -> float {
+  if contains(err, "stringify") || contains(err, "from_int") || contains(err, ".drop(") || contains(err, ".take(") then 0.85
+  else if contains(err, "IMP010") then 0.7
+  else if contains(err, "TC_") then 0.5
+  else 0.3
+}
+
+-- A2A-callable: skill_id "main.handle_typefix".
+-- Args: positional `[compile_error]` per the JSON-RPC tasks/send wire format.
+-- Returns: JSON-encoded {"suggestion","confidence","related_design_doc"}.
+export pure func handle_typefix(compile_error: string) -> string {
+  encode(jo([
+    kv("suggestion",          js(suggest_for(compile_error))),
+    kv("confidence",          jnum(confidence_for(compile_error))),
+    kv("related_design_doc",  js(""))
+  ]))
+}
+
+pure func suggests_encode_for_stringify() -> bool
+  tests [((), true)]
+  {
+    contains(handle_typefix("IMP010: symbol stringify not exported by std/json"), "encode")
+  }
+
+pure func suggests_show_for_from_int() -> bool
+  tests [((), true)]
+  {
+    contains(handle_typefix("undefined: from_int"), "show")
+  }
+
+pure func generic_when_unknown() -> bool
+  tests [((), true)]
+  {
+    contains(handle_typefix("totally unknown error shape"), "Generic")
+  }
+
+pure func returns_valid_json() -> bool
+  tests [((), true)]
+  {
+    let out = handle_typefix("IMP010: stringify");
+    contains(out, "\"suggestion\":") && contains(out, "\"confidence\":")
+  }
