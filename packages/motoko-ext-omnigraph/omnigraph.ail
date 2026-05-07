@@ -3,11 +3,11 @@ module sunholo/motoko_ext_omnigraph/omnigraph
 import std/json (Json, encode, jo, kv, js)
 import std/option (Option, Some, None)
 import pkg/sunholo/motoko_ext_abi/types (ToolCallEnvelope, ToolResultEnvelope, ExtCtx, PromptPatch, BudgetPlan, BudgetPatch, ToolPolicyDecision, ToolHandleDecision)
-import sunholo/motoko_ext_omnigraph/exec (run_omnigraph)
-import sunholo/motoko_ext_omnigraph/args (arg_string)
-import sunholo/motoko_ext_omnigraph/guardrail (denied_mutation_reason)
-import sunholo/motoko_ext_omnigraph/prompts (build_prompt_patch)
-import sunholo/motoko_ext_omnigraph/normalize (normalize_call)
+import pkg/sunholo/motoko_ext_omnigraph/exec (run_omnigraph)
+import pkg/sunholo/motoko_ext_omnigraph/args (arg_string)
+import pkg/sunholo/motoko_ext_omnigraph/guardrail (denied_mutation_reason)
+import pkg/sunholo/motoko_ext_omnigraph/prompts (build_prompt_patch)
+import pkg/sunholo/motoko_ext_omnigraph/normalize (normalize_call)
 
 func cwd_for(ctx: ExtCtx) -> string {
   "${ctx.cwd}/omnigraph"
