@@ -6,22 +6,29 @@ export func tool_filter() -> [string] {
   ["web_search_exa", "web_fetch_exa"]
 }
 
+-- Tool aliases. ADVERTISED to the model via all_tool_names(). MUST match
+-- Anthropic's Bedrock pattern ^[a-zA-Z0-9_-]{1,128}$ — no dots. The
+-- 6 dotted aliases (exa.search/exa_search.search/exa.fetch/etc) were
+-- dropped in motoko v0.18.1 because Bedrock rejects them. resolve_tool()
+-- still accepts the dotted forms as INPUT — in case a model generated
+-- them — so the resolver is unchanged. Only the OUTPUT (advertised) list
+-- needs Bedrock-compat names.
 export func tool_mappings() -> [McpToolMapping] {
   [
     {
       canonical: "ExaSearch",
       mcp_name: "web_search_exa",
-      aliases: ["exa_search", "exa.search", "exa_search.search"]
+      aliases: ["exa_search"]
     },
     {
       canonical: "ExaFetch",
       mcp_name: "web_fetch_exa",
-      aliases: ["exa_fetch", "exa.fetch", "exa_search.fetch"]
+      aliases: ["exa_fetch"]
     },
     {
       canonical: "ExaCrawl",
       mcp_name: "web_fetch_exa",
-      aliases: ["exa_crawl", "exa.crawl", "exa_search.crawl"]
+      aliases: ["exa_crawl"]
     }
   ]
 }

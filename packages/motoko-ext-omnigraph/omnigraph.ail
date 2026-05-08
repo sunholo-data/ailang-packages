@@ -36,6 +36,15 @@ func handled_error(id: string, tool: string, message: string) -> ToolHandleDecis
   })
 }
 
+-- Tool names advertised to the model. MUST match Anthropic's Bedrock
+-- pattern ^[a-zA-Z0-9_-]{1,128}$ — no dots, no slashes, no colons. The
+-- 4 dotted aliases (omnigraph.query/mutate/branch/status) were dropped
+-- in motoko v0.18.1 because Bedrock rejects them at the tools[].custom.
+-- name validator (other Anthropic backends are permissive but Bedrock
+-- is strict). normalize.ail still accepts the dotted forms as INPUT —
+-- in case a model generated them despite not seeing them advertised —
+-- so the normalizer is unchanged. Only the OUTPUT (advertised) list
+-- needs Bedrock-compat names.
 export func provided_tools() -> [string] {
   [
     "OmnigraphRead",
@@ -46,10 +55,6 @@ export func provided_tools() -> [string] {
     "omnigraph_mutate",
     "omnigraph_branch",
     "omnigraph_status",
-    "omnigraph.query",
-    "omnigraph.mutate",
-    "omnigraph.branch",
-    "omnigraph.status",
     "OmnigraphQuery",
     "OmnigraphCreateBranch",
     "list_branches",
