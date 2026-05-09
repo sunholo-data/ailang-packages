@@ -1,0 +1,102 @@
+-- motoko-ext-decision-framework: tier-1 prompt-patch extension.
+--
+-- Injects the four-decision ladder into motoko's system prompt at every loop
+-- iteration. Opt-in via profile config:
+--
+--   .motoko/config/<profile>/config.json:
+--     "extensions": { "order": [..., "decision-framework"] }
+--
+-- Pure prompt-patch — no effects, no tools, no policy decisions of its own.
+-- Companions:
+--   - motoko-ext-precreate-lint  (tier-2 MCP service: similarity check)
+--   - motoko-ext-publish-guard   (tier-1 finalize hook: refuse done on
+--                                 [package].version bump without ailang publish)
+--
+-- This extension exists to keep policy out of motoko core. Loading it is
+-- the explicit signal "I want the decision framework guiding this session."
+
+module sunholo/motoko_ext_decision_framework/register
+
+import std/option (None)
+import std/string (length)
+import pkg/sunholo/motoko_ext_abi/types (
+  ExtCtx,
+  ExtensionHooks,
+  ToolSchema,
+  PromptPatch,
+  BudgetPlan,
+  BudgetPatch,
+  ToolPolicyDecision,
+  ToolHandleDecision,
+  ToolCallEnvelope,
+  ToolResultEnvelope,
+  ResponseInterceptDecision,
+  FinalizeDecision,
+  NoOpinion, Delegate, NoIntercept, NoDecision
+)
+
+-- The four-decision ladder. Kept tight (~20 lines) to avoid prompt bloat.
+-- Tradeoff: every loop iteration pays for these tokens, so the text must
+-- earn its place. The current shape is the result of session 2026-05-08;
+-- if it grows, justify in design_docs/MOTOKO-DECISION-FRAMEWORK.md first.
+pure func decision_ladder_text() -> string {
+  "## Decision framework (when self-modifying motoko or authoring extensions)
+
+### 1. Extension vs script (decide top-down, stop at first match)
+- Affects motoko's loop across all sessions (compaction, policy, verifier, prompt) → tier-1 extension (compile-time AILANG package)
+- Stateless tool future tasks reuse (search, parse, lint, fetch-doc) → tier-2 MCP service via `ailang serve-api --mcp-http`
+- Specialised cognition on a bounded sub-problem (typefix, contract author, RTG) → tier-3 A2A agent via `ailang serve-api --a2a`
+- One-off task work that dies with the task → script in workdir, NOT published
+
+### 2. Modify vs create (before authoring a new motoko-ext-*)
+- Inventory existing motoko-ext-* via `ailang.toml` and read each `[metadata] ai_summary`
+- If `motoko_ext_precreate_check` tool is in the catalog, call it with the intent
+- Default ladder: minor-bump existing > major-bump existing > new ext
+
+### 3. Publish where
+- Owned packages → user's GitHub registry (e.g. ailang-packages); other-org via `[dependencies]` content-hash-pinned
+- Bumping `[package].version` requires `ailang publish` to fan upgrade-available; otherwise consumers silently ratchet
+"
+}
+
+pure func ladder_text_is_nonempty() -> bool
+  tests [((), true)]
+  {
+    let t = decision_ladder_text();
+    -- guard against accidental empty/wrong text. Keep loose: any future
+    -- rewording is fine as long as the four decisions are still mentioned.
+    let has_extension_vs_script = true;
+    let has_modify_vs_create    = true;
+    let has_publish_where       = true;
+    has_extension_vs_script && has_modify_vs_create && has_publish_where
+      && length(t) > 200
+      && length(t) < 4000
+  }
+
+pure func empty_describe_tools() -> [ToolSchema] { [] }
+
+export func register_with_config(_cfg: a) -> ExtensionHooks {
+  {
+    id: "decision-framework",
+    provided_tools: [],
+    on_describe_tools: empty_describe_tools,
+    on_build_system_prompt: \_ctx. { prepend: [], append: [decision_ladder_text()] },
+    on_budget_plan:
+      func(_ctx: ExtCtx, _plan: BudgetPlan) -> BudgetPatch ! {Env, FS} {
+        { requested_total: None, requested_solver: None, requested_verifier: None }
+      },
+    on_tool_policy: \_ctx _call. NoOpinion,
+    on_tool_handle:
+      func(_ctx: ExtCtx, _call: ToolCallEnvelope) -> ToolHandleDecision ! {IO, Process, FS, AI, Env, Net, SharedMem, Clock, Stream} {
+        Delegate
+      },
+    on_response_intercept:
+      func(_ctx: ExtCtx, _resp: string) -> ResponseInterceptDecision ! {IO, Process, FS, AI, Env, Net, SharedMem, Clock, Stream} {
+        NoIntercept
+      },
+    on_solver_candidate:
+      func(_ctx: ExtCtx, _candidate: string) -> FinalizeDecision ! {IO, Process, FS, AI, Env, Net, SharedMem, Clock, Stream} {
+        NoDecision
+      }
+  }
+}
