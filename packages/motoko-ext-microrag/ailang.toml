@@ -1,0 +1,28 @@
+[package]
+name = "sunholo/motoko_ext_microrag"
+version = "0.1.0"
+edition = "1"
+ailang = ">=0.17.0"
+description = "Tier-1 motoko extension exposing AILANG microRAG (just-in-time knowledge retrieval) as a callable tool. Shells out to `ailang micro-rag` directly — no separate MCP server binary required."
+license = "Apache-2.0"
+
+[exports]
+modules = ["sunholo/motoko_ext_microrag/register"]
+
+[dependencies]
+"sunholo/motoko_ext_abi" = { path = "../motoko-ext-abi" }
+
+[effects]
+max = ["IO", "Process", "FS", "AI", "Env", "Net", "SharedMem", "Clock", "Stream"]
+
+[metadata]
+tags = ["motoko", "extension", "microrag", "retrieval", "ailang"]
+ai_summary = "Provides a `microrag_lookup` tool that the agent can call to retrieve relevant AILANG syntax/builtin docs from the indexed brain (via `ailang micro-rag user-prompt`). Adaptive retrieval — the response depends on the model's current query — unlike static prompt-injection extensions. Shells out to the `ailang` binary directly; no MCP server required. Replacement for the unpublished motoko-ext-ailang-hints which proved counterproductive for weak models."
+repository = "https://github.com/sunholo-data/ailang-packages/tree/main/packages/motoko-ext-microrag"
+license_url = "https://github.com/sunholo-data/ailang-packages/blob/main/LICENSE"
+
+[cascade]
+max_cost_usd = 0.25
+
+[stability]
+level = "experimental"

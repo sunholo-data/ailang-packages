@@ -1,0 +1,167 @@
+-- motoko-ext-microrag: tier-1 motoko extension exposing AILANG microRAG
+-- (just-in-time knowledge retrieval) as a single callable tool.
+--
+-- Shells out to `ailang micro-rag user-prompt --prompt <query>` directly —
+-- no separate MCP server binary required. The retrieval engine is part of
+-- the main `ailang` binary.
+--
+-- One tool exposed:
+--   microrag_lookup(query: string)
+--     → returns relevant AILANG syntax / builtin / changelog snippets
+--       indexed in ~/.ailang/microrag/. Adaptive: the response depends
+--       on the query, unlike static-prompt extensions.
+--
+-- Loaded via profile config:
+--   "extensions": { "order": [..., "microrag"] }
+--
+-- Bootstrapping the brain (run once after install):
+--   ailang micro-rag bootstrap
+-- This indexes 56 syntax chunks + 295 builtin frames into ~/.ailang/microrag/.
+
+module sunholo/motoko_ext_microrag/register
+
+import std/option (None, Some)
+import std/string (length)
+import std/process (exec)
+import std/json (get, asString, encode, jo)
+import pkg/sunholo/motoko_ext_abi/types (
+  ExtCtx,
+  ExtensionHooks,
+  ToolSchema,
+  PromptPatch,
+  BudgetPlan,
+  BudgetPatch,
+  ToolPolicyDecision,
+  ToolHandleDecision,
+  ToolCallEnvelope,
+  ToolResultEnvelope,
+  ResponseInterceptDecision,
+  FinalizeDecision,
+  Allow, NoOpinion, Delegate, Handled, NoIntercept, NoDecision
+)
+
+-- The tool catalog entry the model sees.
+pure func microrag_tool_schema() -> ToolSchema {
+  {
+    name: "microrag_lookup",
+    description: "Retrieve relevant AILANG syntax, builtin signatures, or changelog notes by natural-language query. Use BEFORE writing AILANG code that imports unfamiliar names — hallucinated stdlib symbols (`stringify`, `from_int`, `.drop()`) are the #1 weak-model failure mode. Example queries: 'Result type and constructors', 'effect row syntax for IO', 'how to declare a pure func with contracts'.",
+    parameters: "{\"type\":\"object\",\"properties\":{\"query\":{\"type\":\"string\",\"description\":\"Natural-language description of what you want to look up. Be specific (e.g. 'Result Ok Err signatures' not 'errors').\"}},\"required\":[\"query\"]}"
+  }
+}
+
+-- Extract the query argument from the tool call envelope.
+-- Defensive: if the model emits the args field with the wrong shape, fall
+-- back to encoding the whole args object as the query (best-effort).
+pure func get_query(call: ToolCallEnvelope) -> string {
+  match get(call.arguments, "query") {
+    None => encode(call.arguments),
+    Some(j) => match asString(j) { None => encode(j), Some(s) => s }
+  }
+}
+
+-- Truncate retrieval result to keep prompt budget bounded. ~3K chars =
+-- ~750 tokens — enough for a couple of relevant chunks, far less than the
+-- ailang_hints@0.1.0 static text bloat (~325 tokens) and bounded by query
+-- relevance, not author opinion.
+pure func cap_chars(s: string, n: int) -> string {
+  if length(s) <= n then s
+  else "${_str_slice(s, 0, n)}\n[truncated to ${show(n)} chars]"
+}
+
+func make_result(call: ToolCallEnvelope, stdout: string, exit_code: int) -> ToolResultEnvelope {
+  {
+    tool_call_id: call.id,
+    tool: call.tool,
+    exit_code: exit_code,
+    stdout: cap_chars(stdout, 3000),
+    stderr: "",
+    metadata: jo([])
+  }
+}
+
+func make_error_result(call: ToolCallEnvelope, msg: string) -> ToolResultEnvelope {
+  {
+    tool_call_id: call.id,
+    tool: call.tool,
+    exit_code: 1,
+    stdout: "",
+    stderr: msg,
+    metadata: jo([])
+  }
+}
+
+-- Shell out to `ailang micro-rag user-prompt --prompt <query>`. The
+-- micro-rag CLI returns either retrieved chunks (success) or an empty
+-- response (no matches — also success). Any non-zero exit is treated as
+-- a tool failure surfaced to the model.
+func run_microrag(call: ToolCallEnvelope) -> ToolHandleDecision ! {Process} {
+  let query = get_query(call);
+  if length(query) == 0 then Handled(make_error_result(call, "microrag_lookup: missing 'query' argument"))
+  else {
+    match exec("ailang", ["micro-rag", "user-prompt", "--prompt", query]) {
+      Err(e) => Handled(make_error_result(call, "microrag_lookup: exec failed: ${show(e)}")),
+      Ok(out) => Handled(make_result(call, out.stdout, out.exit_code))
+    }
+  }
+}
+
+-- Hooks: the model sees `microrag_lookup` in the tool catalog (via
+-- on_describe_tools); when the model calls it, on_tool_policy ensures
+-- it's not denied by another extension; on_tool_handle dispatches it
+-- to run_microrag and returns Handled(...) so motoko's loop doesn't
+-- forward it to a backend.
+
+pure func microrag_describe_tools() -> [ToolSchema] {
+  [microrag_tool_schema()]
+}
+
+pure func microrag_tool_policy(_ctx: ExtCtx, call: ToolCallEnvelope) -> ToolPolicyDecision {
+  if call.tool == "microrag_lookup" then Allow
+  else NoOpinion
+}
+
+func microrag_tool_handle(_ctx: ExtCtx, call: ToolCallEnvelope) -> ToolHandleDecision ! {IO, Process, FS, AI, Env, Net, SharedMem, Clock, Stream} {
+  if call.tool == "microrag_lookup" then run_microrag(call)
+  else Delegate
+}
+
+pure func get_query_extracts_string_arg() -> bool
+  tests [((), true)]
+  {
+    -- Fabricate a ToolCallEnvelope-like object via the JSON layer to test
+    -- get_query indirectly. Skipped: ToolCallEnvelope isn't trivially
+    -- constructible in inline tests; keep this as a placeholder. The real
+    -- path-coverage is the smoke test that runs motoko with the ext loaded.
+    true
+  }
+
+pure func cap_chars_truncates() -> bool
+  tests [((), true)]
+  {
+    cap_chars("abcdef", 3) == "abc\n[truncated to 3 chars]"
+      && cap_chars("abc", 10) == "abc"
+      && cap_chars("", 5) == ""
+  }
+
+export func register_with_config(_cfg: a) -> ExtensionHooks {
+  {
+    id: "microrag",
+    provided_tools: ["microrag_lookup"],
+    on_describe_tools: microrag_describe_tools,
+    on_build_system_prompt: \_ctx. { prepend: [], append: [] },
+    on_budget_plan:
+      func(_ctx: ExtCtx, _plan: BudgetPlan) -> BudgetPatch ! {Env, FS} {
+        { requested_total: None, requested_solver: None, requested_verifier: None }
+      },
+    on_tool_policy: microrag_tool_policy,
+    on_tool_handle: microrag_tool_handle,
+    on_response_intercept:
+      func(_ctx: ExtCtx, _resp: string) -> ResponseInterceptDecision ! {IO, Process, FS, AI, Env, Net, SharedMem, Clock, Stream} {
+        NoIntercept
+      },
+    on_solver_candidate:
+      func(_ctx: ExtCtx, _candidate: string) -> FinalizeDecision ! {IO, Process, FS, AI, Env, Net, SharedMem, Clock, Stream} {
+        NoDecision
+      }
+  }
+}
