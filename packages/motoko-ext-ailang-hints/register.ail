@@ -53,12 +53,15 @@ import pkg/sunholo/motoko_ext_abi/types (
 pure func ailang_hints_text() -> string {
   "## AILANG context (this task involves AILANG code)
 
-- **Stdlib lookups via tools, not memory.** If `microrag_context_for_file` / `microrag_search` / `ctx_search` are in the catalog, use them BEFORE writing imports. Hallucinated names (`stringify`, `from_int`, `.drop()`) are the #1 failure mode.
-- **Effect rows in signatures.** Effectful: `func f(x: int) -> int ! {IO, FS}`. Pure: omit the row entirely. Pure functions can carry Z3 contracts: `pure func g(n: int) -> int requires { n >= 0 } ensures { result >= n }`.
-- **No method syntax.** AILANG has no `xs.drop(1)` / `xs.map(f)`. Use `std/list` (foldl, map, filter, head, tail) or pattern-match recursion.
-- **Inline tests.** `pure func ok() -> bool tests [((), true)] { ... }` runs via `ailang test`. Use these instead of separate test files for small, deterministic checks.
-- **show before formatting.** `println(show(value))` for any printable type — prefer `show` over `intToStr`/`floatToStr`.
-- **Verify before declaring done.** `make check_core` (type+effect), `make verify_core` (Z3 contracts on `pure func`), inline tests. DP7 will reject `done` with type errors when active."
+- **Unit type is `()`, not `void`.** Effectful entry points: `export func main() -> () ! {IO} { ... }`.
+- **No `return` statements.** The value of the last expression IS the result. Use `if cond then a else b` for branching, not early-return.
+- **Iteration via recursion + lambdas, not named functions.** Prefer `letrec loop = \\n. if n > 100 then () else { println(show(n)); loop(n + 1) }; loop(1)` over a top-level recursive `func`. Less ceremony, fewer parse traps.
+- **No method syntax.** AILANG has no `xs.drop(1)` / `xs.map(f)`. Use `std/list` helpers (foldl, map, filter, head, tail) or pattern-match recursion.
+- **`show` before formatting.** `println(show(value))` for any printable type — works on int, float, list, ADT. Prefer over `intToStr` / `floatToStr`.
+- **Effect rows in signatures.** Effectful functions declare effects after `->`. Pure functions omit the effect row entirely.
+- **Hallucinated names cost iterations.** Common mistakes: `stringify` (use `encode` from std/json), `from_int` (use `show`), method-style `.drop()` (use `std/list`). If `microrag_search` / `ctx_search` are in the catalog, look up unfamiliar names there before guessing.
+- **Inline tests.** `pure func ok() -> bool tests [((), true)] { ... }` runs via `ailang test`. Use for small deterministic checks instead of separate test files.
+- **Verify before declaring done.** `ailang check solution.ail` for type+effect, `ailang run --caps IO --entry main solution.ail` to actually run."
 }
 
 pure func ailang_hints_text_is_well_formed() -> bool
