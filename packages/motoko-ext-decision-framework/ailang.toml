@@ -1,6 +1,6 @@
 [package]
 name = "sunholo/motoko_ext_decision_framework"
-version = "0.1.0"
+version = "0.1.1"
 edition = "1"
 ailang = ">=0.17.0"
 description = "Tier-1 motoko extension: injects the four-decision ladder (extension-vs-script, modify-vs-create, publish-where, cascade-aware-self-publish) into the system prompt at every loop iteration. Opt-in via profile config; not in core."
@@ -17,7 +17,7 @@ max = []
 
 [metadata]
 tags = ["motoko", "extension", "decision-framework", "self-improvement", "policy"]
-ai_summary = "Prompt-patch extension that injects the four-decision ladder into motoko's system prompt: extension-vs-script, modify-vs-create, publish-where, cascade-aware-self-publish. ~15-line constant text appended to system prompt at every loop iteration. Pure function, no effects. Companion to motoko-ext-precreate-lint (deterministic similarity check, tool-shaped) and motoko-ext-publish-guard (finalize hook). Use this when motoko is operating in a self-modifying or self-publishing context; skip for pure end-user coding tasks."
+ai_summary = "Prompt-patch extension that injects the four-decision ladder (extension-vs-script, modify-vs-create, publish-where, cascade-aware-self-publish) into motoko's system prompt CONDITIONALLY — only when ctx.task references extension authoring / publishing / motoko self-modification. Pure substring keyword check; no FS, no LLM call, no per-step cost beyond a strcmp. Saves ~700 tokens per step on irrelevant tasks. Canonical example of the context-aware extension pattern (hooks fire every step with full ExtCtx; cheap pure checks gate the patch). Companion to planned motoko-ext-precreate-lint and motoko-ext-publish-guard."
 repository = "https://github.com/sunholo-data/ailang-packages/tree/main/packages/motoko-ext-decision-framework"
 license_url = "https://github.com/sunholo-data/ailang-packages/blob/main/LICENSE"
 

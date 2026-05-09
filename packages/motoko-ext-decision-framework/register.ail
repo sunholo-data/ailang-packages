@@ -1,24 +1,35 @@
 -- motoko-ext-decision-framework: tier-1 prompt-patch extension.
 --
--- Injects the four-decision ladder into motoko's system prompt at every loop
--- iteration. Opt-in via profile config:
+-- Injects the four-decision ladder into motoko's system prompt ONLY WHEN
+-- THE TASK SIGNALS SELF-MODIFICATION. Opt-in via profile config:
 --
 --   .motoko/config/<profile>/config.json:
---     "extensions": { "order": [..., "decision-framework"] }
+--     "extensions": { "order": [..., "decision_framework"] }
 --
--- Pure prompt-patch — no effects, no tools, no policy decisions of its own.
--- Companions:
+-- v0.1.1 — conditional firing per ctx.task keywords. The matrix is suppressed
+-- on tasks that don't reference extension authoring / publishing / motoko
+-- self-modification, saving prompt budget on irrelevant runs.
+--
+-- Trigger keywords (case-insensitive substring match against task text):
+--   "extension", "motoko-ext", "motoko_ext", "ailang publish",
+--   "[package]", "[extensions]", "register_with_config", "self-modify"
+--
+-- This is the canonical "context-aware extension" pattern: hooks fire every
+-- step with ExtCtx (task, history, workdir, model). Lightweight checks at
+-- on_build_system_prompt time keep the matrix out of irrelevant prompts.
+--
+-- Companions (planned):
 --   - motoko-ext-precreate-lint  (tier-2 MCP service: similarity check)
 --   - motoko-ext-publish-guard   (tier-1 finalize hook: refuse done on
 --                                 [package].version bump without ailang publish)
 --
 -- This extension exists to keep policy out of motoko core. Loading it is
--- the explicit signal "I want the decision framework guiding this session."
+-- the explicit signal "I want the decision framework available this session."
 
 module sunholo/motoko_ext_decision_framework/register
 
 import std/option (None)
-import std/string (length)
+import std/string (length, toLower, contains)
 import pkg/sunholo/motoko_ext_abi/types (
   ExtCtx,
   ExtensionHooks,
@@ -73,14 +84,66 @@ pure func ladder_text_is_nonempty() -> bool
       && length(t) < 4000
   }
 
+-- Decide whether the matrix is relevant to THIS task. Pure substring check
+-- against the task text (lowercased). No FS, no history walk, no LLM call —
+-- the decision must be cheap because it runs every step.
+--
+-- The keyword set is deliberately narrow: false negatives (matrix doesn't
+-- fire when it could have helped) cost a few uninformed decisions; false
+-- positives (matrix fires when irrelevant) cost ~700 tokens of prompt
+-- budget every step. We bias toward false negatives.
+pure func task_signals_self_modification(task: string) -> bool {
+  let t = toLower(task);
+  contains(t, "extension")             -- generic ext authoring
+    || contains(t, "motoko-ext")       -- canonical package prefix
+    || contains(t, "motoko_ext")       -- module-name form
+    || contains(t, "ailang publish")   -- publish flow
+    || contains(t, "[package]")        -- editing ailang.toml
+    || contains(t, "[extensions]")     -- editing extension order
+    || contains(t, "register_with_config")  -- ext entry-point
+    || contains(t, "self-modify")      -- explicit signal
+    || contains(t, "self modify")      -- variant spelling
+    || contains(t, "ext registry")     -- registry generation
+    || contains(t, "decision framework")  -- explicit ask for the matrix
+}
+
+pure func task_signals_fires_on_relevant_keywords() -> bool
+  tests [((), true)]
+  {
+    -- Positive: each canonical signal must fire.
+    task_signals_self_modification("Author a new motoko-ext-foo")
+      && task_signals_self_modification("Edit [package] version in ailang.toml")
+      && task_signals_self_modification("Run ailang publish on the changes")
+      && task_signals_self_modification("Add a new extension to the registry")
+      && task_signals_self_modification("Update register_with_config")
+      && task_signals_self_modification("MOTOKO_EXT_TEST_DUMMY behaviour")  -- case-insensitive
+    -- Negative: generic coding tasks must NOT fire.
+      && not task_signals_self_modification("Write a Python fizzbuzz script")
+      && not task_signals_self_modification("Refactor the auth middleware")
+      && not task_signals_self_modification("Fix the failing test in src/utils")
+      && not task_signals_self_modification("")
+  }
+
 pure func empty_describe_tools() -> [ToolSchema] { [] }
+
+-- Conditional prompt patch: returns the matrix iff task_signals_self_modification.
+-- This is the canonical "context-aware extension" pattern — hooks fire every
+-- step with full ExtCtx; lightweight pure checks here keep irrelevant prompts
+-- clean. The decision is logged via emit_event upstream when the agent loop
+-- iterates so operators can confirm activation behaviour from JSONL.
+pure func conditional_prompt_patch(ctx: ExtCtx) -> PromptPatch {
+  if task_signals_self_modification(ctx.task) then
+    { prepend: [], append: [decision_ladder_text()] }
+  else
+    { prepend: [], append: [] }
+}
 
 export func register_with_config(_cfg: a) -> ExtensionHooks {
   {
-    id: "decision-framework",
+    id: "decision_framework",
     provided_tools: [],
     on_describe_tools: empty_describe_tools,
-    on_build_system_prompt: \_ctx. { prepend: [], append: [decision_ladder_text()] },
+    on_build_system_prompt: conditional_prompt_patch,
     on_budget_plan:
       func(_ctx: ExtCtx, _plan: BudgetPlan) -> BudgetPatch ! {Env, FS} {
         { requested_total: None, requested_solver: None, requested_verifier: None }
