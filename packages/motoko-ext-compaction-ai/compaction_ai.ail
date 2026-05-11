@@ -104,9 +104,12 @@ func split_msgs(msgs: [Msg], keep_recent: int) -> SplitResult {
   }
 }
 
--- Create a summary message
+-- Create a summary message.
+-- Includes empty tool_calls + tool_call_id so the Msg matches the v2.1.0
+-- abi shape (M-ABI-MSG-WIRE-PARITY): assistant summary doesn't carry
+-- tool dispatch state, so both fields default to empty.
 func summary_msg(summary: string) -> Msg {
-  { role: "assistant", content: "[CONTEXT SUMMARY] ${summary}" }
+  { role: "assistant", content: "[CONTEXT SUMMARY] ${summary}", tool_calls: [], tool_call_id: "" }
 }
 
 -- Main compaction logic

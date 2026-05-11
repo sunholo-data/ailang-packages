@@ -14,8 +14,34 @@ import std/json (Json)
 -- Inlined from std/ai to avoid importing AI-effect functions into this pure ABI package.
 export type ToolSchema = { name: string, description: string, parameters: string }
 
--- Inlined from motoko_agent/src/core/types (structural compatibility guaranteed)
-export type Msg = { role: string, content: string }
+-- Inlined from std/ai.ToolCall — structurally identical so call.id / call.name /
+-- call.arguments work the same across abi-typed and ai-typed values.
+-- Added in motoko_ext_abi 2.1.0 to support Msg.tool_calls.
+export type ToolCall = {
+  id: string,
+  name: string,
+  arguments: string
+}
+
+-- Msg is the lightweight conversation-message type passed to extension
+-- hooks (notably on_pre_step). Structurally compatible with std/ai.Message
+-- so motoko_agent can convert between them losslessly.
+--
+-- v2.0.0 shape (still works for code that destructures only .role / .content):
+--   { role: string, content: string }
+--
+-- v2.1.0 adds tool_calls + tool_call_id (M-ABI-MSG-WIRE-PARITY): assistant
+-- messages with tool dispatch carry tool_calls; tool-role messages carry
+-- the tool_call_id that providers use to correlate tool_use → tool_result.
+-- Without these fields, on_pre_step compaction strips tool_call_id and
+-- providers reject the next request with 422 (OpenRouter / OpenAI /
+-- Anthropic all enforce this).
+export type Msg = {
+  role: string,
+  content: string,
+  tool_calls: [ToolCall],
+  tool_call_id: string
+}
 
 -- Inlined from motoko_agent/src/core/tool_contract
 export type ToolCallEnvelope = { id: string, tool: string, arguments: Json }
@@ -85,12 +111,21 @@ export type FinalizeDecision
   | NoDecision
   deriving (Eq)
 
+
+-- Decision type for pre-step compaction hooks.
+-- PassThrough: no compaction needed, proceed with original msgs
+-- Compacted: extension has compacted the message list, use the new one
+export type PreStepDecision
+  = PassThrough
+  | Compacted(msgs: [Msg], note: string)
+  deriving (Eq)
 export type ExtensionHooks = {
   id: string,
   provided_tools: [string],
   on_describe_tools: () -> [ToolSchema],
   on_build_system_prompt: (ExtCtx) -> PromptPatch,
   on_budget_plan: (ExtCtx, BudgetPlan) -> BudgetPatch ! {Env, FS},
+  on_pre_step: (ExtCtx, [Msg]) -> PreStepDecision ! {IO, Process, FS, AI, Env, Net, SharedMem, Clock, Stream},
   on_tool_policy: (ExtCtx, ToolCallEnvelope) -> ToolPolicyDecision,
   on_tool_handle: (ExtCtx, ToolCallEnvelope)
     -> ToolHandleDecision ! {IO, Process, FS, AI, Env, Net, SharedMem, Clock, Stream},
