@@ -4,7 +4,8 @@
 module sunholo/motoko_ext_compaction_ai/register
 
 import std/env (getEnvOr)
-import std/json (decode, getString, getInt, getObject)
+import std/json (decode, getString, getInt)
+import std/option (Option, Some, None)
 import std/fs (readFileResult)
 import pkg/sunholo/motoko_ext_abi/types (
   ExtensionHooks, ExtCtx, PreStepDecision,
@@ -34,17 +35,23 @@ func read_compaction_ai_config(profile_dir: string) -> CompactionAiConfig ! {Env
       match decode(content) {
         Err(_) => default_config(),
         Ok(json) => {
+          -- std/json.getString and getInt return Option[T] (Some/None),
+          -- NOT Result[T, _] (Ok/Err). The previous code matched against
+          -- Result constructors which never matched at runtime, throwing
+          -- "no pattern matched in match expression" when a field WAS
+          -- present. Bug was masked when readFile (now readFileResult)
+          -- panicked on missing file and never reached this branch.
           let model = match getString(json, "model") {
-            Err(_) => default_config().model,
-            Ok(m) => m
+            None => default_config().model,
+            Some(m) => m
           };
           let threshold_pct = match getInt(json, "threshold_pct") {
-            Err(_) => default_config().threshold_pct,
-            Ok(t) => t
+            None => default_config().threshold_pct,
+            Some(t) => t
           };
           let keep_recent = match getInt(json, "keep_recent") {
-            Err(_) => default_config().keep_recent,
-            Ok(k) => k
+            None => default_config().keep_recent,
+            Some(k) => k
           };
           { model: model, threshold_pct: threshold_pct, keep_recent: keep_recent }
         }
