@@ -1,13 +1,17 @@
 [package]
 name = "sunholo/motoko_ext_mcp"
-version = "0.1.0"
+version = "0.2.1"
 edition = "1"
+ailang = ">=0.19.0"
 
 [dependencies]
-"sunholo/motoko_ext_abi" = { path = "../motoko-ext-abi" }
+"sunholo/motoko_ext_abi" = "2.0.0"
 
 [effects]
-max = ["Process", "FS", "Env"]
+max = ["Process", "FS", "Env", "IO"]
+
+[assets]
+files = ["mcp-call.mjs"]
 
 [exports]
 modules = [
@@ -16,5 +20,6 @@ modules = [
   "sunholo/motoko_ext_mcp/exec",
   "sunholo/motoko_ext_mcp/resolve",
   "sunholo/motoko_ext_mcp/compress",
-  "sunholo/motoko_ext_mcp/types"
+  "sunholo/motoko_ext_mcp/types",
+  "sunholo/motoko_ext_mcp/assets"
 ]
