@@ -1,0 +1,211 @@
+module sunholo/linkedin/comments
+
+-- LinkedIn Comments API client (read-only).
+--
+-- Fetches comments via `GET /rest/socialActions/{urn}/comments`. Requires
+-- the `r_organization_social_feed` scope on the OAuth2 token (part of the
+-- Community Management API).
+--
+-- Also provides:
+--   - linkedinCommentsToJson — serialises comments for public consumption
+--     with personal identifiers stripped (GDPR), and adds deterministic
+--     pseudonymous {initials, avatarSeed} fields derived from a one-way
+--     hash of the actor URN.
+--   - linkedinDerivePersona — the persona derivation function exposed
+--     so consumers can build alternative output formats while keeping
+--     the same stable monogram per commenter.
+
+import std/net (httpRequest)
+import std/json (encode, decode, getString, getArray, getObject, getInt, jo, kv, js, ja)
+import std/string (length, split, join, intToStr, substring, charAt, charCode)
+import std/option (Some, None, getOrElse, isSome)
+import std/result (Ok, Err)
+import std/list (length as listLength, map, foldl)
+import std/crypto (sha256Hex)
+
+-- A comment on a LinkedIn post (read-only).
+export type LinkedInComment = {
+  commentUrn: string,
+  authorName: string,
+  text: string,
+  createdAt: string,
+  parentPostUrn: string
+}
+
+-- Headers for read-only comments calls. Note: the version must match the
+-- version the rest of the integration uses; we hard-code rather than
+-- import linkedinApiVersion from `posts.ail` to keep modules independent.
+func linkedinCommentHeaders(token: string) -> [{name: string, value: string}] = [
+  { name: "Authorization", value: "Bearer ${token}" },
+  { name: "X-Restli-Protocol-Version", value: "2.0.0" },
+  { name: "LinkedIn-Version", value: "202604" }
+]
+
+-- LinkedIn requires URL-encoded URNs in the path: urn:li:share:123 → urn%3Ali%3Ashare%3A123
+func linkedinEncodeUrn(urn: string) -> string {
+  let parts = split(urn, ":");
+  join("%3A", parts)
+}
+
+-- Fetch comments for a single post URN.
+export func linkedinGetComments(token: string, postUrn: string) -> Result[[LinkedInComment], string] ! {Net @limit=1} {
+  let encodedUrn = linkedinEncodeUrn(postUrn);
+  let url = "https://api.linkedin.com/rest/socialActions/${encodedUrn}/comments";
+  match httpRequest("GET", url, linkedinCommentHeaders(token), "") {
+    Ok(response) => {
+      if response.ok then linkedinParseCommentsResponse(response.body, postUrn)
+      else Err("Comments API error (status ${response.status}): ${response.body}")
+    },
+    Err(_) => Err("Network error fetching comments for ${postUrn}")
+  }
+}
+
+func linkedinParseCommentsResponse(body: string, postUrn: string) -> Result[[LinkedInComment], string] {
+  match decode(body) {
+    Ok(json) => {
+      match getArray(json, "elements") {
+        Some(elements) => Ok(linkedinParseCommentList(elements, postUrn)),
+        None => Ok([])
+      }
+    },
+    Err(e) => Err("Failed to parse comments: ${e}")
+  }
+}
+
+func linkedinParseCommentList(elements: [Json], postUrn: string) -> [LinkedInComment] =
+  match elements {
+    [] => [],
+    elem :: rest => {
+      let comment = linkedinParseOneComment(elem, postUrn);
+      comment :: linkedinParseCommentList(rest, postUrn)
+    }
+  }
+
+func linkedinParseOneComment(elem: Json, postUrn: string) -> LinkedInComment {
+  -- LinkedIn comments come back shaped like:
+  --   { commentUrn: "urn:li:comment:(...)",
+  --     actor:      "urn:li:person:xxx",
+  --     message:    { text: "...", attributes: [...] },
+  --     created:    { actor: "...", time: 1746000000000 },
+  --     id:         "12345",
+  --     ... }
+  let urn = getOrElse(getString(elem, "commentUrn"), "");
+  let text = match getObject(elem, "message") {
+    Some(msg) => getOrElse(getString(msg, "text"), ""),
+    None => ""
+  };
+  let created = match getObject(elem, "created") {
+    Some(c) => match getInt(c, "time") {
+      Some(t) => intToStr(t),
+      None => ""
+    },
+    None => ""
+  };
+  -- Without r_member_profile we can't expand the actor URN to a name.
+  -- Consumers should derive a pseudonym via linkedinDerivePersona rather
+  -- than rendering this URN directly (it's still a personal identifier).
+  let authorName = getOrElse(getString(elem, "actor"), "unknown");
+  let comment: LinkedInComment = {
+    commentUrn: urn,
+    authorName: authorName,
+    text: text,
+    createdAt: created,
+    parentPostUrn: postUrn
+  };
+  comment
+}
+
+-- Fetch comments for every URN in the list. Capped at 20 calls per sweep
+-- to keep the Net budget bounded. Consumers tracking richer state (slug,
+-- publishedAt, ...) extract URNs and pass them in.
+export func linkedinGetAllComments(token: string, urns: [string]) -> [LinkedInComment] ! {Net @limit=20} {
+  linkedinFetchCommentsLoop(token, urns)
+}
+
+func linkedinFetchCommentsLoop(token: string, urns: [string]) -> [LinkedInComment] ! {Net} =
+  match urns {
+    [] => [],
+    u :: rest => {
+      let comments = match linkedinGetComments(token, u) {
+        Ok(cs) => cs,
+        Err(_) => []
+      };
+      let others = linkedinFetchCommentsLoop(token, rest);
+      linkedinConcatComments(comments, others)
+    }
+  }
+
+func linkedinConcatComments(a: [LinkedInComment], b: [LinkedInComment]) -> [LinkedInComment] =
+  match a {
+    [] => b,
+    x :: rest => x :: linkedinConcatComments(rest, b)
+  }
+
+-- Serialise a comment list as a JSON array for public consumption.
+--
+-- GDPR: the published JSON is intended for serving at a public URL, so
+-- everything that identifies the commenter is stripped:
+--   - actor URN (was on `authorName`)
+--   - commentUrn (composite URN encodes the activity, could be resolved)
+--
+-- Two derived fields are added that are *stable per commenter but not
+-- reversible to identity*:
+--   - initials   — two letters from sha256(actor)[0..1]
+--   - avatarSeed — six hex chars from sha256(actor)[2..4]
+--
+-- The original URN never leaves this function.
+export func linkedinCommentsToJson(comments: [LinkedInComment]) -> string {
+  let entries = map(\c. {
+    let p = linkedinDerivePersona(c.authorName);
+    jo([
+      kv("text", js(c.text)),
+      kv("createdAt", js(c.createdAt)),
+      kv("parentPostUrn", js(c.parentPostUrn)),
+      kv("initials", js(p.initials)),
+      kv("avatarSeed", js(p.avatarSeed))
+    ])
+  }, comments);
+  encode(ja(entries))
+}
+
+-- Compute a deterministic { initials, avatarSeed } pair from any string.
+-- SHA-256 is one-way: identical input → identical persona, but you can't
+-- recover the URN from the hash. Same commenter on different posts always
+-- gets the same monogram + colour seed.
+export func linkedinDerivePersona(actor: string) -> {initials: string, avatarSeed: string} {
+  let h = sha256Hex(actor);
+  let b0 = linkedinHexByte(h, 0);
+  let b1 = linkedinHexByte(h, 2);
+  let initial1 = linkedinLetterFromIdx(b0 - (b0 / 26) * 26);
+  let initial2 = linkedinLetterFromIdx(b1 - (b1 / 26) * 26);
+  let seed = substring(h, 4, 10);
+  let persona: {initials: string, avatarSeed: string} = {
+    initials: "${initial1}${initial2}",
+    avatarSeed: seed
+  };
+  persona
+}
+
+-- Parse two consecutive hex chars (positions `pos` and `pos+1`) into 0..255.
+func linkedinHexByte(hex: string, pos: int) -> int =
+  linkedinHexVal(charAt(hex, pos)) * 16 + linkedinHexVal(charAt(hex, pos + 1))
+
+-- A single hex char (0-9, a-f, A-F) → 0..15. Other inputs map to 0.
+func linkedinHexVal(c: string) -> int {
+  let n = charCode(c);
+  if n >= 48 && n <= 57 then n - 48        -- '0'..'9'
+  else if n >= 97 && n <= 102 then n - 87  -- 'a'..'f'
+  else if n >= 65 && n <= 70 then n - 55   -- 'A'..'F'
+  else 0
+}
+
+-- 0..25 → "A".."Z" without needing charFromCode in stdlib.
+func linkedinLetterFromIdx(i: int) -> string =
+  match i {
+    0 => "A", 1 => "B", 2 => "C", 3 => "D", 4 => "E",
+    5 => "F", 6 => "G", 7 => "H", 8 => "I", 9 => "J",
+    10 => "K", 11 => "L", 12 => "M", 13 => "N", 14 => "O",
+    15 => "P", 16 => "Q", 17 => "R", 18 => "S", 19 => "T",
+    20 => "U", 21 => "V", 22 => "W", 23 => "X", 24 => "Y",
+    25 => "Z", _ => "?"
+  }
