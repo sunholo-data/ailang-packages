@@ -24,12 +24,17 @@ import std/list (length as listLength, map, foldl)
 import std/crypto (sha256Hex)
 
 -- A comment on a LinkedIn post (read-only).
+--
+-- parentCommentUrn is empty ("") for top-level comments and set to the
+-- parent comment's URN for nested replies. Consumers wanting a tree
+-- structure can group on this field.
 export type LinkedInComment = {
   commentUrn: string,
   authorName: string,
   text: string,
   createdAt: string,
-  parentPostUrn: string
+  parentPostUrn: string,
+  parentCommentUrn: string
 }
 
 -- Headers for read-only comments calls. Note: the version must match the
@@ -83,11 +88,12 @@ func linkedinParseCommentList(elements: [Json], postUrn: string) -> [LinkedInCom
 
 func linkedinParseOneComment(elem: Json, postUrn: string) -> LinkedInComment {
   -- LinkedIn comments come back shaped like:
-  --   { commentUrn: "urn:li:comment:(...)",
-  --     actor:      "urn:li:person:xxx",
-  --     message:    { text: "...", attributes: [...] },
-  --     created:    { actor: "...", time: 1746000000000 },
-  --     id:         "12345",
+  --   { commentUrn:    "urn:li:comment:(...)",
+  --     actor:         "urn:li:person:xxx",
+  --     message:       { text: "...", attributes: [...] },
+  --     created:       { actor: "...", time: 1746000000000 },
+  --     parentComment: "urn:li:comment:(...)"  -- only on nested replies
+  --     id:            "12345",
   --     ... }
   let urn = getOrElse(getString(elem, "commentUrn"), "");
   let text = match getObject(elem, "message") {
@@ -105,20 +111,109 @@ func linkedinParseOneComment(elem: Json, postUrn: string) -> LinkedInComment {
   -- Consumers should derive a pseudonym via linkedinDerivePersona rather
   -- than rendering this URN directly (it's still a personal identifier).
   let authorName = getOrElse(getString(elem, "actor"), "unknown");
+  -- `parentComment` is present only on nested replies. Top-level comments
+  -- get an empty string, which the caller can use to detect threading depth.
+  let parentComment = getOrElse(getString(elem, "parentComment"), "");
   let comment: LinkedInComment = {
     commentUrn: urn,
     authorName: authorName,
     text: text,
     createdAt: created,
-    parentPostUrn: postUrn
+    parentPostUrn: postUrn,
+    parentCommentUrn: parentComment
   };
   comment
 }
 
--- Fetch comments for every URN in the list. Capped at 20 calls per sweep
--- to keep the Net budget bounded. Consumers tracking richer state (slug,
--- publishedAt, ...) extract URNs and pass them in.
-export func linkedinGetAllComments(token: string, urns: [string]) -> [LinkedInComment] ! {Net @limit=20} {
+-- Fetch replies to a specific comment.
+--
+-- LinkedIn nests comments one level deep: a comment on a post can have
+-- replies. To see them, hit `/socialActions/<commentUrn>/comments`.
+-- (Reply-to-replies aren't a thing in LinkedIn's UI; this is the leaf.)
+export func linkedinGetCommentReplies(token: string, commentUrn: string)
+  -> Result[[LinkedInComment], string]
+  ! {Net @limit=1}
+{
+  let encoded = linkedinEncodeUrn(commentUrn);
+  let url = "https://api.linkedin.com/rest/socialActions/${encoded}/comments";
+  match httpRequest("GET", url, linkedinCommentHeaders(token), "") {
+    Ok(response) => {
+      if response.ok then linkedinParseRepliesResponse(response.body, commentUrn)
+      else Err("Comment replies API error (status ${response.status}): ${response.body}")
+    },
+    Err(_) => Err("Network error fetching replies for ${commentUrn}")
+  }
+}
+
+-- Reply parsing differs from top-level parsing only in that the comments
+-- come back with their `parentComment` field set; otherwise identical shape.
+func linkedinParseRepliesResponse(body: string, parentCommentUrn: string) -> Result[[LinkedInComment], string] {
+  match decode(body) {
+    Ok(json) => {
+      match getArray(json, "elements") {
+        Some(elements) => Ok(linkedinParseReplyList(elements, parentCommentUrn)),
+        None => Ok([])
+      }
+    },
+    Err(e) => Err("Failed to parse replies: ${e}")
+  }
+}
+
+-- Each reply belongs to a known parent (we asked for replies to that one).
+-- LinkedIn's response usually includes `parentComment` per element, but we
+-- defensively fill it in case any element is missing the field.
+func linkedinParseReplyList(elements: [Json], parentCommentUrn: string) -> [LinkedInComment] =
+  match elements {
+    [] => [],
+    elem :: rest => {
+      let r = linkedinParseOneReply(elem, parentCommentUrn);
+      r :: linkedinParseReplyList(rest, parentCommentUrn)
+    }
+  }
+
+func linkedinParseOneReply(elem: Json, parentCommentUrn: string) -> LinkedInComment {
+  -- `object` on a reply points at the parent activity URN (post); we use
+  -- that for parentPostUrn. parentCommentUrn is enforced to the URN we
+  -- asked replies for (LinkedIn's `parentComment` field may be elided).
+  let urn = getOrElse(getString(elem, "commentUrn"), "");
+  let text = match getObject(elem, "message") {
+    Some(msg) => getOrElse(getString(msg, "text"), ""),
+    None => ""
+  };
+  let created = match getObject(elem, "created") {
+    Some(c) => match getInt(c, "time") {
+      Some(t) => intToStr(t),
+      None => ""
+    },
+    None => ""
+  };
+  let authorName = getOrElse(getString(elem, "actor"), "unknown");
+  let postUrn = getOrElse(getString(elem, "object"), "");
+  let comment: LinkedInComment = {
+    commentUrn: urn,
+    authorName: authorName,
+    text: text,
+    createdAt: created,
+    parentPostUrn: postUrn,
+    parentCommentUrn: parentCommentUrn
+  };
+  comment
+}
+
+-- Fetch comments AND their replies for every URN in the list.
+--
+-- Two phases per post:
+--   1. GET top-level comments (1 call)
+--   2. For each top-level comment, GET its replies (N calls)
+--
+-- Returns a single flat list. Each comment carries parentPostUrn (the post
+-- it belongs to) and parentCommentUrn (the comment it replies to, or "" for
+-- a top-level comment). Consumers can either keep it flat or group by
+-- parentCommentUrn for a threaded display.
+--
+-- Net @limit=50 supports ~25 posts with 1 reply each, or 5 posts with ~9
+-- replies each. Bump per the active campaign's shape.
+export func linkedinGetAllComments(token: string, urns: [string]) -> [LinkedInComment] ! {Net @limit=50} {
   linkedinFetchCommentsLoop(token, urns)
 }
 
@@ -126,12 +221,28 @@ func linkedinFetchCommentsLoop(token: string, urns: [string]) -> [LinkedInCommen
   match urns {
     [] => [],
     u :: rest => {
-      let comments = match linkedinGetComments(token, u) {
+      let topLevel = match linkedinGetComments(token, u) {
         Ok(cs) => cs,
         Err(_) => []
       };
+      -- For each top-level comment, also fetch its replies.
+      let replies = linkedinFetchRepliesForList(token, topLevel);
+      let combined = linkedinConcatComments(topLevel, replies);
       let others = linkedinFetchCommentsLoop(token, rest);
-      linkedinConcatComments(comments, others)
+      linkedinConcatComments(combined, others)
+    }
+  }
+
+func linkedinFetchRepliesForList(token: string, comments: [LinkedInComment]) -> [LinkedInComment] ! {Net} =
+  match comments {
+    [] => [],
+    c :: rest => {
+      let mine = match linkedinGetCommentReplies(token, c.commentUrn) {
+        Ok(rs) => rs,
+        Err(_) => []
+      };
+      let others = linkedinFetchRepliesForList(token, rest);
+      linkedinConcatComments(mine, others)
     }
   }
 
@@ -161,6 +272,9 @@ export func linkedinCommentsToJson(comments: [LinkedInComment]) -> string {
       kv("text", js(c.text)),
       kv("createdAt", js(c.createdAt)),
       kv("parentPostUrn", js(c.parentPostUrn)),
+      -- parentCommentUrn lets the website reconstruct a reply tree.
+      -- For top-level comments this is the empty string.
+      kv("parentCommentUrn", js(c.parentCommentUrn)),
       kv("initials", js(p.initials)),
       kv("avatarSeed", js(p.avatarSeed))
     ])
