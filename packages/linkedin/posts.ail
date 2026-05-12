@@ -94,6 +94,47 @@ requires { length(text) > 0 && length(text) <= 3000 }
   }
 }
 
+-- Create a post with a single attached image. The image URN must be one
+-- returned by sunholo/linkedin/images.linkedinUploadImage — LinkedIn
+-- rejects any other URN as the post's media reference.
+--
+--   token       — OAuth2 access token (w_organization_social scope)
+--   orgUrn      — urn:li:organization:<id>
+--   text        — post body. Auto-escaped for Little Text Format.
+--   imageUrn    — urn:li:image:<id> returned by the image upload flow
+--   altText     — accessibility description for the image (≤ 300 chars
+--                 per LinkedIn's accessibility guidance)
+export func linkedinCreateImagePost(token: string, orgUrn: string, text: string, imageUrn: string, altText: string)
+  -> Result[PostResult, string]
+  ! {Net @limit=1}
+requires { length(text) > 0 && length(text) <= 3000 }
+{
+  let url = "https://api.linkedin.com/rest/posts";
+  let escaped = linkedinEscapeLittleText(text);
+  let body = encode(jo([
+    kv("author", js(orgUrn)),
+    kv("commentary", js(escaped)),
+    kv("visibility", js("PUBLIC")),
+    kv("distribution", jo([
+      kv("feedDistribution", js("MAIN_FEED"))
+    ])),
+    kv("content", jo([
+      kv("media", jo([
+        kv("id", js(imageUrn)),
+        kv("altText", js(altText))
+      ]))
+    ])),
+    kv("lifecycleState", js("PUBLISHED"))
+  ]));
+  match httpRequest("POST", url, linkedinHeaders(token), body) {
+    Ok(response) => {
+      if response.ok then linkedinParsePostResponse(response.headers, response.body)
+      else Err("LinkedIn API error (status ${response.status}): ${response.body}")
+    },
+    Err(_) => Err("Network error creating LinkedIn image post")
+  }
+}
+
 func linkedinParsePostResponse(headers: [{name: string, value: string}], body: string) -> Result[PostResult, string] {
   -- LinkedIn POST /rest/posts returns 201 with the URN in the `x-restli-id`
   -- response header. The body is empty on success.
