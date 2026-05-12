@@ -389,6 +389,19 @@ func linkedinRedactedText(msg: Json) -> string {
 -- Apply redactions in REVERSE order of `start` so earlier indices don't
 -- shift as we replace later ones. We also drop attributes that don't have
 -- a `value.person.person` URN (organisations, hashtag entities, etc.).
+--
+-- Two-pass algorithm:
+--   Pass 1 — STRUCTURED: walk the LinkedIn-provided attributes and replace
+--            each tagged substring with @<initials>. Catches `@Mark Edmondson`.
+--   Pass 2 — FREE-TEXT NAME SWEEP: for each tagged person, also replace any
+--            other occurrence of their full name (or its space-separated
+--            parts ≥3 chars) elsewhere in the same comment. Catches the
+--            "Hi Tomasz" pattern where the commenter tags someone and then
+--            uses their first name again in prose.
+--
+-- Trade-off on Pass 2: short common names that happen to appear as English
+-- words ("Mark this date") may be over-redacted. Privacy-first; the rare
+-- false positive is acceptable.
 func linkedinApplyRedactions(text: string, attrs: [Json]) -> string {
   let personAttrs = foldl(\acc a. {
     match getObject(a, "value") {
@@ -407,9 +420,45 @@ func linkedinApplyRedactions(text: string, attrs: [Json]) -> string {
       None => acc
     }
   }, [], attrs);
-  -- Sort by start descending so replacements don't shift earlier offsets.
+
+  -- Extract each tagged name BEFORE we start mutating the text, since
+  -- the structured pass will replace those substrings.
+  let withNames = map(\a. linkedinExtractName(text, a), personAttrs);
+
+  -- Pass 1: structured-attribute redaction (right-to-left to keep offsets stable).
   let sorted = linkedinSortByStartDesc(personAttrs);
-  foldl(\t a. linkedinReplaceMention(t, a.start, a.len, a.urn), text, sorted)
+  let afterPass1 = foldl(\t a. linkedinReplaceMention(t, a.start, a.len, a.urn), text, sorted);
+
+  -- Pass 2: literal sweep of remaining occurrences of each tagged name
+  -- (and its name-parts ≥3 chars).
+  foldl(\acc a. linkedinSweepName(acc, a.name, a.urn), afterPass1, withNames)
+}
+
+-- Pull the tagged-name substring out of the original text, defensively
+-- clamping if LinkedIn's UTF-16 offsets would run past the buffer.
+func linkedinExtractName(text: string, a: {start: int, len: int, urn: string}) -> {name: string, urn: string} {
+  let textLen = length(text);
+  let safeEnd = if a.start + a.len > textLen then textLen else a.start + a.len;
+  let name = if a.start >= 0 && a.start < textLen
+             then substring(text, a.start, safeEnd)
+             else "";
+  let r: {name: string, urn: string} = { name: name, urn: a.urn };
+  r
+}
+
+-- Replace every literal occurrence of `name` (and each space-separated
+-- piece of length ≥3) with @<initials>. Skips empty input. Threshold of
+-- 3 keeps prepositions / articles ("of", "to", "is", "a", "an") from
+-- being scooped up by accident.
+func linkedinSweepName(text: string, name: string, urn: string) -> string {
+  if length(name) == 0 then text
+  else {
+    let p = linkedinDerivePersona(urn);
+    let replacement = "@${p.initials}";
+    let afterFull = replace(text, name, replacement);
+    let parts = split(name, " ");
+    foldl(\s part. if length(part) >= 3 then replace(s, part, replacement) else s, afterFull, parts)
+  }
 }
 
 -- Bubble-sort by start descending — list is tiny (≤ a handful of mentions
