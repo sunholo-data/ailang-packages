@@ -90,7 +90,7 @@ Provide a concise summary that captures essential context for continuing the tas
 -- "cannot access field of non-record value: *eval.StringValue". Fixed in
 -- 0.1.4 — returns a structural fallback string on summarizer failure so the
 -- agent loop continues with an indicative summary marker rather than dying.
-func summarize_with_ai(prompt: string, model: string) -> string ! {AI, IO, Process, FS, Env, Net, SharedMem, Clock, Stream} {
+export func summarize_with_ai(prompt: string, model: string) -> string ! {AI, IO, Process, FS, Env, Net, SharedMem, Clock, Stream} {
   let msgs: [Message] = [{ role: "user", content: prompt, tool_calls: [], tool_call_id: "" }];
   match step(model, msgs, []) {
     Ok(result) => result.message.content,
