@@ -5,6 +5,7 @@
 module sunholo/motoko_ext_compaction_ai/compaction_ai
 
 import std/ai (Message, step)
+import std/result (Result, Ok, Err)
 import std/string (length, contains)
 import std/list (length as list_length, take, drop, reverse)
 import pkg/sunholo/motoko_ext_abi/types (ExtCtx, PreStepDecision, PassThrough, Compacted, Msg)
@@ -82,11 +83,19 @@ RECENT TURNS (keep these verbatim - ${show(recent_count)} messages):
 Provide a concise summary that captures essential context for continuing the task."
 }
 
--- Call AI to summarize old turns
+-- Call AI to summarize old turns. step returns Result[StepResult, AIError]
+-- so we MUST match on it — accessing .message.content directly would unwrap
+-- Err(AIError) to its .message string (network blips, rate limits, model
+-- timeouts on long agent loops) and then crash on .content with
+-- "cannot access field of non-record value: *eval.StringValue". Fixed in
+-- 0.1.4 — returns a structural fallback string on summarizer failure so the
+-- agent loop continues with an indicative summary marker rather than dying.
 func summarize_with_ai(prompt: string, model: string) -> string ! {AI, IO, Process, FS, Env, Net, SharedMem, Clock, Stream} {
   let msgs: [Message] = [{ role: "user", content: prompt, tool_calls: [], tool_call_id: "" }];
-  let result = step(model, msgs, []);
-  result.message.content
+  match step(model, msgs, []) {
+    Ok(result) => result.message.content,
+    Err(e) => "[summarizer unavailable: ${e.code}: ${e.message}]"
+  }
 }
 
 -- Split result as a record (AILANG doesn't support tuple destructuring)
