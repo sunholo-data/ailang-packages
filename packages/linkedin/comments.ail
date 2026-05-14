@@ -493,7 +493,13 @@ func linkedinReplaceMention(text: string, start: int, len: int, urn: string) -> 
 -- SHA-256 is one-way: identical input → identical persona, but you can't
 -- recover the URN from the hash. Same commenter on different posts always
 -- gets the same monogram + colour seed.
-export func linkedinDerivePersona(actor: string) -> {initials: string, avatarSeed: string} {
+--
+-- Contract: the persona shape is mathematically guaranteed — exactly 2
+-- letters for the monogram, exactly 6 hex chars for the CSS avatar seed.
+-- Downstream renderers can rely on these widths without runtime checks.
+export func linkedinDerivePersona(actor: string) -> {initials: string, avatarSeed: string}
+  ensures { length(result.initials) == 2, length(result.avatarSeed) == 6 }
+{
   let h = sha256Hex(actor);
   let b0 = linkedinHexByte(h, 0);
   let b1 = linkedinHexByte(h, 2);
@@ -512,7 +518,11 @@ func linkedinHexByte(hex: string, pos: int) -> int =
   linkedinHexVal(charAt(hex, pos)) * 16 + linkedinHexVal(charAt(hex, pos + 1))
 
 -- A single hex char (0-9, a-f, A-F) → 0..15. Other inputs map to 0.
-func linkedinHexVal(c: string) -> int {
+-- Range-bound by contract — callers can use the result as an array
+-- index without bounds-checking.
+func linkedinHexVal(c: string) -> int
+  ensures { result >= 0, result < 16 }
+{
   let n = charCode(c);
   if n >= 48 && n <= 57 then n - 48        -- '0'..'9'
   else if n >= 97 && n <= 102 then n - 87  -- 'a'..'f'

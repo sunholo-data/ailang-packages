@@ -27,7 +27,11 @@ export type LinkedInCreds = {
 }
 
 -- Path to credentials file. Convention: $HOME/.ailang/linkedin/credentials.json
-func linkedinCredsPath() -> string ! {Env} {
+-- Non-empty by construction: getEnvOr falls back to "/tmp" if HOME isn't set,
+-- and the suffix is a literal. Contract makes the invariant explicit.
+func linkedinCredsPath() -> string ! {Env}
+  ensures { length(result) > 0 }
+{
   let home = getEnvOr("HOME", "/tmp");
   "${home}/.ailang/linkedin/credentials.json"
 }

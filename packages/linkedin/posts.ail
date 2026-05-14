@@ -15,6 +15,7 @@ import std/json (encode, decode, getString, jo, kv, js)
 import std/option (Some, None, getOrElse, isSome)
 import std/result (Ok, Err)
 import std/string (length, trim, replace, charCode, charAt)
+import std/list (length as listLength)
 
 -- Result of publishing a post via linkedinCreatePost.
 export type PostResult = {
@@ -26,15 +27,25 @@ export type PostResult = {
 -- LinkedIn API version header. Bump as LinkedIn deprecates older versions.
 -- Consumers can override per call by building their own headers, but this is
 -- the default the package ships with.
-export func linkedinApiVersion() -> string = "202604"
+export func linkedinApiVersion() -> string
+  ensures { length(result) > 0 }
+{
+  "202604"
+}
 
 -- Standard headers for LinkedIn REST calls.
-export func linkedinHeaders(token: string) -> [{name: string, value: string}] = [
-  { name: "Authorization", value: "Bearer ${token}" },
-  { name: "Content-Type", value: "application/json" },
-  { name: "X-Restli-Protocol-Version", value: "2.0.0" },
-  { name: "LinkedIn-Version", value: linkedinApiVersion() }
-]
+-- Four headers, always — guaranteed by contract so callers don't have
+-- to defensively check the list length when threading them through.
+export func linkedinHeaders(token: string) -> [{name: string, value: string}]
+  ensures { listLength(result) == 4 }
+{
+  [
+    { name: "Authorization", value: "Bearer ${token}" },
+    { name: "Content-Type", value: "application/json" },
+    { name: "X-Restli-Protocol-Version", value: "2.0.0" },
+    { name: "LinkedIn-Version", value: linkedinApiVersion() }
+  ]
+}
 
 -- LinkedIn's commentary field uses "Little Text Format". These characters
 -- are syntactic (mentions, hashtags, entities) and must be backslash-escaped

@@ -8,17 +8,31 @@ public display.
 
 | Module | What it provides |
 |--------|------------------|
-| `sunholo/linkedin/types` | `LinkedInCreds`, `LinkedInComment`, `PostResult`, `PostState` records that flow between the other modules. |
-| `sunholo/linkedin/auth` | `linkedinReadCreds`, `linkedinGetToken`, `linkedinGetOrgUrn`. Reads `~/.ailang/linkedin/credentials.json` and refreshes expired access tokens via the LinkedIn OAuth2 endpoint. |
-| `sunholo/linkedin/posts` | `linkedinCreatePost`, `linkedinEscapeLittleText`, `linkedinHeaders`, `linkedinFindHeader`. Publishes to `POST /rest/posts` with a `Net @limit=1` budget. Body is auto-escaped for LinkedIn's Little Text Format. |
-| `sunholo/linkedin/comments` | `linkedinGetComments`, `linkedinGetAllComments`, `linkedinCommentsToJson`, `linkedinDerivePersona`. Reads `GET /rest/socialActions/{urn}/comments` and serialises a GDPR-stripped, pseudonymous JSON for public publication. |
+| `sunholo/linkedin/auth` | `LinkedInCreds` record + `linkedinReadCreds`, `linkedinGetToken`, `linkedinGetOrgUrn`. Reads `~/.ailang/linkedin/credentials.json` and refreshes expired access tokens via the LinkedIn OAuth2 endpoint. |
+| `sunholo/linkedin/posts` | `PostResult` record + `linkedinCreatePost`, `linkedinCreateImagePost`, `linkedinEscapeLittleText`, `linkedinHeaders`, `linkedinFindHeader`. Publishes to `POST /rest/posts` with a `Net @limit=1` budget. Body is auto-escaped for LinkedIn's Little Text Format. |
+| `sunholo/linkedin/images` | `ImageUpload` record + `linkedinInitializeImageUpload`, `linkedinUploadImageBytes`, `linkedinUploadImage`. Three-step register / PUT / finalise flow for attaching images to posts. |
+| `sunholo/linkedin/comments` | `LinkedInComment` + `PublicComment` records + `linkedinGetComments`, `linkedinGetCommentReplies`, `linkedinGetAllComments`, `linkedinSanitiseComment`, `linkedinCommentsToJson`, `linkedinDerivePersona`. Reads `GET /rest/socialActions/{urn}/comments` and serialises a GDPR-stripped, pseudonymous JSON for public publication. Uses IFC `Declassify` effect to enforce that PII can't leak without passing through the sanitiser. |
 
 ## Capability budgets
 
 - `linkedinCreatePost`: `Net @limit=1` — exactly one outbound call per publish.
 - `linkedinGetComments`: `Net @limit=1` per post.
-- `linkedinGetAllComments`: `Net @limit=20` total — up to 20 posts in a sweep.
+- `linkedinGetAllComments`: `Net @limit=50` total — sweep up to 50 posts.
 - `linkedinGetToken`: `Net @limit=1`, `FS @limit=5`, `Env` — read creds, maybe refresh.
+- `linkedinUploadImage`: `Net @limit=2` total — initialise + upload.
+
+## Contracts
+
+Every contract here is `requires`/`ensures`-bounded; AILANG rejects code that violates them at the type-check stage.
+
+| Function | Contract | Why |
+|---|---|---|
+| `linkedinCreatePost` / `linkedinCreateImagePost` | `requires { length(text) > 0 && length(text) <= 3000 }` | LinkedIn's documented hard limit. Caught at compile time, not in production. |
+| `linkedinDerivePersona` | `ensures { length(result.initials) == 2, length(result.avatarSeed) == 6 }` | Renderers can rely on a 2-char monogram + 6-char hex CSS seed without runtime checks. |
+| `linkedinHeaders` | `ensures { listLength(result) == 4 }` | Auth + Content-Type + protocol version + LinkedIn-Version, always. |
+| `linkedinApiVersion` | `ensures { length(result) > 0 }` | Header value never blank. |
+| `linkedinCredsPath` | `ensures { length(result) > 0 }` | Falls back to `/tmp` if HOME is unset; still always non-empty. |
+| `linkedinHexVal` | `ensures { result >= 0, result < 16 }` | Hex-digit value usable as an array index without bounds-checking. |
 
 ## Credentials
 
@@ -74,8 +88,11 @@ parentPostUrn, initials, avatarSeed}` ship.
   minting one. Use `ailang-linkedin auth` (in the `sunholo-data/ailang-demos`
   repo) or any compatible OAuth flow to produce the credentials.json.
 
-## Why version 0.1.0
+## Versions
 
-First publish. Expect the API to evolve as we learn what consumers need.
-Breaking changes will follow semver — 0.x to 0.(x+1) for breaking, 0.x.y to
-0.x.(y+1) for additive / fix.
+- **0.4.0** — Contracts sweep: persona shape, header count, hex range, post-text limit (already shipped on `create*Post`). `[metadata]`, `[cascade]`, `[stability]` sections added to `ailang.toml` so the docs page surfaces tags, AI summary, repository link, etc. No API breakage.
+- **0.3.1** — Image uploads (`linkedinUploadImage`, three-step register + PUT + finalise).
+- **0.2.x** — Comments, persona derivation, GDPR-stripped JSON output.
+- **0.1.0** — First publish. OAuth refresh + text-post publish.
+
+Breaking changes follow semver: 0.x to 0.(x+1) for breaking, 0.x.y to 0.x.(y+1) for additive / fix.

@@ -1,9 +1,9 @@
 [package]
 name = "sunholo/linkedin"
-version = "0.3.1"
+version = "0.4.0"
 edition = "1"
 ailang = ">=0.19.0"
-description = "LinkedIn API client: OAuth2 auth, publish text + image posts on a company page, read threaded comments, derive GDPR-safe pseudonymous personas for public display."
+description = "LinkedIn API client for AILANG: OAuth2 auth, publish text + image posts on a company page, read threaded comments, derive GDPR-safe pseudonymous personas for public display."
 license = "Apache-2.0"
 
 [exports]
@@ -16,3 +16,19 @@ modules = [
 
 [effects]
 max = ["Net", "FS", "Env", "Declassify", "IO"]
+
+[metadata]
+tags = ["linkedin", "social", "oauth2", "marketing", "publishing", "comments", "gdpr", "ifc-labels"]
+ai_summary = "LinkedIn REST API client. Publish text + image posts on a company page (Net @limit=1, requires text length 1..3000). Read threaded comments (per-post @limit=1, sweep @limit=50). Derive stable pseudonymous personas from actor URNs via SHA-256 — initials + 6-hex avatar seed, IFC-Declassify-typed so the raw URN cannot leak. Credentials live in ~/.ailang/linkedin/credentials.json with automatic OAuth2 refresh."
+repository = "https://github.com/sunholo-data/ailang-packages/tree/main/packages/linkedin"
+homepage = "https://ailang.sunholo.com/docs/packages/sunholo/linkedin"
+documentation = "https://github.com/sunholo-data/ailang-packages/blob/main/packages/linkedin/README.md"
+license_url = "https://github.com/sunholo-data/ailang-packages/blob/main/LICENSE"
+
+# Per-cascade AI repair budget ceiling (USD). The cloud wrapper aborts
+# the run and labels the PR `cascade-budget-exceeded` rather than overrunning.
+[cascade]
+max_cost_usd = 1.00
+
+[stability]
+level = "experimental"
