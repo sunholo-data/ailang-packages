@@ -1,0 +1,64 @@
+module sunholo/external_backend/runner
+
+-- Generic adapter for invoking external subprocess backends that emit JSON
+-- on stdout. Useful any time AILANG needs to delegate work to a Python,
+-- Rust, Node, Go (or shell) helper and get typed data back: PDF parsers,
+-- OCR engines, embedders, image classifiers, layout-analysis models, etc.
+--
+-- Effect hygiene: this module owns the Process effect and the JSON-over-
+-- stdout protocol. Callers compose with their own IO/Net/FS as needed.
+-- The pure formatError helper keeps log strings off the effectful path.
+--
+-- Future growth surface (not yet implemented, but the API is shaped to
+-- accept them as additive exports):
+--   runJsonWithTimeout(cmd, args, ms) — fail fast on hangs
+--   runNdJson(cmd, args)               — stream line-delimited JSON
+--   runWithStdin(cmd, args, bytes)     — pipe input to subprocess
+--   pingHealth(cmd, args)              — cheap probe for long-lived backends
+--   runCached(cmd, args, cacheDir)     — hash inputs, skip re-exec
+
+import std/process (exec)
+import std/bytes (toString)
+import std/json (decode)
+import std/result (Result, Ok, Err)
+import std/string (length as strLength)
+
+-- Discriminated error states. Each carries enough context for a caller to
+-- decide whether to fail loud, fall back, or retry.
+--
+-- ExecFailed   — could not start the subprocess (command not found, perms)
+-- NonZeroExit  — process ran but reported failure; stderr is captured for
+--                inclusion in diagnostics
+-- InvalidJson  — process exited 0 but stdout did not parse as JSON; both
+--                the decoder message and stderr are surfaced so callers
+--                can distinguish "produced rubbish" from "produced
+--                warnings then valid output"
+export type BackendError = ExecFailed(string)
+                         | NonZeroExit({code: int, stderr: string})
+                         | InvalidJson({stderr: string, msg: string})
+
+-- Render an error for human-readable logging. Pure: no IO.
+export pure func formatError(err: BackendError) -> string
+  ensures { strLength(result) > 0 }
+=
+  match err {
+    ExecFailed(msg) => "exec failed: ${msg}",
+    NonZeroExit(e) => "backend exited ${show(e.code)}; stderr: ${e.stderr}",
+    InvalidJson(e) => "JSON decode failed: ${e.msg} (stderr: ${e.stderr})"
+  }
+
+-- Run an external subprocess expected to print a single JSON value on stdout.
+-- Stderr is captured separately and surfaced inside the error variant on
+-- failure paths, so callers can include it in diagnostics or telemetry.
+export func runJson(cmd: string, args: [string]) -> Result[Json, BackendError] ! {Process} =
+  match exec(cmd, args) {
+    Err(_) => Err(ExecFailed("could not execute '${cmd}'")),
+    Ok(out) =>
+      if out.exitCode != 0
+        then Err(NonZeroExit({code: out.exitCode, stderr: toString(out.stderr)}))
+        else
+          match decode(toString(out.stdout)) {
+            Err(msg) => Err(InvalidJson({stderr: toString(out.stderr), msg: msg})),
+            Ok(j) => Ok(j)
+          }
+  }

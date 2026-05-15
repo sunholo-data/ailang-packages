@@ -1,0 +1,79 @@
+-- Boot smoke test for sunholo/external_backend.
+--
+-- Registry pre-publish gate runs this with --ai-stub and a broad
+-- capability set, looking for "OK:" on the final line.
+--
+-- We exercise:
+--   1. formatError: each BackendError variant renders to a non-empty string
+--      with the expected prefix.
+--   2. runJson with a non-existent command — must return Err(ExecFailed).
+--   3. runJson with "false" — must return Err(NonZeroExit{code: 1}).
+--   4. runJson with "echo not-json" — must return Err(InvalidJson{...}).
+--   5. runJson with "echo {\"ok\":true}" — must return Ok(Json).
+--
+-- All checks are offline. No network, no real backend installed.
+
+module _smoke
+
+import std/io (println)
+import std/string (length, contains)
+import std/result (Result, Ok, Err)
+import sunholo/external_backend/runner (
+  runJson, formatError,
+  ExecFailed, NonZeroExit, InvalidJson, BackendError
+)
+
+func check(name: string, cond: bool) -> int ! {IO} {
+  if cond then {
+    println("  ✓ ${name}");
+    1
+  } else {
+    println("  ✗ ${name}");
+    0
+  }
+}
+
+export func main() -> () ! {IO, Process} {
+  let s1 = formatError(ExecFailed("nope"));
+  let s2 = formatError(NonZeroExit({code: 2, stderr: "boom"}));
+  let s3 = formatError(InvalidJson({stderr: "warn", msg: "bad"}));
+
+  let p1 = check("formatError(ExecFailed) non-empty", length(s1) > 0);
+  let p2 = check("formatError(ExecFailed) mentions cmd", contains(s1, "nope"));
+  let p3 = check("formatError(NonZeroExit) mentions code", contains(s2, "2"));
+  let p4 = check("formatError(NonZeroExit) mentions stderr", contains(s2, "boom"));
+  let p5 = check("formatError(InvalidJson) mentions msg", contains(s3, "bad"));
+
+  -- runJson with non-existent command → ExecFailed
+  let r1 = runJson("definitely-not-a-real-command-xyz123", []);
+  let p6 = match r1 {
+    Err(ExecFailed(_)) => check("runJson missing cmd → ExecFailed", true),
+    _ => check("runJson missing cmd → ExecFailed", false)
+  };
+
+  -- runJson with "false" → NonZeroExit
+  let r2 = runJson("false", []);
+  let p7 = match r2 {
+    Err(NonZeroExit(_)) => check("runJson exit-1 → NonZeroExit", true),
+    _ => check("runJson exit-1 → NonZeroExit", false)
+  };
+
+  -- runJson with non-JSON stdout → InvalidJson
+  let r3 = runJson("echo", ["not-json"]);
+  let p8 = match r3 {
+    Err(InvalidJson(_)) => check("runJson non-JSON → InvalidJson", true),
+    _ => check("runJson non-JSON → InvalidJson", false)
+  };
+
+  -- runJson with valid JSON → Ok
+  let r4 = runJson("printf", ["{\"ok\":true}"]);
+  let p9 = match r4 {
+    Ok(_) => check("runJson valid JSON → Ok", true),
+    _ => check("runJson valid JSON → Ok", false)
+  };
+
+  let total = p1 + p2 + p3 + p4 + p5 + p6 + p7 + p8 + p9;
+  if total == 9
+    then println("OK: 9/9 checks passed")
+    else println("FAIL: ${show(total)}/9 checks passed")
+}

@@ -57,6 +57,7 @@ export func main() -> () ! {IO, FS, Net} =
 | [sunholo/billing_store](packages/billing-store/) | Firestore CRUD for billing records (customers, subscriptions, usage) | Net, FS, Env | [Guide](packages/billing-store/AGENT.md) |
 | [sunholo/billing_stripe](packages/billing-stripe/) | Stripe adapter: checkout, portal, webhooks, event mapping | Net, Env | [Guide](packages/billing-stripe/AGENT.md) |
 | [sunholo/billing_service_api](packages/billing-service-api/) | HTTP handlers for billing Cloud Run service | Net, FS, Env, IO | [Guide](packages/billing-service-api/AGENT.md) |
+| [sunholo/external_backend](packages/external-backend/) | Run external subprocesses that emit JSON; typed Result errors with stderr capture | Process | [Guide](packages/external-backend/AGENT.md) |
 
 ## AGENT.md — AI Discovery
 
