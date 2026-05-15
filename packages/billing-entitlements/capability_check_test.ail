@@ -4,11 +4,11 @@
 
 module sunholo/billing_entitlements/capability_check_test
 
-import ./entitlement (Entitlements, resolveEntitlements, freeEntitlements)
-import ./capability_check (canOperate, canUseApi, AllowDecision, OperationRequest)
-import ./quota_policy (isOverRequestLimit, isOverUnitLimit, remainingRequests, remainingUnits, requestUsagePercent, isNearLimit)
-import ./usage_policy (applyDelta, emptyUsage, usageDelta)
-import ./plan (Plan)
+import pkg/sunholo/billing_entitlements/entitlement (Entitlements, resolveEntitlements, freeEntitlements)
+import pkg/sunholo/billing_entitlements/capability_check (canOperate, canUseApi, AllowDecision, OperationRequest)
+import pkg/sunholo/billing_entitlements/quota_policy (isOverRequestLimit, isOverUnitLimit, remainingRequests, remainingUnits, requestUsagePercent, isNearLimit)
+import pkg/sunholo/billing_entitlements/usage_policy (applyDelta, emptyUsage, usageDelta)
+import pkg/sunholo/billing_entitlements/plan (Plan)
 
 -- Test fixture: known plan values for deterministic assertions
 func testCatalog() -> [{key: string, plan: Plan}] = [
