@@ -52,7 +52,8 @@ func authHeaders() -> Result[{headers: [{name: string, value: string}]}, string]
 -- Get a single document by collection path and document ID
 --
 -- Returns the document's "fields" object on success.
--- Returns Err if document doesn't exist (404) or on network error.
+-- Returns Err if the document doesn't exist (404), the response body
+-- has no "fields" key (corrupt / empty doc state), or on network error.
 --
 -- Example:
 --   match getDoc("users", "uid_123") {
@@ -73,9 +74,14 @@ export func getDoc(collection: string, docId: string) -> Result[Json, string] ! 
               if resp.ok then
                 match decode(resp.body) {
                   Ok(json) =>
+                    -- A 200 with no "fields" key is a corrupt/empty
+                    -- doc state, not a happy path. asStr/asInt would
+                    -- silently default to ""/0 for every field of the
+                    -- caller's destructure — so an empty Firestore
+                    -- doc would surface as a fully zero-valued record.
                     match get(json, "fields") {
                       Some(fields) => Ok(fields),
-                      None => Ok(jo([]))
+                      None => Err("Document has no 'fields' key: ${collection}/${docId}")
                     },
                   Err(e) => Err("JSON decode error: ${e}")
                 }
