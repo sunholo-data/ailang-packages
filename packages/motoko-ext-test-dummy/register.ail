@@ -17,9 +17,10 @@ import pkg/sunholo/motoko_ext_abi/types (
   BudgetPlan, BudgetPatch, PromptPatch,
   ToolCallEnvelope, ToolResultEnvelope,
   ToolPolicyDecision, ToolHandleDecision,
-  ResponseInterceptDecision, FinalizeDecision,
+  ResponseInterceptDecision, FinalizeDecision, PreStepDecision,
   Allow, Deny, NoOpinion, Delegate, NoIntercept, NoDecision,
-  Accept, ContinueWithFeedback
+  Accept, ContinueWithFeedback, PassThrough,
+  Msg
 )
 
 type DummyConfig = {
@@ -76,6 +77,10 @@ export func register_with_config(_cfg: a) -> ExtensionHooks ! {Env} {
         if tool_decision == "allow" then Allow
         else if tool_decision == "deny" then Deny("dummy deny")
         else NoOpinion,
+    on_pre_step:
+      func(_ctx: ExtCtx, _msgs: list[Msg]) -> PreStepDecision ! {IO, Process, FS, AI, Env, Net, SharedMem, Clock, Stream} {
+        PassThrough
+      },
     on_tool_handle:
       func(_ctx: ExtCtx, _call: ToolCallEnvelope) -> ToolHandleDecision ! {IO, Process, FS, AI, Env, Net, SharedMem, Clock, Stream} {
         Delegate
