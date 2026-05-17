@@ -71,7 +71,13 @@ export type ExtCtx = {
   env_server_url: string,
   budget_remaining: int,
   history_slice: [Msg],
-  state_key: string
+  state_key: string,
+  -- v2.2.0: context_limit in tokens for ctx.model. Populated by the host
+  -- via src/core/context_usage.context_limit_for(model). 0 means
+  -- "unknown" — extensions should treat as "skip context-aware behaviour"
+  -- rather than guessing with a stale heuristic. Eliminates the duplicate
+  -- model-registry tables that previously lived in motoko_ext_compaction_ai.
+  context_limit: int
 }
 
 export type PromptPatch = {
