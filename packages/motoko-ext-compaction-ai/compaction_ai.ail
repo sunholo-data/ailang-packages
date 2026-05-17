@@ -11,23 +11,18 @@ import std/list (length as list_length, take, drop, reverse)
 import pkg/sunholo/motoko_ext_abi/types (ExtCtx, PreStepDecision, PassThrough, Compacted, Msg)
 import pkg/sunholo/motoko_ext_compaction_ai/types (CompactionAiConfig)
 
--- Context limits per model family (approximate, in tokens)
-func context_limit_for(model: string) -> int {
-  if length(model) == 0 then 128000
-  else if contains(model, "claude-3.5-sonnet") then 200000
-  else if contains(model, "claude-3-opus") then 200000
-  else if contains(model, "claude-3") then 200000
-  else if contains(model, "gpt-4-turbo") then 128000
-  else if contains(model, "gpt-4o") then 128000
-  else if contains(model, "gpt-4") then 8192
-  else if contains(model, "gemini-1.5-pro") then 1000000
-  else if contains(model, "gemini-2") then 1000000
-  else if contains(model, "llama-3.1-405b") then 128000
-  else if contains(model, "llama-3.1-70b") then 128000
-  else if contains(model, "llama-3.1-8b") then 128000
-  else if contains(model, "deepseek") then 64000
-  else 128000
-}
+-- v0.2.0 (2026-05-17): the previous duplicate context_limit_for() heuristic
+-- has been deleted. The host (motoko_agent) populates ctx.context_limit via
+-- src/core/context_usage.context_limit_for(model) on every ext-hook call,
+-- so the extension reads it directly. Eliminates the perpetual drift between
+-- this package's substring-match table and motoko_agent's authoritative
+-- Z3-verified equality-match registry.
+--
+-- Fallback: when ctx.context_limit == 0 (host doesn't recognise the model),
+-- usage_percent returns 0 → compact_with_ai sees "below threshold" → no
+-- compaction. That's the right behaviour: rather than guess with a stale
+-- heuristic and fire premature compaction (cost foot-gun), we just trust
+-- the host's "I don't know this model" signal and let the conversation run.
 
 -- Token estimate: content length / 4
 func estimate_tokens(content: string) -> int {
@@ -42,11 +37,12 @@ func estimate_msgs_tokens(msgs: [Msg]) -> int {
   }
 }
 
--- Context usage as integer percent (0-100)
-func usage_percent(msgs: [Msg], model: string) -> int {
-  let limit = context_limit_for(model);
-  if limit == 0 then 0
-  else (estimate_msgs_tokens(msgs) * 100) / limit
+-- Context usage as integer percent (0-100). Uses host-supplied limit
+-- (ctx.context_limit) so we never disagree with motoko_agent's own
+-- compaction.compact_step about how much room is left.
+func usage_percent(msgs: [Msg], context_limit: int) -> int {
+  if context_limit == 0 then 0
+  else (estimate_msgs_tokens(msgs) * 100) / context_limit
 }
 
 -- Format a message for the summarization prompt
@@ -122,9 +118,14 @@ func summary_msg(summary: string) -> Msg {
 }
 
 -- Main compaction logic
+-- v0.2.0: reads ctx.context_limit (populated by the host from
+-- motoko_agent/src/core/context_usage.context_limit_for(model)) instead of
+-- running a duplicate heuristic. When the host signals "unknown model"
+-- (context_limit == 0), usage_percent returns 0 → PassThrough → no
+-- compaction. Better than guessing.
 export func compact_with_ai(ctx: ExtCtx, msgs: [Msg], cfg: CompactionAiConfig) -> PreStepDecision ! {AI, IO, Process, FS, Env, Net, SharedMem, Clock, Stream} {
-  let pct = usage_percent(msgs, ctx.model);
-  
+  let pct = usage_percent(msgs, ctx.context_limit);
+
   -- Don't compact if we have plenty of room (use configured threshold)
   if pct < cfg.threshold_pct then PassThrough
   else {
@@ -133,18 +134,18 @@ export func compact_with_ai(ctx: ExtCtx, msgs: [Msg], cfg: CompactionAiConfig) -
     let split_result = split_msgs(msgs, keep_recent);
     let old_turns = split_result.old;
     let recent_turns = split_result.recent;
-    
+
     -- Nothing to compact
     if list_length(old_turns) == 0 then PassThrough
     else {
       -- Summarize old turns using configured model
       let prompt = summarization_prompt(old_turns, recent_turns);
       let summary = summarize_with_ai(prompt, cfg.model);
-      
+
       -- Build compacted list: summary + recent turns
       let compacted = [summary_msg(summary)] ++ recent_turns;
-      
-      Compacted(compacted, "AI-summarized ${show(list_length(old_turns))} turns (${show(pct)}% -> ${show(usage_percent(compacted, ctx.model))}%)")
+
+      Compacted(compacted, "AI-summarized ${show(list_length(old_turns))} turns (${show(pct)}% -> ${show(usage_percent(compacted, ctx.context_limit))}%)")
     }
   }
 }
