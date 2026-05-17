@@ -73,12 +73,18 @@ function buildRequestBody(method, tool, toolArgs) {
 function buildRequestUrl(baseUrl, authStyle, apiKey, toolsCsv) {
   const url = new URL(baseUrl);
 
-  if (authStyle.startsWith('query:')) {
+  // v0.2.5: "none" means public server, send no apiKey query param /
+  // no Authorization header. authStyle === '' (no flag passed at all)
+  // is also treated as no-auth — supports the auth_args() AILANG-side
+  // branch that omits the flags entirely.
+  if (authStyle === '' || authStyle === 'none') {
+    // no query-param auth
+  } else if (authStyle.startsWith('query:')) {
     const param = authStyle.slice('query:'.length).trim();
     if (param === '') return { error: 'invalid --auth-style query param' };
     url.searchParams.set(param, apiKey);
   } else if (!authStyle.startsWith('header:')) {
-    return { error: 'invalid --auth-style (expected query:<param> or header:Bearer)' };
+    return { error: 'invalid --auth-style (expected query:<param>, header:Bearer, or none)' };
   }
 
   if (toolsCsv.trim() !== '') {
@@ -99,8 +105,17 @@ async function main() {
   const timeoutMs = Number(parseArg('--timeout-ms', '30000')) || 30000;
   const dryRun = hasFlag('--dry-run');
 
-  if (!baseUrl || !authEnvVar || !authStyle) {
-    printJson({ error: 'missing required flags: --base-url, --auth-env-var, --auth-style' });
+  // v0.2.5: --auth-env-var and --auth-style become optional. Omitting
+  // both means "no-auth": treated as a public MCP server (same as
+  // passing --auth-style none). Earlier behaviour (both required) is
+  // preserved as a strict mode whenever EITHER flag is present.
+  if (!baseUrl) {
+    printJson({ error: 'missing required flag: --base-url' });
+    return;
+  }
+  const noAuth = (!authEnvVar && !authStyle) || authStyle === 'none';
+  if (!noAuth && (!authEnvVar || !authStyle)) {
+    printJson({ error: 'must provide both --auth-env-var and --auth-style, or neither (no-auth public server)' });
     return;
   }
 
@@ -119,8 +134,8 @@ async function main() {
     }
   }
 
-  const apiKey = process.env[authEnvVar] || '';
-  if (apiKey === '') {
+  const apiKey = noAuth ? '' : (process.env[authEnvVar] || '');
+  if (!noAuth && apiKey === '') {
     printJson({ error: `missing API key in env var ${authEnvVar}` });
     return;
   }

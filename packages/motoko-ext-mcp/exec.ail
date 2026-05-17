@@ -4,9 +4,11 @@ import std/bytes (toString)
 import std/json (Json, decode, encode, jo, kv, js, get, asString)
 import std/option (Option, Some, None)
 import std/process (exec, ProcessError)
+import std/result (Result, Ok, Err)
 import std/string (trim, toLower, contains, join)
 
 import pkg/sunholo/motoko_ext_abi/types (ToolResultEnvelope)
+import pkg/sunholo/motoko_ext_mcp/assets (bridge_path)
 import pkg/sunholo/motoko_ext_mcp/compress (compress_output)
 import pkg/sunholo/motoko_ext_mcp/types (McpServerConfig)
 
@@ -115,67 +117,101 @@ func with_tools_filter(args: [string], cfg: McpServerConfig) -> [string] {
   else args ++ ["--tools", tools_csv]
 }
 
-export func bridge_args(workdir: string, cfg: McpServerConfig, mcp_tool_name: string, args_json: string) -> [string] {
-  with_tools_filter([
-    "${workdir}/scripts/mcp-call.mjs",
-    "--base-url", cfg.base_url,
-    "--auth-env-var", cfg.auth_env_var,
-    "--auth-style", cfg.auth_style,
-    "--tool", mcp_tool_name,
-    "--args-json", args_json,
-    "--timeout-ms", show(cfg.timeout_ms)
-  ], cfg)
+-- v0.2.5: when cfg.auth_style == "none" the server is treated as public —
+-- emit no --auth-env-var / --auth-style flags. The bridge accepts this
+-- as "no auth, send the request without any apiKey/header injection."
+-- Backward compat: any other auth_style (query:<param>, header:Bearer)
+-- still requires a non-empty auth_env_var, same as 0.2.4 and earlier.
+func auth_args(cfg: McpServerConfig) -> [string] {
+  if cfg.auth_style == "none" then []
+  else ["--auth-env-var", cfg.auth_env_var, "--auth-style", cfg.auth_style]
 }
 
-func list_bridge_args(workdir: string, cfg: McpServerConfig) -> [string] {
-  with_tools_filter([
-    "${workdir}/scripts/mcp-call.mjs",
-    "--base-url", cfg.base_url,
-    "--auth-env-var", cfg.auth_env_var,
-    "--auth-style", cfg.auth_style,
-    "--method", "tools/list",
-    "--timeout-ms", show(cfg.timeout_ms)
-  ], cfg)
+-- bridge_args takes the resolved bridge_path (from std/package.assetPath via
+-- the assets.bridge_path helper) instead of constructing a workdir-relative
+-- path. v0.2.4 (M-EXT-PORTABILITY-GATE follow-up): the bridge ships INSIDE
+-- the package via assets/mcp-call.mjs, so consumers no longer need to
+-- vendor scripts/mcp-call.mjs in their workdir.
+export func bridge_args(bridge_script: string, cfg: McpServerConfig, mcp_tool_name: string, args_json: string) -> [string] {
+  with_tools_filter([bridge_script, "--base-url", cfg.base_url]
+    ++ auth_args(cfg)
+    ++ ["--tool", mcp_tool_name, "--args-json", args_json, "--timeout-ms", show(cfg.timeout_ms)], cfg)
 }
 
-export func run_mcp_tool(id: string, canonical: string, workdir: string, cfg: McpServerConfig, mcp_tool_name: string, args: Json) -> Option[ToolResultEnvelope] ! {Process} {
-  let argv = bridge_args(workdir, cfg, mcp_tool_name, encode(args));
-  match shell_exec("node", argv, workdir, cfg.timeout_ms) {
-    None => None,
-    Some(out) => {
-      if out.err != "" then Some(error_envelope(id, canonical, out.err))
-      else if looks_like_missing_node(out.stderr, out.exit_code) then None
-      else {
-        let bridge = parse_bridge_response(out.stdout);
-        if bridge.error != "" then Some(error_envelope(id, canonical, bridge.error))
-        else {
-          let stdout = compress_output(bridge.output, cfg.max_output_chars);
-          let stderr = compress_output(out.stderr, cfg.max_output_chars);
-          Some({
-            tool_call_id: id,
-            tool: canonical,
-            stdout: stdout,
-            stderr: stderr,
-            exit_code: out.exit_code,
-            metadata: jo([kv("json_metadata", js(encode(parse_output_json(stdout))))])
-          })
+func list_bridge_args(bridge_script: string, cfg: McpServerConfig) -> [string] {
+  with_tools_filter([bridge_script, "--base-url", cfg.base_url]
+    ++ auth_args(cfg)
+    ++ ["--method", "tools/list", "--timeout-ms", show(cfg.timeout_ms)], cfg)
+}
+
+-- error envelope when the bundled bridge can't be resolved (package not
+-- installed, asset stripped, etc.) — caller should treat as "MCP unavailable
+-- in this environment" rather than crashing.
+func bridge_unavailable_envelope(id: string, tool: string, msg: string) -> ToolResultEnvelope {
+  {
+    tool_call_id: id,
+    tool: tool,
+    stdout: "",
+    stderr: "mcp bundled bridge unavailable: ${msg}",
+    exit_code: 127,
+    metadata: jo([kv("json_metadata", js(encode(jo([kv("output", js(msg))]))))])
+  }
+}
+
+-- run_mcp_tool now resolves the bundled mcp-call.mjs via assets.bridge_path
+-- (M-EXT-PORTABILITY-GATE, v0.2.4). workdir is still the cwd for the spawned
+-- node process — only the script PATH stops being workdir-relative.
+-- New effects: + FS (assetPath needs FS to stat the bundled file).
+export func run_mcp_tool(id: string, canonical: string, workdir: string, cfg: McpServerConfig, mcp_tool_name: string, args: Json) -> Option[ToolResultEnvelope] ! {Process, FS} {
+  match bridge_path() {
+    Err(msg) => Some(bridge_unavailable_envelope(id, canonical, msg)),
+    Ok(bridge_script) => {
+      let argv = bridge_args(bridge_script, cfg, mcp_tool_name, encode(args));
+      match shell_exec("node", argv, workdir, cfg.timeout_ms) {
+        None => None,
+        Some(out) => {
+          if out.err != "" then Some(error_envelope(id, canonical, out.err))
+          else if looks_like_missing_node(out.stderr, out.exit_code) then None
+          else {
+            let bridge = parse_bridge_response(out.stdout);
+            if bridge.error != "" then Some(error_envelope(id, canonical, bridge.error))
+            else {
+              let stdout = compress_output(bridge.output, cfg.max_output_chars);
+              let stderr = compress_output(out.stderr, cfg.max_output_chars);
+              Some({
+                tool_call_id: id,
+                tool: canonical,
+                stdout: stdout,
+                stderr: stderr,
+                exit_code: out.exit_code,
+                metadata: jo([kv("json_metadata", js(encode(parse_output_json(stdout))))])
+              })
+            }
+          }
         }
       }
     }
   }
 }
 
-export func list_mcp_tools(workdir: string, cfg: McpServerConfig) -> Option[string] ! {Process} {
-  match shell_exec("node", list_bridge_args(workdir, cfg), workdir, cfg.timeout_ms) {
-    None => None,
-    Some(out) => {
-      if out.err != "" then Some("")
-      else if looks_like_missing_node(out.stderr, out.exit_code) then None
-      else {
-        let bridge = parse_bridge_response(out.stdout);
-        if bridge.error != "" then Some("")
-        else Some(bridge.output)
+-- list_mcp_tools also resolves the bundled bridge. None on missing bridge
+-- (consumers treat the same as "node binary not found" — list of tools
+-- becomes empty and the host skips MCP-backed tool advertisement).
+export func list_mcp_tools(workdir: string, cfg: McpServerConfig) -> Option[string] ! {Process, FS} {
+  match bridge_path() {
+    Err(_) => None,
+    Ok(bridge_script) =>
+      match shell_exec("node", list_bridge_args(bridge_script, cfg), workdir, cfg.timeout_ms) {
+        None => None,
+        Some(out) => {
+          if out.err != "" then Some("")
+          else if looks_like_missing_node(out.stderr, out.exit_code) then None
+          else {
+            let bridge = parse_bridge_response(out.stdout);
+            if bridge.error != "" then Some("")
+            else Some(bridge.output)
+          }
+        }
       }
-    }
   }
 }
