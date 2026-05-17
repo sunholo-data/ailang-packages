@@ -1,0 +1,47 @@
+-- Smoke test for motoko_ext_context_mode.
+--
+-- Asserts:
+-- (1) register_with_config returns without runtime panic
+-- (2) provided_tools returns the 18-name advertised list (9 PascalCase + 9
+--     snake_case aliases — dotted forms intentionally NOT advertised since
+--     Anthropic Bedrock rejects them at the tool-name validator)
+-- (3) describe_provided_tools returns non-empty per-tool schemas (the
+--     specific failure mode 0.2.1 had: stub register meant on_describe_tools
+--     returned [] and provider-native typed tool use silently degraded
+--     to no-argument calls)
+--
+-- The smoke runs in the publish sandbox where MCP bridge invocation
+-- would fail (no context-mode binary, no MOTOKO_CONTEXT_MODE_BIN env)
+-- so we don't exercise on_tool_handle end-to-end here — that path is
+-- covered by motoko_agent's verify_extensions integration test against
+-- a real bridge.
+
+module sunholo/motoko_ext_context_mode/_smoke
+
+import std/io (println)
+import std/list (length)
+import pkg/sunholo/motoko_ext_context_mode/register (register_with_config)
+import pkg/sunholo/motoko_ext_context_mode/context_mode (provided_tools, describe_provided_tools)
+import std/string (length as slen)
+
+export func main() -> () ! {Env, FS, IO} {
+  -- Assertion 1: register doesn't panic
+  let _ = register_with_config(0);
+  println("OK: register_with_config returned without panic");
+
+  -- Assertion 2: provided_tools returns the expected count
+  let tools = provided_tools();
+  let count = length(tools);
+  if count == 18 then
+    println("OK: provided_tools returned ${show(count)} entries (9 PascalCase + 9 snake_case)")
+  else
+    println("FAIL: provided_tools returned ${show(count)} entries; expected 18");
+
+  -- Assertion 3: describe_provided_tools returns non-empty per-tool schemas
+  let schemas = describe_provided_tools();
+  let schema_count = length(schemas);
+  if schema_count == 18 then
+    println("OK: describe_provided_tools returned ${show(schema_count)} schemas matching provided_tools")
+  else
+    println("FAIL: describe_provided_tools returned ${show(schema_count)} schemas; expected 18 (parity with provided_tools)")
+}

@@ -1,25 +1,70 @@
 -- Register the context_mode extension.
--- Minimal stub that passes through all hooks with defaults.
+--
+-- v0.2.2 (2026-05-17): wires up the helper modules (context_mode.ail,
+-- exec.ail, prompts.ail) that 0.2.1 already shipped but never connected.
+-- Pre-0.2.2, register.ail was a 26-line stub returning empty provided_tools
+-- + Allow / Delegate / NoIntercept / NoDecision for every hook, which made
+-- the published package functionally useless and motivated arniwesth's
+-- local-override fix in motoko_agent PR #22. This release ports those
+-- semantics back into the registry so consumers (motoko_agent + similar
+-- hosts) can drop their local overrides.
+--
+-- Schema describer is in context_mode.ail::describe_provided_tools — the
+-- per-tool JSON schemas (language enum, required args per tool) were the
+-- main missing piece that broke provider-native typed tool use.
 
 module sunholo/motoko_ext_context_mode/register
 
+import std/option (Option, None, Some)
 import pkg/sunholo/motoko_ext_abi/types (
-  ExtensionHooks, ExtCtx, PreStepDecision, PassThrough,
-  ToolPolicyDecision, ToolHandleDecision, ResponseInterceptDecision, FinalizeDecision,
-  Allow, Delegate, NoIntercept, NoDecision
+  ExtensionHooks, ExtCtx, BudgetPlan, BudgetPatch, PromptPatch,
+  PreStepDecision, PassThrough,
+  ResponseInterceptDecision, NoIntercept,
+  FinalizeDecision, NoDecision
 )
-import std/option (Option, None)
+import pkg/sunholo/motoko_ext_context_mode/types (CtxConfig)
+import pkg/sunholo/motoko_ext_context_mode/prompts (load_agent_prompt)
+import pkg/sunholo/motoko_ext_context_mode/context_mode (
+  provided_tools,
+  describe_provided_tools,
+  on_build_system_prompt as build_system_prompt,
+  on_tool_policy as tool_policy,
+  on_tool_handle as tool_handle,
+  finalize_with_index
+)
+
+-- Baked-in defaults. Hosts that need per-environment tuning can override
+-- by patching ailang-packages' published package version, or by setting
+-- environment variables for the bridge script (context-mode-mcp-call.mjs
+-- respects MOTOKO_CONTEXT_MODE_BIN / _TIMEOUT_MS / _MAX_OUTPUT_CHARS).
+-- Single source of truth for these defaults — host-side overrides land
+-- in v0.2.3 once we agree on a config-discovery convention (see design
+-- doc M-EXT-AUTHOR-DX).
+func default_ctx_config() -> CtxConfig {
+  {
+    bin: "context-mode",
+    timeout_ms: 60000,
+    max_output_chars: 65536,
+    snapshot_key_prefix: "context_mode"
+  }
+}
+
+func no_budget_patch() -> BudgetPatch {
+  { requested_total: None, requested_solver: None, requested_verifier: None }
+}
 
 export func register_with_config(_cfg: a) -> ExtensionHooks ! {Env, FS} {
+  let cfg = default_ctx_config();
+  let cached_prompt = "";  -- v0.2.3: load_agent_prompt(workdir) once we expose workdir on ExtCtx
   {
     id: "context_mode",
-    provided_tools: [],
-    on_describe_tools: \_ . [],
-    on_build_system_prompt: \_ . { prepend: [], append: [] },
-    on_budget_plan: \_ _ . { requested_total: None, requested_solver: None, requested_verifier: None } ! {Env, FS},
+    provided_tools: provided_tools(),
+    on_describe_tools: \_ . describe_provided_tools(),
+    on_build_system_prompt: \ctx. build_system_prompt(cached_prompt, ctx),
+    on_budget_plan: \_ _ . no_budget_patch() ! {Env, FS},
     on_pre_step: \_ _ . PassThrough ! {IO, Process, FS, AI, Env, Net, SharedMem, Clock, Stream},
-    on_tool_policy: \_ _ . Allow,
-    on_tool_handle: \_ _ . Delegate ! {IO, Process, FS, AI, Env, Net, SharedMem, Clock, Stream},
+    on_tool_policy: tool_policy,
+    on_tool_handle: \ctx call. tool_handle(cfg, ctx, call) ! {IO, Process, FS, AI, Env, Net, SharedMem, Clock, Stream},
     on_response_intercept: \_ _ . NoIntercept ! {IO, Process, FS, AI, Env, Net, SharedMem, Clock, Stream},
     on_solver_candidate: \_ _ . NoDecision ! {IO, Process, FS, AI, Env, Net, SharedMem, Clock, Stream}
   }

@@ -6,7 +6,7 @@ import std/option (Option, Some, None)
 import std/sem (make_frame_at, store_frame, load_frame)
 import std/string (toLower, trim, contains, startsWith)
 
-import pkg/sunholo/motoko_ext_abi/types (ToolCallEnvelope, ExtCtx, PromptPatch, BudgetPlan, BudgetPatch, ToolPolicyDecision, ToolHandleDecision, ResponseInterceptDecision, FinalizeDecision)
+import pkg/sunholo/motoko_ext_abi/types (ToolCallEnvelope, ToolSchema, ExtCtx, PromptPatch, BudgetPlan, BudgetPatch, ToolPolicyDecision, ToolHandleDecision, ResponseInterceptDecision, FinalizeDecision)
 import pkg/sunholo/motoko_ext_context_mode/types (CtxConfig)
 import pkg/sunholo/motoko_ext_context_mode/exec (run_context_mode, run_context_mode_fire_and_forget)
 import pkg/sunholo/motoko_ext_context_mode/prompts (build_prompt_patch)
@@ -184,4 +184,93 @@ export func finalize_with_index(cfg: CtxConfig, ctx: ExtCtx, candidate: string) 
   ]);
   let _ = run_context_mode_fire_and_forget("node", bridge_args_for(cfg, ctx, "ctx_index", idx_args), ctx.cwd, cfg.timeout_ms);
   NoDecision
+}
+
+-- ============================================================================
+-- on_describe_tools schemas (v0.2.2 — port from arniwesth/motoko_agent#22)
+--
+-- Ports the per-tool JSON-Schema parameter blocks Arni built locally in
+-- src/core/ext/context_mode/register.ail. These are advertised to the model
+-- via on_describe_tools so provider-native typed tool use can pass required
+-- args (`language`, `code`, `content`, `path`, `commands`, `queries`)
+-- correctly. Without them on_describe_tools degrades to empty {} blocks and
+-- typed tool use silently passes no arguments.
+-- ============================================================================
+
+func language_enum_schema() -> string {
+  "\"enum\":[\"javascript\",\"typescript\",\"python\",\"shell\",\"ruby\",\"go\",\"rust\",\"php\",\"perl\",\"r\",\"elixir\",\"csharp\"]"
+}
+
+func ctx_execute_parameters() -> string {
+  "{\"type\":\"object\",\"properties\":{\"language\":{\"type\":\"string\",${language_enum_schema()},\"description\":\"Runtime language.\"},\"code\":{\"type\":\"string\",\"description\":\"Code or shell command to execute. Print only the relevant summary.\"},\"timeout\":{\"type\":\"number\",\"description\":\"Maximum execution time in milliseconds.\"},\"background\":{\"type\":\"boolean\",\"description\":\"Keep the process running after timeout for servers or daemons.\"},\"intent\":{\"type\":\"string\",\"description\":\"What to extract when output is large.\"}},\"required\":[\"language\",\"code\"],\"additionalProperties\":false}"
+}
+
+func ctx_execute_file_parameters() -> string {
+  "{\"type\":\"object\",\"properties\":{\"path\":{\"type\":\"string\",\"description\":\"Absolute path or path relative to the project root.\"},\"language\":{\"type\":\"string\",${language_enum_schema()},\"description\":\"Runtime language.\"},\"code\":{\"type\":\"string\",\"description\":\"Code that processes FILE_CONTENT and prints only the relevant summary.\"},\"timeout\":{\"type\":\"number\",\"description\":\"Maximum execution time in milliseconds.\"},\"intent\":{\"type\":\"string\",\"description\":\"What to extract when output is large.\"}},\"required\":[\"path\",\"language\",\"code\"],\"additionalProperties\":false}"
+}
+
+func ctx_index_parameters() -> string {
+  "{\"type\":\"object\",\"properties\":{\"content\":{\"type\":\"string\",\"description\":\"Raw text or markdown to index. Provide this or path.\"},\"path\":{\"type\":\"string\",\"description\":\"File path to read and index. Provide this or content.\"},\"source\":{\"type\":\"string\",\"description\":\"Label for the indexed content.\"}},\"anyOf\":[{\"required\":[\"content\"]},{\"required\":[\"path\"]}],\"additionalProperties\":false}"
+}
+
+func ctx_search_parameters() -> string {
+  "{\"type\":\"object\",\"properties\":{\"queries\":{\"type\":\"array\",\"items\":{\"type\":\"string\"},\"description\":\"Search queries. Batch all related questions in one call.\"},\"limit\":{\"type\":\"number\",\"description\":\"Results per query.\"},\"source\":{\"type\":\"string\",\"description\":\"Filter to a specific indexed source.\"},\"contentType\":{\"type\":\"string\",\"enum\":[\"code\",\"prose\"],\"description\":\"Filter results by content type.\"},\"sort\":{\"type\":\"string\",\"enum\":[\"relevance\",\"timeline\"],\"description\":\"Sort mode.\"}},\"required\":[\"queries\"],\"additionalProperties\":false}"
+}
+
+func ctx_fetch_and_index_parameters() -> string {
+  "{\"type\":\"object\",\"properties\":{\"url\":{\"type\":\"string\",\"description\":\"Single URL to fetch and index.\"},\"source\":{\"type\":\"string\",\"description\":\"Label for single URL content.\"},\"requests\":{\"type\":\"array\",\"items\":{\"type\":\"object\",\"properties\":{\"url\":{\"type\":\"string\"},\"source\":{\"type\":\"string\"}},\"required\":[\"url\"],\"additionalProperties\":false},\"description\":\"Batch of URLs to fetch and index.\"},\"concurrency\":{\"type\":\"integer\",\"minimum\":1,\"maximum\":8,\"description\":\"Maximum parallel URL fetches.\"},\"force\":{\"type\":\"boolean\",\"description\":\"Skip cache and re-fetch.\"}},\"anyOf\":[{\"required\":[\"url\"]},{\"required\":[\"requests\"]}],\"additionalProperties\":false}"
+}
+
+func ctx_batch_execute_parameters() -> string {
+  "{\"type\":\"object\",\"properties\":{\"commands\":{\"type\":\"array\",\"items\":{\"type\":\"object\",\"properties\":{\"label\":{\"type\":\"string\",\"description\":\"Section label for this command output.\"},\"command\":{\"type\":\"string\",\"description\":\"Shell command to execute.\"}},\"required\":[\"label\",\"command\"],\"additionalProperties\":false},\"description\":\"Commands to execute and index.\"},\"queries\":{\"type\":\"array\",\"items\":{\"type\":\"string\"},\"description\":\"Search queries to run over indexed command output.\"},\"timeout\":{\"type\":\"number\",\"description\":\"Maximum execution time in milliseconds.\"},\"concurrency\":{\"type\":\"integer\",\"minimum\":1,\"maximum\":8,\"description\":\"Maximum parallel commands.\"}},\"required\":[\"commands\",\"queries\"],\"additionalProperties\":false}"
+}
+
+func ctx_purge_parameters() -> string {
+  "{\"type\":\"object\",\"properties\":{\"confirm\":{\"type\":\"boolean\",\"description\":\"Must be true to purge.\"},\"sessionId\":{\"type\":\"string\",\"description\":\"Specific session to purge.\"},\"scope\":{\"type\":\"string\",\"enum\":[\"project\"],\"description\":\"Use project to purge all indexed content for this project.\"}},\"required\":[\"confirm\"],\"additionalProperties\":false}"
+}
+
+func context_tool_description(canonical: string) -> string {
+  if canonical == "CtxExecute" then "Execute a small code or shell snippet through context-mode. Use for analysis, command output summarization, and token-saving probes."
+  else if canonical == "CtxBatchExecute" then "Run multiple shell commands through context-mode, index their output, and return targeted search results."
+  else if canonical == "CtxExecuteFile" then "Read and process a file inside context-mode without loading the full file into model context."
+  else if canonical == "CtxIndex" then "Index text content or a file path into context-mode's searchable knowledge base."
+  else if canonical == "CtxSearch" then "Search content previously indexed by context-mode."
+  else if canonical == "CtxFetchAndIndex" then "Fetch URL content, index it in context-mode, and return a short preview."
+  else if canonical == "CtxStats" then "Return context-mode session statistics."
+  else if canonical == "CtxDoctor" then "Run context-mode diagnostics."
+  else if canonical == "CtxPurge" then "Delete context-mode indexed content for a session or project."
+  else "Context-mode extension tool: ${canonical}"
+}
+
+func context_tool_parameters(canonical: string) -> string {
+  if canonical == "CtxExecute" then ctx_execute_parameters()
+  else if canonical == "CtxBatchExecute" then ctx_batch_execute_parameters()
+  else if canonical == "CtxExecuteFile" then ctx_execute_file_parameters()
+  else if canonical == "CtxIndex" then ctx_index_parameters()
+  else if canonical == "CtxSearch" then ctx_search_parameters()
+  else if canonical == "CtxFetchAndIndex" then ctx_fetch_and_index_parameters()
+  else if canonical == "CtxPurge" then ctx_purge_parameters()
+  else "{\"type\":\"object\",\"properties\":{},\"required\":[],\"additionalProperties\":false}"
+}
+
+func ext_tool_schema(name: string) -> ToolSchema {
+  let canonical = canonical_tool_name(name);
+  {
+    name: name,
+    description: context_tool_description(canonical),
+    parameters: context_tool_parameters(canonical)
+  }
+}
+
+-- describe_provided_tools builds the [ToolSchema] for on_describe_tools.
+-- Called from register.ail::register_with_config.
+export func describe_provided_tools() -> [ToolSchema] {
+  describe_each(provided_tools())
+}
+
+func describe_each(names: [string]) -> [ToolSchema] {
+  match names {
+    [] => [],
+    n :: rest => ext_tool_schema(n) :: describe_each(rest)
+  }
 }
