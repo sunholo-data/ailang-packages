@@ -45,7 +45,9 @@ import pkg/sunholo/motoko_ext_abi/types (
   ToolResultEnvelope,
   ResponseInterceptDecision,
   FinalizeDecision,
-  Allow, NoOpinion, Delegate, Handled, NoIntercept, NoDecision
+  PreStepDecision,
+  Msg,
+  Allow, NoOpinion, Delegate, Handled, NoIntercept, NoDecision, PassThrough
 )
 
 -- Cap the retrieval text added to each tool result. ~2K chars = ~500 tokens
@@ -179,6 +181,10 @@ export func register_with_config(_cfg: a) -> ExtensionHooks {
     on_budget_plan:
       func(_ctx: ExtCtx, _plan: BudgetPlan) -> BudgetPatch ! {Env, FS} {
         { requested_total: None, requested_solver: None, requested_verifier: None }
+      },
+    on_pre_step:
+      func(_ctx: ExtCtx, _msgs: [Msg]) -> PreStepDecision ! {IO, Process, FS, AI, Env, Net, SharedMem, Clock, Stream} {
+        PassThrough
       },
     on_tool_policy: microrag_tool_policy,
     on_tool_handle: microrag_tool_handle,
