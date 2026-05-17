@@ -7,7 +7,7 @@ import std/rand (uuid4)
 import pkg/sunholo/motoko_ext_abi/types (
   ExtCtx, ExtensionHooks, ToolSchema, PromptPatch, BudgetPlan, BudgetPatch,
   ToolPolicyDecision, ToolHandleDecision, ToolResultEnvelope, ResponseInterceptDecision, FinalizeDecision,
-  ToolCallEnvelope
+  ToolCallEnvelope, Msg, PreStepDecision
 )
 import pkg/sunholo/motoko_ext_a2a/types (A2AAgent, A2AConfig)
 
@@ -180,7 +180,8 @@ export func make_hooks(cfg: A2AConfig) -> ExtensionHooks {
     on_tool_policy:        func(_ctx: ExtCtx, _call: ToolCallEnvelope) -> ToolPolicyDecision { NoOpinion },
     on_tool_handle:        handle,
     on_response_intercept: intercept,
-    on_solver_candidate:   finalize
+    on_solver_candidate:   finalize,
+    on_pre_step:           func(_ctx: ExtCtx, _msgs: [Msg]) -> PreStepDecision ! {IO, Process, FS, AI, Env, Net, SharedMem, Clock, Stream} { PassThrough }
   }
 }
 
