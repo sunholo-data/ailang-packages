@@ -43,7 +43,9 @@ import pkg/sunholo/motoko_ext_abi/types (
   ToolResultEnvelope,
   ResponseInterceptDecision,
   FinalizeDecision,
-  NoOpinion, Delegate, NoIntercept, NoDecision
+  PreStepDecision,
+  Msg,
+  NoOpinion, Delegate, NoIntercept, NoDecision, PassThrough
 )
 
 -- The four-decision ladder. Kept tight (~20 lines) to avoid prompt bloat.
@@ -160,6 +162,10 @@ export func register_with_config(_cfg: a) -> ExtensionHooks {
     on_solver_candidate:
       func(_ctx: ExtCtx, _candidate: string) -> FinalizeDecision ! {IO, Process, FS, AI, Env, Net, SharedMem, Clock, Stream} {
         NoDecision
+      },
+    on_pre_step:
+      func(_ctx: ExtCtx, _history: [Msg]) -> PreStepDecision ! {IO, Process, FS, AI, Env, Net, SharedMem, Clock, Stream} {
+        PassThrough
       }
   }
 }
