@@ -17,7 +17,8 @@ import pkg/sunholo/motoko_ext_compose/types (ToolResultMeta, ComposeHostConfig)
 import pkg/sunholo/motoko_ext_abi/types (
   ToolCallEnvelope, ToolResultEnvelope,
   ExtCtx, ExtensionHooks, PromptPatch, BudgetPlan, BudgetPatch,
-  ToolPolicyDecision, ToolHandleDecision, ResponseInterceptDecision, FinalizeDecision
+  ToolPolicyDecision, ToolHandleDecision, ResponseInterceptDecision, FinalizeDecision,
+  PreStepDecision, Msg
 )
 
 import pkg/sunholo/motoko_ext_compose/prompts (build_author_prompt, build_summary_prompt, normalize_intent_kind, derive_intent_kind)
@@ -824,12 +825,16 @@ export func register_with_config(runtime_cfg: ComposeHostConfig) -> ExtensionHoo
   let finalize = func(_ctx: ExtCtx, _candidate: string) -> FinalizeDecision ! {IO, Process, FS, AI, Env, Net, SharedMem, Clock, Stream} {
     no_finalize_decision()
   };
+  let pre_step = func(_ctx: ExtCtx, _msgs: [Msg]) -> PreStepDecision ! {IO, Process, FS, AI, Env, Net, SharedMem, Clock, Stream} {
+    PassThrough
+  };
   {
     id: "compose",
     provided_tools: provided_tools(),
     on_describe_tools: \_ . [],
     on_build_system_prompt: on_build_system_prompt,
     on_budget_plan: budget_hook,
+    on_pre_step: pre_step,
     on_tool_policy: \ctx call. on_tool_policy_with_mode(composition_mode, ctx, call),
     on_tool_handle: handle,
     on_response_intercept: intercept,
