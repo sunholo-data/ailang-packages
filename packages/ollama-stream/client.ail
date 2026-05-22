@@ -1,0 +1,140 @@
+-- Streaming client for Ollama's /api/chat endpoint.
+--
+-- Ollama streams NDJSON (one JSON object per line) rather than SSE. AILANG's
+-- _ai_step_with_stream falls back to non-streaming for ollama (see ai.go
+-- comment "Gemini / Ollama / config-driven providers: NO-OP fallback") so
+-- this package goes straight at the raw API via std/stream.ndjsonPost.
+--
+-- Thinking-model aware: gemma4 (and other reasoning models) interleave
+-- `message.thinking` chunks during their reasoning phase before producing
+-- `message.content`. parseChatChunk surfaces both as separate fields so a
+-- consumer can render reasoning differently (dimmed, prefixed, hidden, ...).
+--
+-- Usage:
+--   import pkg/sunholo/ollama_stream/client (streamChat, Chunk)
+--   import std/io (print, println)
+--
+--   func render(c: Chunk) -> bool ! {IO} {
+--     if c.thinking != "" then { print("[think]${c.thinking}"); true }
+--     else if c.text != "" then { print(c.text); true }
+--     else if c.done then { println(""); false }
+--     else true
+--   }
+--
+--   streamChat("http://100.83.21.3:11434", "gemma4:26b",
+--              "say hi in three words", render)
+
+module sunholo/ollama_stream/client
+
+import std/stream (
+  ndjsonPost, onEvent, runEventLoop, disconnect,
+  StreamEvent, Opened, Closed, SSEData, StreamError, Message, Binary, Ping, SourceText, SourceBytes,
+  StreamConn, StreamErrorKind
+)
+import std/json (Json, decode, encode, getString, getBool, getObject, jo, kv, js, jb, ja)
+import std/option (Some, None)
+import std/result (Result, Ok, Err)
+
+-- A parsed chunk from an Ollama /api/chat stream.
+-- text:     answer fragment for this chunk (empty during a thinking phase)
+-- thinking: reasoning fragment (empty for non-thinking models)
+-- done:     true on the terminal chunk
+export type Chunk = { text: string, thinking: string, done: bool }
+
+-- Build the JSON request body for /api/chat. Uses std/json builders so the
+-- model name and message content are safely escaped — no hand-rolled string
+-- concatenation. Extend this if you need system prompts, multi-turn history,
+-- or generation options (temperature, num_predict, ...).
+export func chatBody(model: string, userMessage: string) -> string {
+  let userMsg = jo([
+    kv("role", js("user")),
+    kv("content", js(userMessage))
+  ]);
+  let payload = jo([
+    kv("model", js(model)),
+    kv("messages", ja([userMsg])),
+    kv("stream", jb(true))
+  ]);
+  encode(payload)
+}
+
+-- Parse one NDJSON line emitted by /api/chat into a Chunk. Returns None when
+-- the line is empty, malformed, or doesn't carry an expected field — caller
+-- can choose to keep streaming or treat None as a soft error.
+export func parseChatChunk(line: string) -> Option[Chunk] {
+  match decode(line) {
+    Ok(j) => Some(extractChunk(j)),
+    Err(_) => None
+  }
+}
+
+-- Internal: pull text/thinking/done out of a decoded /api/chat JSON object.
+pure func extractChunk(j: Json) -> Chunk {
+  let done = match getBool(j, "done") {
+    Some(b) => b,
+    None => false
+  };
+  let msgOpt = getObject(j, "message");
+  let text = match msgOpt {
+    Some(m) => match getString(m, "content") { Some(s) => s, None => "" },
+    None => ""
+  };
+  let thinking = match msgOpt {
+    Some(m) => match getString(m, "thinking") { Some(s) => s, None => "" },
+    None => ""
+  };
+  { text: text, thinking: thinking, done: done }
+}
+
+-- Bridge a StreamEvent handler down to a Chunk handler. Returns true to keep
+-- streaming, false to stop. Non-data events end the stream (Closed/Error) or
+-- are ignored (Opened/Ping/Binary/Message/Source*).
+export func dispatchEvent(evt: StreamEvent, handler: (Chunk) -> bool) -> bool {
+  match evt {
+    SSEData(_, line) => match parseChatChunk(line) {
+      Some(c) => handler(c),
+      None => true
+    },
+    Closed(_, _) => false,
+    StreamError(_) => false,
+    Opened(_) => true,
+    Ping(_) => true,
+    Message(_) => true,
+    Binary(_) => true,
+    SourceText(_, _) => true,
+    SourceBytes(_, _) => true
+  }
+}
+
+-- Stream a single-turn chat completion from an Ollama server, calling
+-- handler for each parsed Chunk.
+--
+-- endpoint:    base URL of the ollama daemon, e.g. "http://100.83.21.3:11434"
+--              (no trailing slash; /api/chat is appended)
+-- model:       Ollama model tag, e.g. "gemma4:26b"
+-- userMessage: the user-turn content (single-turn only — extend chatBody for
+--              multi-turn)
+-- handler:     called once per parsed chunk. Returns true to keep streaming,
+--              false to stop early. The handler's effect row flows through,
+--              so a handler that calls println uses {IO}.
+--
+-- Returns Ok(()) on clean stream end; Err(kind) on connection failure.
+export func streamChat(
+  endpoint: string,
+  model: string,
+  userMessage: string,
+  handler: (Chunk) -> bool
+) -> Result[unit, StreamErrorKind] ! {Stream} {
+  let url = "${endpoint}/api/chat";
+  let body = chatBody(model, userMessage);
+  let result = ndjsonPost(url, body, {headers: []});
+  match result {
+    Ok(conn) => {
+      onEvent(conn, \evt. dispatchEvent(evt, handler));
+      runEventLoop(conn);
+      disconnect(conn);
+      Ok(())
+    },
+    Err(e) => Err(e)
+  }
+}
