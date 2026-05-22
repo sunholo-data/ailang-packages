@@ -1,6 +1,6 @@
 # AILANG Packages
 
-Curated AILANG packages for production use. Extracted from real projects (docparse, ecommerce demos, streaming agents) to eliminate duplication and provide tested, reusable modules.
+Curated AILANG packages for production use. Extracted from real projects (docparse, e-commerce demos, streaming agents) to eliminate duplication and provide tested, reusable modules.
 
 This is a **monorepo** — multiple packages live in one repository. Each package in `packages/` has its own `ailang.toml` manifest. You can depend on individual packages via path deps or git deps with `subdir`.
 
