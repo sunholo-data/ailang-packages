@@ -146,6 +146,24 @@ func emit_thinking_end(step_num: int, stream_id: string, status: string) -> () !
   println(payload)
 }
 
+-- M-MOTOKO-V021-EFFECT-ROW-MIGRATION workaround for AILANG v0.21.x lambda
+-- effect inference bug: when a let-bound lambda contains a `match` expression
+-- with at least one pure branch (`Usage(_) => ()`), AILANG erases the
+-- lambda's inferred effect row to {} and unification with the
+-- `(StreamChunk) -> () ! {IO}` parameter of `stepWithStream` fails.
+-- Top-level function decls correctly honor the explicit `! {IO}` annotation,
+-- so we extract the match into a top-level handler and the lambda just calls
+-- it. Filed against AILANG for the underlying inference fix.
+-- Requires AILANG v0.21.1+ (M-IFACE-NESTED-EFFECTS — the iface bug that
+-- compounded this regression had to land server-side first).
+func handle_stream_chunk(step_num: int, stream_id: string, chunk: StreamChunk) -> () ! {IO} {
+  match chunk {
+    ContentDelta(text) => emit_thinking_delta_event(step_num, stream_id, text),
+    ThinkingDelta(text) => emit_reasoning_delta_event(step_num, stream_id, text),
+    Usage(_) => ()
+  }
+}
+
 -- Real-streaming wrapper matching the fork's API exactly.
 --
 -- v0.21+ migration: AILANG's std/ai.stepWithStream takes a typed [Message]
@@ -177,11 +195,7 @@ export func callStreamResult(
   let resolved_model = model_for_provider(model) in
   let messages: [Message] = [{ role: "user", content: input, tool_calls: [], tool_call_id: "" }] in
   let _ = emit_thinking_start(step_num, stream_id, model) in
-  let on_chunk = \chunk. match chunk {
-    ContentDelta(text) => emit_thinking_delta_event(step_num, stream_id, text),
-    ThinkingDelta(text) => emit_reasoning_delta_event(step_num, stream_id, text),
-    Usage(_) => ()
-  } in
+  let on_chunk = \chunk. handle_stream_chunk(step_num, stream_id, chunk) in
   match stepWithStream(resolved_model, messages, [], [], on_chunk) {
     Ok(result) => {
       let _ = emit_thinking_end(step_num, stream_id, "completed") in
