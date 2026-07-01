@@ -49,17 +49,18 @@ match scalar(db, "SELECT COUNT(*) FROM messages") {
 | Symbol | Kind | Description |
 |--------|------|-------------|
 | `DB` | type | `{ path: string }` — lightweight DB handle |
-| `Row` | type | `Json` — a JObject; use `std/json.get` to access fields |
-| `QueryResult` | type | `{ columns: [string], rows: [Row], rowCount: int }` |
+| `QueryResult` | type | `{ columns: [string], rows: [Json], rowCount: int }` |
 | `openDB` | func | `(path: string) -> DB` |
+
+Each row is a `Json` value (a JObject); use `std/json.get` to access fields.
 
 ### `sunholo/duckdb/query`
 
 | Function | Signature | Description |
 |----------|-----------|-------------|
 | `query` | `(DB, string) -> Result[QueryResult, string] ! {Process}` | Full result with column list |
-| `queryAll` | `(DB, string) -> Result[[Row], string] ! {Process}` | All rows |
-| `queryOne` | `(DB, string) -> Result[Option[Row], string] ! {Process}` | First row or None |
+| `queryAll` | `(DB, string) -> Result[[Json], string] ! {Process}` | All rows |
+| `queryOne` | `(DB, string) -> Result[Option[Json], string] ! {Process}` | First row or None |
 | `scalar` | `(DB, string) -> Result[Option[Json], string] ! {Process}` | First column of first row |
 
 ### `sunholo/duckdb/schema`
@@ -71,7 +72,7 @@ match scalar(db, "SELECT COUNT(*) FROM messages") {
 
 ## Accessing row fields
 
-`Row` is a `Json` value (JObject). Use `std/json` helpers:
+Each row is a `Json` value (JObject). Use `std/json` helpers:
 
 ```ailang
 import std/json (get, asString, asNumber, asBool, getString, getNumber)

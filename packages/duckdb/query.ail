@@ -7,7 +7,7 @@ import std/list    (map, length, head)
 import std/option  (Option, Some, None)
 import std/result  (Result, Ok, Err)
 import std/string  (trim)
-import ./types     (DB, Row, QueryResult)
+import ./types     (DB, QueryResult)
 
 -- Execute SQL and return full QueryResult.
 -- Row values are Json — use std/json helpers (get, asString, asNumber, etc.) to extract fields.
@@ -20,15 +20,15 @@ export func query(db: DB, sql: string) -> Result[QueryResult, string] ! {Process
       else parseResult(trim(toString(out.stdout)))
   }
 
--- Execute SQL and return all rows.
-export func queryAll(db: DB, sql: string) -> Result[[Row], string] ! {Process} =
+-- Execute SQL and return all rows. Each row is a Json (JObject).
+export func queryAll(db: DB, sql: string) -> Result[[Json], string] ! {Process} =
   match query(db, sql) {
     Err(e)  => Err(e),
     Ok(qr)  => Ok(qr.rows)
   }
 
--- Execute SQL and return the first row, or None if empty.
-export func queryOne(db: DB, sql: string) -> Result[Option[Row], string] ! {Process} =
+-- Execute SQL and return the first row (a Json), or None if empty.
+export func queryOne(db: DB, sql: string) -> Result[Option[Json], string] ! {Process} =
   match query(db, sql) {
     Err(e)   => Err(e),
     Ok(qr)   =>

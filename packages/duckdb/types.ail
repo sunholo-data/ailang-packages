@@ -2,14 +2,18 @@ module sunholo/duckdb/types
 
 import std/json (Json)
 
--- A single result row from duckdb -json output (always a JObject).
+-- A single result row from duckdb -json output is always a Json (JObject).
 -- Use std/json helpers to extract fields: get, asString, asNumber, asBool, etc.
-export type Row = Json
+--
+-- NOTE: rows are typed as raw `Json` rather than a `type Row = Json` alias.
+-- Transparent aliases to non-record types are not expanded across module
+-- boundaries by the current toolchain, so an exported `Row` would fail to
+-- unify with the `Json` values std/json produces (get/keys/asArray).
 
 -- Full query result including column ordering
 export type QueryResult = {
   columns:  [string],
-  rows:     [Row],
+  rows:     [Json],
   rowCount: int
 }
 
