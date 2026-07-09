@@ -1,0 +1,31 @@
+-- Boot probe for the publish/verify-extensions gate. Prints "OK: ..." iff
+-- the generalized engine still reproduces the cross-validated wave-5
+-- ground truth (same assertion as wave5_demo.ail, machine-checkable).
+module sunholo/deontic/_smoke
+
+import std/io (println)
+import std/list (length)
+import std/string (join)
+import ./types (Event, Deliver, Pay, AmendPrice, ForceMajeure, Notice, Waive, Terminate, initState)
+import ./engine (runEvents, report)
+
+export func main() -> () ! {IO} {
+  let pol = { penPerDay: 200, penCap: 4000, payWithin: 10, cureDays: 15, ratePct: 1, ratePeriod: 10 };
+  let evs = [
+    Deliver(8, "M1"), AmendPrice(30, "M2", 22000), ForceMajeure(35, 38, 44),
+    Pay(41, "M1"), Waive(45, "M1-payment"), Deliver(50, "M2"),
+    Notice(61, "M2-payment"), Pay(74, "M2"), Notice(80, "M3-delivery"),
+    Terminate(96, "Client")
+  ];
+  let st = runEvents(pol, initState([("M1", 10, 10000), ("M2", 40, 20000), ("M3", 70, 15000)]), evs);
+  let lines = report(pol, st, ["M1", "M2", "M3"]);
+  let tail3 = join("|", dropTo3(lines));
+  if length(lines) == 16 && tail3 == "vendor_owes=4600|client_owes=220|net: Vendor pays Client 4380"
+  then println("OK: deontic wave5 ground truth (16 lines, net 4380)")
+  else println("FAIL: deontic ground truth drifted: ${tail3}")
+}
+
+func dropTo3(xs: [string]) -> [string] {
+  if length(xs) <= 3 then xs
+  else (match xs { [] => [], _ :: t => dropTo3(t) })
+}
