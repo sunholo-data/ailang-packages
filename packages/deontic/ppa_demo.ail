@@ -1,0 +1,63 @@
+-- Power Purchase Agreement (PPA) demo for sunholo/deontic.
+--
+-- Models a solar PPA between a Seller (vendor role: delivers) and a Buyer
+-- (client role: pays) using the generalized engine — no engine changes, just
+-- data:
+--
+--   COD        commercial operation date: commission the plant by day 180;
+--              triggers the capacity payment (50,000), net-30
+--   Q1, Q2     quarterly contracted-energy deliveries (120,000 each), net-30
+--
+-- Policy: delay damages 500/day capped 25,000 per obligation; late-payment
+-- interest 1% per full 30 days; contractual cure period 30 days.
+--
+-- Timeline story:
+--   d170  Seller achieves COD ten days EARLY
+--   d195  Buyer pays capacity payment (late=0: due d200)
+--   d255  grid curtailment order [255..269] — force majeure over the Q1
+--         deadline (d260): Q1 extends by 15 days to d275
+--   d271  Seller delivers Q1 within the extended window (late=0)
+--   d290  indexation amendment: Q2 price 120,000 -> 126,000
+--   d310  Buyer pays Q1 (due d301, 9 days late -> 0 full periods -> no interest)
+--   (d350 Q2 deadline passes undelivered)
+--   d365  Buyer notices the Q2 delivery default (cure by d395)
+--   d400  Buyer terminates for prolonged default: Q2 cancelled, delay
+--         damages accrue d351..d399 = 49 days x 500 = 24,500 (under cap)
+--
+-- Run:  AILANG_RELAX_MODULES=1 ailang run --caps IO ppa_demo.ail
+
+module sunholo/deontic/ppa_demo
+
+import std/io (println)
+import ./types (Event, Deliver, Pay, AmendPrice, ForceMajeure, Notice, Waive, Terminate,
+                Policy, initState)
+import ./engine (runEvents, report)
+
+func printAll(xs: [string]) -> () ! {IO} {
+  match xs {
+    [] => (),
+    h :: t => { println(h); printAll(t) }
+  }
+}
+
+export func main() -> () ! {IO} {
+  let ppaPolicy = { penPerDay: 500, penCap: 25000, payWithin: 30,
+                    cureDays: 30, ratePct: 1, ratePeriod: 30 };
+  let obligations = [
+    ("COD", 180, 50000),
+    ("Q1", 260, 120000),
+    ("Q2", 350, 120000)
+  ];
+  let timeline = [
+    Deliver(170, "COD"),
+    Pay(195, "COD"),
+    ForceMajeure(255, 255, 269),
+    Deliver(271, "Q1"),
+    AmendPrice(290, "Q2", 126000),
+    Pay(310, "Q1"),
+    Notice(365, "Q2-delivery"),
+    Terminate(400, "Buyer")
+  ];
+  let st = runEvents(ppaPolicy, initState(obligations), timeline);
+  printAll(report(ppaPolicy, st, ["COD", "Q1", "Q2"]))
+}

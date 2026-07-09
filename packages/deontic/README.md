@@ -92,6 +92,42 @@ current `ailang test` runner skips tests in modules with package-relative
 imports (pre-existing; other packages' tests skip identically), so the demo
 diff is the enforced gate for now.
 
+## Real-world example: Power Purchase Agreements
+
+`ppa_demo.ail` models a solar PPA — COD milestone with capacity payment,
+quarterly contracted-energy deliveries, curtailment as force majeure,
+indexation as amendment, termination for prolonged default — with NO engine
+changes, just data:
+
+```
+Q1 effective: deadline=275 price=120000     <- curtailment window extended it
+Q2 effective: deadline=350 price=126000     <- indexation amendment
+Q2 delivery: CANCELLED late_days=49 penalty=24500
+termination: day=400 by=Buyer grounds=Q2-delivery
+net: Vendor pays Client 24500
+```
+
+## Integrating: API service vs WASM
+
+The engine's purity changes the usual calculus:
+
+- **WASM (client-side analysis).** The documented AILANG WASM pain points are
+  effect-handler bridges and version drift — a pure fold needs NO effect
+  bridges, so this package is an unusually good WASM citizen: ship the AILANG
+  wasm runtime + these modules, feed events from your app, render the report.
+  Wins: contracts never leave the browser (PPA confidentiality), and what-if
+  analysis (drag a deadline / toggle a waiver, re-run the fold) is
+  interactive at zero marginal cost. Validate with a spike before committing
+  (version drift between the wasm runtime and .ail sources is the known trap).
+- **API service (docparse pattern).** Proven ops path, and REQUIRED anyway
+  for the step WASM can't do: AI extraction of events/terms from contract
+  prose (`std/ai` with explicit capabilities, server-side keys).
+- **Recommended hybrid:** extraction server-side (prose -> typed events via a
+  small API), reasoning client-side (WASM what-if on the extracted events).
+  If the WASM spike bites, run BOTH server-side behind the docparse-style
+  API first — the module boundary between extraction and reasoning is the
+  same either way, so the split is a deployment decision, not a design one.
+
 ## Extension points
 
 - **Custom policies**: `Policy` is plain data — per-contract knobs.
