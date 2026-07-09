@@ -1,0 +1,55 @@
+-- sunholo/deontic — settlement arithmetic, Z3-contracted.
+--
+-- Every function here carries requires/ensures and is provable with
+-- `ailang verify packages/deontic/settle.ail`. These are the money paths:
+-- if the engine has a bug, it should not be HERE.
+
+module sunholo/deontic/settle
+
+-- Cap a non-negative accrual at a non-negative ceiling.
+export pure func capAt(pen: int, cap: int) -> int
+  requires { pen >= 0 && cap >= 0 }
+  ensures { result <= cap && result >= 0 && (result == pen || result == cap) }
+{
+  if pen < cap then pen else cap
+}
+
+-- Number of FULL periods in daysLate (floor division).
+export pure func floorPeriods(daysLate: int, period: int) -> int
+  requires { daysLate >= 0 && period > 0 }
+  ensures { result >= 0 && result * period <= daysLate }
+{
+  daysLate / period
+}
+
+-- Simple (non-compounding) interest: ratePct percent of price per full
+-- period late, integer floor.
+export pure func interestFor(price: int, ratePct: int, daysLate: int, period: int) -> int
+  requires { price >= 0 && ratePct >= 0 && daysLate >= 0 && period > 0 }
+  ensures { result >= 0 }
+{
+  price * ratePct * floorPeriods(daysLate, period) / 100
+}
+
+-- Per-day delivery penalty with cap.
+export pure func penaltyFor(daysLate: int, perDay: int, cap: int) -> int
+  requires { daysLate >= 0 && perDay >= 0 && cap >= 0 }
+  ensures { result >= 0 && result <= cap }
+{
+  capAt(daysLate * perDay, cap)
+}
+
+-- Days late relative to a deadline (never negative).
+export pure func daysLateAt(day: int, deadline: int) -> int
+  ensures { result >= 0 && result >= day - deadline }
+{
+  if day > deadline then day - deadline else 0
+}
+
+-- Net settlement: positive means A pays B the difference.
+export pure func netOf(aOwes: int, bOwes: int) -> int
+  requires { aOwes >= 0 && bOwes >= 0 }
+  ensures { result == aOwes - bOwes }
+{
+  aOwes - bOwes
+}

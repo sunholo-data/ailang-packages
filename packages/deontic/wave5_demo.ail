@@ -1,0 +1,46 @@
+-- Runnable ground-truth gate for sunholo/deontic.
+--
+-- Replays the wave-5 eval timeline through the generalized engine and prints
+-- the report. The output MUST be byte-identical to the 16-line
+-- expected_stdout of benchmarks/legal_obligation_engine.yml in the ailang
+-- repo (itself cross-validated against an independent Python
+-- implementation). Run from this directory:
+--
+--   AILANG_RELAX_MODULES=1 ailang run --caps IO wave5_demo.ail
+--
+-- NOTE: engine_test.ail carries the same assertions as inline tests, but the
+-- current `ailang test` runner SKIPS tests in modules with package-relative
+-- imports (pre-existing; duckdb's tests skip the same way) — so THIS demo is
+-- the enforced gate until the runner supports package tests.
+
+module sunholo/deontic/wave5_demo
+
+import std/io (println)
+import ./types (Event, Deliver, Pay, AmendPrice, ForceMajeure, Notice, Waive, Terminate,
+                Policy, initState)
+import ./engine (runEvents, report)
+
+func printAll(xs: [string]) -> () ! {IO} {
+  match xs {
+    [] => (),
+    h :: t => { println(h); printAll(t) }
+  }
+}
+
+export func main() -> () ! {IO} {
+  let pol = { penPerDay: 200, penCap: 4000, payWithin: 10, cureDays: 15, ratePct: 1, ratePeriod: 10 };
+  let evs = [
+    Deliver(8, "M1"),
+    AmendPrice(30, "M2", 22000),
+    ForceMajeure(35, 38, 44),
+    Pay(41, "M1"),
+    Waive(45, "M1-payment"),
+    Deliver(50, "M2"),
+    Notice(61, "M2-payment"),
+    Pay(74, "M2"),
+    Notice(80, "M3-delivery"),
+    Terminate(96, "Client")
+  ];
+  let st = runEvents(pol, initState([("M1", 10, 10000), ("M2", 40, 20000), ("M3", 70, 15000)]), evs);
+  printAll(report(pol, st, ["M1", "M2", "M3"]))
+}

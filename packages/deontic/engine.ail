@@ -1,0 +1,210 @@
+-- sunholo/deontic — the event fold + pure report builders.
+--
+-- runEvents is a pure fold: no IO anywhere in this package. Consumers print
+-- the report lines (or feed them elsewhere) under their own capabilities.
+--
+-- Semantics (pinned; see README for the full rule set):
+-- - Delivery penalty: perDay per day late, capped, accruing to delivery day,
+--   or to (termination day - 1) for obligations cancelled by termination.
+-- - Payment due = delivery day + payWithin; interest = ratePct% of price per
+--   FULL ratePeriod days late, floor division, simple.
+-- - Notice opens a cure window ending notice day + cureDays INCLUSIVE.
+--   Payment breaches cure by paying principal in the window (interest still
+--   accrues to the payment day); delivery breaches cure by delivering.
+-- - Waiver: the breach cannot ground termination and its penalty/interest is
+--   EXCLUDED from the owed sums. Report lines always show ACCRUED values.
+-- - Termination is valid only against a noticed, uncured, unwaived breach
+--   whose window has expired (day > notice day + cureDays); grounds = first
+--   qualifying notice in arrival order. Invalid attempts change nothing.
+--   On termination, undelivered obligations cancel (no price owed; penalty
+--   frozen at day-1); delivered-but-unpaid obligations cancel for payment.
+
+module sunholo/deontic/engine
+
+import std/list (concat)
+import std/string (substring, length, endsWith)
+import ./types (Event, Deliver, Pay, AmendPrice, ForceMajeure, Notice, Waive, Terminate, Term, NoTerm, TermAt, Policy, State, aGet, aSet, hasStr)
+import ./settle (penaltyFor, interestFor, daysLateAt, netOf)
+
+-- ---------------------------------------------------------------- events --
+
+export pure func runEvents(pol: Policy, st: State, evs: [Event]) -> State {
+  match evs {
+    [] => st,
+    e :: rest => runEvents(pol, applyEvent(pol, st, e), rest)
+  }
+}
+
+-- Force majeure: extend UNDELIVERED delivery deadlines lying inside [d1,d2]
+-- inclusive by the window length (d2 - d1 + 1). Payment dues unaffected.
+func extendFm(dls: [(string, int)], delivered: [(string, int)], d1: int, d2: int) -> [(string, int)] {
+  match dls {
+    [] => [],
+    p :: rest => match p {
+      (id, dl) => {
+        let span = d2 - d1 + 1;
+        let ndl = if dl >= d1 && dl <= d2 && aGet(delivered, id) < 0 then dl + span else dl;
+        (id, ndl) :: extendFm(rest, delivered, d1, d2)
+      }
+    }
+  }
+}
+
+export pure func applyEvent(pol: Policy, s: State, ev: Event) -> State {
+  match ev {
+    Deliver(day, id) => ({ s | delivered: aSet(s.delivered, id, day) }),
+    Pay(day, id) => ({ s | paid: aSet(s.paid, id, day) }),
+    AmendPrice(_, id, p) => ({ s | prs: aSet(s.prs, id, p) }),
+    ForceMajeure(_, d1, d2) => {
+      let nd = extendFm(s.dls, s.delivered, d1, d2);
+      { s | dls: nd }
+    },
+    Notice(day, bid) => ({ s | notices: concat(s.notices, [(bid, day)]) }),
+    Waive(_, bid) => ({ s | waived: concat(s.waived, [bid]) }),
+    Terminate(day, by) => (match findGrounds(pol, s, s.notices, day) {
+      NoTerm => s,
+      TermAt(d, _, g) => {
+        let nt = TermAt(d, by, g);
+        { s | term: nt }
+      }
+    })
+  }
+}
+
+
+-- A breach "<id>-payment" cures by paying principal within the window;
+-- "<id>-delivery" cures by delivering within the window.
+export pure func isCured(pol: Policy, s: State, bid: string, nday: int) -> bool {
+  let id = obligationOf(bid);
+  let d = if isPaymentBreach(bid) then aGet(s.paid, id) else aGet(s.delivered, id);
+  d >= 0 && d <= nday + pol.cureDays
+}
+
+func findGrounds(pol: Policy, s: State, notices: [(string, int)], day: int) -> Term {
+  match notices {
+    [] => NoTerm,
+    p :: rest => match p {
+      (bid, nday) =>
+        if hasStr(s.waived, bid) then findGrounds(pol, s, rest, day)
+        else if (isCured(pol, s, bid, nday) == false) && day > nday + pol.cureDays
+        then TermAt(day, "", bid)
+        else findGrounds(pol, s, rest, day)
+    }
+  }
+}
+
+-- Breach ids are "<obligationId>-delivery" | "<obligationId>-payment".
+func isPaymentBreach(bid: string) -> bool = endsWith(bid, "-payment")
+
+func obligationOf(bid: string) -> string {
+  let suffixLen = if isPaymentBreach(bid) then 8 else 9;
+  substring(bid, 0, length(bid) - suffixLen)
+}
+
+-- ---------------------------------------------------------------- report --
+
+func termDay(t: Term) -> int {
+  match t { NoTerm => -1, TermAt(d, _, _) => d }
+}
+
+func breachLine(pol: Policy, s: State, id: string, what: string) -> string {
+  let bid = "${id}-${what}";
+  if hasStr(s.waived, bid) then "${id} ${what} breach: WAIVED"
+  else {
+    let nday = aGet(s.notices, bid);
+    if nday < 0 then ""
+    else if isCured(pol, s, bid, nday) then "${id} ${what} breach: CURED"
+    else "${id} ${what} breach: UNCURED"
+  }
+}
+
+func keepNonEmpty(xs: [string]) -> [string] {
+  match xs {
+    [] => [],
+    h :: t => if h == "" then keepNonEmpty(t) else h :: keepNonEmpty(t)
+  }
+}
+
+-- Lines + (vendor accrual owed, client accrual owed) for one obligation.
+func obligationReport(pol: Policy, s: State, id: string) -> ([string], (int, int)) {
+  let dl = aGet(s.dls, id);
+  let price = aGet(s.prs, id);
+  let dDay = aGet(s.delivered, id);
+  let tday = termDay(s.term);
+  if dDay >= 0 then {
+    let late = daysLateAt(dDay, dl);
+    let pen = penaltyFor(late, pol.penPerDay, pol.penCap);
+    let penOwed = if hasStr(s.waived, "${id}-delivery") then 0 else pen;
+    let dLine = "${id} delivery: DELIVERED day=${show(dDay)} late=${show(late)} penalty=${show(pen)}";
+    let due = dDay + pol.payWithin;
+    let pDay = aGet(s.paid, id);
+    if pDay >= 0 then {
+      let lateP = daysLateAt(pDay, due);
+      let interest = interestFor(price, pol.ratePct, lateP, pol.ratePeriod);
+      let intOwed = if hasStr(s.waived, "${id}-payment") then 0 else interest;
+      let pLine = "${id} payment: PAID day=${show(pDay)} late=${show(lateP)} interest=${show(interest)}";
+      (concat([dLine, pLine], keepNonEmpty([breachLine(pol, s, id, "delivery"), breachLine(pol, s, id, "payment")])), (penOwed, intOwed))
+    } else {
+      let pLine = if tday >= 0 then ["${id} payment: CANCELLED"] else [];
+      (concat(concat([dLine], pLine), keepNonEmpty([breachLine(pol, s, id, "delivery"), breachLine(pol, s, id, "payment")])), (penOwed, 0))
+    }
+  } else {
+    if tday >= 0 then {
+      let lateDays = daysLateAt(tday - 1, dl);
+      let pen = penaltyFor(lateDays, pol.penPerDay, pol.penCap);
+      let penOwed = if hasStr(s.waived, "${id}-delivery") then 0 else pen;
+      let dLine = "${id} delivery: CANCELLED late_days=${show(lateDays)} penalty=${show(pen)}";
+      (concat([dLine, "${id} payment: CANCELLED"], keepNonEmpty([breachLine(pol, s, id, "delivery"), breachLine(pol, s, id, "payment")])), (penOwed, 0))
+    } else {
+      ([], (0, 0))
+    }
+  }
+}
+
+func effectiveLines(s: State, ids: [string]) -> [string] {
+  match ids {
+    [] => [],
+    id :: rest => "${id} effective: deadline=${show(aGet(s.dls, id))} price=${show(aGet(s.prs, id))}" :: effectiveLines(s, rest)
+  }
+}
+
+func obligationsReport(pol: Policy, s: State, ids: [string]) -> ([string], (int, int)) {
+  match ids {
+    [] => ([], (0, 0)),
+    id :: rest => match obligationReport(pol, s, id) {
+      (lines, owed) => match obligationsReport(pol, s, rest) {
+        (moreLines, moreOwed) => match owed {
+          (v, c) => match moreOwed {
+            (mv, mc) => (concat(lines, moreLines), (v + mv, c + mc))
+          }
+        }
+      }
+    }
+  }
+}
+
+func termLines(t: Term) -> [string] {
+  match t {
+    NoTerm => [],
+    TermAt(d, by, g) => ["termination: day=${show(d)} by=${by} grounds=${g}"]
+  }
+}
+
+func netLines(vendorOwes: int, clientOwes: int) -> [string] {
+  let n = netOf(vendorOwes, clientOwes);
+  let netLine =
+    if n > 0 then "net: Vendor pays Client ${show(n)}"
+    else if n < 0 then "net: Client pays Vendor ${show(0 - n)}"
+    else "net: settled";
+  ["vendor_owes=${show(vendorOwes)}", "client_owes=${show(clientOwes)}", netLine]
+}
+
+-- The full report: effective terms, per-obligation blocks, termination,
+-- owed sums, and the net settlement line.
+export pure func report(pol: Policy, s: State, ids: [string]) -> [string] {
+  match obligationsReport(pol, s, ids) {
+    (lines, owed) => match owed {
+      (v, c) => concat(concat(concat(effectiveLines(s, ids), lines), termLines(s.term)), netLines(v, c))
+    }
+  }
+}

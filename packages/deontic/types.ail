@@ -1,0 +1,95 @@
+-- sunholo/deontic — types
+--
+-- A deontic (obligation/permission) reasoning core for contract-shaped
+-- domains: obligations with deadlines and prices, notice-and-cure windows,
+-- waiver with forgiveness, force-majeure deadline extension, amendment, and
+-- termination cascade. The engine is a PURE fold over an event list: same
+-- contract + same events = same outcome, replayable by construction.
+--
+-- Provenance: generalized from the cross-validated wave-5 eval reference
+-- (ailang repo, benchmarks/frontier_refs/legal_obligation_engine.ail), whose
+-- output is byte-identical to an independent Python implementation.
+
+module sunholo/deontic/types
+
+-- Events, tagged with the day they occur. Days are integers; process events
+-- in day order (the engine does not sort — callers supply ordered events).
+-- Obligation ids are free-form strings (e.g. "M1"); breach ids are
+-- "<obligationId>-delivery" or "<obligationId>-payment".
+export type Event = Deliver(int, string)
+           | Pay(int, string)
+           | AmendPrice(int, string, int)
+           | ForceMajeure(int, int, int)
+           | Notice(int, string)
+           | Waive(int, string)
+           | Terminate(int, string)
+
+-- Termination outcome: day, terminating party, and the grounding breach id.
+export type Term = NoTerm | TermAt(int, string, string)
+
+-- Policy knobs. All money is integer minor units; all rates are integer
+-- percent. Interest: ratePct percent of price per FULL ratePeriod days late
+-- (floor division), simple, non-compounding.
+export type Policy = {
+  penPerDay: int,
+  penCap: int,
+  payWithin: int,
+  cureDays: int,
+  ratePct: int,
+  ratePeriod: int
+}
+
+-- Engine state: association lists keyed by obligation id (deadlines,
+-- prices, delivery days, payment days), notice list in arrival order
+-- (breach id, day), waived breach ids, and the termination outcome.
+export type State = {
+  dls: [(string, int)],
+  prs: [(string, int)],
+  delivered: [(string, int)],
+  paid: [(string, int)],
+  notices: [(string, int)],
+  waived: [string],
+  term: Term
+}
+
+-- Build the initial state from (obligationId, deadline, price) triples.
+export pure func initState(obligations: [(string, int, int)]) -> State {
+  { dls: dlsOf(obligations), prs: prsOf(obligations),
+    delivered: [], paid: [], notices: [], waived: [], term: NoTerm }
+}
+
+pure func dlsOf(xs: [(string, int, int)]) -> [(string, int)] {
+  match xs {
+    [] => [],
+    t :: rest => match t { (id, dl, _) => (id, dl) :: dlsOf(rest) }
+  }
+}
+
+pure func prsOf(xs: [(string, int, int)]) -> [(string, int)] {
+  match xs {
+    [] => [],
+    t :: rest => match t { (id, _, pr) => (id, pr) :: prsOf(rest) }
+  }
+}
+
+-- Association-list helpers shared by the engine.
+export pure func aGet(xs: [(string, int)], k: string) -> int {
+  match xs {
+    [] => -1,
+    p :: rest => match p { (n, v) => if n == k then v else aGet(rest, k) }
+  }
+}
+
+export pure func aSet(xs: [(string, int)], k: string, v: int) -> [(string, int)] {
+  match xs {
+    [] => [(k, v)],
+    p :: rest => match p { (n, _) => if n == k then (k, v) :: rest else p :: aSet(rest, k, v) }
+  }
+}
+
+export pure func hasStr(xs: [string], k: string) -> bool {
+  match xs {
+    [] => false,
+    h :: t => if h == k then true else hasStr(t, k)
+  }
+}

@@ -47,6 +47,7 @@ export func main() -> () ! {IO, FS, Net} =
 | [sunholo/config](packages/config/) | Config loading from env vars with validation | Env | [Guide](packages/config/AGENT.md) |
 | [sunholo/testing-utils](packages/testing-utils/) | Test assertion helpers (assertEqual, assertOk, etc.) | Pure | [Guide](packages/testing-utils/AGENT.md) |
 | [sunholo/firestore](packages/firestore/) | Firestore REST API client — CRUD, queries, field encoding | Net, FS, Env | [Guide](packages/firestore/AGENT.md) |
+| [sunholo/deontic](packages/deontic/) | Verified contract reasoning: obligations, notice-and-cure, waiver, force majeure, termination — pure event fold with Z3-proved settlement math | Pure (IO in demo only) | [Guide](packages/deontic/AGENT.md) |
 
 ### Billing Packages (DocParse)
 

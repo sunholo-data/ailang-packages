@@ -1,0 +1,111 @@
+-- Ground-truth tests for sunholo/deontic.
+--
+-- The big test replays the wave-5 eval timeline (ailang repo,
+-- benchmarks/legal_obligation_engine.yml) through the GENERALIZED engine and
+-- asserts the report is byte-identical to the 16-line expected output that
+-- was cross-validated against an independent Python implementation.
+
+module sunholo/deontic/engine_test
+
+import std/string (join)
+import ./types (Event, Deliver, Pay, AmendPrice, ForceMajeure, Notice, Waive, Terminate, Policy, State, initState, aGet, Term, NoTerm, TermAt)
+import ./engine (runEvents, report)
+
+pure func wave5Policy() -> Policy {
+  { penPerDay: 200, penCap: 4000, payWithin: 10, cureDays: 15, ratePct: 1, ratePeriod: 10 }
+}
+
+pure func wave5Events() -> [Event] {
+  [
+    Deliver(8, "M1"),
+    AmendPrice(30, "M2", 22000),
+    ForceMajeure(35, 38, 44),
+    Pay(41, "M1"),
+    Waive(45, "M1-payment"),
+    Deliver(50, "M2"),
+    Notice(61, "M2-payment"),
+    Pay(74, "M2"),
+    Notice(80, "M3-delivery"),
+    Terminate(96, "Client")
+  ]
+}
+
+pure func wave5State() -> State {
+  runEvents(wave5Policy(), initState([("M1", 10, 10000), ("M2", 40, 20000), ("M3", 70, 15000)]), wave5Events())
+}
+
+pure func wave5Report() -> string {
+  join("\n", report(wave5Policy(), wave5State(), ["M1", "M2", "M3"]))
+}
+
+pure func wave5Expected() -> string {
+  join("\n", [
+    "M1 effective: deadline=10 price=10000",
+    "M2 effective: deadline=47 price=22000",
+    "M3 effective: deadline=70 price=15000",
+    "M1 delivery: DELIVERED day=8 late=0 penalty=0",
+    "M1 payment: PAID day=41 late=23 interest=200",
+    "M1 payment breach: WAIVED",
+    "M2 delivery: DELIVERED day=50 late=3 penalty=600",
+    "M2 payment: PAID day=74 late=14 interest=220",
+    "M2 payment breach: CURED",
+    "M3 delivery: CANCELLED late_days=25 penalty=4000",
+    "M3 payment: CANCELLED",
+    "M3 delivery breach: UNCURED",
+    "termination: day=96 by=Client grounds=M3-delivery",
+    "vendor_owes=4600",
+    "client_owes=220",
+    "net: Vendor pays Client 4380"
+  ])
+}
+
+test "wave-5 ground truth: report byte-identical to cross-validated output" {
+  wave5Report() == wave5Expected()
+}
+
+test "termination invalid without expired cure window" {
+  -- terminate on day 95 (window ends 95 inclusive) must be a no-op
+  let evs = [
+    Notice(80, "M3-delivery"),
+    Terminate(95, "Client")
+  ];
+  let s = runEvents(wave5Policy(), initState([("M3", 70, 15000)]), evs);
+  join("\n", report(wave5Policy(), s, ["M3"])) != wave5Expected() &&
+    aTermIsNone(s)
+}
+
+test "waived breach cannot ground termination" {
+  let evs = [
+    Notice(80, "M3-delivery"),
+    Waive(81, "M3-delivery"),
+    Terminate(96, "Client")
+  ];
+  aTermIsNone(runEvents(wave5Policy(), initState([("M3", 70, 15000)]), evs))
+}
+
+test "force majeure extends only in-window undelivered deadlines" {
+  let evs = [ForceMajeure(35, 38, 44)];
+  let s = runEvents(wave5Policy(), initState([("A", 40, 100), ("B", 70, 100)]), evs);
+  effDl(s, "A") == 47 && effDl(s, "B") == 70
+}
+
+test "floor-division interest: 7 days late in 10-day periods is zero" {
+  let evs = [Deliver(8, "M1"), Pay(25, "M1")];
+  let s = runEvents(wave5Policy(), initState([("M1", 10, 10000)]), evs);
+  containsLine(report(wave5Policy(), s, ["M1"]), "M1 payment: PAID day=25 late=7 interest=0")
+}
+
+-- helpers
+
+pure func aTermIsNone(s: State) -> bool {
+  match s.term { NoTerm => true, TermAt(_, _, _) => false }
+}
+
+pure func effDl(s: State, id: string) -> int = aGet(s.dls, id)
+
+pure func containsLine(lines: [string], want: string) -> bool {
+  match lines {
+    [] => false,
+    h :: t => if h == want then true else containsLine(t, want)
+  }
+}
