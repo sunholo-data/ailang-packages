@@ -107,26 +107,46 @@ termination: day=400 by=Buyer grounds=Q2-delivery
 net: Vendor pays Client 24500
 ```
 
-## Integrating: API service vs WASM
+## Integrating: API service vs WASM — both spiked, with numbers (2026-07-09)
 
-The engine's purity changes the usual calculus:
+`api.ail` provides the boundary both paths share:
+- `analyzeContract(obligations, events, policy) -> [string]` — structured
+  records (serve-api decodes JSON into these natively)
+- `analyzeContractJson(obligationsJson, eventsJson, policyJson) -> [string]`
+  — one opaque JSON-string wire format (required for WASM, whose host bridge
+  currently converts only scalar arguments; also handy for any client)
 
-- **WASM (client-side analysis).** The documented AILANG WASM pain points are
-  effect-handler bridges and version drift — a pure fold needs NO effect
-  bridges, so this package is an unusually good WASM citizen: ship the AILANG
-  wasm runtime + these modules, feed events from your app, render the report.
-  Wins: contracts never leave the browser (PPA confidentiality), and what-if
-  analysis (drag a deadline / toggle a waiver, re-run the fold) is
-  interactive at zero marginal cost. Validate with a spike before committing
-  (version drift between the wasm runtime and .ail sources is the known trap).
-- **API service (docparse pattern).** Proven ops path, and REQUIRED anyway
-  for the step WASM can't do: AI extraction of events/terms from contract
-  prose (`std/ai` with explicit capabilities, server-side keys).
-- **Recommended hybrid:** extraction server-side (prose -> typed events via a
-  small API), reasoning client-side (WASM what-if on the extracted events).
-  If the WASM spike bites, run BOTH server-side behind the docparse-style
-  API first — the module boundary between extraction and reasoning is the
-  same either way, so the split is a deployment decision, not a design one.
+**API path — measured.** Zero custom code:
+```bash
+cd packages/deontic && ailang serve-api --port 8080 .
+curl -X POST localhost:8080/api/api/analyzeContract -d '{...}'  # 20ms, HTTP 200
+```
+Full PPA settlement report in ~20ms server-side / ~23ms round-trip local.
+This is the docparse deployment shape: containerize + Cloud Run.
+
+**WASM path — measured (Node, fresh dev-build runtime).**
+| Metric | Value |
+|---|---|
+| runtime artifact | 41.1 MB uncompressed (host with brotli + cache-forever) |
+| instantiate + boot | ~1.2 s (one-time) |
+| load bundled package | ~350 ms (one-time; 421-line single-module bundle) |
+| analyzeContractJson | 13 ms first call |
+| what-if recompute | **8.9 ms each** (50 consecutive, byte-identical output) |
+
+The report is byte-identical to the API/CLI output. Caveats before
+production: bundle the package into a single module (relative imports are
+stripped by a build step — the wasm loader takes one module source); pin the
+runtime build to the bundle (version drift is the known trap); this spike ran
+under Node — do a browser pass before shipping; and the runtime bridge's
+scalar-only argument conversion is why the JSON-string surface exists
+(upstream enhancement opportunity: array/object conversion in cmd/wasm).
+
+**Recommended for contract platforms (e.g. PPA analysis):** hybrid.
+AI extraction of events/terms from contract prose runs server-side (keys +
+`std/ai` capabilities), returning the typed event JSON; the reasoning fold
+runs client-side in WASM for ~9 ms interactive what-if with contracts never
+leaving the browser. Falling back to API-only is a deployment change, not a
+redesign — both paths call the same `api.ail` boundary.
 
 ## Extension points
 

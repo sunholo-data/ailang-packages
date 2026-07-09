@@ -1,0 +1,140 @@
+-- JSON-friendly API surface for sunholo/deontic (serve-api / embed / WASM).
+--
+-- Events arrive as flat records (one shape, fields used per kind) so any
+-- JSON client can call this without knowing AILANG ADTs:
+--   {kind:"deliver"|"pay",           day, ref, amt:0,  hi:0}
+--   {kind:"amend_price",             day, ref, amt,    hi:0}
+--   {kind:"force_majeure",           day, ref:"", amt:d1, hi:d2}
+--   {kind:"notice"|"waive",          day, ref:breachId, amt:0, hi:0}
+--   {kind:"terminate",               day, ref:party,    amt:0, hi:0}
+-- Unknown kinds are ignored (documented; returns are total).
+
+module sunholo/deontic/api
+
+import std/list (concat)
+import std/json (Json, decode, get, asString, asArray, asNumber)
+import std/option (Option, Some, None)
+import std/result (Result, Ok, Err)
+import std/math (floatToInt)
+import ./types (Event, Deliver, Pay, AmendPrice, ForceMajeure, Notice, Waive, Terminate,
+                Policy, State, initState)
+import ./engine (runEvents, report)
+
+type WireEvent = { kind: string, day: int, ref: string, amt: int, hi: int }
+type WireObligation = { id: string, deadline: int, price: int }
+
+func toEvent(w: { kind: string, day: int, ref: string, amt: int, hi: int }) -> [Event] {
+  if w.kind == "deliver" then [Deliver(w.day, w.ref)]
+  else if w.kind == "pay" then [Pay(w.day, w.ref)]
+  else if w.kind == "amend_price" then [AmendPrice(w.day, w.ref, w.amt)]
+  else if w.kind == "force_majeure" then [ForceMajeure(w.day, w.amt, w.hi)]
+  else if w.kind == "notice" then [Notice(w.day, w.ref)]
+  else if w.kind == "waive" then [Waive(w.day, w.ref)]
+  else if w.kind == "terminate" then [Terminate(w.day, w.ref)]
+  else []
+}
+
+func toEvents(ws: [{ kind: string, day: int, ref: string, amt: int, hi: int }]) -> [Event] {
+  match ws {
+    [] => [],
+    w :: rest => concat(toEvent(w), toEvents(rest))
+  }
+}
+
+func toTriples(os: [{ id: string, deadline: int, price: int }]) -> [(string, int, int)] {
+  match os {
+    [] => [],
+    o :: rest => (o.id, o.deadline, o.price) :: toTriples(rest)
+  }
+}
+
+func ids(os: [{ id: string, deadline: int, price: int }]) -> [string] {
+  match os {
+    [] => [],
+    o :: rest => o.id :: ids(rest)
+  }
+}
+
+-- The one endpoint a platform needs: contract + timeline -> settlement report.
+export pure func analyzeContract(
+  obligations: [{ id: string, deadline: int, price: int }],
+  events: [{ kind: string, day: int, ref: string, amt: int, hi: int }],
+  policy: Policy
+) -> [string] {
+  let st = runEvents(policy, initState(toTriples(obligations)), toEvents(events));
+  report(policy, st, ids(obligations))
+}
+
+-- ---------------------------------------------------------------------------
+-- JSON-string surface: the portable boundary for WASM (whose host bridge
+-- currently converts only scalar arguments) and for any client that prefers
+-- one opaque wire format. Same engine, same report.
+
+
+func jInt(j: Json, key: string) -> int {
+  match get(j, key) {
+    None => 0,
+    Some(v) => match asNumber(v) {
+      None => 0,
+      Some(f) => floatToInt(f)
+    }
+  }
+}
+
+func jStr(j: Json, key: string) -> string {
+  match get(j, key) {
+    None => "",
+    Some(v) => match asString(v) {
+      None => "",
+      Some(s) => s
+    }
+  }
+}
+
+func jItems(j: Json) -> [Json] {
+  match asArray(j) {
+    None => [],
+    Some(xs) => xs
+  }
+}
+
+func obligationsOfJson(j: Json) -> [{ id: string, deadline: int, price: int }] {
+  obligationsGo(jItems(j))
+}
+
+func obligationsGo(xs: [Json]) -> [{ id: string, deadline: int, price: int }] {
+  match xs {
+    [] => [],
+    o :: rest => ({ id: jStr(o, "id"), deadline: jInt(o, "deadline"), price: jInt(o, "price") }) :: obligationsGo(rest)
+  }
+}
+
+func eventsOfJson(j: Json) -> [{ kind: string, day: int, ref: string, amt: int, hi: int }] {
+  eventsGo(jItems(j))
+}
+
+func eventsGo(xs: [Json]) -> [{ kind: string, day: int, ref: string, amt: int, hi: int }] {
+  match xs {
+    [] => [],
+    e :: rest => ({ kind: jStr(e, "kind"), day: jInt(e, "day"), ref: jStr(e, "ref"), amt: jInt(e, "amt"), hi: jInt(e, "hi") }) :: eventsGo(rest)
+  }
+}
+
+func policyOfJson(j: Json) -> Policy {
+  { penPerDay: jInt(j, "penPerDay"), penCap: jInt(j, "penCap"), payWithin: jInt(j, "payWithin"),
+    cureDays: jInt(j, "cureDays"), ratePct: jInt(j, "ratePct"), ratePeriod: jInt(j, "ratePeriod") }
+}
+
+-- All three payloads as JSON strings; malformed JSON yields a one-line error report.
+export pure func analyzeContractJson(obligationsJson: string, eventsJson: string, policyJson: string) -> [string] {
+  match decode(obligationsJson) {
+    Err(e) => ["error: obligations: ${e}"],
+    Ok(oj) => match decode(eventsJson) {
+      Err(e) => ["error: events: ${e}"],
+      Ok(ej) => match decode(policyJson) {
+        Err(e) => ["error: policy: ${e}"],
+        Ok(pj) => analyzeContract(obligationsOfJson(oj), eventsOfJson(ej), policyOfJson(pj))
+      }
+    }
+  }
+}
