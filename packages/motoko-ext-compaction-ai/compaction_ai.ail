@@ -101,7 +101,7 @@ export func summarize_with_ai(prompt: string, model: string) -> string ! {AI, IO
   -- and return nothing (measured: 19/30 empty summaries on a docx run, which made
   -- the agent lose its context ~2/3 of rounds). Appending /no_think fixes it and is
   -- inert text for non-qwen models.
-  let msgs: [Message] = [{ role: "user", content: "${prompt}\n/no_think", tool_calls: [], tool_call_id: "" }];
+  let msgs: [Message] = [{ role: "user", content: "${prompt}\n/no_think", tool_calls: [], tool_call_id: "", images: [] }];
   match step(model, msgs, []) {
     Ok(result) => result.message.content,
     Err(e) => "[summarizer unavailable: ${e.code}: ${e.message}]"
