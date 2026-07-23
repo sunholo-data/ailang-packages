@@ -1,0 +1,25 @@
+[package]
+name = "sunholo/motoko_ext_fmt"
+version = "0.1.0"
+edition = "1"
+ailang = ">=0.17.0"
+description = "Tier-1 motoko extension: canonically formats .ail files on write, so a weak model re-reads drift-free code. Shells out to `ailang fmt --write`."
+license = "Apache-2.0"
+
+[exports]
+modules = ["sunholo/motoko_ext_fmt/register"]
+
+[dependencies]
+"sunholo/motoko_ext_abi" = "2.2.0"
+
+[effects]
+max = ["IO", "Process", "FS", "AI", "Env", "Net", "SharedMem", "Clock", "Stream"]
+
+[metadata]
+tags = ["motoko", "extension", "fmt", "format", "ailang"]
+ai_summary = "Intercepts WriteFile on .ail files via on_tool_handle: performs the real write, then runs `ailang fmt --write` on the file so the model's next turn re-reads canonical code. The mechanism under test in M-EVAL-FMT-WEAKMODEL-AB — does removing syntax drift reduce compile-stuck spirals in a weak local model. Non-.ail writes are Delegated to motoko's default handler. Logs each format to the eval fmt_hook_events sink (<workdir>/.claude/fmt_hook_events.jsonl) for treatment-integrity, matching the Claude-Code format_ail.sh hook so the eval harness banks identical events."
+repository = "https://github.com/sunholo-data/ailang-packages/tree/main/packages/motoko-ext-fmt"
+license_url = "https://github.com/sunholo-data/ailang-packages/blob/main/LICENSE"
+
+[stability]
+level = "experimental"

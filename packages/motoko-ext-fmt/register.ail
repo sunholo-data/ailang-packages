@@ -1,0 +1,141 @@
+-- motoko-ext-fmt@0.1.0: tier-1 motoko extension that canonically FORMATS .ail
+-- files on write, so a weak model re-reads drift-free code on its next turn.
+--
+-- The hypothesis (M-EVAL-FMT-WEAKMODEL-AB): syntax drift drives compile-stuck
+-- spirals in weak models; canonical formatting removes the drift. The Claude
+-- Code arm delivers this via a format_ail.sh PostToolUse hook; this extension
+-- is the equivalent for motoko-driven (local/OpenRouter) models, which the
+-- Claude hook cannot reach.
+--
+-- Architecture (mirrors motoko-ext-microrag's on_tool_handle intercept):
+--   on_tool_handle(WriteFile{path: foo.ail, content: code}) →
+--     1. writeFile(path, content)             -- the real write (AILANG_FS_SANDBOX)
+--     2. exec("ailang", ["fmt", "--write", p]) -- format in place; idempotent,
+--                                                  Parse(fmt(x)) ≡ Parse(x)
+--     3. emit {status,file} to <workdir>/.claude/fmt_hook_events.jsonl
+--        (the exact sink eval_harness.ReadFmtHookSink consumes → treatment
+--         integrity: the void-clause check works unchanged)
+--     4. Handled(toolResult{stdout: "wrote N bytes; formatted"})
+-- Non-.ail writes are Delegated to motoko's default WriteFile handler.
+--
+-- Loaded via profile config (the A/B toggle):
+--   "extensions": { "order": [..., "fmt"] }   -- ON arm
+-- Absent from the OFF arm's order. The profile IS the treatment toggle.
+
+module sunholo/motoko_ext_fmt/register
+
+import std/string (length, endsWith)
+
+import std/process (exec)
+
+import std/fs (writeFile, appendFile, mkdirAll)
+
+import std/bytes (toString)
+
+import std/json (encode, jo, kv, js, get, asString)
+
+import std/option (Option, None, Some)
+
+import pkg/sunholo/motoko_ext_abi/types (ExtCtx, ExtensionHooks, ToolSchema, PromptPatch, BudgetPlan, BudgetPatch, ToolPolicyDecision, ToolHandleDecision, ToolCallEnvelope, ToolResultEnvelope, ResponseInterceptDecision, FinalizeDecision, PreStepDecision, Msg, NoOpinion, Delegate, Handled, NoIntercept, NoDecision, PassThrough)
+
+-- Pull a string field from the JSON tool arguments; "" indicates missing.
+pure func get_str(call: ToolCallEnvelope, key: string) -> string {
+  match get_arg(call, key) {
+    None => "",
+    Some(s) => s
+  }
+}
+
+-- Bridge to the ABI's json get/asString; kept separate so the pattern matches
+-- microrag's proven idiom exactly.
+pure func get_arg(call: ToolCallEnvelope, key: string) -> Option[string] {
+  match get(call.arguments, key) {
+    None => None,
+    Some(j) => asString(j)
+  }
+}
+
+pure func is_ail_file(path: string) -> bool {
+  endsWith(path, ".ail")
+}
+
+pure func is_ail_file_detects_extension() -> bool
+  tests [
+    ((), true)
+  ] {
+  is_ail_file("solution.ail") && is_ail_file("src/core/foo.ail") && not is_ail_file("solution.py") && not is_ail_file("")
+}
+
+func make_result(call: ToolCallEnvelope, stdout: string, exit_code: int) -> ToolResultEnvelope {
+  { tool_call_id: call.id, tool: call.tool, exit_code: exit_code, stdout: stdout, stderr: "", metadata: jo([]) }
+}
+
+func make_error_result(call: ToolCallEnvelope, msg: string) -> ToolResultEnvelope {
+  { tool_call_id: call.id, tool: call.tool, exit_code: 1, stdout: "", stderr: msg, metadata: jo([]) }
+}
+
+-- Run `ailang fmt --write <path>`; returns the exit code (0 = formatted).
+-- A fmt failure leaves the file as the model wrote it (atomic --write) and is
+-- logged as status:"error" — never wedges the turn.
+func run_fmt(path: string) -> int ! {Process} {
+  match exec("ailang", ["fmt", "--write", path]) {
+    Err(_) => 1,
+    Ok(out) => out.exitCode
+  }
+}
+
+-- Append one treatment event to <workdir>/.claude/fmt_hook_events.jsonl.
+-- Matches the format_ail.sh sink so eval_harness.ReadFmtHookSink banks it as a
+-- FmtHookEvent{status, file}. mkdirAll ensures the sink dir exists (appendFile
+-- does not create parents).
+func emit_fmt_event(workdir: string, path: string, exit_code: int) -> () ! {FS} {
+  let dir = concat_String(show(workdir), "/.claude")
+  let _ = mkdirAll(dir)
+  let status = if exit_code == 0 then "formatted" else "error"
+  let line = encode(jo([kv("status", js(status)), kv("file", js(path))]))
+  let _ = appendFile(concat_String(show(dir), "/fmt_hook_events.jsonl"), concat_String(show(line), "\n"));
+  ()
+}
+
+-- Write the file, format it, log the treatment, return the combined result.
+func auto_write_with_fmt(ctx: ExtCtx, call: ToolCallEnvelope) -> ToolHandleDecision ! {FS, Process} {
+  let path = get_str(call, "path")
+  let content = get_str(call, "content")
+  if path == "" then Handled(make_error_result(call, "WriteFile: missing 'path'")) else if content == "" then Handled(make_error_result(call, "WriteFile: missing 'content'")) else {
+    let _ = writeFile(path, content)
+    let code = run_fmt(path)
+    let _ = emit_fmt_event(ctx.workdir, path, code)
+    let msg = if code == 0 then concat_String(concat_String(concat_String(concat_String("Wrote ", show(show(length(content)))), " bytes to "), show(path)), "; formatted (ailang fmt --write)") else concat_String(concat_String(concat_String(concat_String(concat_String(concat_String("Wrote ", show(show(length(content)))), " bytes to "), show(path)), "; fmt exit "), show(show(code))), " — left as written")
+    Handled(make_result(call, msg, 0))
+  }
+}
+
+pure func fmt_describe_tools() -> list[ToolSchema] {
+  []
+}
+
+pure func fmt_tool_policy(_ctx: ExtCtx, _call: ToolCallEnvelope) -> ToolPolicyDecision {
+  NoOpinion
+}
+
+-- Fire on WriteFile to a .ail path; Delegate everything else so motoko's native
+-- WriteFile/EditFile/ReadFile path-validation + hashing + emit_event chain still
+-- runs (see src/core/tool_runtime.ail).
+func fmt_tool_handle(ctx: ExtCtx, call: ToolCallEnvelope) -> ToolHandleDecision ! {IO, Process, FS, AI, Env, Net, SharedMem, Clock, Stream} {
+  if call.tool == "WriteFile" then {
+    let path = get_str(call, "path")
+    if is_ail_file(path) then auto_write_with_fmt(ctx, call) else Delegate
+  } else Delegate
+}
+
+export func register_with_config(_cfg: a) -> ExtensionHooks {
+  { id: "fmt", provided_tools: ["WriteFile"], on_describe_tools: fmt_describe_tools, on_build_system_prompt: \_ctx. { prepend: [], append: [] }, on_budget_plan: func(_ctx: ExtCtx, _plan: BudgetPlan) -> BudgetPatch ! {Env, FS} {
+    { requested_total: None, requested_solver: None, requested_verifier: None }
+  }, on_pre_step: func(_ctx: ExtCtx, _msgs: list[Msg]) -> PreStepDecision ! {IO, Process, FS, AI, Env, Net, SharedMem, Clock, Stream} {
+    PassThrough
+  }, on_tool_policy: fmt_tool_policy, on_tool_handle: fmt_tool_handle, on_response_intercept: func(_ctx: ExtCtx, _resp: string) -> ResponseInterceptDecision ! {IO, Process, FS, AI, Env, Net, SharedMem, Clock, Stream} {
+    NoIntercept
+  }, on_solver_candidate: func(_ctx: ExtCtx, _candidate: string) -> FinalizeDecision ! {IO, Process, FS, AI, Env, Net, SharedMem, Clock, Stream} {
+    NoDecision
+  } }
+}
