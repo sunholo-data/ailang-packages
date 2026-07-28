@@ -61,7 +61,7 @@ func read_compaction_ai_config(profile_dir: string) -> CompactionAiConfig ! {Env
 }
 
 -- Register the AI compaction extension
-export func register_with_config(_cfg: a) -> ExtensionHooks ! {Env, FS} {
+export func register_with_config(_cfg: a) -> ExtensionHooks ! {AI, Clock, Env, FS, IO, Net, Process, SharedMem, Stream} {
   let profile_dir = getEnvOr("MOTOKO_PROFILE_DIR", ".");
   let compaction_cfg = read_compaction_ai_config(profile_dir);
   

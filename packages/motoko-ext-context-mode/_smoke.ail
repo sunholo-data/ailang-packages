@@ -24,7 +24,7 @@ import pkg/sunholo/motoko_ext_context_mode/register (register_with_config)
 import pkg/sunholo/motoko_ext_context_mode/context_mode (provided_tools, describe_provided_tools)
 import std/string (length as slen)
 
-export func main() -> () ! {Env, FS, IO} {
+export func main() -> () ! {Env, FS, IO, Process, SharedMem} {
   -- Assertion 1: register doesn't panic
   let _ = register_with_config(0);
   println("OK: register_with_config returned without panic");

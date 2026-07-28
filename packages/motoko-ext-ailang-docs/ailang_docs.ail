@@ -40,7 +40,7 @@ export func on_tool_handle(cfg: McpServerConfig, mappings: [McpToolMapping], ctx
   }
 }
 
-export func make_hooks(workdir: string, timeout_ms: int, max_output_chars: int) -> ExtensionHooks ! {FS} {
+export func make_hooks(workdir: string, timeout_ms: int, max_output_chars: int) -> ExtensionHooks ! {FS, Process} {
   let active = workdir_is_ailang_project(workdir);
   let cfg = mcp_config(timeout_ms, max_output_chars);
   let mappings = tool_mappings();

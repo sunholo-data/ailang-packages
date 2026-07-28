@@ -53,7 +53,7 @@ func no_budget_patch() -> BudgetPatch {
   { requested_total: None, requested_solver: None, requested_verifier: None }
 }
 
-export func register_with_config(_cfg: a) -> ExtensionHooks ! {Env, FS} {
+export func register_with_config(_cfg: a) -> ExtensionHooks ! {Env, FS, Process, SharedMem} {
   let cfg = default_ctx_config();
   let cached_prompt = "";  -- v0.2.3: load_agent_prompt(workdir) once we expose workdir on ExtCtx
   {
