@@ -287,13 +287,47 @@ pure func fmt_tool_policy(_ctx: ExtCtx, _call: ToolCallEnvelope) -> ToolPolicyDe
   NoOpinion
 }
 
+-- escapes_workspace: an ABSOLUTE path that is not under the workspace root.
+--
+-- WHY THIS GUARD EXISTS (0.4.1)
+--
+-- auto_write_with_fmt calls writeFile() directly. Under AILANG_FS_SANDBOX a
+-- write outside the sandbox is a FATAL runtime error — it does not fail the
+-- tool call, it kills the motoko supervisor, and the whole benchmark run is
+-- banked as api_error with zero turns. Observed 2026-07-30: the model wrote a
+-- scratch file to /tmp/test_syntax.ail to try a syntax idea, and the run died:
+--   Error: execution failed: path "/tmp/test_syntax.ail" escapes sandbox "..."
+--
+-- Writing a scratch file is NORMAL exploratory behaviour and must cost the
+-- model a tool error it can recover from, not the entire run. motoko's native
+-- WriteFile handler validates the path and returns exactly that — which is why
+-- this extension delegates everything it does not handle. Taking .ail writes
+-- without re-doing that validation silently removed the safety net for the one
+-- file type the agent writes most.
+--
+-- Relative paths are treated as INSIDE: they resolve against the workspace, and
+-- refusing them would disable the extension for the common relative-path write.
+pure func escapes_workspace(workdir: string, path: string) -> bool {
+  workdir != "" && startsWith(path, "/") && not startsWith(path, workdir)
+}
+
+pure func escapes_workspace_only_rejects_absolute_outsiders() -> bool
+  tests [
+    ((), true)
+  ] {
+  escapes_workspace("/ws", "/tmp/x.ail")
+    && not escapes_workspace("/ws", "/ws/benchmark/solution.ail")
+    && not escapes_workspace("/ws", "benchmark/solution.ail")
+    && not escapes_workspace("", "/tmp/x.ail")
+}
+
 -- Fire on WriteFile to a .ail path; Delegate everything else so motoko's native
 -- WriteFile/EditFile/ReadFile path-validation + hashing + emit_event chain still
 -- runs (see src/core/tool_runtime.ail).
 func fmt_tool_handle(ctx: ExtCtx, call: ToolCallEnvelope) -> ToolHandleDecision ! {IO, Process, FS, AI, Env, Net, SharedMem, Clock, Stream} {
   if call.tool == "WriteFile" then {
     let path = get_str(call, "path")
-    if is_ail_file(path) then auto_write_with_fmt(ctx, call) else Delegate
+    if is_ail_file(path) && not escapes_workspace(ctx.workdir, path) then auto_write_with_fmt(ctx, call) else Delegate
   } else Delegate
 }
 
