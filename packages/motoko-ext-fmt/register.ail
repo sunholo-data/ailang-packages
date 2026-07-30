@@ -30,7 +30,7 @@ import std/result (Ok, Err)
 
 import std/process (exec)
 
-import std/fs (writeFile, appendFile, mkdirAll, readFileResult)
+import std/fs (writeFile, writeFileResult, appendFile, mkdirAll, readFileResult)
 
 import std/bytes (toString)
 
@@ -251,7 +251,25 @@ func auto_write_with_fmt(ctx: ExtCtx, call: ToolCallEnvelope) -> ToolHandleDecis
   let path = get_str(call, "path")
   let content = get_str(call, "content")
   if path == "" then Handled(make_error_result(call, "WriteFile: missing 'path'")) else if content == "" then Handled(make_error_result(call, "WriteFile: missing 'content'")) else {
-    let _ = writeFile(path, content)
+    -- writeFileResult, NOT writeFile: a bare writeFile FAILURE IS FATAL. It does
+    -- not fail the tool call, it kills the motoko supervisor and the whole
+    -- benchmark banks as api_error with zero turns.
+    --
+    -- Reproduced 2026-07-30: the model called WriteFile with the RELATIVE path
+    -- "benchmark/solution.ail". The extension resolves it against the process
+    -- CWD (the motoko repo), not the workspace, so:
+    --   Error: execution failed: writeFile: open benchmark/solution.ail: no such file or directory
+    -- and the run died. motoko\'s native handler resolves relative paths against
+    -- the workdir correctly, which is exactly the validation this extension
+    -- bypassed by taking the call.
+    --
+    -- So: attempt the write, and on ANY failure DELEGATE. motoko then handles
+    -- the call properly and the model gets a recoverable tool result. This makes
+    -- the extension structurally incapable of killing a run — a formatting
+    -- convenience must never be able to destroy the measurement it is part of.
+    match writeFileResult(path, content) {
+      Err(_) => Delegate,
+      Ok(_) => {
     let fmtres = run_fmt_preview(path)
     let code = fmtres.code
     let diag = fmtres.diag
@@ -276,6 +294,8 @@ func auto_write_with_fmt(ctx: ExtCtx, call: ToolCallEnvelope) -> ToolHandleDecis
     let check_clause = if code == 3 then "" else concat_String("\n  ", run_check(ctx.workdir, path))
     let msg = concat_String(concat_String(head, fmt_clause), check_clause)
     Handled(make_result(call, msg, 0))
+      }
+    }
   }
 }
 
