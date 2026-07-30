@@ -24,11 +24,13 @@
 
 module sunholo/motoko_ext_fmt/register
 
-import std/string (length, endsWith)
+import std/string (length, endsWith, startsWith, substring, split)
+
+import std/result (Ok, Err)
 
 import std/process (exec)
 
-import std/fs (writeFile, appendFile, mkdirAll)
+import std/fs (writeFile, appendFile, mkdirAll, readFileResult)
 
 import std/bytes (toString)
 
@@ -77,10 +79,48 @@ func make_error_result(call: ToolCallEnvelope, msg: string) -> ToolResultEnvelop
 -- Run `ailang fmt --write <path>`; returns the exit code (0 = formatted).
 -- A fmt failure leaves the file as the model wrote it (atomic --write) and is
 -- logged as status:"error" — never wedges the turn.
-func run_fmt(path: string) -> int ! {Process} {
-  match exec("ailang", ["fmt", "--write", path]) {
-    Err(_) => 1,
-    Ok(out) => out.exitCode
+-- Returns (exit_code, diagnostic). The diagnostic is `ailang fmt`'s own stderr,
+-- passed through VERBATIM — never re-worded here, so it cannot drift from what
+-- the formatter actually said.
+--
+-- This used to return only out.exitCode and discard the rest. That is why a
+-- model saw "fmt exit 3" instead of the PAR-code, the line, and the worked
+-- example the formatter had already written for it. Measured cost of that
+-- discard: seven consecutive unparseable writes in one run, none reacted to,
+-- because an exit code is not something you can correct from.
+--
+-- 0.4.0: REPORT, DO NOT WRITE. `--write` is gone.
+--
+-- Rewriting the file the agent just wrote breaks the invariant every agent loop
+-- assumes — what I wrote is what is there. Measured 2026-07-30 over 23 paired
+-- runs (only difference: this extension): the ON arm re-inspected the file it
+-- had just written 33 times against the control's 1, rewrote it 4x as often
+-- (160 vs 72 WriteFiles), and spent significantly MORE output tokens — median
+-- +2,693, 18 of 23 pairs, Wilcoxon p=0.011, +62% aggregate.
+--
+-- The failure is not the message. This extension ALREADY sent a clear diff
+-- ("reformatted to canonical AILANG — these lines were not canonical"), and the
+-- model still went back to look, because the bytes on disk no longer matched
+-- what it held in context. In graph_bfs trial 2 the first attempt was nearly
+-- right (only a missing `import std/io (println)`); after the silent rewrite the
+-- model spent 30 turns permuting ALREADY-VALID pattern syntax into invented
+-- forms — `::((n,nbrs),rest)`, `list[...]`, `head.0` — because form is what
+-- visibly changed. The control solved the same benchmark in 4 turns.
+--
+-- So: keep the teaching signal, drop the mutation. `ailang fmt <path>` with no
+-- --write prints the canonical form to stdout and leaves the file exactly as
+-- the model wrote it. The model still learns what canonical AILANG looks like;
+-- its own file stops moving underneath it. This is why DP7's `ailang check`
+-- works and this did not — check TELLS the model something without touching
+-- its file.
+--
+-- Returns (exit_code, canonical_source, diagnostic). The diagnostic is `ailang
+-- fmt`'s own stderr, passed through VERBATIM — never re-worded here, so it
+-- cannot drift from what the formatter actually said.
+func run_fmt_preview(path: string) -> { code: int, canonical: string, diag: string } ! {Process} {
+  match exec("ailang", ["fmt", path]) {
+    Err(_) => { code: 1, canonical: "", diag: "could not run `ailang fmt`" },
+    Ok(out) => { code: out.exitCode, canonical: toString(out.stdout), diag: toString(out.stderr) }
   }
 }
 
@@ -88,13 +128,122 @@ func run_fmt(path: string) -> int ! {Process} {
 -- Matches the format_ail.sh sink so eval_harness.ReadFmtHookSink banks it as a
 -- FmtHookEvent{status, file}. mkdirAll ensures the sink dir exists (appendFile
 -- does not create parents).
+-- EXIT 3 IS OMITTED, per sink contract clause 5 — the same rule
+-- scripts/hooks/format_ail.sh follows. `ailang fmt` returns 3 when the file is
+-- not parseable, which is the NORMAL mid-edit state: the agent has written half
+-- a function, or drifted dialect it is about to fix. Recording that as "error"
+-- (as this did) both slanders a correctly-behaving formatter and makes this
+-- extension's events non-comparable with the Claude-hook arm's, so a
+-- cross-harness fmt comparison would be apples to oranges.
+--
+-- Observed 2026-07-29 on run_length_encode: 8 of 27 invocations logged "error",
+-- which read as a 30% formatter failure rate. Verified against `ailang fmt`
+-- directly — a truncated file and a drifted-dialect file BOTH exit 3, so those
+-- events were benign and should never have been banked.
 func emit_fmt_event(workdir: string, path: string, exit_code: int) -> () ! {FS} {
-  let dir = concat_String(show(workdir), "/.claude")
-  let _ = mkdirAll(dir)
-  let status = if exit_code == 0 then "formatted" else "error"
-  let line = encode(jo([kv("status", js(status)), kv("file", js(path))]))
-  let _ = appendFile(concat_String(show(dir), "/fmt_hook_events.jsonl"), concat_String(show(line), "\n"));
-  ()
+  if exit_code == 3 then () else {
+    let dir = concat_String(show(workdir), "/.claude")
+    let _ = mkdirAll(dir)
+    let status = if exit_code == 0 then "formatted" else "error"
+    let line = encode(jo([kv("status", js(status)), kv("file", js(path))]))
+    let _ = appendFile(concat_String(show(dir), "/fmt_hook_events.jsonl"), concat_String(show(line), "\n"));
+    ()
+  }
+}
+
+-- line_in reports whether `needle` appears in `hay` (exact line match).
+func line_in(needle: string, hay: list[string]) -> bool {
+  match hay {
+    [] => false,
+    ::(h, rest) => if h == needle then true else line_in(needle, rest)
+  }
+}
+
+-- diff_lines renders the CHANGES fmt made, not the whole file.
+--
+-- Returning the full canonical source costs ~1.2K chars on EVERY successful
+-- format — on one observed run, 14 corrections would have spent ~5K tokens
+-- making the model re-read code it had mostly written correctly. The delta is
+-- what teaches; the unchanged 95% is noise.
+--
+-- ADDITIONS ARE EMITTED FIRST, with their own budget.
+--
+-- The first version walked `before` and spent the whole budget on "-" lines
+-- before additions ran at all. On a reformat that touched many lines the model
+-- received eight lines of its own REJECTED code and not one line of the
+-- correction — strictly worse than saying nothing, because the "+" side IS the
+-- lesson. Separate budgets mean removals can never starve it.
+--
+-- Set-difference on lines rather than a positional diff: fmt inserts and
+-- removes lines (blank lines between imports, collapsing wrapped calls), which
+-- desyncs any index-based walk and invents phantom changes.
+func diff_lines(before: list[string], after: list[string], budget: int) -> string {
+  let adds = added_lines(after, before, budget)
+  let dels = removed_lines(before, after, 4)
+  if dels == "" then adds else concat_String(adds, concat_String("  (replacing:)\n", dels))
+}
+
+-- "+" lines: what canonical AILANG looks like. The correction.
+func added_lines(after: list[string], before: list[string], budget: int) -> string {
+  if budget <= 0 then "  … (more)\n" else match after {
+    [] => "",
+    ::(a, arest) => if line_in(a, before) then added_lines(arest, before, budget) else concat_String(concat_String("+", a), concat_String("\n", added_lines(arest, before, budget - 1)))
+  }
+}
+
+-- "-" lines: what was replaced. Useful context, but capped low — the model
+-- already knows what it wrote.
+func removed_lines(before: list[string], after: list[string], budget: int) -> string {
+  if budget <= 0 then "  … (more)\n" else match before {
+    [] => "",
+    ::(b, brest) => if line_in(b, after) then removed_lines(brest, after, budget) else concat_String(concat_String("-", b), concat_String("\n", removed_lines(brest, after, budget - 1)))
+  }
+}
+
+-- display_path strips the workspace prefix so the model reads
+-- "benchmark/solution.ail", not a 120-char absolute temp path repeated three
+-- times per message — which on the first live run was most of the payload.
+func display_path(workdir: string, path: string) -> string {
+  if workdir != "" && startsWith(path, workdir) then substring(path, length(workdir) + 1, length(path)) else path
+}
+
+-- run_check mirrors motoko's own per-edit DP7 (ail_typecheck_after_edit in
+-- src/core/tool_runtime.ail) VERBATIM — same bash invocation, same phrasing,
+-- same 1200-char truncation.
+--
+-- WHY THIS EXTENSION MUST DO IT ITSELF
+--
+-- ToolHandleDecision is binary: Handled(result) | Delegate. There is no
+-- "augment". By returning Handled for WriteFile this extension takes the tool
+-- call completely, so motoko's native write path — the one that runs the
+-- per-edit typecheck — never executes. Measured 2026-07-29: a baseline
+-- (ollama) WriteFile result carries a `typecheck` field with
+-- "ailang check: FAILED - fix these errors before continuing"; the ollama_fmt
+-- arm's carried nothing. The fmt arm had been trading DP7 away for formatting
+-- feedback, so the A/B was measuring "fmt INSTEAD OF typecheck" rather than
+-- "fmt in addition to it".
+--
+-- Reproducing it here keeps all three layers reaching the model — fmt fixes
+-- what it can, check verifies the rest — and keeps the ON arm a superset of
+-- the control rather than a different treatment.
+func run_check(workdir: string, path: string) -> string ! {Process} {
+  if not endsWith(path, ".ail") then "" else match exec("bash", ["-c", "cd \"$1\" && ailang check \"$2\" 2>&1", "_chk", workdir, path]) {
+    Err(_) => "",
+    Ok(out) => if out.exitCode == 0 then "ailang check: OK - file type-checks." else {
+      let raw = toString(out.stdout)
+      let snippet = if length(raw) > 1200 then substring(raw, 0, 1200) else raw
+      concat_String("ailang check: FAILED - fix these errors before continuing:\n", snippet)
+    }
+  }
+}
+
+-- Read a file, returning "" if unreadable. Used to see what fmt made of the
+-- model's write; "" degrades to the terse message rather than a wrong claim.
+func read_or_empty(path: string) -> string ! {FS} {
+  match readFileResult(path) {
+    Ok(c) => c,
+    Err(_) => ""
+  }
 }
 
 -- Write the file, format it, log the treatment, return the combined result.
@@ -103,9 +252,29 @@ func auto_write_with_fmt(ctx: ExtCtx, call: ToolCallEnvelope) -> ToolHandleDecis
   let content = get_str(call, "content")
   if path == "" then Handled(make_error_result(call, "WriteFile: missing 'path'")) else if content == "" then Handled(make_error_result(call, "WriteFile: missing 'content'")) else {
     let _ = writeFile(path, content)
-    let code = run_fmt(path)
+    let fmtres = run_fmt_preview(path)
+    let code = fmtres.code
+    let diag = fmtres.diag
+    let canonical = fmtres.canonical
     let _ = emit_fmt_event(ctx.workdir, path, code)
-    let msg = if code == 0 then concat_String(concat_String(concat_String(concat_String("Wrote ", show(show(length(content)))), " bytes to "), show(path)), "; formatted (ailang fmt --write)") else concat_String(concat_String(concat_String(concat_String(concat_String(concat_String("Wrote ", show(show(length(content)))), " bytes to "), show(path)), "; fmt exit "), show(show(code))), " — left as written")
+    -- Three cases, three behaviours. Tokens are spent ONLY when there is
+    -- something to teach:
+    --   exit 3      -> the formatter's own diagnostic, verbatim. It already
+    --                  carries the PAR code, the line, and a worked example of
+    --                  the rule that was broken.
+    --   changed     -> the canonical form, so the model's next turn edits from
+    --                  correct code instead of re-deriving its own drift.
+    --   canonical   -> almost nothing. Nothing was wrong; say so and stop.
+    let disp = display_path(ctx.workdir, path)
+    let head = concat_String(concat_String(concat_String("Wrote ", show(show(length(content)))), " bytes to "), show(disp))
+    -- fmt clause: what the formatter could or could not do.
+    let fmt_clause = if code == 3 then concat_String("\n  fmt: NOT formatted — the file does not parse yet:\n", diag) else if code != 0 then concat_String(concat_String("\n  fmt: failed (exit ", show(show(code))), concat_String(") — left as written:\n", diag)) else if canonical != content && canonical != "" then concat_String("\n  fmt: your file is UNCHANGED on disk. Canonical AILANG would differ here:\n", diff_lines(split(content, "\n"), split(canonical, "\n"), 12)) else "\n  fmt: canonical"
+    -- check clause: DP7. Skipped on exit 3 ONLY because `ailang check` would
+    -- report the same parse error the fmt clause just printed — one fault,
+    -- one message. Every other path runs it, so type and effect errors (which
+    -- fmt structurally cannot see) always reach the model.
+    let check_clause = if code == 3 then "" else concat_String("\n  ", run_check(ctx.workdir, path))
+    let msg = concat_String(concat_String(head, fmt_clause), check_clause)
     Handled(make_result(call, msg, 0))
   }
 }
