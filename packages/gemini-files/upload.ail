@@ -38,7 +38,7 @@ export type UploadedFile = {
 -- mimeType: e.g. "application/pdf", "image/png"
 -- displayName: human-readable name for the file
 export func uploadFile(base64Data: string, mimeType: string, displayName: string)
-  -> Result[UploadedFile, string] ! {Net, FS, Env} {
+  -> Result[UploadedFile, string] ! {Clock, Net, FS, Env} {
   let apiKey = getEnvOr("GOOGLE_API_KEY", "");
   let gcsBucket = getEnvOr("GCS_TEMP_BUCKET", "");
 
@@ -63,8 +63,9 @@ export func deleteFile(uploaded: UploadedFile) -> Result[(), string] ! {Net, FS,
 
 -- === Backend A: GCS Upload ===
 
+-- Clock: the unique GCS object name is timestamped via now().
 func uploadToGcs(base64Data: string, mimeType: string, displayName: string, bucket: string)
-  -> Result[UploadedFile, string] ! {Net, FS, Env} {
+  -> Result[UploadedFile, string] ! {Clock, Net, FS, Env} {
   -- Get OAuth2 token via ADC
   match getAccessToken() {
     Err(e) => Err("gemini_files: GCS auth failed: ${e}"),
