@@ -37,7 +37,7 @@ export type ResumableUpload = {
 
 -- Download a GCS object to /tmp/ and return the local file path.
 -- The gs:// URI must be valid (use validateGcsUri first for untrusted input).
-export func downloadToTemp(gsUri: string) -> Result[string, string] ! {Net, FS, Env} {
+export func downloadToTemp(gsUri: string) -> Result[string, string] ! {Net, FS, Env, Clock} {
   match parseGcsUri(gsUri) {
     Err(e) => Err(e),
     Ok(ref) => {
