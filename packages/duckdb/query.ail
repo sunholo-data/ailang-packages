@@ -55,6 +55,7 @@ export func scalar(db: DB, sql: string) -> Result[Option[Json], string] ! {Proce
 -- duckdb -json outputs a JSON array of objects: [{"col": val, ...}, ...]
 -- Empty result set outputs "" or "[]".
 -- Each Row is a Json (JObject) — callers use std/json.get / asString / asNumber.
+@allow_empty_ok("a query matching zero rows is a successful query: duckdb -json prints \"\" or [] for an empty result set, and callers must see Ok with no rows, not Err")
 func parseResult(raw: string) -> Result[QueryResult, string] =
   if raw == "" || raw == "[]"
   then Ok({ columns: [], rows: [], rowCount: 0 })
