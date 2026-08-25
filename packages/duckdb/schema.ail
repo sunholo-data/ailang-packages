@@ -1,5 +1,7 @@
 module sunholo/duckdb/schema
 
+import std/string (join)
+import std/list   (map)
 import std/json   (asNumber)
 import std/option (Some, None)
 import std/result (Result, Ok, Err)
@@ -26,3 +28,47 @@ export func tableExists(db: DB, name: string) -> Result[bool, string] ! {Process
         Some(n) => Ok(n > 0.0)
       }
   }
+
+-- Execute a script FROM A FILE (via the CLI's .read). execScript passes the
+-- SQL text through a single argv slot, which puts ARG_MAX (~1 MB on macOS,
+-- argv+env combined) between you and any large generated script — a batched
+-- INSERT list or a long IN-list hits it in practice. Write the script with
+-- std/fs and hand the path over instead; only the path rides in argv.
+export func execScriptFile(db: DB, sqlPath: string) -> Result[(), string] ! {Process} =
+  execScript(db, ".read ${sqlPath}")
+
+-- The bounded-memory contract, as a prelude for scripts that read more than
+-- they can hold: an explicit ceiling plus somewhere to spill means a too-big
+-- query degrades to disk speed instead of taking the machine into swap.
+-- Prepend to any script that ingests bulk data.
+export pure func limitsPrelude(memLimit: string, tempDir: string) -> string =
+  "SET memory_limit = '${memLimit}';\nSET temp_directory = '${tempDir}';"
+
+-- A deterministic multi-format timestamp parse.
+--
+-- DO NOT use try_strptime with a format LIST for this: as of DuckDB v1.5.2
+-- the list evaluation is stateful across rows — a row that matches a later
+-- format makes the NEXT row try that format first, so a string parseable by
+-- two formats (one of them garbage — %z happily consumes ':18' as an offset)
+-- parses differently depending on what the previous row contained.
+-- Reproducer: a two-row VALUES with '01 Jan 20 10:00 +0100' then
+-- '27 Nov 19 04:28:18' mis-parses the second row under '%d %b %y %H:%M %z'.
+-- A coalesce chain of single-format calls tries the formats in the order
+-- given, every row, no shared state.
+export pure func tryStrptimeChain(expr: string, formats: [string]) -> string =
+  "coalesce(${join(", ", map(\f. "try_strptime(${expr}, '${f}')", formats))})"
+
+-- ── Tests (colocated: the test runner cannot resolve builtins across module
+-- imports — reported upstream — so the module carries its own) ───────────────
+
+test "limitsPrelude renders both settings" {
+  limitsPrelude("4GB", "/tmp/spill") == "SET memory_limit = '4GB';\nSET temp_directory = '/tmp/spill';"
+}
+
+test "tryStrptimeChain chains formats in order" {
+  tryStrptimeChain("d", ["%Y", "%y"]) == "coalesce(try_strptime(d, '%Y'), try_strptime(d, '%y'))"
+}
+
+test "tryStrptimeChain with one format is a single call" {
+  tryStrptimeChain("d", ["%Y"]) == "coalesce(try_strptime(d, '%Y'))"
+}
