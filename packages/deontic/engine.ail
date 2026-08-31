@@ -6,25 +6,54 @@
 -- Semantics (pinned; see README for the full rule set):
 -- - Delivery penalty: perDay per day late, capped, accruing to delivery day,
 --   or to (termination day - 1) for obligations cancelled by termination.
--- - Payment due = delivery day + payWithin; interest = ratePct% of price per
---   FULL ratePeriod days late, floor division, simple.
+-- - Payment due = delivery day + payWithin. Interest is per-diem at
+--   ratePerAnnumBp basis points where that is set, otherwise ratePct% of
+--   price per FULL ratePeriod days late, floor division, simple.
 -- - Notice opens a cure window ending notice day + cureDays INCLUSIVE.
 --   Payment breaches cure by paying principal in the window (interest still
 --   accrues to the payment day); delivery breaches cure by delivering.
 -- - Waiver: the breach cannot ground termination and its penalty/interest is
 --   EXCLUDED from the owed sums. Report lines always show ACCRUED values.
+--   Waiver forgives the CONSEQUENCES of a breach, never the price itself —
+--   an unpaid principal stays owed by a party whose lateness was waived.
 -- - Termination is valid only against a noticed, uncured, unwaived breach
 --   whose window has expired (day > notice day + cureDays); grounds = first
 --   qualifying notice in arrival order. Invalid attempts change nothing.
---   On termination, undelivered obligations cancel (no price owed; penalty
---   frozen at day-1); delivered-but-unpaid obligations cancel for payment.
+--
+-- Termination and earned money (CHANGED in 0.2.0, and this is the important
+-- one). On termination, UNDELIVERED obligations cancel: no price is owed and
+-- the penalty freezes at day-1. Obligations that were DELIVERED and not paid
+-- do NOT cancel — the price stays owed and interest keeps running to the
+-- valuation date. Until 0.2.0 they cancelled for payment, which meant
+-- terminating a contract for non-payment silently extinguished the very debt
+-- being terminated over and reported the contract as settled. Delivered work
+-- is earned; termination stops the future, not the past.
+--
+-- Outstanding money is now REPORTED (0.2.0). A delivered, unpaid, unterminated
+-- obligation previously produced no payment line at all and contributed
+-- nothing to the owed sums, so an overdue invoice was invisible in the very
+-- report meant to settle it. Principal now flows into client_owes whenever
+-- delivery has happened and payment has not.
+--
+-- Valuation (0.2.0). Interest on money still outstanding needs an as-of date,
+-- and a pure fold has no clock — so the date is an event, AsOf(day). Without
+-- one the principal is still reported and owed; interest is reported as
+-- uncomputed rather than as zero.
+--
+-- Suspension (0.2.0). Suspend/Resume model the remedy most services contracts
+-- actually grant: stop performing, keep the contract alive, restart on
+-- payment. Suspension passes the same validity test as termination and holds
+-- undelivered deadlines for its duration.
 
 module sunholo/deontic/engine
 
 import std/list (concat)
 import std/string (substring, length, endsWith)
-import ./types (Event, Deliver, Pay, AmendPrice, ForceMajeure, Notice, Waive, Terminate, Term, NoTerm, TermAt, Policy, State, aGet, aSet, hasStr)
-import ./settle (penaltyFor, interestFor, daysLateAt, netOf)
+import ./types (Event, Deliver, Pay, AmendPrice, ForceMajeure, Notice, Waive, Terminate,
+                Suspend, Resume, AsOf, AttributedDelay,
+                Term, NoTerm, TermAt, SuspWindow, SuspW, Attribution, Attr,
+                Policy, State, aGet, aSet, hasStr)
+import ./settle (penaltyFor, interestFor, interestPerDiem, daysLateAt, netOf)
 
 -- ---------------------------------------------------------------- events --
 
@@ -50,6 +79,40 @@ func extendFm(dls: [(string, int)], delivered: [(string, int)], d1: int, d2: int
   }
 }
 
+-- Resume: every UNDELIVERED deadline moves by the length of the suspension,
+-- in-window or not. A suspension stops the clock on work not yet done.
+func extendUndelivered(dls: [(string, int)], delivered: [(string, int)], span: int) -> [(string, int)] {
+  match dls {
+    [] => [],
+    p :: rest => match p {
+      (id, dl) => {
+        let ndl = if aGet(delivered, id) < 0 then dl + span else dl;
+        (id, ndl) :: extendUndelivered(rest, delivered, span)
+      }
+    }
+  }
+}
+
+-- The day an open suspension began, or -1 if performance is running.
+export pure func openSuspFrom(ws: [SuspWindow]) -> int {
+  match ws {
+    [] => -1,
+    w :: rest => match w { SuspW(r) => if r.to < 0 then r.from else openSuspFrom(rest) }
+  }
+}
+
+func closeSusps(ws: [SuspWindow], day: int) -> [SuspWindow] {
+  match ws {
+    [] => [],
+    w :: rest => match w {
+      SuspW(r) => {
+        let nw = if r.to < 0 then SuspW({ from: r.from, to: day, by: r.by, grounds: r.grounds }) else w;
+        nw :: closeSusps(rest, day)
+      }
+    }
+  }
+}
+
 export pure func applyEvent(pol: Policy, s: State, ev: Event) -> State {
   match ev {
     Deliver(day, id) => ({ s | delivered: aSet(s.delivered, id, day) }),
@@ -67,7 +130,39 @@ export pure func applyEvent(pol: Policy, s: State, ev: Event) -> State {
         let nt = TermAt(d, by, g);
         { s | term: nt }
       }
-    })
+    }),
+    -- Suspension passes the same validity test as termination: a noticed,
+    -- uncured, unwaived breach whose cure window has expired. A second
+    -- Suspend while one is already running changes nothing.
+    Suspend(day, by) => (match findGrounds(pol, s, s.notices, day) {
+      NoTerm => s,
+      TermAt(_, _, g) => {
+        let already = openSuspFrom(s.susps);
+        if already >= 0 then s
+        else {
+          let w = SuspW({ from: day, to: -1, by: by, grounds: g });
+          let ns = concat(s.susps, [w]);
+          { s | susps: ns }
+        }
+      }
+    }),
+    Resume(day) => {
+      let from = openSuspFrom(s.susps);
+      if from < 0 then s
+      else {
+        let span = day - from;
+        let nd = extendUndelivered(s.dls, s.delivered, span);
+        let nw = closeSusps(s.susps, day);
+        { s | dls: nd, susps: nw }
+      }
+    },
+    AsOf(day) => ({ s | asOf: day }),
+    AttributedDelay(_, d1, d2, cause) => {
+      let nd = extendFm(s.dls, s.delivered, d1, d2);
+      let a = Attr({ from: d1, to: d2, span: d2 - d1 + 1, cause: cause });
+      let na = concat(s.attributions, [a]);
+      { s | dls: nd, attributions: na }
+    }
   }
 }
 
@@ -101,10 +196,25 @@ func obligationOf(bid: string) -> string {
   substring(bid, 0, length(bid) - suffixLen)
 }
 
+-- Interest under whichever model the policy selects. ratePerAnnumBp wins
+-- where it is set; a policy with neither model configured charges nothing
+-- rather than dividing by zero.
+export pure func interestDue(pol: Policy, price: int, daysLate: int) -> int {
+  if pol.ratePerAnnumBp > 0 then interestPerDiem(price, pol.ratePerAnnumBp, daysLate)
+  else if pol.ratePeriod > 0 then interestFor(price, pol.ratePct, daysLate, pol.ratePeriod)
+  else 0
+}
+
 -- ---------------------------------------------------------------- report --
 
 func termDay(t: Term) -> int {
   match t { NoTerm => -1, TermAt(d, _, _) => d }
+}
+
+-- The date outstanding money is valued at: an explicit AsOf if one was
+-- supplied, otherwise the termination day, otherwise unvalued.
+func valuationDay(s: State) -> int {
+  if s.asOf >= 0 then s.asOf else termDay(s.term)
 }
 
 func breachLine(pol: Policy, s: State, id: string, what: string) -> string {
@@ -126,11 +236,17 @@ func keepNonEmpty(xs: [string]) -> [string] {
 }
 
 -- Lines + (vendor accrual owed, client accrual owed) for one obligation.
+--
+-- client_owes carries interest AND outstanding principal; vendor_owes carries
+-- delivery penalties. Waiver removes the consequence of a breach from the
+-- owed sums, never the price.
 func obligationReport(pol: Policy, s: State, id: string) -> ([string], (int, int)) {
   let dl = aGet(s.dls, id);
   let price = aGet(s.prs, id);
   let dDay = aGet(s.delivered, id);
   let tday = termDay(s.term);
+  let vday = valuationDay(s);
+  let breaches = keepNonEmpty([breachLine(pol, s, id, "delivery"), breachLine(pol, s, id, "payment")]);
   if dDay >= 0 then {
     let late = daysLateAt(dDay, dl);
     let pen = penaltyFor(late, pol.penPerDay, pol.penCap);
@@ -140,13 +256,24 @@ func obligationReport(pol: Policy, s: State, id: string) -> ([string], (int, int
     let pDay = aGet(s.paid, id);
     if pDay >= 0 then {
       let lateP = daysLateAt(pDay, due);
-      let interest = interestFor(price, pol.ratePct, lateP, pol.ratePeriod);
+      let interest = interestDue(pol, price, lateP);
       let intOwed = if hasStr(s.waived, "${id}-payment") then 0 else interest;
       let pLine = "${id} payment: PAID day=${show(pDay)} late=${show(lateP)} interest=${show(interest)}";
-      (concat([dLine, pLine], keepNonEmpty([breachLine(pol, s, id, "delivery"), breachLine(pol, s, id, "payment")])), (penOwed, intOwed))
+      (concat([dLine, pLine], breaches), (penOwed, intOwed))
     } else {
-      let pLine = if tday >= 0 then ["${id} payment: CANCELLED"] else [];
-      (concat(concat([dLine], pLine), keepNonEmpty([breachLine(pol, s, id, "delivery"), breachLine(pol, s, id, "payment")])), (penOwed, 0))
+      -- Delivered and unpaid. The price is earned and stays owed whether or
+      -- not the contract was terminated; only the future cancels.
+      let status = if tday >= 0 then "OUTSTANDING (survives termination)" else "OUTSTANDING";
+      if vday >= 0 then {
+        let lateP = daysLateAt(vday, due);
+        let interest = interestDue(pol, price, lateP);
+        let intOwed = if hasStr(s.waived, "${id}-payment") then 0 else interest;
+        let pLine = "${id} payment: ${status} as_of=${show(vday)} due=${show(due)} late=${show(lateP)} principal=${show(price)} interest=${show(interest)}";
+        (concat([dLine, pLine], breaches), (penOwed, price + intOwed))
+      } else {
+        let pLine = "${id} payment: ${status} due=${show(due)} principal=${show(price)} interest=not computed (no AsOf)";
+        (concat([dLine, pLine], breaches), (penOwed, price))
+      }
     }
   } else {
     if tday >= 0 then {
@@ -154,9 +281,21 @@ func obligationReport(pol: Policy, s: State, id: string) -> ([string], (int, int
       let pen = penaltyFor(lateDays, pol.penPerDay, pol.penCap);
       let penOwed = if hasStr(s.waived, "${id}-delivery") then 0 else pen;
       let dLine = "${id} delivery: CANCELLED late_days=${show(lateDays)} penalty=${show(pen)}";
-      (concat([dLine, "${id} payment: CANCELLED"], keepNonEmpty([breachLine(pol, s, id, "delivery"), breachLine(pol, s, id, "payment")])), (penOwed, 0))
+      (concat([dLine, "${id} payment: CANCELLED"], breaches), (penOwed, 0))
     } else {
-      ([], (0, 0))
+      -- Undelivered and still running. Silent unless somebody has valued the
+      -- contract, because "not yet delivered" is not news; overdue is.
+      let sFrom = openSuspFrom(s.susps);
+      if sFrom >= 0 then
+        (concat(["${id} delivery: SUSPENDED since=${show(sFrom)} deadline_held=${show(dl)}"], breaches), (0, 0))
+      else if vday >= 0 && vday > dl then {
+        let lateDays = daysLateAt(vday, dl);
+        let pen = penaltyFor(lateDays, pol.penPerDay, pol.penCap);
+        let penOwed = if hasStr(s.waived, "${id}-delivery") then 0 else pen;
+        let dLine = "${id} delivery: OVERDUE as_of=${show(vday)} late=${show(lateDays)} penalty=${show(pen)}";
+        (concat([dLine], breaches), (penOwed, 0))
+      }
+      else (breaches, (0, 0))
     }
   }
 }
@@ -183,6 +322,29 @@ func obligationsReport(pol: Policy, s: State, ids: [string]) -> ([string], (int,
   }
 }
 
+-- Attributed delays are reported: a deadline that moved should say why, and
+-- whose delay it was. Plain ForceMajeure stays unattributed and silent.
+func attributionLines(xs: [Attribution]) -> [string] {
+  match xs {
+    [] => [],
+    a :: rest => match a {
+      Attr(r) => "delay: [${show(r.from)}..${show(r.to)}] +${show(r.span)}d to undelivered deadlines — cause: ${r.cause}" :: attributionLines(rest)
+    }
+  }
+}
+
+func suspensionLines(xs: [SuspWindow]) -> [string] {
+  match xs {
+    [] => [],
+    w :: rest => match w {
+      SuspW(r) => {
+        let toPart = if r.to < 0 then "open" else show(r.to);
+        "suspension: from=${show(r.from)} to=${toPart} by=${r.by} grounds=${r.grounds}" :: suspensionLines(rest)
+      }
+    }
+  }
+}
+
 func termLines(t: Term) -> [string] {
   match t {
     NoTerm => [],
@@ -199,12 +361,16 @@ func netLines(vendorOwes: int, clientOwes: int) -> [string] {
   ["vendor_owes=${show(vendorOwes)}", "client_owes=${show(clientOwes)}", netLine]
 }
 
--- The full report: effective terms, per-obligation blocks, termination,
--- owed sums, and the net settlement line.
+-- The full report: effective terms, attributed delays, per-obligation blocks,
+-- suspensions, termination, owed sums, and the net settlement line.
 export pure func report(pol: Policy, s: State, ids: [string]) -> [string] {
   match obligationsReport(pol, s, ids) {
     (lines, owed) => match owed {
-      (v, c) => concat(concat(concat(effectiveLines(s, ids), lines), termLines(s.term)), netLines(v, c))
+      (v, c) => {
+        let head = concat(effectiveLines(s, ids), attributionLines(s.attributions));
+        let mid = concat(lines, suspensionLines(s.susps));
+        concat(concat(concat(head, mid), termLines(s.term)), netLines(v, c))
+      }
     }
   }
 }

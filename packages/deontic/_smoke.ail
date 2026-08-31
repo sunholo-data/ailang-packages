@@ -1,16 +1,23 @@
 -- Boot probe for the publish/verify-extensions gate. Prints "OK: ..." iff
--- the generalized engine still reproduces the cross-validated wave-5
--- ground truth (same assertion as wave5_demo.ail, machine-checkable).
+-- BOTH hold:
+--   1. the generalized engine still reproduces the cross-validated wave-5
+--      ground truth (same assertion as wave5_demo.ail, machine-checkable);
+--   2. terminating for non-payment does NOT extinguish the delivered-but-
+--      unpaid debt. That was the 0.1.x defect: the report said "net: settled"
+--      while the money the termination was grounded on vanished. It is cheap
+--      to reintroduce by touching the termination cascade, so the gate checks
+--      it every publish.
 module sunholo/deontic/_smoke
 
 import std/io (println)
 import std/list (length)
 import std/string (join)
-import ./types (Event, Deliver, Pay, AmendPrice, ForceMajeure, Notice, Waive, Terminate, initState)
+import ./types (Event, Deliver, Pay, AmendPrice, ForceMajeure, Notice, Waive, Terminate,
+                AsOf, initState)
 import ./engine (runEvents, report)
 
 export func main() -> () ! {IO} {
-  let pol = { penPerDay: 200, penCap: 4000, payWithin: 10, cureDays: 15, ratePct: 1, ratePeriod: 10 };
+  let pol = { penPerDay: 200, penCap: 4000, payWithin: 10, cureDays: 15, ratePct: 1, ratePeriod: 10, ratePerAnnumBp: 0 };
   let evs = [
     Deliver(8, "M1"), AmendPrice(30, "M2", 22000), ForceMajeure(35, 38, 44),
     Pay(41, "M1"), Waive(45, "M1-payment"), Deliver(50, "M2"),
@@ -20,9 +27,18 @@ export func main() -> () ! {IO} {
   let st = runEvents(pol, initState([("M1", 10, 10000), ("M2", 40, 20000), ("M3", 70, 15000)]), evs);
   let lines = report(pol, st, ["M1", "M2", "M3"]);
   let tail3 = join("|", dropTo3(lines));
-  if length(lines) == 16 && tail3 == "vendor_owes=4600|client_owes=220|net: Vendor pays Client 4380"
-  then println("OK: deontic wave5 ground truth (16 lines, net 4380)")
-  else println("FAIL: deontic ground truth drifted: ${tail3}")
+  -- 2. earned money survives termination
+  let debtPol = { penPerDay: 0, penCap: 0, payWithin: 10, cureDays: 15,
+                  ratePct: 0, ratePeriod: 0, ratePerAnnumBp: 1000 };
+  let debtSt = runEvents(debtPol, initState([("M1", 0, 100000)]),
+    [Deliver(0, "M1"), Notice(20, "M1-payment"), Terminate(40, "Vendor"), AsOf(40)]);
+  let debtTail = join("|", dropTo3(report(debtPol, debtSt, ["M1"])));
+  let wave5Ok = length(lines) == 16 && tail3 == "vendor_owes=4600|client_owes=220|net: Vendor pays Client 4380";
+  let debtOk = debtTail == "vendor_owes=0|client_owes=100821|net: Client pays Vendor 100821";
+  if wave5Ok && debtOk
+  then println("OK: deontic wave5 ground truth (16 lines, net 4380) + earned money survives termination")
+  else if wave5Ok == false then println("FAIL: deontic ground truth drifted: ${tail3}")
+  else println("FAIL: termination extinguished earned money: ${debtTail}")
 }
 
 func dropTo3(xs: [string]) -> [string] {

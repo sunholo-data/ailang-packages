@@ -8,11 +8,13 @@
 module sunholo/deontic/engine_test
 
 import std/string (join)
-import ./types (Event, Deliver, Pay, AmendPrice, ForceMajeure, Notice, Waive, Terminate, Policy, State, initState, aGet, Term, NoTerm, TermAt)
-import ./engine (runEvents, report)
+import ./types (Event, Deliver, Pay, AmendPrice, ForceMajeure, Notice, Waive, Terminate,
+                Suspend, Resume, AsOf, AttributedDelay,
+                Policy, State, initState, aGet, Term, NoTerm, TermAt)
+import ./engine (runEvents, report, openSuspFrom)
 
 pure func wave5Policy() -> Policy {
-  { penPerDay: 200, penCap: 4000, payWithin: 10, cureDays: 15, ratePct: 1, ratePeriod: 10 }
+  { penPerDay: 200, penCap: 4000, payWithin: 10, cureDays: 15, ratePct: 1, ratePeriod: 10, ratePerAnnumBp: 0 }
 }
 
 pure func wave5Events() -> [Event] {
@@ -108,4 +110,95 @@ pure func containsLine(lines: [string], want: string) -> bool {
     [] => false,
     h :: t => if h == want then true else containsLine(t, want)
   }
+}
+
+-- ---------------------------------------------------------------- v0.2.0 --
+--
+-- The regression these exist for: until 0.2.0, terminating a contract for
+-- non-payment cancelled the delivered-but-unpaid obligation and the report
+-- said "net: settled". The debt being terminated over disappeared.
+
+pure func p0() -> Policy {
+  { penPerDay: 0, penCap: 0, payWithin: 10, cureDays: 15,
+    ratePct: 0, ratePeriod: 0, ratePerAnnumBp: 1000 }
+}
+
+-- M1 delivered day 0, due day 10, never paid; noticed day 20, terminated
+-- day 40, valued day 40.
+pure func unpaidTerminated() -> State {
+  runEvents(p0(), initState([("M1", 0, 100000)]),
+    [Deliver(0, "M1"), Notice(20, "M1-payment"), Terminate(40, "M1-payment-party"), AsOf(40)])
+}
+
+test "delivered-but-unpaid principal SURVIVES termination" {
+  containsLine(report(p0(), unpaidTerminated(), ["M1"]),
+    "M1 payment: OUTSTANDING (survives termination) as_of=40 due=10 late=30 principal=100000 interest=821")
+}
+
+test "terminating for non-payment does not report the contract as settled" {
+  containsLine(report(p0(), unpaidTerminated(), ["M1"]), "client_owes=100821") &&
+    containsLine(report(p0(), unpaidTerminated(), ["M1"]), "net: Client pays Vendor 100821")
+}
+
+test "an overdue unpaid invoice is visible without any termination" {
+  let s = runEvents(p0(), initState([("M1", 0, 100000)]), [Deliver(0, "M1"), AsOf(40)]);
+  containsLine(report(p0(), s, ["M1"]),
+    "M1 payment: OUTSTANDING as_of=40 due=10 late=30 principal=100000 interest=821")
+}
+
+test "principal is owed even with no valuation date; interest is not invented" {
+  let s = runEvents(p0(), initState([("M1", 0, 100000)]), [Deliver(0, "M1")]);
+  containsLine(report(p0(), s, ["M1"]),
+    "M1 payment: OUTSTANDING due=10 principal=100000 interest=not computed (no AsOf)") &&
+    containsLine(report(p0(), s, ["M1"]), "client_owes=100000")
+}
+
+test "waiving a payment breach forgives interest, never the principal" {
+  let s = runEvents(p0(), initState([("M1", 0, 100000)]),
+    [Deliver(0, "M1"), Waive(20, "M1-payment"), AsOf(40)]);
+  containsLine(report(p0(), s, ["M1"]), "client_owes=100000")
+}
+
+test "per-diem interest: 10% p.a. on 100000 for 30 days is 821" {
+  -- 100000 * 1000 * 30 / 3650000 = 821 (floor)
+  let s = runEvents(p0(), initState([("M1", 0, 100000)]), [Deliver(0, "M1"), Pay(40, "M1")]);
+  containsLine(report(p0(), s, ["M1"]), "M1 payment: PAID day=40 late=30 interest=821")
+}
+
+test "per-diem accrues from day one where the period model pays nothing" {
+  let perDiem = p0();
+  let period = { penPerDay: 0, penCap: 0, payWithin: 10, cureDays: 15,
+                 ratePct: 1, ratePeriod: 30, ratePerAnnumBp: 0 };
+  let evs = [Deliver(0, "M1"), Pay(39, "M1")];   -- 29 days late: no full period
+  let a = runEvents(perDiem, initState([("M1", 0, 100000)]), evs);
+  let b = runEvents(period, initState([("M1", 0, 100000)]), evs);
+  containsLine(report(perDiem, a, ["M1"]), "M1 payment: PAID day=39 late=29 interest=794") &&
+    containsLine(report(period, b, ["M1"]), "M1 payment: PAID day=39 late=29 interest=0")
+}
+
+test "suspension needs the same grounds termination does" {
+  -- no notice, so no qualifying breach: the Suspend is a no-op
+  let s = runEvents(p0(), initState([("M1", 0, 100000)]), [Deliver(0, "M1"), Suspend(40, "Vendor")]);
+  openSuspFrom(s.susps) == -1
+}
+
+test "suspension holds undelivered deadlines and resume moves them" {
+  let s = runEvents(p0(), initState([("M1", 0, 100000), ("M2", 60, 50000)]),
+    [Deliver(0, "M1"), Notice(20, "M1-payment"), Suspend(40, "Vendor"), Resume(55)]);
+  effDl(s, "M2") == 75 && effDl(s, "M1") == 0 && openSuspFrom(s.susps) == -1
+}
+
+test "an open suspension is reported and the contract is not terminated" {
+  let s = runEvents(p0(), initState([("M1", 0, 100000), ("M2", 60, 50000)]),
+    [Deliver(0, "M1"), Notice(20, "M1-payment"), Suspend(40, "Vendor")]);
+  containsLine(report(p0(), s, ["M1", "M2"]),
+    "suspension: from=40 to=open by=Vendor grounds=M1-payment") && aTermIsNone(s)
+}
+
+test "attributed delay extends deadlines and records whose delay it was" {
+  let s = runEvents(p0(), initState([("M1", 20, 100000)]),
+    [AttributedDelay(5, 5, 25, "Customer: inputs not supplied")]);
+  effDl(s, "M1") == 41 &&
+    containsLine(report(p0(), s, ["M1"]),
+      "delay: [5..25] +21d to undelivered deadlines — cause: Customer: inputs not supplied")
 }

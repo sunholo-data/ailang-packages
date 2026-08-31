@@ -23,25 +23,63 @@ export type Event = Deliver(int, string)
            | Notice(int, string)
            | Waive(int, string)
            | Terminate(int, string)
+           -- v0.2.0 --------------------------------------------------------
+           -- Suspend(day, by): stop performing, keep the contract alive.
+           -- Valid only against a noticed, uncured, unwaived breach whose cure
+           -- window has expired — the same test Terminate uses. The remedy
+           -- most services contracts actually grant; without it a suspension
+           -- has to be modelled as a termination, which answers a different
+           -- question. Resume(day) restarts and extends every UNDELIVERED
+           -- deadline by the length of the suspension.
+           | Suspend(int, string)
+           | Resume(int)
+           -- AsOf(day): the valuation date. An unpaid debt accrues interest
+           -- until somebody values it; a pure fold has no clock, so the date
+           -- is an event. This is what a statement of account means by
+           -- "interest calculated to <date>".
+           | AsOf(int)
+           -- AttributedDelay(day, d1, d2, cause): extends undelivered
+           -- deadlines exactly as ForceMajeure does, but records WHOSE delay
+           -- it was. "Delays arising from unmet customer requirements" and "an
+           -- act of God" have the same effect on a deadline and completely
+           -- different consequences for who is in breach.
+           | AttributedDelay(int, int, int, string)
 
 -- Termination outcome: day, terminating party, and the grounding breach id.
 export type Term = NoTerm | TermAt(int, string, string)
 
--- Policy knobs. All money is integer minor units; all rates are integer
--- percent. Interest: ratePct percent of price per FULL ratePeriod days late
--- (floor division), simple, non-compounding.
+-- One suspension window. `to` is -1 while the suspension is still running.
+export type SuspWindow = SuspW({ from: int, to: int, by: string, grounds: string })
+
+-- One attributed delay window, and the deadline extension it caused.
+export type Attribution = Attr({ from: int, to: int, span: int, cause: string })
+
+-- Policy knobs. All money is integer minor units.
+--
+-- Two interest models, and the choice is explicit:
+--
+--   ratePerAnnumBp > 0   per-diem accrual at that annual rate in basis points
+--                        (1035 = 10.35%). What statutory interest actually is.
+--   ratePerAnnumBp == 0  fall back to ratePct percent of price per FULL
+--                        ratePeriod days late, floor division, simple. Kept
+--                        because contracts really are written this way, and
+--                        because it is the cross-validated wave-5 model.
 export type Policy = {
   penPerDay: int,
   penCap: int,
   payWithin: int,
   cureDays: int,
   ratePct: int,
-  ratePeriod: int
+  ratePeriod: int,
+  ratePerAnnumBp: int
 }
 
 -- Engine state: association lists keyed by obligation id (deadlines,
 -- prices, delivery days, payment days), notice list in arrival order
 -- (breach id, day), waived breach ids, and the termination outcome.
+--
+-- v0.2.0 adds: asOf (valuation date, -1 = unvalued), susps (suspension
+-- windows, newest last) and attributions (attributed delay windows).
 export type State = {
   dls: [(string, int)],
   prs: [(string, int)],
@@ -49,13 +87,17 @@ export type State = {
   paid: [(string, int)],
   notices: [(string, int)],
   waived: [string],
-  term: Term
+  term: Term,
+  asOf: int,
+  susps: [SuspWindow],
+  attributions: [Attribution]
 }
 
 -- Build the initial state from (obligationId, deadline, price) triples.
 export pure func initState(obligations: [(string, int, int)]) -> State {
   { dls: dlsOf(obligations), prs: prsOf(obligations),
-    delivered: [], paid: [], notices: [], waived: [], term: NoTerm }
+    delivered: [], paid: [], notices: [], waived: [], term: NoTerm,
+    asOf: -1, susps: [], attributions: [] }
 }
 
 pure func dlsOf(xs: [(string, int, int)]) -> [(string, int)] {

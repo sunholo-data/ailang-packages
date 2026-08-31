@@ -31,6 +31,24 @@ export pure func interestFor(price: int, ratePct: int, daysLate: int, period: in
   price * ratePct * floorPeriods(daysLate, period) / 100
 }
 
+-- Per-diem simple interest at an ANNUAL rate in basis points (1035 = 10.35%).
+--
+-- This is the shape statutory interest actually has. Both the Finnish Interest
+-- Act and Danish renteloven accrue from the due date on a DAILY basis; the
+-- period model above is a step function that pays nothing until a whole period
+-- has elapsed, so it always rounds toward the debtor — by up to one full
+-- period's interest on every obligation. Where a report has to reconcile
+-- against a real statement of account, use this.
+--
+-- Integer floor throughout: prices are minor units, so the divisor is
+-- 10000 basis points x 365 days.
+export pure func interestPerDiem(price: int, ratePerAnnumBp: int, daysLate: int) -> int
+  requires { price >= 0 && ratePerAnnumBp >= 0 && daysLate >= 0 }
+  ensures { result >= 0 && result * 3650000 <= price * ratePerAnnumBp * daysLate }
+{
+  price * ratePerAnnumBp * daysLate / 3650000
+}
+
 -- Per-day delivery penalty with cap.
 export pure func penaltyFor(daysLate: int, perDay: int, cap: int) -> int
   requires { daysLate >= 0 && perDay >= 0 && cap >= 0 }

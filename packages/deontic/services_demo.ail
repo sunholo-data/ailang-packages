@@ -1,0 +1,84 @@
+-- Services-engagement demo for sunholo/deontic.
+--
+-- The PPA demo models a supply contract: milestones, delay damages, and a
+-- termination that cancels what was never delivered. A professional-services
+-- engagement is the other shape, and it exercises everything 0.2.0 added:
+--
+--   * no delivery penalty at all — the remedy is suspension, not damages
+--   * payment terms in days net, with STATUTORY interest, which accrues per
+--     diem rather than per completed period
+--   * a right to suspend performance for non-payment and resume on payment
+--   * delay caused by the CUSTOMER not supplying an input it owed
+--   * and the case that matters: terminating for non-payment must not
+--     extinguish the fees already earned
+--
+-- Day 0 is the start of the term. Money is minor units.
+--
+--   d0    Phase 0 due; customer inputs were owed before it and did not arrive
+--   d21   the input finally lands — [0..20] attributed to the customer, so
+--         the phase-0 deadline moves and the vendor is not in breach
+--   d21   phase 0 delivered, paid on time at d35
+--   d44   month 1 delivered, invoiced; due d58; not paid
+--   d72   notice of the payment breach; cure window ends d86
+--   d74   month 2 delivered anyway (work in flight)
+--   d87   vendor SUSPENDS — contract alive, undelivered deadlines held
+--   d110  customer pays month 1 (52 days late), vendor resumes
+--   d110  valuation date: month 2 is still outstanding
+--
+-- Run:  AILANG_RELAX_MODULES=1 ailang run --caps IO services_demo.ail
+
+module sunholo/deontic/services_demo
+
+import std/io (println)
+import ./types (Event, Deliver, Pay, Notice, Terminate, Suspend, Resume, AsOf, AttributedDelay,
+                Policy, initState)
+import ./engine (runEvents, report)
+
+func printAll(xs: [string]) -> () ! {IO} {
+  match xs {
+    [] => (),
+    h :: t => { println(h); printAll(t) }
+  }
+}
+
+export func main() -> () ! {IO} {
+  -- No delivery penalty. 14 days net. Cure window 14 days, which is what a
+  -- suspension-for-non-payment clause usually grants. Interest 10.00% p.a.
+  -- accruing daily: ratePerAnnumBp wins, so ratePct/ratePeriod are unused.
+  let pol = { penPerDay: 0, penCap: 0, payWithin: 14, cureDays: 14,
+              ratePct: 0, ratePeriod: 0, ratePerAnnumBp: 1000 };
+
+  let obligations = [
+    ("P0", 7, 400000),     -- fixed-price opening phase
+    ("M1", 44, 630000),    -- monthly commitment
+    ("M2", 74, 630000),
+    ("M3", 84, 315000)     -- part month to the end of the term
+  ];
+  let ids = ["P0", "M1", "M2", "M3"];
+
+  println("=== suspension: the contract survives, and so does the debt ===");
+  let a = runEvents(pol, initState(obligations), [
+    AttributedDelay(0, 0, 20, "Customer: required inputs not supplied"),
+    Deliver(21, "P0"), Pay(35, "P0"),
+    Deliver(44, "M1"),
+    Notice(72, "M1-payment"),
+    Deliver(74, "M2"),
+    Suspend(87, "Vendor"),
+    Pay(110, "M1"),
+    Resume(110),
+    AsOf(110)
+  ]);
+  printAll(report(pol, a, ids));
+
+  println("");
+  println("=== termination for non-payment: the future stops, the fees do not ===");
+  let b = runEvents(pol, initState(obligations), [
+    Deliver(7, "P0"), Pay(21, "P0"),
+    Deliver(44, "M1"),
+    Notice(72, "M1-payment"),
+    Deliver(74, "M2"),
+    Terminate(87, "Vendor"),
+    AsOf(120)
+  ]);
+  printAll(report(pol, b, ids))
+}
