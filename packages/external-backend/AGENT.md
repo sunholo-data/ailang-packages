@@ -35,7 +35,14 @@ type BackendError = ExecFailed(string)
 
 runJson(cmd: string, args: [string]) -> Result[Json, BackendError] ! {Process}
 formatError(err: BackendError) -> string   -- pure, ensures result non-empty
+describeProcessError(cmd: string, err: ProcessError) -> string   -- pure, ensures non-empty
 ```
+
+`ExecFailed` now carries the std/process cause rather than a fixed string.
+Before 0.2.0 every `ProcessError` collapsed into `"could not execute '<cmd>'"`,
+which names the one cause (a missing binary) that is usually not what happened
+— a `Timeout(30000)` on a slow OCR backend read as `uv` being absent from a
+PATH that was correct, and had worked seconds earlier for the previous file.
 
 ## Common usage patterns
 

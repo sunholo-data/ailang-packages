@@ -10,6 +10,11 @@
 --   3. runJson with "false" — must return Err(NonZeroExit{code: 1}).
 --   4. runJson with "echo not-json" — must return Err(InvalidJson{...}).
 --   5. runJson with "echo {\"ok\":true}" — must return Ok(Json).
+--   6. describeProcessError: each ProcessError variant renders its OWN
+--      cause, not a generic "could not execute". Regression guard — every
+--      variant used to collapse into that one string, so a docparse OCR
+--      backend killed by the 30s process timeout reported `uv` as missing
+--      from PATH, on a PATH that was correct.
 --
 -- All checks are offline. No network, no real backend installed.
 
@@ -18,8 +23,9 @@ module _smoke
 import std/io (println)
 import std/string (length, contains)
 import std/result (Result, Ok, Err)
+import std/process (Timeout, OutputLimitExceeded, NotFound, AbnormalExit)
 import sunholo/external_backend/runner (
-  runJson, formatError,
+  runJson, formatError, describeProcessError,
   ExecFailed, NonZeroExit, InvalidJson, BackendError
 )
 
@@ -72,8 +78,26 @@ export func main() -> () ! {IO, Process} {
     _ => check("runJson valid JSON → Ok", false)
   };
 
-  let total = p1 + p2 + p3 + p4 + p5 + p6 + p7 + p8 + p9;
-  if total == 9
-    then println("OK: 9/9 checks passed")
-    else println("FAIL: ${show(total)}/9 checks passed")
+  -- describeProcessError: each variant must say its own name. A timeout
+  -- rendered as "could not execute" is the bug this package shipped.
+  let d1 = describeProcessError("uv", Timeout(30000));
+  let p10 = check("Timeout names the timeout", contains(d1, "timed out"));
+  let p11 = check("Timeout carries the duration", contains(d1, "30000"));
+  let p12 = check("Timeout does not claim exec failed",
+                  contains(d1, "could not execute") == false);
+
+  let d2 = describeProcessError("uv", OutputLimitExceeded(10485760));
+  let p13 = check("OutputLimitExceeded names the limit", contains(d2, "10485760"));
+
+  let d3 = describeProcessError("uv", NotFound("uv"));
+  let p14 = check("NotFound names PATH", contains(d3, "PATH"));
+
+  let d4 = describeProcessError("uv", AbnormalExit(9, "SIGKILL"));
+  let p15 = check("AbnormalExit names the signal", contains(d4, "SIGKILL"));
+
+  let total = p1 + p2 + p3 + p4 + p5 + p6 + p7 + p8 + p9
+            + p10 + p11 + p12 + p13 + p14 + p15;
+  if total == 15
+    then println("OK: 15/15 checks passed")
+    else println("FAIL: ${show(total)}/15 checks passed")
 }

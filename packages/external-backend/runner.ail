@@ -17,7 +17,7 @@ module sunholo/external_backend/runner
 --   pingHealth(cmd, args)              — cheap probe for long-lived backends
 --   runCached(cmd, args, cacheDir)     — hash inputs, skip re-exec
 
-import std/process (exec)
+import std/process (exec, ProcessError, NotAllowed, NotFound, PermissionDenied, Timeout, OutputLimitExceeded, SpawnFailed, AbnormalExit)
 import std/bytes (toString)
 import std/json (decode)
 import std/result (Result, Ok, Err)
@@ -47,12 +47,34 @@ export pure func formatError(err: BackendError) -> string
     InvalidJson(e) => "JSON decode failed: ${e.msg} (stderr: ${e.stderr})"
   }
 
+-- Render a std/process failure with the detail its variant actually carries.
+--
+-- Every ProcessError used to collapse into "could not execute '<cmd>'", which
+-- names the one cause (a missing binary) that is usually NOT what happened. A
+-- Timeout(30000) killing a slow backend read as `uv` being absent from PATH —
+-- sending the reader to check a PATH that was correct, on a command that had
+-- worked seconds earlier for the previous file. The duration, the byte limit
+-- and the signal are the actionable half of each variant, so each says its own
+-- name. Pure: no IO.
+export pure func describeProcessError(cmd: string, err: ProcessError) -> string
+  ensures { strLength(result) > 0 }
+=
+  match err {
+    NotFound(m) => "command '${cmd}' not found in PATH (${m})",
+    NotAllowed(m) => "command '${cmd}' is not in the Process allowlist (${m})",
+    PermissionDenied(m) => "permission denied executing '${cmd}' (${m})",
+    Timeout(ms) => "command '${cmd}' timed out after ${show(ms)}ms (raise --process-timeout)",
+    OutputLimitExceeded(n) => "command '${cmd}' exceeded the ${show(n)}-byte output limit (raise --process-max-output)",
+    SpawnFailed(m) => "could not spawn '${cmd}': ${m}",
+    AbnormalExit(sig, name) => "command '${cmd}' was killed by signal ${show(sig)} (${name})"
+  }
+
 -- Run an external subprocess expected to print a single JSON value on stdout.
 -- Stderr is captured separately and surfaced inside the error variant on
 -- failure paths, so callers can include it in diagnostics or telemetry.
 export func runJson(cmd: string, args: [string]) -> Result[Json, BackendError] ! {Process} =
   match exec(cmd, args) {
-    Err(_) => Err(ExecFailed("could not execute '${cmd}'")),
+    Err(pe) => Err(ExecFailed(describeProcessError(cmd, pe))),
     Ok(out) =>
       if out.exitCode != 0
         then Err(NonZeroExit({code: out.exitCode, stderr: toString(out.stderr)}))

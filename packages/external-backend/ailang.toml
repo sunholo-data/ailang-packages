@@ -1,6 +1,6 @@
 [package]
 name = "sunholo/external_backend"
-version = "0.1.0"
+version = "0.2.0"
 edition = "1"
 ailang = ">=0.19.0"
 description = "Run external subprocess backends that emit JSON; typed Result-based errors with stderr capture."
@@ -19,7 +19,7 @@ max = ["Process", "IO"]
 
 [metadata]
 tags = ["subprocess", "exec", "json", "ffi", "adapter", "process"]
-ai_summary = "Generic wrapper around std/process.exec for JSON-on-stdout backends (PDF parsers, OCR, embedders, classifiers). Returns Result[Json, BackendError] with ExecFailed/NonZeroExit/InvalidJson variants carrying exit code + stderr. Pure formatError helper for logging. Confines the Process effect so callers stay effect-thin."
+ai_summary = "Generic wrapper around std/process.exec for JSON-on-stdout backends (PDF parsers, OCR, embedders, classifiers). Returns Result[Json, BackendError] with ExecFailed/NonZeroExit/InvalidJson variants carrying exit code + stderr. Pure formatError and describeProcessError helpers for logging; describeProcessError renders each std/process failure (timeout duration, output-byte limit, kill signal, PATH miss) rather than collapsing them into one string. Confines the Process effect so callers stay effect-thin."
 repository = "https://github.com/sunholo-data/ailang-packages/tree/main/packages/external-backend"
 homepage = "https://ailang.sunholo.com/docs/packages/sunholo/external_backend"
 documentation = "https://github.com/sunholo-data/ailang-packages/blob/main/packages/external-backend/README.md"

@@ -53,7 +53,7 @@ type BackendError = ExecFailed(string)
                   | InvalidJson({stderr: string, msg: string})
 ```
 
-- `ExecFailed(msg)` — could not start the subprocess (command not found, perms)
+- `ExecFailed(msg)` — the subprocess did not produce output: not found, not permitted, timed out, killed, or over the output limit. Since 0.2.0 `msg` says which (see `describeProcessError`)
 - `NonZeroExit{code, stderr}` — process ran but reported failure; stderr is captured for inclusion in diagnostics
 - `InvalidJson{stderr, msg}` — process exited 0 but stdout did not parse as JSON; both the decoder message and stderr are surfaced so callers can distinguish "produced rubbish" from "produced warnings then valid output"
 
@@ -64,6 +64,21 @@ Execute a subprocess and decode its stdout as JSON. The single effect is `Proces
 ### `formatError(err) -> string` (pure)
 
 Render an error as a human-readable string. Contract: `ensures { strLength(result) > 0 }`.
+
+### `describeProcessError(cmd, err) -> string` (pure)
+
+Render a `std/process.ProcessError` with the detail its variant carries — the
+timeout duration, the output-byte limit, the kill signal, the PATH miss — and
+the flag that fixes it (`--process-timeout`, `--process-max-output`).
+
+`runJson` applies this to every `exec` failure, so `ExecFailed` messages are
+specific by default. It is exported because callers that run `exec` directly
+want the same treatment.
+
+Before 0.2.0 all seven variants rendered as `"could not execute '<cmd>'"`. That
+is the missing-binary message, so a timeout sent readers to check a PATH that
+was never wrong. Downstream, docparse's docling backend was being killed at the
+30s default on every non-trivial PDF and reporting `uv` as unavailable.
 
 ## Adapter contract
 
