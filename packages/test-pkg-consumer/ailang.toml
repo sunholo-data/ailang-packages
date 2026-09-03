@@ -10,7 +10,10 @@ ailang = ">=0.14.0"
 modules = ["sunholo/test_pkg_consumer/wrap"]
 
 [dependencies]
-"sunholo/test_pkg" = "0.1.3"
+# Cascade-repair: test_pkg (0.1.3) removed the `version` export (class C).
+# Resolve the sibling locally per monorepo convention (registry is not
+# reachable from the sandbox); consumer source no longer calls version().
+"sunholo/test_pkg" = { path = "../test-pkg" }
 
 [effects]
 max = []
