@@ -9,12 +9,12 @@ module sunholo/linkedin/auth
 -- If only a refresh_token is present, exchanges it for a fresh access_token.
 
 import std/fs (readFile, fileExists)
-import std/net (httpRequest)
 import std/json (decode, getString)
-import std/option (Some, None, getOrElse, isSome)
+import std/option (Some, None, getOrElse)
 import std/result (Ok, Err)
 import std/string (length)
 import std/env (getEnvOr)
+import pkg/sunholo/oauth/token (OAuthCreds, exchangeRefresh)
 
 -- Credentials minted by `ailang-linkedin auth` (or any compatible OAuth2
 -- exchange) and conventionally stored at ~/.ailang/linkedin/credentials.json.
@@ -99,30 +99,21 @@ func linkedinTokenFromCreds() -> Result[string, string] ! {Env, FS @limit=5, Net
 }
 
 -- Exchange a refresh token for a fresh access token.
-func linkedinRefreshToken(creds: LinkedInCreds) -> Result[string, string] ! {Net} {
-  let url = "https://www.linkedin.com/oauth/v2/accessToken";
-  let body = "grant_type=refresh_token&refresh_token=${creds.refreshToken}&client_id=${creds.clientId}&client_secret=${creds.clientSecret}";
-  let headers = [
-    { name: "Content-Type", value: "application/x-www-form-urlencoded" }
-  ];
-  match httpRequest("POST", url, headers, body) {
-    Ok(response) => {
-      if response.ok then linkedinParseTokenResponse(response.body)
-      else Err("OAuth refresh failed (status ${response.status}): ${response.body}")
-    },
-    Err(_) => Err("Network error during OAuth token refresh")
-  }
-}
-
-func linkedinParseTokenResponse(body: string) -> Result[string, string] {
-  match decode(body) {
-    Ok(json) => {
-      let tokenOpt = getString(json, "access_token");
-      if isSome(tokenOpt) then Ok(getOrElse(tokenOpt, ""))
-      else Err("No access_token in OAuth response")
-    },
-    Err(e) => Err("Failed to parse OAuth response: ${e}")
-  }
+--
+-- Delegates to sunholo/oauth. This used to build the form body by string
+-- interpolation, which silently corrupts the request when a client secret
+-- contains "+" or "&" — and the failure then reads as bad credentials rather
+-- than bad encoding. exchangeRefresh uses urlEncodeForm, so the values are
+-- percent-encoded. That is a behaviour fix, not just deduplication.
+func linkedinRefreshToken(creds: LinkedInCreds) -> Result[string, string] ! {Net @limit=1} {
+  exchangeRefresh(
+    "https://www.linkedin.com/oauth/v2/accessToken",
+    {
+      clientId: creds.clientId,
+      clientSecret: creds.clientSecret,
+      refreshToken: creds.refreshToken
+    }
+  )
 }
 
 -- Get the org URN out of the credentials file. Used by callers that need to
