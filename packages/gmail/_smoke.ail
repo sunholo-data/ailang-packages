@@ -1,0 +1,70 @@
+-- Boot smoke test for sunholo/gmail.
+--
+-- Offline: no network, no credential, no mailbox. Everything exercised here is
+-- the pure half, which is deliberately where the security-critical logic lives.
+--
+-- The header-injection cases are the reason this file exists. Its contract is
+-- currently unverifiable by Z3 (string interpolation desugars to `show`), so
+-- these assertions are the only thing standing between a caller and a forged
+-- header. They are not decorative.
+
+module _smoke
+
+import std/io (println)
+import std/string (contains)
+import std/result (Result, Ok, Err)
+import pkg/sunholo/gmail/message (Message, safeMessage, safeRaw, headerSafe, encodeRaw)
+
+func check(name: string, ok: bool) -> int ! {IO} {
+  if ok then { println("  ✓ ${name}"); 1 } else { println("  ✗ ${name}"); 0 }
+}
+
+func msg(to: string, subject: string) -> Message {
+  { to: to, from: "bot@example.com", subject: subject, body: "hello" }
+}
+
+export func main() -> () ! {IO} {
+  println("sunholo/gmail smoke");
+
+  let a = check("headerSafe accepts an ordinary address", headerSafe("a@b.com"));
+  let b = check("headerSafe rejects CR", not(headerSafe("a@b.com\rBcc: x@y.com")));
+  let c = check("headerSafe rejects LF", not(headerSafe("a@b.com\nBcc: x@y.com")));
+
+  let d = match safeMessage(msg("a@b.com", "hello")) {
+    Ok(s) => check("safeMessage separates headers from body", contains(s, "\r\n\r\n")),
+    Err(_) => check("safeMessage separates headers from body", false)
+  };
+  let e = match safeMessage(msg("a@b.com", "hello")) {
+    Ok(s) => check("safeMessage sets a text/plain content type", contains(s, "Content-Type: text/plain")),
+    Err(_) => check("safeMessage sets a text/plain content type", false)
+  };
+
+  -- The attack, both fields.
+  let f = match safeMessage(msg("a@b.com\r\nBcc: attacker@evil.com", "hello")) {
+    Ok(_) => check("safeMessage REFUSES an injected recipient", false),
+    Err(m) => check("safeMessage REFUSES an injected recipient", contains(m, "recipient"))
+  };
+  let g = match safeMessage(msg("a@b.com", "hi\r\nBcc: attacker@evil.com")) {
+    Ok(_) => check("safeMessage REFUSES an injected subject", false),
+    Err(m) => check("safeMessage REFUSES an injected subject", contains(m, "subject"))
+  };
+  let h = match safeMessage(msg("", "hello")) {
+    Ok(_) => check("safeMessage refuses an empty recipient", false),
+    Err(_) => check("safeMessage refuses an empty recipient", true)
+  };
+
+  -- base64url, not base64: the two alphabets differ in exactly these characters,
+  -- and Gmail rejects the standard one with an error that never says "encoding".
+  let enc = encodeRaw("a+b/c?");
+  let i = check("encodeRaw emits base64url, not base64",
+                not(contains(enc, "+")) && not(contains(enc, "/")));
+
+  let j = match safeRaw(msg("a@b.com\nBcc: x@y.com", "hello")) {
+    Ok(_) => check("safeRaw refuses before encoding", false),
+    Err(_) => check("safeRaw refuses before encoding", true)
+  };
+
+  let passed = a + b + c + d + e + f + g + h + i + j;
+  if passed == 10 then println("OK: 10/10 checks passed")
+  else println("FAIL: ${show(passed)}/10 checks passed")
+}
