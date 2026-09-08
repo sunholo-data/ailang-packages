@@ -60,6 +60,18 @@ export func main() -> () ! {IO, FS, Net} =
 | [sunholo/billing_service_api](packages/billing-service-api/) | HTTP handlers for billing Cloud Run service | Net, FS, Env, IO | [Guide](packages/billing-service-api/AGENT.md) |
 | [sunholo/external_backend](packages/external-backend/) | Run external subprocesses that emit JSON; typed Result errors with stderr capture | Process | [Guide](packages/external-backend/AGENT.md) |
 
+## Discord and agent/UI protocols (local development)
+
+| Package | Purpose |
+|---|---|
+| [sunholo/discord](packages/discord/AGENT.md) | Bot REST v10 client, messages, replies, pagination and structured errors |
+| [sunholo/agui](packages/agui/AGENT.md) | Pure AG-UI event codecs and sequential run validation |
+| [sunholo/a2ui](packages/a2ui/AGENT.md) | Existing component builders plus additive A2UI 0.9.1 envelopes/review surfaces |
+
+These changes are developed against the local `ailang-demos/discord` CLI/MCP app.
+New versions are not yet registry releases. Use path dependencies during development.
+The demo contains the cross-package and upstream schema/SDK integration suite.
+
 ## AGENT.md — AI Discovery
 
 Each package includes an `AGENT.md` file — a structured guide for AI agents explaining:

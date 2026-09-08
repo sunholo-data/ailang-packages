@@ -1,0 +1,83 @@
+module sunholo/agui/events
+
+import std/json (Json, encode, decode, getString, get, jo, kv, js)
+import std/option (Some, None, getOrElse)
+import std/result (Result, Ok, Err)
+import std/list (map)
+import std/string (join)
+
+export type Event = RunStarted(string, string) | RunFinished(string, string) | RunError(string)
+  | TextStart(string) | TextContent(string, string) | TextEnd(string)
+  | ToolStart(string, string) | ToolArgs(string, string) | ToolEnd(string)
+  | ToolResult(string, string, string) | StateSnapshot(Json) | Custom(string, Json)
+
+export pure func eventJson(e: Event) -> Json = match e {
+  RunStarted(threadId, runId) => jo([kv("type", js("RUN_STARTED")), kv("threadId", js(threadId)), kv("runId", js(runId))]),
+  RunFinished(threadId, runId) => jo([kv("type", js("RUN_FINISHED")), kv("threadId", js(threadId)), kv("runId", js(runId))]),
+  RunError(message) => jo([kv("type", js("RUN_ERROR")), kv("message", js(message))]),
+  TextStart(id) => jo([kv("type", js("TEXT_MESSAGE_START")), kv("messageId", js(id)), kv("role", js("assistant"))]),
+  TextContent(id, delta) => jo([kv("type", js("TEXT_MESSAGE_CONTENT")), kv("messageId", js(id)), kv("delta", js(delta))]),
+  TextEnd(id) => jo([kv("type", js("TEXT_MESSAGE_END")), kv("messageId", js(id))]),
+  ToolStart(id, name) => jo([kv("type", js("TOOL_CALL_START")), kv("toolCallId", js(id)), kv("toolCallName", js(name))]),
+  ToolArgs(id, delta) => jo([kv("type", js("TOOL_CALL_ARGS")), kv("toolCallId", js(id)), kv("delta", js(delta))]),
+  ToolEnd(id) => jo([kv("type", js("TOOL_CALL_END")), kv("toolCallId", js(id))]),
+  ToolResult(messageId, id, content) => jo([kv("type", js("TOOL_CALL_RESULT")), kv("messageId", js(messageId)), kv("toolCallId", js(id)), kv("content", js(content)), kv("role", js("tool"))]),
+  StateSnapshot(snapshot) => jo([kv("type", js("STATE_SNAPSHOT")), kv("snapshot", snapshot)]),
+  Custom(name, value) => jo([kv("type", js("CUSTOM")), kv("name", js(name)), kv("value", value)])
+}
+
+export pure func encodeEvent(e: Event) -> string = encode(eventJson(e))
+export pure func jsonLines(events: [Event]) -> string = join("\n", map(encodeEvent, events))
+export pure func sseFrame(e: Event) -> string = "data: ${encodeEvent(e)}\n\n"
+
+-- Decoder deliberately rejects unsupported event variants; it does not silently
+-- convert unknown events to a supported type. Metadata is not round-tripped in v0.1.
+export pure func decodeEvent(raw: string) -> Result[Event, string] = match decode(raw) {
+  Err(_) => Err("Malformed AG-UI JSON"), Ok(j) => {
+    let kind = getOrElse(getString(j, "type"), "");
+    let id = getOrElse(getString(j, "messageId"), "");
+    let toolId = getOrElse(getString(j, "toolCallId"), "");
+    let threadId = getOrElse(getString(j, "threadId"), "");
+    let runId = getOrElse(getString(j, "runId"), "");
+    if kind == "RUN_STARTED" && threadId != "" && runId != "" then Ok(RunStarted(threadId, runId))
+    else if kind == "RUN_FINISHED" && threadId != "" && runId != "" then Ok(RunFinished(threadId, runId))
+    else if kind == "RUN_ERROR" then match getString(j, "message") {Some(s) => Ok(RunError(s)), None => Err("Missing error message")}
+    else if kind == "TEXT_MESSAGE_START" && id != "" && getOrElse(getString(j, "role"), "") == "assistant" then Ok(TextStart(id))
+    else if kind == "TEXT_MESSAGE_CONTENT" && id != "" then match getString(j, "delta") {Some(s) => Ok(TextContent(id, s)), None => Err("Missing text delta")}
+    else if kind == "TEXT_MESSAGE_END" && id != "" then Ok(TextEnd(id))
+    else if kind == "TOOL_CALL_START" && toolId != "" then match getString(j, "toolCallName") {Some(s) => if s == "" then Err("Empty tool name") else Ok(ToolStart(toolId, s)), None => Err("Missing tool name")}
+    else if kind == "TOOL_CALL_ARGS" && toolId != "" then match getString(j, "delta") {Some(s) => Ok(ToolArgs(toolId, s)), None => Err("Missing tool arguments delta")}
+    else if kind == "TOOL_CALL_END" && toolId != "" then Ok(ToolEnd(toolId))
+    else if kind == "TOOL_CALL_RESULT" && toolId != "" && id != "" then match getString(j, "content") {Some(s) => Ok(ToolResult(id, toolId, s)), None => Err("Missing tool result")}
+    else if kind == "STATE_SNAPSHOT" then match get(j, "snapshot") {Some(s) => Ok(StateSnapshot(s)), None => Err("Missing snapshot")}
+    else if kind == "CUSTOM" && getOrElse(getString(j, "name"), "") != "" then match get(j, "value") {Some(s) => Ok(Custom(getOrElse(getString(j, "name"), ""), s)), None => Err("Missing custom value")}
+    else Err("Unsupported or malformed AG-UI event: ${kind}")
+  }
+}
+
+-- A single sequential run: no overlapping messages/tools. This is a deliberately
+-- narrower profile than AG-UI itself. ToolEnd closes arguments, NOT tool execution.
+export pure func validateRun(events: [Event]) -> Result[(), string] = match events {
+  RunStarted(threadId, runId) :: rest =>
+    if threadId == "" || runId == "" then Err("Empty run identity") else walk(rest, threadId, runId, "", "", false, ""),
+  _ => Err("Run must begin with RUN_STARTED")
+}
+
+pure func walk(events: [Event], threadId: string, runId: string, textId: string, toolId: string, argsEnded: bool, args: string) -> Result[(), string] = match events {
+  [] => Err("Run missing terminal event"),
+  event :: rest => match event {
+    RunStarted(_, _) => Err("Nested run in sequential profile"),
+    RunFinished(t, r) => if t != threadId || r != runId || textId != "" || toolId != "" then Err("Run identity mismatch or unfinished stream") else match rest {[] => Ok(()), _ => Err("Events after terminal")},
+    RunError(_) => match rest {[] => Ok(()), _ => Err("Events after error")},
+    TextStart(id) => if id == "" || textId != "" then Err("Invalid text start") else walk(rest, threadId, runId, id, toolId, argsEnded, args),
+    TextContent(id, _) => if textId == "" || id != textId then Err("Text delta without matching start") else walk(rest, threadId, runId, textId, toolId, argsEnded, args),
+    TextEnd(id) => if textId == "" || id != textId then Err("Text end without matching start") else walk(rest, threadId, runId, "", toolId, argsEnded, args),
+    ToolStart(id, name) => if id == "" || name == "" || toolId != "" then Err("Invalid tool start") else walk(rest, threadId, runId, textId, id, false, ""),
+    ToolArgs(id, delta) => if toolId == "" || id != toolId || argsEnded then Err("Tool arguments outside stream") else walk(rest, threadId, runId, textId, toolId, false, "${args}${delta}"),
+    ToolEnd(id) => if toolId == "" || id != toolId || argsEnded then Err("Invalid tool end") else match decode(args) {
+      Err(_) => Err("Tool arguments are not complete JSON"), Ok(_) => walk(rest, threadId, runId, textId, toolId, true, args)},
+    ToolResult(messageId, id, _) => if messageId == "" || toolId == "" || id != toolId || not argsEnded then Err("Tool result without completed arguments") else walk(rest, threadId, runId, textId, "", false, ""),
+    StateSnapshot(_) => walk(rest, threadId, runId, textId, toolId, argsEnded, args),
+    Custom(_, _) => walk(rest, threadId, runId, textId, toolId, argsEnded, args)
+  }
+}

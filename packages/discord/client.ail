@@ -1,0 +1,137 @@
+module sunholo/discord/client
+
+import std/net (httpRequest)
+import std/json (Json, JArray, encode, decode, getString, getInt, getNumber, getBool, getArray, getObject, jo, kv, js, ja, jb, jint, jnum)
+import std/option (Some, None, getOrElse)
+import std/result (Result, Ok, Err)
+import std/string (length, charAt, trim, toLower, stringToFloat)
+import std/list (map)
+
+export type DiscordError = {kind: string, status: int, code: int, message: string, retryAfter: float, global: bool}
+export type DiscordMessage = {id: string, channelId: string, authorId: string, authorName: string, content: string, timestamp: string, replyTo: string, mentions: [string]}
+export type DiscordChannel = {id: string, name: string, kind: int}
+export type MessageQuery = {limit: int, before: string, after: string}
+
+export pure func problem(kind: string, message: string) -> DiscordError =
+  {kind: kind, status: 0, code: 0, message: message, retryAfter: 0.0, global: false}
+
+-- Reject path/query injection and preserve 64-bit snowflakes across JSON/WASM.
+export pure func validId(id: string) -> bool =
+  length(id) > 0 && length(id) <= 20 && charAt(id, 0) != "0" && digits(id, 0)
+
+pure func digits(s: string, i: int) -> bool =
+  if i >= length(s) then true
+  else { let c = charAt(s, i); c >= "0" && c <= "9" && digits(s, i + 1) }
+
+export pure func messagePath(channelId: string, query: MessageQuery) -> Result[string, DiscordError] =
+  if not validId(channelId) then Err(problem("validation", "Invalid channelId ID"))
+  else if query.limit < 1 || query.limit > 100 then Err(problem("validation", "Limit must be 1..100"))
+  else if query.before != "" && query.after != "" then Err(problem("validation", "before and after are mutually exclusive"))
+  else if query.before != "" && not validId(query.before) then Err(problem("validation", "Invalid before cursor"))
+  else if query.after != "" && not validId(query.after) then Err(problem("validation", "Invalid after cursor"))
+  else Ok("/channels/${channelId}/messages?limit=${query.limit}${if query.before != "" then "&before=${query.before}" else ""}${if query.after != "" then "&after=${query.after}" else ""}")
+
+export pure func messageBody(text: string, replyTo: string, nonce: string) -> Result[string, DiscordError] =
+  if length(trim(text)) == 0 || length(text) > 2000 then Err(problem("validation", "Message must contain 1..2000 characters"))
+  else if replyTo != "" && not validId(replyTo) then Err(problem("validation", "Invalid reply message ID"))
+  else if length(nonce) > 25 then Err(problem("validation", "Nonce exceeds 25 characters"))
+  else {
+    let base = [kv("content", js(text)), kv("allowed_mentions", jo([kv("parse", ja([])), kv("replied_user", jb(false))]))];
+    let reply = if replyTo == "" then [] else [kv("message_reference", jo([kv("message_id", js(replyTo)), kv("fail_if_not_exists", jb(true))]))];
+    let dedup = if nonce == "" then [] else [kv("nonce", js(nonce)), kv("enforce_nonce", jb(true))];
+    Ok(encode(jo(base ++ reply ++ dedup)))
+  }
+
+export pure func errorJson(e: DiscordError) -> Json = jo([
+  kv("kind", js(e.kind)), kv("status", jint(e.status)), kv("code", jint(e.code)),
+  kv("message", js(e.message)), kv("retry_after", jnum(e.retryAfter)), kv("global", jb(e.global))])
+
+pure func header(headers: [{name: string, value: string}], name: string) -> string =
+  match headers { [] => "", h :: rest => if toLower(h.name) == name then h.value else header(rest, name) }
+
+-- Do not include raw response bodies, request headers or tokens in errors.
+export pure func responseJson(status: int, headers: [{name: string, value: string}], body: string) -> Result[Json, DiscordError] {
+  let parsed = decode(body);
+  if status >= 200 && status < 300 then
+    match parsed { Ok(j) => Ok(j), Err(_) => Err(problem("decode", "Discord returned malformed JSON")) }
+  else {
+    let j = match parsed { Ok(v) => v, Err(_) => jo([]) };
+    let kind = if status == 429 then "rate_limit" else if status == 401 then "authentication" else if status == 403 then "permission" else "http";
+    let retry = getOrElse(getNumber(j, "retry_after"), getOrElse(stringToFloat(header(headers, "retry-after")), 0.0));
+    Err({kind: kind, status: status, code: getOrElse(getInt(j, "code"), 0),
+      message: "Discord HTTP ${status}", retryAfter: retry, global: getOrElse(getBool(j, "global"), header(headers, "x-ratelimit-global") == "true")})
+  }
+}
+
+func request(token: string, method: string, path: string, body: string) -> Result[Json, DiscordError] ! {Net} =
+  if trim(token) == "" then Err(problem("authentication", "DISCORD_BOT_TOKEN or token file is required"))
+  else match httpRequest(method, "https://discord.com/api/v10${path}", [
+    {name: "Authorization", value: "Bot ${token}"}, {name: "Content-Type", value: "application/json"},
+    {name: "User-Agent", value: "DiscordBot (https://github.com/sunholo-data/ailang-packages, 0.1.0)"}], body) {
+    Ok(r) => responseJson(r.status, r.headers, r.body),
+    Err(_) => Err(problem("network", if method == "POST" then "Send outcome unknown; reconcile before retrying" else "Discord request failed"))
+  }
+
+export func identity(token: string) -> Result[Json, DiscordError] ! {Net} = request(token, "GET", "/users/@me", "")
+
+export func channels(token: string, guild: string) -> Result[[DiscordChannel], DiscordError] ! {Net} =
+  if not validId(guild) then Err(problem("validation", "Invalid guild ID"))
+  else match request(token, "GET", "/guilds/${guild}/channels", "") {
+    Err(e) => Err(e), Ok(JArray(xs)) => parseChannels(xs), Ok(_) => Err(problem("decode", "Expected channelId array")) }
+
+@allow_empty_ok("An empty channel array is a valid Discord response and recursion base case")
+pure func parseChannels(xs: [Json]) -> Result[[DiscordChannel], DiscordError] = match xs {
+  [] => Ok([]), x :: rest => {
+    let id = getOrElse(getString(x, "id"), "");
+    let name = getOrElse(getString(x, "name"), "");
+    let kind = getOrElse(getInt(x, "type"), -1);
+    if not validId(id) || kind < 0 then Err(problem("decode", "Invalid channelId object"))
+    else match parseChannels(rest) { Err(e) => Err(e), Ok(tail) => Ok({id: id, name: name, kind: kind} :: tail) }
+  }
+}
+
+export pure func parseMessage(j: Json) -> Result[DiscordMessage, DiscordError] {
+  let id = getOrElse(getString(j, "id"), "");
+  let channelId = getOrElse(getString(j, "channel_id"), "");
+  let author = getOrElse(getObject(j, "author"), jo([]));
+  let authorId = getOrElse(getString(author, "id"), "");
+  let timestamp = getOrElse(getString(j, "timestamp"), "");
+  let reference = getOrElse(getObject(j, "message_reference"), jo([]));
+  if not validId(id) || not validId(channelId) || not validId(authorId) || timestamp == "" then Err(problem("decode", "Message missing required identity/timestamp"))
+  else match getString(j, "content") {
+    None => Err(problem("decode", "Message content field missing or invalid")),
+    Some(content) => Ok({id: id, channelId: channelId, authorId: authorId,
+      authorName: getOrElse(getString(author, "username"), ""), content: content, timestamp: timestamp,
+      replyTo: getOrElse(getString(reference, "message_id"), ""),
+      mentions: map(\m. getOrElse(getString(m, "id"), ""), getOrElse(getArray(j, "mentions"), []))})
+  }
+}
+
+@allow_empty_ok("An empty message page is valid, including the pagination termination condition")
+export pure func parseMessages(xs: [Json]) -> Result[[DiscordMessage], DiscordError] = match xs {
+  [] => Ok([]), x :: rest => match parseMessage(x) {
+    Err(e) => Err(e), Ok(m) => match parseMessages(rest) {Err(e) => Err(e), Ok(ms) => Ok(m :: ms)} }
+}
+
+export func readMessages(token: string, channelId: string, query: MessageQuery) -> Result[[DiscordMessage], DiscordError] ! {Net} =
+  match messagePath(channelId, query) {
+    Err(e) => Err(e), Ok(path) => match request(token, "GET", path, "") {
+      Err(e) => Err(e), Ok(JArray(xs)) => parseMessages(xs), Ok(_) => Err(problem("decode", "Expected message array")) }
+  }
+
+export func readMessage(token: string, channelId: string, message: string) -> Result[DiscordMessage, DiscordError] ! {Net} =
+  if not validId(channelId) || not validId(message) then Err(problem("validation", "Invalid channelId/message ID"))
+  else match request(token, "GET", "/channels/${channelId}/messages/${message}", "") { Err(e) => Err(e), Ok(j) => parseMessage(j) }
+
+export func sendMessage(token: string, channelId: string, text: string, replyTo: string, nonce: string) -> Result[DiscordMessage, DiscordError] ! {Net} =
+  if not validId(channelId) then Err(problem("validation", "Invalid channelId ID"))
+  else match messageBody(text, replyTo, nonce) {
+    Err(e) => Err(e), Ok(body) => match request(token, "POST", "/channels/${channelId}/messages", body) {
+      Err(e) => Err(e), Ok(j) => parseMessage(j) }
+  }
+
+export pure func messageJson(m: DiscordMessage) -> Json = jo([
+  kv("id", js(m.id)), kv("channel_id", js(m.channelId)), kv("author", jo([kv("id", js(m.authorId)), kv("username", js(m.authorName))])),
+  kv("content", js(m.content)), kv("timestamp", js(m.timestamp)),
+  kv("message_reference", jo([kv("message_id", js(m.replyTo))])),
+  kv("mentions", ja(map(\id. jo([kv("id", js(id))]), m.mentions)))])

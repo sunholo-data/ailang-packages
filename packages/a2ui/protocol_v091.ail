@@ -1,0 +1,56 @@
+module sunholo/a2ui/protocol_v091
+
+import std/json (Json, encode, decode, getString, getObject, getInt, jo, kv, js, ja, jint)
+import std/option (Some, None, getOrElse)
+import std/result (Result, Ok, Err)
+import std/list (map)
+import std/datetime (parseRFC3339)
+
+export type Action = {name: string, surfaceId: string, sourceComponentId: string, timestamp: string, context: Json}
+
+export pure func envelope(name: string, payload: Json) -> Json = jo([kv("version", js("v0.9.1")), kv(name, payload)])
+export pure func createSurface(surfaceId: string) -> Json = envelope("createSurface", jo([
+  kv("surfaceId", js(surfaceId)), kv("catalogId", js("https://a2ui.org/specification/v0_9_1/catalogs/basic/catalog.json"))]))
+export pure func updateComponents(surfaceId: string, components: [Json]) -> Json =
+  envelope("updateComponents", jo([kv("surfaceId", js(surfaceId)), kv("components", ja(components))]))
+export pure func updateDataModel(surfaceId: string, path: string, value: Json) -> Json =
+  envelope("updateDataModel", jo([kv("surfaceId", js(surfaceId)), kv("path", js(path)), kv("value", value)]))
+export pure func deleteSurface(surfaceId: string) -> Json = envelope("deleteSurface", jo([kv("surfaceId", js(surfaceId))]))
+export pure func binding(path: string) -> Json = jo([kv("path", js(path))])
+
+-- Generic review surface: domain decisions and sending remain in the application.
+export pure func reviewSurface(surfaceId: string, draftId: string, revision: int, destination: string, text: string) -> [Json] {
+  let components = [
+    jo([kv("id", js("root")), kv("component", js("Column")), kv("children", ja(map(js, ["destination", "body", "submit"])))]),
+    jo([kv("id", js("destination")), kv("component", js("Text")), kv("text", binding("/destination"))]),
+    jo([kv("id", js("body")), kv("component", js("TextField")), kv("label", js("Reply")), kv("value", binding("/text")), kv("variant", js("longText"))]),
+    jo([kv("id", js("submit_label")), kv("component", js("Text")), kv("text", js("Send reply"))]),
+    jo([kv("id", js("submit")), kv("component", js("Button")), kv("child", js("submit_label")), kv("variant", js("primary")),
+      kv("action", jo([kv("event", jo([kv("name", js("submitDraft")), kv("context", jo([
+        kv("draftId", binding("/draftId")), kv("revision", binding("/revision")), kv("text", binding("/text"))]))]))]))])
+  ];
+  [createSurface(surfaceId), updateComponents(surfaceId, components), updateDataModel(surfaceId, "/", jo([
+    kv("draftId", js(draftId)), kv("revision", jint(revision)), kv("destination", js(destination)), kv("text", js(text))]))]
+}
+
+export pure func actionJson(a: Action) -> Json = envelope("action", jo([
+  kv("name", js(a.name)), kv("surfaceId", js(a.surfaceId)), kv("sourceComponentId", js(a.sourceComponentId)),
+  kv("timestamp", js(a.timestamp)), kv("context", a.context)]))
+
+export pure func decodeAction(raw: string) -> Result[Action, string] = match decode(raw) {
+  Err(_) => Err("Malformed A2UI JSON"), Ok(j) =>
+    if getOrElse(getString(j, "version"), "") != "v0.9.1" then Err("Expected A2UI v0.9.1")
+    else match getObject(j, "action") {
+      None => Err("Missing A2UI action"), Some(a) => {
+        let name = getOrElse(getString(a, "name"), "");
+        let surfaceId = getOrElse(getString(a, "surfaceId"), "");
+        let source = getOrElse(getString(a, "sourceComponentId"), "");
+        let timestamp = getOrElse(getString(a, "timestamp"), "");
+        if name == "" || surfaceId == "" || source == "" || timestamp == "" then Err("Missing action identity or timestamp")
+        else if not validTimestamp(timestamp) then Err("Invalid RFC3339 action timestamp")
+        else match getObject(a, "context") { None => Err("Missing action context"), Some(c) => Ok({name: name, surfaceId: surfaceId, sourceComponentId: source, timestamp: timestamp, context: c}) }
+      }
+    }
+}
+
+pure func validTimestamp(value: string) -> bool = match parseRFC3339(value) {Some(_) => true, None => false}
