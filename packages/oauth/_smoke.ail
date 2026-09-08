@@ -1,0 +1,86 @@
+-- Boot smoke test for sunholo/oauth.
+--
+-- The registry's pre-publish smoke gate runs this and looks for a final line
+-- starting with "OK:". Everything here is offline — no network, no real
+-- credentials, no browser.
+--
+-- What we exercise:
+--   - consentUrl: that the two parameters which decide whether you get a
+--     refresh token at all (access_type=offline, prompt=consent) are actually
+--     emitted, and that values are form-encoded rather than interpolated raw.
+--   - codeFromQuery: the three outcomes of a loopback callback — a code, a
+--     provider error, and a bare hit with neither.
+--
+-- Deliberately not exercised: exchangeCode, exchangeRefresh, readCreds,
+-- writeCreds. Those need a live provider or a real credential on disk, and
+-- are covered by the consuming project's integration test.
+
+module _smoke
+
+import std/io (println)
+import std/string (contains)
+import std/json (Json, decode)
+import std/option (Some, None)
+import std/result (Result, Ok, Err)
+import pkg/sunholo/oauth/flow (googleConfig, consentUrl, codeFromQuery)
+
+func check(name: string, ok: bool) -> int ! {IO} {
+  if ok then { println("  ✓ ${name}"); 1 }
+  else { println("  ✗ ${name}"); 0 }
+}
+
+func cfg() -> ClientConfig {
+  googleConfig(
+    "client-id-123",
+    "secret-with-plus+and&amp",
+    "http://127.0.0.1:8765/",
+    "https://www.googleapis.com/auth/gmail.compose",
+    "someone@example.com"
+  )
+}
+
+export func main() -> () ! {IO} {
+  println("sunholo/oauth smoke");
+
+  let url = consentUrl(cfg());
+
+  -- Without both of these Google returns an access token that expires in an
+  -- hour and no refresh token, and the flow otherwise looks like it worked.
+  let a = check("consentUrl emits access_type=offline", contains(url, "access_type=offline"));
+  let b = check("consentUrl emits prompt=consent", contains(url, "prompt=consent"));
+  let c = check("consentUrl targets the Google auth endpoint",
+                contains(url, "https://accounts.google.com/o/oauth2/v2/auth?"));
+
+  -- Form-encoded, not interpolated: a secret containing + or & must not leak
+  -- through raw, or the request is silently corrupted and reads as bad creds.
+  let d = check("consentUrl percent-encodes the redirect_uri",
+                contains(url, "redirect_uri=http%3A%2F%2F127.0.0.1%3A8765%2F"));
+  let e = check("consentUrl percent-encodes the scope",
+                contains(url, "scope=https%3A%2F%2Fwww.googleapis.com%2Fauth%2Fgmail.compose"));
+
+  let f = match decode("{\"code\":\"abc123\"}") {
+    Ok(q) => match codeFromQuery(q) {
+      Ok(code) => check("codeFromQuery extracts a code", code == "abc123"),
+      Err(_) => check("codeFromQuery extracts a code", false)
+    },
+    Err(_) => check("codeFromQuery extracts a code", false)
+  };
+  let g = match decode("{\"error\":\"access_denied\"}") {
+    Ok(q) => match codeFromQuery(q) {
+      Ok(_) => check("codeFromQuery reports a declined grant", false),
+      Err(m) => check("codeFromQuery reports a declined grant", contains(m, "access_denied"))
+    },
+    Err(_) => check("codeFromQuery reports a declined grant", false)
+  };
+  let h = match decode("{}") {
+    Ok(q) => match codeFromQuery(q) {
+      Ok(_) => check("codeFromQuery rejects an empty callback", false),
+      Err(_) => check("codeFromQuery rejects an empty callback", true)
+    },
+    Err(_) => check("codeFromQuery rejects an empty callback", false)
+  };
+
+  let passed = a + b + c + d + e + f + g + h;
+  if passed == 8 then println("OK: 8/8 checks passed")
+  else println("FAIL: ${show(passed)}/8 checks passed")
+}
