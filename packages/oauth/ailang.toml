@@ -1,0 +1,30 @@
+[package]
+name = "sunholo/oauth"
+version = "0.1.0"
+edition = "1"
+ailang = ">=0.35.0"
+description = "OAuth2 for installed apps — consent URL, loopback code exchange, and refresh→access, provider-agnostic"
+license = "Apache-2.0"
+
+[exports]
+modules = [
+  "sunholo/oauth/flow",
+  "sunholo/oauth/token"
+]
+
+[effects]
+# IO is here for _smoke.ail only — no library function in this package prints.
+max = ["FS", "Net", "IO"]
+
+[metadata]
+tags = ["oauth", "oauth2", "auth", "google", "loopback", "refresh-token"]
+ai_summary = "Run the OAuth2 installed-app flow end to end from AILANG: build a consent URL, exchange a loopback authorization code for a refresh token, store it in ADC authorized_user shape, and exchange refresh for access tokens against any provider"
+repository = "https://github.com/sunholo-data/ailang-packages/tree/main/packages/oauth"
+homepage = "https://ailang.sunholo.com/docs/packages/sunholo/oauth"
+license_url = "https://github.com/sunholo-data/ailang-packages/blob/main/LICENSE"
+
+[cascade]
+max_cost_usd = 1.00
+
+[stability]
+level = "experimental"

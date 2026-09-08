@@ -1,0 +1,135 @@
+-- sunholo/oauth/flow — the installed-app authorization code flow.
+--
+-- The bootstrap half of OAuth2: no credentials yet, and you need a refresh
+-- token. Google deprecated the out-of-band flow in 2022, so the only supported
+-- route for a desktop/installed client is a loopback redirect — which means
+-- something has to listen on 127.0.0.1 and catch the code.
+--
+-- `ailang serve-api` does that, so the whole dance is AILANG. Before this
+-- package, every consumer solved the loopback outside the language:
+-- sunholo/linkedin's credentials are "written by the OAuth dance" performed by
+-- a separate binary, and the Daneel bootstrap that motivated this package used
+-- a Python script. This module is the part they were missing.
+--
+-- The @route handler must live in the served module, so this package provides
+-- the logic and the consumer writes a small shim. See AGENT.md for the shim.
+
+module sunholo/oauth/flow
+
+import std/fs (readFile, fileExists)
+import std/net (urlEncodeForm)
+import std/json (Json, decode, get, getString)
+import std/option (Option, Some, None)
+import std/result (Result, Ok, Err)
+import pkg/sunholo/oauth/token (OAuthCreds, postFormBody)
+
+-- Everything needed to run a flow against one provider.
+export type ClientConfig = {
+  clientId: string,
+  clientSecret: string,
+  authEndpoint: string,
+  tokenEndpoint: string,
+  redirectUri: string,
+  scope: string,
+  loginHint: string
+}
+
+-- Google's endpoints, filled in around a client you supply.
+--
+-- loginHint pre-selects an account. It is a convenience, never a guarantee —
+-- the user can still pick another, which is how a grant ends up authorised as
+-- the wrong identity while looking entirely successful. Verify who the token
+-- belongs to afterwards; do not assume.
+export pure func googleConfig(
+  clientId: string,
+  clientSecret: string,
+  redirectUri: string,
+  scope: string,
+  loginHint: string
+) -> ClientConfig {
+  {
+    clientId: clientId,
+    clientSecret: clientSecret,
+    authEndpoint: "https://accounts.google.com/o/oauth2/v2/auth",
+    tokenEndpoint: "https://oauth2.googleapis.com/token",
+    redirectUri: redirectUri,
+    scope: scope,
+    loginHint: loginHint
+  }
+}
+
+-- Read a client id/secret from a Cloud console download ("installed" shape).
+export func readInstalledClient(path: string) -> Result[{ id: string, secret: string }, string] ! {FS @limit=5} {
+  if not(fileExists(path)) then Err("no client file at ${path}")
+  else {
+    let raw = readFile(path);
+    match decode(raw) {
+      Ok(doc) => match get(doc, "installed") {
+        Some(inst) => {
+          let cid = match getString(inst, "client_id") { Some(s) => s, None => "" };
+          let sec = match getString(inst, "client_secret") { Some(s) => s, None => "" };
+          if cid == "" then Err("no client_id in ${path}")
+          else Ok({ id: cid, secret: sec })
+        },
+        None => Err("no 'installed' key in ${path} — is this a Desktop app client? A Web client will fail later at the redirect.")
+      },
+      Err(e) => Err("could not parse ${path}: ${e}")
+    }
+  }
+}
+
+-- Build the consent URL to open in a browser.
+--
+-- access_type=offline and prompt=consent are both required to get a refresh
+-- token back. Without them the exchange returns an access token that expires
+-- in an hour and no way to renew it — and the flow otherwise looks like it
+-- worked, which is the expensive part.
+export pure func consentUrl(cfg: ClientConfig) -> string {
+  let q = urlEncodeForm([
+    { name: "client_id", value: cfg.clientId },
+    { name: "redirect_uri", value: cfg.redirectUri },
+    { name: "response_type", value: "code" },
+    { name: "scope", value: cfg.scope },
+    { name: "access_type", value: "offline" },
+    { name: "prompt", value: "consent" },
+    { name: "login_hint", value: cfg.loginHint }
+  ]);
+  "${cfg.authEndpoint}?${q}"
+}
+
+-- Exchange an authorization code for durable credentials.
+export func exchangeCode(cfg: ClientConfig, code: string) -> Result[OAuthCreds, string] ! {Net @limit=1} {
+  let form = urlEncodeForm([
+    { name: "code", value: code },
+    { name: "client_id", value: cfg.clientId },
+    { name: "client_secret", value: cfg.clientSecret },
+    { name: "redirect_uri", value: cfg.redirectUri },
+    { name: "grant_type", value: "authorization_code" }
+  ]);
+  match postFormBody(cfg.tokenEndpoint, form) {
+    Ok(payload) => match getRefresh(payload) {
+      Some(rt) => Ok({ clientId: cfg.clientId, clientSecret: cfg.clientSecret, refreshToken: rt }),
+      None => Err("no refresh_token in the response. The grant already exists — revoke it at myaccount.google.com/permissions and retry, or confirm prompt=consent is set.")
+    },
+    Err(e) => Err(e)
+  }
+}
+
+func getRefresh(payload: string) -> Option[string] {
+  match decode(payload) {
+    Ok(doc) => getString(doc, "refresh_token"),
+    Err(_) => None
+  }
+}
+
+-- Pull the code (or the error) out of a @raw handler's query record.
+-- Returns Err with the provider's own message when the user declines.
+export pure func codeFromQuery(query: Json) -> Result[string, string] {
+  match getString(query, "code") {
+    Some(c) => Ok(c),
+    None => match getString(query, "error") {
+      Some(e) => Err("authorisation declined: ${e}"),
+      None => Err("callback had neither code nor error — open the consent URL first")
+    }
+  }
+}
