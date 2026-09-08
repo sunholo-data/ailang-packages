@@ -1,0 +1,75 @@
+-- sunholo/gmail/api — the effectful half: drafts and sends.
+--
+-- Thin by design. Everything that can be decided without the network lives in
+-- sunholo/gmail/message, which is pure and testable; this module does the two
+-- things that genuinely need Net, and nothing else.
+--
+-- DRAFTS AND SENDS ARE BOTH HERE, AND THE SCOPE CANNOT SEPARATE THEM
+--
+-- Google has no draft-only scope: `gmail.compose` covers creating drafts AND
+-- sending. So "this agent only drafts" is a property of the CALLER, never of the
+-- grant, and a package that offered only `createDraft` would imply a safety it
+-- cannot provide. Both are offered plainly, and the choice is documented as the
+-- caller's to make and to bound.
+--
+-- (Named `api` rather than `send` because `send` is a RESERVED KEYWORD in
+-- AILANG — it cannot appear as a module path segment. The parse error points at
+-- the module line and says so, but only if you read the first error rather than
+-- the cascade after it.)
+--
+-- Sending is the one irreversible thing in this package. A caller sending
+-- unattended wants a per-run cap, a recipient allowlist and a self-reply guard —
+-- none of which belong here, because a limit each caller re-implements is a
+-- limit nobody enforces. Put them in one place at the boundary you control.
+
+module sunholo/gmail/api
+
+import std/net (httpRequest)
+import std/json (decode, getString)
+import std/option (Option, Some, None)
+import std/result (Result, Ok, Err)
+import pkg/sunholo/gmail/message (Message, safeRaw)
+
+func post(url: string, token: string, payload: string) -> Result[string, string] ! {Net @limit=1} {
+  let hdrs = [
+    { name: "Authorization", value: "Bearer ${token}" },
+    { name: "Content-Type", value: "application/json" }
+  ];
+  -- httpRequest is (METHOD, URL, headers, body). Both leading parameters are
+  -- `string`, so swapping them type-checks and fails at runtime as InvalidMethod
+  -- in about a millisecond, reading exactly like a dead network.
+  match httpRequest("POST", url, hdrs, payload) {
+    Ok(resp) =>
+      if resp.ok then
+        match decode(resp.body) {
+          Ok(doc) => match getString(doc, "id") {
+            Some(id) => Ok(id),
+            None => Err("Gmail accepted the request but returned no id: ${resp.body}")
+          },
+          Err(e) => Err("could not parse Gmail's response: ${e}")
+        }
+      else Err("Gmail returned ${show(resp.status)}: ${resp.body}"),
+    -- `show` rather than an exhaustive match: NetError carries variants the docs
+    -- do not list, and matching only the documented ones turns a bad error into
+    -- "no pattern matched".
+    Err(e) => Err("transport: ${show(e)}")
+  }
+}
+
+-- Leave a draft in the mailbox. Reversible: a human reads it and decides.
+export func createDraft(token: string, m: Message) -> Result[string, string] ! {Net @limit=1} {
+  match safeRaw(m) {
+    Ok(raw) => post("https://gmail.googleapis.com/gmail/v1/users/me/drafts", token,
+                    "{\"message\":{\"raw\":\"${raw}\"}}"),
+    Err(e) => Err(e)
+  }
+}
+
+-- Send. There is no recall.
+export func sendMessage(token: string, m: Message) -> Result[string, string] ! {Net @limit=1} {
+  match safeRaw(m) {
+    Ok(raw) => post("https://gmail.googleapis.com/gmail/v1/users/me/messages/send", token,
+                    "{\"raw\":\"${raw}\"}"),
+    Err(e) => Err(e)
+  }
+}

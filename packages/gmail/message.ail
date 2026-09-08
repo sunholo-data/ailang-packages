@@ -1,0 +1,90 @@
+-- sunholo/gmail/message — composing an RFC 5322 message, safely.
+--
+-- The pure half. No network, no credentials, no effects: given strings, produce
+-- the bytes Gmail wants. That separation is the point — this is the part where
+-- a mistake is a security bug, and it is the part a solver can reason about.
+--
+-- THE ATTACK THIS EXISTS TO PREVENT
+--
+-- A header block is terminated by a blank line. A recipient or subject
+-- containing CR or LF therefore does not "look odd" — it ends the headers and
+-- begins a new section, letting a caller forge Bcc, rewrite the From, or append
+-- an entire body of their choosing. If any part of `to` or `subject` comes from
+-- a document, an inbound email or a model, that is a live injection path.
+--
+-- ON THE CONTRACT, AND WHY THERE IS ALSO A RUNTIME CHECK
+--
+-- `buildMessage` carries `requires` clauses stating exactly that. They are
+-- currently SKIPPED by `ailang verify`: string interpolation desugars to `show`,
+-- which Z3 cannot encode, so any function that builds a string is unverifiable
+-- (reported 2026-09-08 as fb_913ee851c83c0d8c). Since `++` is list-only,
+-- interpolation is how strings get built, so this is not avoidable by writing it
+-- differently.
+--
+-- So the contract documents the intent and cannot yet prove it. Shipping that
+-- alone would be claiming a guarantee we have not earned. `safeMessage` returns
+-- a Result and performs the same check at runtime, and it is what callers should
+-- use. When the solver can encode interpolation, the contract becomes the proof
+-- and the runtime check becomes redundant belt-and-braces — at which point this
+-- comment should be revisited rather than quietly left to rot.
+
+module sunholo/gmail/message
+
+import std/string (contains)
+import std/bytes (fromString, toBase64URL)
+import std/result (Result, Ok, Err)
+
+-- A message before encoding. `body` is deliberately unconstrained: newlines in a
+-- body are ordinary and harmless, because the body is everything after the
+-- blank line and cannot escape upward.
+export type Message = {
+  to: string,
+  from: string,
+  subject: string,
+  body: string
+}
+
+-- True when a header VALUE cannot break out of its header.
+export pure func headerSafe(v: string) -> bool {
+  not(contains(v, "\r")) && not(contains(v, "\n"))
+}
+
+-- Compose. The contract states the property; `safeMessage` enforces it.
+export pure func buildMessage(m: Message) -> string
+requires {
+  headerSafe(m.to), headerSafe(m.from), headerSafe(m.subject)
+}
+ensures { contains(result, "\r\n\r\n") }
+{
+  "To: ${m.to}\r\nFrom: ${m.from}\r\nSubject: ${m.subject}\r\nMIME-Version: 1.0\r\nContent-Type: text/plain; charset=UTF-8\r\n\r\n${m.body}"
+}
+
+-- The one callers should use. Refuses rather than composing something dangerous,
+-- and names which field was at fault — a rejection nobody can act on gets
+-- retried with the same input.
+export pure func safeMessage(m: Message) -> Result[string, string] {
+  if not(headerSafe(m.to)) then Err("recipient contains CR or LF — header injection")
+  else if not(headerSafe(m.from)) then Err("from contains CR or LF — header injection")
+  else if not(headerSafe(m.subject)) then Err("subject contains CR or LF — header injection")
+  else if m.to == "" then Err("no recipient")
+  else Ok(buildMessage(m))
+}
+
+-- Gmail's `raw` field is base64url, and rejects standard base64 — the alphabets
+-- differ in two characters, so a message containing the wrong one fails at the
+-- API with an error that does not mention encoding.
+--
+-- Needs AILANG >= 0.35.4: std/bytes.toBase64URL did not exist before it, and the
+-- workaround (toBase64 then replaceMany) is exactly the kind of thing that gets
+-- copied into three packages and subtly wrong in one.
+export pure func encodeRaw(rfc5322: string) -> string {
+  toBase64URL(fromString(rfc5322))
+}
+
+-- Compose and encode in one step, refusing unsafe input.
+export pure func safeRaw(m: Message) -> Result[string, string] {
+  match safeMessage(m) {
+    Ok(s) => Ok(encodeRaw(s)),
+    Err(e) => Err(e)
+  }
+}
