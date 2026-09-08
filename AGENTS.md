@@ -1,10 +1,28 @@
-# AGENTS.md — AILANG Cloud Agent Instructions
+# AILANG package development
 
-This file provides cross-platform instructions for AI coding agents (Claude Code, Gemini CLI, Codex, etc.) when working in AILANG-managed workspaces.
+Read [.agents/skills/ailang-packages/SKILL.md](.agents/skills/ailang-packages/SKILL.md)
+before creating, changing, validating or publishing packages. Start with
+`ailang version` and `ailang docs package-authoring`. Use the installed binary's
+`ailang prompt`, `ailang docs std/<module>` and `ailang pkg-docs <vendor/name>`
+before web research for AILANG. The skill includes an older-binary fallback.
+Read the affected package's `AGENT.md` and `ailang.toml`; each `packages/*` directory
+is an independent package root.
 
-## You Are a Cloud Agent
+Compilation is one check. Include meaningful contracts, native tests/properties,
+effect ceilings and budgets. Run `ailang pkg quality --strict <package-dir>` when
+available and report gaps; source evidence is not a test run or a proof. Use native
+package tests and relevant runtime/integration checks. Reproduce old compiler/test
+bug notes against the installed version before adopting workarounds.
 
-You are running inside a Cloud Run Job, dispatched by the AILANG coordinator. Your task was sent as a message to your inbox and includes a directive describing what to build or change.
+Use path dependencies for local development and registry versions for released
+consumers. `ailang publish --dry-run` checks packaging; it does not establish that
+tests passed or contracts were proved. Report those results separately.
+
+## Coordinator-dispatched jobs only
+
+The remaining instructions apply when the AILANG coordinator dispatched this task
+inside a Cloud Run Job. Local interactive sessions follow the user's requested
+workflow; they are not automatically coordinator jobs.
 
 ## Git Workflow
 
