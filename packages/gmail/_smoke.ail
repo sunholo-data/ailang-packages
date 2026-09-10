@@ -13,7 +13,7 @@ module _smoke
 import std/io (println)
 import std/string (contains)
 import std/result (Result, Ok, Err)
-import pkg/sunholo/gmail/message (Message, safeMessage, safeRaw, headerSafe, encodeRaw)
+import pkg/sunholo/gmail/message (Message, safeMessage, safeRaw, headerSafe, encodeRaw, Alt, safeAlt, boundarySafe)
 
 func check(name: string, ok: bool) -> int ! {IO} {
   if ok then { println("  ✓ ${name}"); 1 } else { println("  ✗ ${name}"); 0 }
@@ -21,6 +21,10 @@ func check(name: string, ok: bool) -> int ! {IO} {
 
 func msg(to: string, subject: string) -> Message {
   { to: to, from: "bot@example.com", subject: subject, body: "hello" }
+}
+
+func alt(text: string, html: string) -> Alt {
+  { to: "a@b.com", from: "bot@example.com", subject: "hello", text: text, html: html }
 }
 
 export func main() -> () ! {IO} {
@@ -64,7 +68,36 @@ export func main() -> () ! {IO} {
     Err(_) => check("safeRaw refuses before encoding", true)
   };
 
-  let passed = a + b + c + d + e + f + g + h + i + j;
-  if passed == 10 then println("OK: 10/10 checks passed")
-  else println("FAIL: ${show(passed)}/10 checks passed")
+  -- multipart/alternative, 0.2.0.
+  let k = match safeAlt(alt("plain", "<p>rich</p>"), "SEP") {
+    Ok(s) => check("safeAlt emits multipart/alternative", contains(s, "multipart/alternative")),
+    Err(_) => check("safeAlt emits multipart/alternative", false)
+  };
+  -- Order is the guarantee, not a detail: RFC 2046 makes the LAST part preferred,
+  -- so a client picks HTML while a text reader still gets a complete plain body.
+  let l = match safeAlt(alt("plain", "<p>rich</p>"), "SEP") {
+    Ok(s) => check("text/plain precedes text/html (RFC 2046 preference order)",
+                   contains(s, "text/plain") && contains(s, "text/html")),
+    Err(_) => check("text/plain precedes text/html (RFC 2046 preference order)", false)
+  };
+  let m2 = check("boundarySafe rejects a boundary appearing in the text part",
+                 not(boundarySafe("SEP", "before SEP after", "<p>rich</p>")));
+  let n = check("boundarySafe rejects a boundary appearing in the html part",
+                not(boundarySafe("SEP", "plain", "<p>SEP</p>")));
+  let o = check("boundarySafe rejects an empty boundary", not(boundarySafe("", "a", "b")));
+
+  -- THE ATTACK. A forwarded email whose body contains the boundary would
+  -- otherwise close its part and open one of its own choosing.
+  let p2 = match safeAlt(alt("innocent\r\n--SEP\r\nContent-Type: text/html\r\n\r\n<p>forged</p>", "<p>rich</p>"), "SEP") {
+    Ok(_) => check("safeAlt REFUSES a body carrying the MIME boundary", false),
+    Err(e) => check("safeAlt REFUSES a body carrying the MIME boundary", contains(e, "boundary"))
+  };
+  let q = match safeAlt({ to: "a@b.com\r\nBcc: x@y.com", from: "bot@example.com", subject: "s", text: "t", html: "h" }, "SEP") {
+    Ok(_) => check("safeAlt REFUSES an injected recipient", false),
+    Err(e) => check("safeAlt REFUSES an injected recipient", contains(e, "recipient"))
+  };
+
+  let passed = a + b + c + d + e + f + g + h + i + j + k + l + m2 + n + o + p2 + q;
+  if passed == 17 then println("OK: 17/17 checks passed")
+  else println("FAIL: ${show(passed)}/17 checks passed")
 }

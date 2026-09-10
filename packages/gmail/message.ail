@@ -30,7 +30,7 @@
 
 module sunholo/gmail/message
 
-import std/string (contains)
+import std/string (contains, concat)
 import std/bytes (fromString, toBase64URL)
 import std/result (Result, Ok, Err)
 
@@ -84,6 +84,76 @@ export pure func encodeRaw(rfc5322: string) -> string {
 -- Compose and encode in one step, refusing unsafe input.
 export pure func safeRaw(m: Message) -> Result[string, string] {
   match safeMessage(m) {
+    Ok(s) => Ok(encodeRaw(s)),
+    Err(e) => Err(e)
+  }
+}
+
+
+-- ---------------------------------------------------------------------------
+-- multipart/alternative — added 0.2.0
+-- ---------------------------------------------------------------------------
+--
+-- Motivated by Daneel, which sends scheduled reports a human actually reads.
+-- buildMessage hardcodes text/plain, so HTML needed a sibling rather than a
+-- flag: the two produce different bytes and have different failure modes, and a
+-- boolean parameter would hide that.
+--
+-- THE ATTACK THIS ADDS A GUARD FOR. A multipart body is delimited by a boundary
+-- string. A part whose CONTENT contains that boundary closes its own part early
+-- and opens another — forging an attachment, or replacing the visible body with
+-- something the composer never wrote. That is CR/LF header injection one layer
+-- down, and it matters more here than in most mailers because these bodies carry
+-- FORWARDED EMAIL: text a stranger chose.
+--
+-- The boundary is safe because it is CHECKED, not because it is hard to guess.
+
+export type Alt = {
+  to: string,
+  from: string,
+  subject: string,
+  text: string,
+  html: string
+}
+
+-- Neither part may contain the delimiter that separates them.
+export pure func boundarySafe(boundary: string, text: string, html: string) -> bool {
+  boundary != "" && not(contains(text, boundary)) && not(contains(html, boundary))
+}
+
+-- Part order is not cosmetic. RFC 2046 says the LAST part is the most-preferred
+-- representation, so text/plain goes first and text/html second: a client that
+-- cannot render HTML shows the plain part, and anything reading the raw message
+-- — including another agent — gets a complete text version rather than tag soup.
+export pure func buildAlt(m: Alt, boundary: string) -> string
+requires {
+  headerSafe(m.to), headerSafe(m.from), headerSafe(m.subject),
+  boundarySafe(boundary, m.text, m.html)
+}
+{
+  concat([
+    "To: ${m.to}\r\nFrom: ${m.from}\r\nSubject: ${m.subject}\r\n",
+    "MIME-Version: 1.0\r\n",
+    "Content-Type: multipart/alternative; boundary=\"${boundary}\"\r\n\r\n",
+    "--${boundary}\r\nContent-Type: text/plain; charset=UTF-8\r\n\r\n${m.text}\r\n",
+    "--${boundary}\r\nContent-Type: text/html; charset=UTF-8\r\n\r\n${m.html}\r\n",
+    "--${boundary}--\r\n"
+  ])
+}
+
+-- The one callers should use. Names which field was at fault, because a refusal
+-- nobody can act on gets retried with the same input.
+export pure func safeAlt(m: Alt, boundary: string) -> Result[string, string] {
+  if not(headerSafe(m.to)) then Err("recipient contains CR or LF — header injection")
+  else if not(headerSafe(m.from)) then Err("from contains CR or LF — header injection")
+  else if not(headerSafe(m.subject)) then Err("subject contains CR or LF — header injection")
+  else if m.to == "" then Err("no recipient")
+  else if not(boundarySafe(boundary, m.text, m.html)) then Err("a body part contains the MIME boundary — part injection")
+  else Ok(buildAlt(m, boundary))
+}
+
+export pure func safeAltRaw(m: Alt, boundary: string) -> Result[string, string] {
+  match safeAlt(m, boundary) {
     Ok(s) => Ok(encodeRaw(s)),
     Err(e) => Err(e)
   }
