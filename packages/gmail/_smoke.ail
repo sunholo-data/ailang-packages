@@ -13,7 +13,7 @@ module _smoke
 import std/io (println)
 import std/string (contains)
 import std/result (Result, Ok, Err)
-import pkg/sunholo/gmail/message (Message, safeMessage, safeRaw, headerSafe, encodeRaw, Alt, safeAlt, boundarySafe)
+import pkg/sunholo/gmail/message (Message, safeMessage, safeRaw, headerSafe, encodeRaw, Alt, safeAlt, boundarySafe, altFrom)
 
 func check(name: string, ok: bool) -> int ! {IO} {
   if ok then { println("  ✓ ${name}"); 1 } else { println("  ✗ ${name}"); 0 }
@@ -97,7 +97,16 @@ export func main() -> () ! {IO} {
     Err(e) => check("safeAlt REFUSES an injected recipient", contains(e, "recipient"))
   };
 
-  let passed = a + b + c + d + e + f + g + h + i + j + k + l + m2 + n + o + p2 + q;
-  if passed == 17 then println("OK: 17/17 checks passed")
-  else println("FAIL: ${show(passed)}/17 checks passed")
+  -- altFrom is the taint gate. The guarantee it carries is a TYPE-level one and
+  -- so cannot be asserted at runtime: a caller passing string<email> into it
+  -- fails to compile. This check only pins that the constructor builds what it
+  -- says; the enforcement is demonstrated by examples/runnable/contracts.
+  let r = match safeAlt(altFrom("a@b.com", "bot@example.com", "s", "plain", "<p>rich</p>"), "SEP") {
+    Ok(s) => check("altFrom builds a well-formed Alt", contains(s, "multipart/alternative")),
+    Err(_) => check("altFrom builds a well-formed Alt", false)
+  };
+
+  let passed = a + b + c + d + e + f + g + h + i + j + k + l + m2 + n + o + p2 + q + r;
+  if passed == 18 then println("OK: 18/18 checks passed")
+  else println("FAIL: ${show(passed)}/18 checks passed")
 }

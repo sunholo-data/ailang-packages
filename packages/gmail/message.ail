@@ -158,3 +158,46 @@ export pure func safeAltRaw(m: Alt, boundary: string) -> Result[string, string] 
     Err(e) => Err(e)
   }
 }
+
+
+-- ---------------------------------------------------------------------------
+-- The taint gate — 0.2.1
+-- ---------------------------------------------------------------------------
+--
+-- AILANG enforces information-flow labels on FUNCTION PARAMETERS. Measured on
+-- v0.36.0, 10 Sept 2026: passing a string<email> to a parameter typed
+-- string{not email} is a TYPE ERROR —
+--
+--   information-flow violation: value labelled <email> reaches parameter "body"
+--   which forbids it (string{not email})
+--
+-- It does NOT enforce on record FIELDS: constructing { body: <email> } where the
+-- field is declared string{not email} compiles clean. So annotating Message.body
+-- or Alt.text would look like a guarantee and provide none.
+--
+-- Hence a constructor, whose parameters carry the refinement.
+--
+-- ⚠️ AND IT DOES NOT YET PROTECT A CALLER IN ANOTHER MODULE. Measured the same
+-- day: the refinement is enforced WITHIN a module and LOST across a module
+-- boundary, local import or registry package alike. So a caller importing this
+-- function can still pass string<email> and compile clean. Filed as issue #1134.
+--
+-- It is shipped anyway, and the reason is worth stating rather than assuming:
+-- the signature is the correct specification, it costs callers nothing, it
+-- documents the intended contract at the point of use, and it starts enforcing
+-- the moment the boundary bug is fixed — with no caller change. What it must NOT
+-- do meanwhile is be described as a guarantee. Until #1134 lands, the protection
+-- against a forwarded body reaching the wire is the CALLER's responsibility.
+--
+-- The direct record literal is still available for callers whose text never came
+-- from a mailbox. That is deliberate: a gate nobody can bypass for legitimate
+-- reasons gets bypassed for illegitimate ones.
+export pure func altFrom(
+  to: string,
+  from: string,
+  subject: string,
+  text: string{not email},
+  html: string{not email}
+) -> Alt {
+  { to: to, from: from, subject: subject, text: text, html: html }
+}
