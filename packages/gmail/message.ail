@@ -31,6 +31,7 @@
 module sunholo/gmail/message
 
 import std/string (contains, concat)
+import std/list (map, foldl, length)
 import std/bytes (fromString, toBase64URL)
 import std/result (Result, Ok, Err)
 
@@ -229,19 +230,41 @@ export pure func altFrom(
 -- IMAGE. A layout that depends on the logo loading is a layout that breaks for
 -- every recipient whose client blocks it.
 
-export type Related = {
-  alt: Alt,
+export type InlinePart = {
   cid: string,          -- referenced from the HTML as cid:<this>
   mimeType: string,     -- e.g. "image/png"
   filename: string,
   b64: string           -- base64, already line-wrapped
 }
 
+export type Related = {
+  alt: Alt,
+  parts: [InlinePart]
+}
+
+-- A part is safe when neither boundary appears in its payload and its
+-- content-id cannot break out of the header it is interpolated into.
+export pure func partSafe(rel: string, alt: string, p: InlinePart) -> bool {
+  not(contains(p.b64, rel)) && not(contains(p.b64, alt)) &&
+  not(contains(p.cid, "\r")) && not(contains(p.cid, "\n")) && p.cid != "" &&
+  not(contains(p.filename, "\r")) && not(contains(p.filename, "\n"))
+}
+
 export pure func relatedSafe(rel: string, alt: string, r: Related) -> bool {
   rel != "" && alt != "" && rel != alt &&
   not(contains(r.alt.text, rel)) && not(contains(r.alt.html, rel)) &&
-  not(contains(r.b64, rel)) && not(contains(r.b64, alt)) &&
-  not(contains(r.cid, "\r")) && not(contains(r.cid, "\n"))
+  foldl(\acc. \p. acc && partSafe(rel, alt, p), true, r.parts)
+}
+
+export pure func renderPart(boundary: string, p: InlinePart) -> string {
+  concat([
+    "--${boundary}\r\n",
+    "Content-Type: ${p.mimeType}\r\n",
+    "Content-Transfer-Encoding: base64\r\n",
+    "Content-ID: <${p.cid}>\r\n",
+    "Content-Disposition: inline; filename=\"${p.filename}\"\r\n\r\n",
+    "${p.b64}\r\n"
+  ])
 }
 
 export pure func buildRelated(r: Related, relBoundary: string, altBoundary: string) -> string
@@ -260,12 +283,7 @@ requires {
     "--${altBoundary}\r\nContent-Type: text/plain; charset=UTF-8\r\n\r\n${r.alt.text}\r\n",
     "--${altBoundary}\r\nContent-Type: text/html; charset=UTF-8\r\n\r\n${r.alt.html}\r\n",
     "--${altBoundary}--\r\n\r\n",
-    "--${relBoundary}\r\n",
-    "Content-Type: ${r.mimeType}\r\n",
-    "Content-Transfer-Encoding: base64\r\n",
-    "Content-ID: <${r.cid}>\r\n",
-    "Content-Disposition: inline; filename=\"${r.filename}\"\r\n\r\n",
-    "${r.b64}\r\n",
+    concat(map(\p. renderPart(relBoundary, p), r.parts)),
     "--${relBoundary}--\r\n"
   ])
 }
@@ -276,7 +294,8 @@ export pure func safeRelated(r: Related, relBoundary: string, altBoundary: strin
   else if not(headerSafe(r.alt.subject)) then Err("subject contains CR or LF — header injection")
   else if r.alt.to == "" then Err("no recipient")
   else if not(boundarySafe(altBoundary, r.alt.text, r.alt.html)) then Err("a body part contains the alternative boundary — part injection")
-  else if not(relatedSafe(relBoundary, altBoundary, r)) then Err("the related boundary is empty, equal to the alternative boundary, or present in a part")
+  else if length(r.parts) == 0 then Err("multipart/related with no inline parts — use safeAlt instead")
+  else if not(relatedSafe(relBoundary, altBoundary, r)) then Err("the related boundary is empty, equal to the alternative boundary, or present in a part, or a content-id contains CR/LF")
   else Ok(buildRelated(r, relBoundary, altBoundary))
 }
 
