@@ -13,7 +13,7 @@ module _smoke
 import std/io (println)
 import std/string (contains)
 import std/result (Result, Ok, Err)
-import pkg/sunholo/gmail/message (Message, safeMessage, safeRaw, headerSafe, encodeRaw, Alt, safeAlt, boundarySafe, altFrom)
+import pkg/sunholo/gmail/message (Message, safeMessage, safeRaw, headerSafe, encodeRaw, Alt, safeAlt, boundarySafe, altFrom, Related, safeRelated, relatedSafe)
 
 func check(name: string, ok: bool) -> int ! {IO} {
   if ok then { println("  ✓ ${name}"); 1 } else { println("  ✗ ${name}"); 0 }
@@ -106,7 +106,29 @@ export func main() -> () ! {IO} {
     Err(_) => check("altFrom builds a well-formed Alt", false)
   };
 
-  let passed = a + b + c + d + e + f + g + h + i + j + k + l + m2 + n + o + p2 + q + r;
-  if passed == 18 then println("OK: 18/18 checks passed")
-  else println("FAIL: ${show(passed)}/18 checks passed")
+  -- multipart/related, 0.3.0. Two boundaries now, and the failure they must
+  -- prevent is one closing the other's section.
+  let rel = { alt: alt("plain", "<img src=\"cid:x\">"), cid: "x", mimeType: "image/png", filename: "x.png", b64: "AAAA" };
+  let s1 = match safeRelated(rel, "REL", "ALT") {
+    Ok(s) => check("safeRelated nests alternative inside related",
+                   contains(s, "multipart/related") && contains(s, "multipart/alternative")),
+    Err(_) => check("safeRelated nests alternative inside related", false)
+  };
+  let s2 = match safeRelated(rel, "REL", "ALT") {
+    Ok(s) => check("safeRelated attaches the image with a Content-ID", contains(s, "Content-ID: <x>")),
+    Err(_) => check("safeRelated attaches the image with a Content-ID", false)
+  };
+  let s3 = check("relatedSafe rejects identical boundaries", not(relatedSafe("SAME", "SAME", rel)));
+  let s4 = check("relatedSafe rejects a boundary inside the base64",
+                 not(relatedSafe("AAAA", "ALT", rel)));
+  let s5 = check("relatedSafe rejects CR in the content-id",
+                 not(relatedSafe("REL", "ALT", { alt: alt("p", "h"), cid: "x\r\nBcc: e@v.com", mimeType: "image/png", filename: "x.png", b64: "AAAA" })));
+  let s6 = match safeRelated(rel, "SAME", "SAME") {
+    Ok(_) => check("safeRelated REFUSES identical boundaries", false),
+    Err(e) => check("safeRelated REFUSES identical boundaries", contains(e, "boundary"))
+  };
+
+  let passed = a + b + c + d + e + f + g + h + i + j + k + l + m2 + n + o + p2 + q + r + s1 + s2 + s3 + s4 + s5 + s6;
+  if passed == 24 then println("OK: 24/24 checks passed")
+  else println("FAIL: ${show(passed)}/24 checks passed")
 }

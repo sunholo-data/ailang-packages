@@ -201,3 +201,88 @@ export pure func altFrom(
 ) -> Alt {
   { to: to, from: from, subject: subject, text: text, html: html }
 }
+
+
+-- ---------------------------------------------------------------------------
+-- multipart/related — inline images, added 0.3.0
+-- ---------------------------------------------------------------------------
+--
+-- An HTML part that references an image needs the image carried WITH it, or the
+-- recipient sees a broken box. Remote URLs are the usual answer and the wrong
+-- one: most clients block them by default, and a remote fetch tells the sender
+-- when a message was opened, which is tracking whether or not it was meant as
+-- tracking.
+--
+-- So the image travels in the message, referenced as cid:<id> from the HTML:
+--
+--   multipart/related
+--     multipart/alternative
+--       text/plain          <- complete, not a stub
+--       text/html           <- <img src="cid:daneel">
+--     image/png             <- Content-ID: <daneel>
+--
+-- TWO boundaries now, and they must differ from each other as well as being
+-- absent from every part. A related-boundary equal to the alternative-boundary
+-- closes the wrong section and the message silently loses its body.
+--
+-- The design rule that survives this: the HTML must remain READABLE WITHOUT THE
+-- IMAGE. A layout that depends on the logo loading is a layout that breaks for
+-- every recipient whose client blocks it.
+
+export type Related = {
+  alt: Alt,
+  cid: string,          -- referenced from the HTML as cid:<this>
+  mimeType: string,     -- e.g. "image/png"
+  filename: string,
+  b64: string           -- base64, already line-wrapped
+}
+
+export pure func relatedSafe(rel: string, alt: string, r: Related) -> bool {
+  rel != "" && alt != "" && rel != alt &&
+  not(contains(r.alt.text, rel)) && not(contains(r.alt.html, rel)) &&
+  not(contains(r.b64, rel)) && not(contains(r.b64, alt)) &&
+  not(contains(r.cid, "\r")) && not(contains(r.cid, "\n"))
+}
+
+export pure func buildRelated(r: Related, relBoundary: string, altBoundary: string) -> string
+requires {
+  headerSafe(r.alt.to), headerSafe(r.alt.from), headerSafe(r.alt.subject),
+  boundarySafe(altBoundary, r.alt.text, r.alt.html),
+  relatedSafe(relBoundary, altBoundary, r)
+}
+{
+  concat([
+    "To: ${r.alt.to}\r\nFrom: ${r.alt.from}\r\nSubject: ${r.alt.subject}\r\n",
+    "MIME-Version: 1.0\r\n",
+    "Content-Type: multipart/related; boundary=\"${relBoundary}\"\r\n\r\n",
+    "--${relBoundary}\r\n",
+    "Content-Type: multipart/alternative; boundary=\"${altBoundary}\"\r\n\r\n",
+    "--${altBoundary}\r\nContent-Type: text/plain; charset=UTF-8\r\n\r\n${r.alt.text}\r\n",
+    "--${altBoundary}\r\nContent-Type: text/html; charset=UTF-8\r\n\r\n${r.alt.html}\r\n",
+    "--${altBoundary}--\r\n\r\n",
+    "--${relBoundary}\r\n",
+    "Content-Type: ${r.mimeType}\r\n",
+    "Content-Transfer-Encoding: base64\r\n",
+    "Content-ID: <${r.cid}>\r\n",
+    "Content-Disposition: inline; filename=\"${r.filename}\"\r\n\r\n",
+    "${r.b64}\r\n",
+    "--${relBoundary}--\r\n"
+  ])
+}
+
+export pure func safeRelated(r: Related, relBoundary: string, altBoundary: string) -> Result[string, string] {
+  if not(headerSafe(r.alt.to)) then Err("recipient contains CR or LF — header injection")
+  else if not(headerSafe(r.alt.from)) then Err("from contains CR or LF — header injection")
+  else if not(headerSafe(r.alt.subject)) then Err("subject contains CR or LF — header injection")
+  else if r.alt.to == "" then Err("no recipient")
+  else if not(boundarySafe(altBoundary, r.alt.text, r.alt.html)) then Err("a body part contains the alternative boundary — part injection")
+  else if not(relatedSafe(relBoundary, altBoundary, r)) then Err("the related boundary is empty, equal to the alternative boundary, or present in a part")
+  else Ok(buildRelated(r, relBoundary, altBoundary))
+}
+
+export pure func safeRelatedRaw(r: Related, relBoundary: string, altBoundary: string) -> Result[string, string] {
+  match safeRelated(r, relBoundary, altBoundary) {
+    Ok(s) => Ok(encodeRaw(s)),
+    Err(e) => Err(e)
+  }
+}
