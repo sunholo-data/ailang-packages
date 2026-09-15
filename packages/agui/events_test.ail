@@ -1,0 +1,140 @@
+-- Native tests for sunholo/agui/events.
+--
+-- Offline only: pure codecs and sequential-run validation against the AG-UI
+-- core subset. Sequence legality mirrors the narrower sequential profile
+-- documented in AGENT.md; full AG-UI traces are out of scope for v0.1.
+
+module sunholo/agui/events_test
+
+import std/json (decode, encode, getString, get, jo, kv, js, jint)
+import std/option (Some, None, getOrElse)
+import std/result (Result, Ok, Err, isOk, isErr)
+import std/string (join, concat, startsWith, endsWith, length as strLength)
+import std/list (map, length as listLength)
+import pkg/sunholo/agui/events (RunStarted, RunFinished, RunError, TextStart, TextContent, TextEnd, ToolStart, ToolArgs, ToolEnd, ToolResult, StateSnapshot, Custom, eventName, eventJson, encodeEvent, jsonLines, sseFrame, decodeEvent, validateRun)
+
+pure func isError[a, b](r: Result[a, b]) -> bool = match r { Err(_) => true, Ok(_) => false }
+
+-- Round-trip through the string encoding: decode(encode(e)) re-encodes to the
+-- original bytes. ADT equality is not relied on; re-encoding is compared instead.
+test "encode/decode round-trip preserves lifecycle events" {
+  match decodeEvent(encodeEvent(RunStarted("t1", "r1"))) {
+    Err(_) => false,
+    Ok(e) => encodeEvent(e) == encodeEvent(RunStarted("t1", "r1"))
+  } &&
+  match decodeEvent(encodeEvent(RunFinished("t1", "r1"))) {
+    Err(_) => false,
+    Ok(e) => encodeEvent(e) == encodeEvent(RunFinished("t1", "r1"))
+  } &&
+  match decodeEvent(encodeEvent(RunError("boom"))) {
+    Err(_) => false,
+    Ok(e) => encodeEvent(e) == encodeEvent(RunError("boom"))
+  }
+}
+
+test "encode/decode round-trip preserves text and tool streams" {
+  match decodeEvent(encodeEvent(TextStart("m1"))) { Err(_) => false, Ok(e) => encodeEvent(e) == encodeEvent(TextStart("m1")) } &&
+  match decodeEvent(encodeEvent(TextContent("m1", "hello"))) { Err(_) => false, Ok(e) => encodeEvent(e) == encodeEvent(TextContent("m1", "hello")) } &&
+  match decodeEvent(encodeEvent(TextEnd("m1"))) { Err(_) => false, Ok(e) => encodeEvent(e) == encodeEvent(TextEnd("m1")) } &&
+  match decodeEvent(encodeEvent(ToolStart("c1", "search"))) { Err(_) => false, Ok(e) => encodeEvent(e) == encodeEvent(ToolStart("c1", "search")) } &&
+  match decodeEvent(encodeEvent(ToolArgs("c1", "{\"q\":1}"))) { Err(_) => false, Ok(e) => encodeEvent(e) == encodeEvent(ToolArgs("c1", "{\"q\":1}")) } &&
+  match decodeEvent(encodeEvent(ToolEnd("c1"))) { Err(_) => false, Ok(e) => encodeEvent(e) == encodeEvent(ToolEnd("c1")) } &&
+  match decodeEvent(encodeEvent(ToolResult("m9", "c1", "done"))) { Err(_) => false, Ok(e) => encodeEvent(e) == encodeEvent(ToolResult("m9", "c1", "done")) }
+}
+
+test "encode/decode round-trip preserves state and custom events" {
+  let snapshot = jo([kv("step", js("plan"))]);
+  match decodeEvent(encodeEvent(StateSnapshot(snapshot))) {
+    Err(_) => false,
+    Ok(e) => match e { StateSnapshot(v) => encode(v) == encode(snapshot), _ => false }
+  } &&
+  match decodeEvent(encodeEvent(Custom("tag", snapshot))) {
+    Err(_) => false,
+    Ok(e) => match e { Custom(n, v) => n == "tag" && encode(v) == encode(snapshot), _ => false }
+  }
+}
+
+test "eventJson carries the canonical type discriminator" {
+  eventName(RunStarted("t", "r")) == "RUN_STARTED" &&
+  eventName(TextContent("m", "d")) == "TEXT_MESSAGE_CONTENT" &&
+  eventName(ToolResult("m", "c", "x")) == "TOOL_CALL_RESULT" &&
+  eventName(StateSnapshot(jo([]))) == "STATE_SNAPSHOT" &&
+  eventName(Custom("n", jo([]))) == "CUSTOM" &&
+  getOrElse(getString(eventJson(RunStarted("t", "r")), "type"), "") == "RUN_STARTED" &&
+  getOrElse(getString(eventJson(TextStart("m")), "role"), "") == "assistant" &&
+  getOrElse(getString(eventJson(ToolResult("m", "c", "x")), "role"), "") == "tool"
+}
+
+test "decoder rejects malformed and unsupported payloads" {
+  isErr(decodeEvent("not json")) &&
+  isErr(decodeEvent("{}")) &&
+  isErr(decodeEvent("{\"type\":\"UNKNOWN_KIND\"}")) &&
+  isErr(decodeEvent("{\"type\":\"RUN_STARTED\"}")) &&
+  isErr(decodeEvent("{\"type\":\"RUN_STARTED\",\"threadId\":\"t\"}")) &&
+  isErr(decodeEvent("{\"type\":\"TEXT_MESSAGE_START\",\"messageId\":\"m1\"}")) &&
+  isErr(decodeEvent("{\"type\":\"TOOL_CALL_START\",\"toolCallId\":\"c1\",\"toolCallName\":\"\"}")) &&
+  isErr(decodeEvent("{\"type\":\"RUN_ERROR\"}"))
+}
+
+test "decoder preserves assistant role requirement and deltas" {
+  match decodeEvent("{\"type\":\"TEXT_MESSAGE_START\",\"messageId\":\"m1\",\"role\":\"assistant\"}") {
+    Err(_) => false, Ok(e) => match e { TextStart(id) => id == "m1", _ => false }
+  } &&
+  match decodeEvent("{\"type\":\"TEXT_MESSAGE_CONTENT\",\"messageId\":\"m1\",\"delta\":\"hello\"}") {
+    Err(_) => false, Ok(e) => match e { TextContent(id, d) => id == "m1" && d == "hello", _ => false }
+  } &&
+  isErr(decodeEvent("{\"type\":\"TEXT_MESSAGE_START\",\"messageId\":\"m1\",\"role\":\"user\"}"))
+}
+
+test "jsonLines joins with newline separators" {
+  jsonLines([]) == "" &&
+  jsonLines([RunError("x")]) == encodeEvent(RunError("x")) &&
+  jsonLines([TextStart("m"), TextEnd("m")]) == concat([encodeEvent(TextStart("m")), "\n", encodeEvent(TextEnd("m"))])
+}
+
+test "sseFrame wraps the encoded event" {
+  startsWith(sseFrame(RunError("x")), "data: ") && endsWith(sseFrame(RunError("x")), "\n\n")
+}
+
+test "validateRun accepts a well-formed sequential run" {
+  isOk(validateRun([
+    RunStarted("t1", "r1"),
+    TextStart("m1"), TextContent("m1", "Hi"), TextEnd("m1"),
+    ToolStart("c1", "search"), ToolArgs("c1", "{\"q\":\"x\"}"), ToolEnd("c1"),
+    ToolResult("m2", "c1", "found"),
+    RunFinished("t1", "r1")
+  ]))
+}
+
+test "validateRun accepts runs with interleaved state and custom events" {
+  isOk(validateRun([
+    RunStarted("t1", "r1"),
+    StateSnapshot(jo([kv("n", jint(1))])),
+    Custom("tag", jo([kv("k", js("v"))])),
+    TextStart("m1"), TextContent("m1", "Hi"), TextEnd("m1"),
+    RunFinished("t1", "r1")
+  ]))
+}
+
+test "validateRun rejects malformed sequences" {
+  isErr(validateRun([])) &&
+  isErr(validateRun([RunFinished("t", "r")])) &&
+  isErr(validateRun([TextStart("m"), RunFinished("t", "r")])) &&
+  isErr(validateRun([RunStarted("", "r"), RunFinished("", "r")])) &&
+  isErr(validateRun([RunStarted("t", "r")])) &&
+  isErr(validateRun([RunStarted("t", "r"), RunStarted("t", "r"), RunFinished("t", "r")])) &&
+  isErr(validateRun([RunStarted("t", "r"), TextStart("m"), RunFinished("t", "r")])) &&
+  isErr(validateRun([RunStarted("t", "r"), TextStart("m1"), TextContent("m2", "x"), TextEnd("m2"), RunFinished("t", "r")]))
+}
+
+test "validateRun requires complete JSON tool arguments before results" {
+  isErr(validateRun([RunStarted("t", "r"), ToolStart("c", "q"), ToolArgs("c", "{\"partial\":}"), ToolEnd("c"), ToolResult("m", "c", "r"), RunFinished("t", "r")])) &&
+  isErr(validateRun([RunStarted("t", "r"), ToolStart("c", "q"), ToolResult("m", "c", "r"), RunFinished("t", "r")])) &&
+  isErr(validateRun([RunStarted("t", "r"), ToolStart("c", "q"), ToolEnd("c"), RunFinished("t", "r")])) &&
+  isOk(validateRun([RunStarted("t", "r"), ToolStart("c", "q"), ToolArgs("c", "{\"q\":1}"), ToolEnd("c"), ToolResult("m", "c", "r"), RunFinished("t", "r")]))
+}
+
+test "validateRun allows error to terminate a run" {
+  isOk(validateRun([RunStarted("t", "r"), RunError("boom")])) &&
+  isErr(validateRun([RunStarted("t", "r"), RunError("boom"), TextStart("m")]))
+}

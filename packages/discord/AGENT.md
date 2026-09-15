@@ -24,7 +24,7 @@ Exports in `sunholo/discord/client`:
 | sendMessage(token, channelId, text, replyTo, nonce) | Text or reply; mentions disabled; optional nonce dedup |
 | validId(id), messagePath(...), messageBody(...) | Pure request validation/building |
 | responseJson(status, headers, body) | Pure response classification |
-| parseMessage(json), parseMessages(array), messageJson(message) | Typed message codecs |
+| parseMessage(json), parseMessages(array), parseChannels(array), messageJson(message) | Typed message codecs |
 | problem(kind, message), errorJson(error) | Structured errors |
 
 `DiscordMessage` stores IDs as strings, author identity/name, content, timestamp,
@@ -39,6 +39,25 @@ the caller; there is no sleeping or automatic retry. Network errors on POST mean
 unknown outcome. Reconcile before retrying. Discord nonce dedup is time-limited and
 is not a durable exactly-once guarantee.
 
-Validate: `ailang check --package .`. Cross-package runtime and upstream protocol
-checks live in `ailang-demos/discord/tests/`; run `npm test` in that demo after
-`ailang lock` and `npm ci`. No live credentials are used in that suite.
+Validation (2026-09-15, AILANG dev + `pkg quality` on `build/package-authoring-followups`):
+
+- `ailang check --package .`: clean.
+- `ailang test --package .`: 22 native tests, 22 passed, 0 failed, 0 skipped. Offline
+  only; no network, no credentials.
+- `ailang test client.ail --allow-skips`: 18 contract-derived property cases pass with
+  100 generated cases each. 4 skips, all structural: 3 × no generator for the imported
+  `std/json` `Json` type (parseChannels/parseMessage/parseMessages ensures), 1 ×
+  out-of-contract `requires { i >= 0 }` on `digits` (random negative samples are
+  correctly discarded). 0 failures.
+- `ailang verify client.ail`: 1 proved (`problem`), 12 skipped — Z3 has no encoding for
+  `trim`/`charAt`/`toLower`/`stringToFloat`, string interpolation (`show`), or callees
+  returning `Option`/`Result`. 0 counterexamples, 0 unknown. Contracts are also
+  executed as runtime properties (above), which is the primary behavioral evidence.
+- `ailang pkg quality --strict .`: 0 declaration gaps (22 native tests, 22 contract
+  clauses, `@limit=1` on all six `Net` functions, each performing exactly one request).
+- Explicit `properties [...]` (forall) blocks are not used: the forall lowering is
+  broken upstream (core #624). Runtime property evidence comes from `ensures` clauses.
+
+Cross-package runtime and upstream protocol checks live in `ailang-demos/discord/tests/`;
+run `npm test` in that demo after `ailang lock` and `npm ci`. No live credentials are
+used in that suite.

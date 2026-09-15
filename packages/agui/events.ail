@@ -2,16 +2,31 @@ module sunholo/agui/events
 
 import std/json (Json, encode, decode, getString, get, jo, kv, js)
 import std/option (Some, None, getOrElse)
-import std/result (Result, Ok, Err)
-import std/list (map)
-import std/string (join)
+import std/result (Result, Ok, Err, isOk, isErr)
+import std/list (map, length as listLength)
+import std/string (join, startsWith, endsWith)
 
 export type Event = RunStarted(string, string) | RunFinished(string, string) | RunError(string)
   | TextStart(string) | TextContent(string, string) | TextEnd(string)
   | ToolStart(string, string) | ToolArgs(string, string) | ToolEnd(string)
   | ToolResult(string, string, string) | StateSnapshot(Json) | Custom(string, Json)
 
-export pure func eventJson(e: Event) -> Json = match e {
+-- Canonical AG-UI type discriminator for each supported variant.
+export pure func eventName(e: Event) -> string
+ensures { result != "" }
+{
+  match e {
+    RunStarted(_, _) => "RUN_STARTED", RunFinished(_, _) => "RUN_FINISHED", RunError(_) => "RUN_ERROR",
+    TextStart(_) => "TEXT_MESSAGE_START", TextContent(_, _) => "TEXT_MESSAGE_CONTENT", TextEnd(_) => "TEXT_MESSAGE_END",
+    ToolStart(_, _) => "TOOL_CALL_START", ToolArgs(_, _) => "TOOL_CALL_ARGS", ToolEnd(_) => "TOOL_CALL_END",
+    ToolResult(_, _, _) => "TOOL_CALL_RESULT", StateSnapshot(_) => "STATE_SNAPSHOT", Custom(_, _) => "CUSTOM"
+  }
+}
+
+export pure func eventJson(e: Event) -> Json
+ensures { getOrElse(getString(result, "type"), "") == eventName(e) }
+{
+  match e {
   RunStarted(threadId, runId) => jo([kv("type", js("RUN_STARTED")), kv("threadId", js(threadId)), kv("runId", js(runId))]),
   RunFinished(threadId, runId) => jo([kv("type", js("RUN_FINISHED")), kv("threadId", js(threadId)), kv("runId", js(runId))]),
   RunError(message) => jo([kv("type", js("RUN_ERROR")), kv("message", js(message))]),
@@ -24,15 +39,33 @@ export pure func eventJson(e: Event) -> Json = match e {
   ToolResult(messageId, id, content) => jo([kv("type", js("TOOL_CALL_RESULT")), kv("messageId", js(messageId)), kv("toolCallId", js(id)), kv("content", js(content)), kv("role", js("tool"))]),
   StateSnapshot(snapshot) => jo([kv("type", js("STATE_SNAPSHOT")), kv("snapshot", snapshot)]),
   Custom(name, value) => jo([kv("type", js("CUSTOM")), kv("name", js(name)), kv("value", value)])
+  }
 }
 
-export pure func encodeEvent(e: Event) -> string = encode(eventJson(e))
-export pure func jsonLines(events: [Event]) -> string = join("\n", map(encodeEvent, events))
-export pure func sseFrame(e: Event) -> string = "data: ${encodeEvent(e)}\n\n"
+export pure func encodeEvent(e: Event) -> string
+ensures { startsWith(result, "{") && endsWith(result, "}") }
+{
+  encode(eventJson(e))
+}
+
+export pure func jsonLines(events: [Event]) -> string
+ensures { listLength(events) != 0 || result == "" }
+{
+  join("\n", map(encodeEvent, events))
+}
+
+export pure func sseFrame(e: Event) -> string
+ensures { startsWith(result, "data: ") && endsWith(result, "\n\n") }
+{
+  "data: ${encodeEvent(e)}\n\n"
+}
 
 -- Decoder deliberately rejects unsupported event variants; it does not silently
 -- convert unknown events to a supported type. Metadata is not round-tripped in v0.1.
-export pure func decodeEvent(raw: string) -> Result[Event, string] = match decode(raw) {
+export pure func decodeEvent(raw: string) -> Result[Event, string]
+ensures { isOk(decode(raw)) || isErr(result) }
+{
+  match decode(raw) {
   Err(_) => Err("Malformed AG-UI JSON"), Ok(j) => {
     let kind = getOrElse(getString(j, "type"), "");
     let id = getOrElse(getString(j, "messageId"), "");
@@ -53,17 +86,25 @@ export pure func decodeEvent(raw: string) -> Result[Event, string] = match decod
     else if kind == "CUSTOM" && getOrElse(getString(j, "name"), "") != "" then match get(j, "value") {Some(s) => Ok(Custom(getOrElse(getString(j, "name"), ""), s)), None => Err("Missing custom value")}
     else Err("Unsupported or malformed AG-UI event: ${kind}")
   }
+  }
 }
 
 -- A single sequential run: no overlapping messages/tools. This is a deliberately
 -- narrower profile than AG-UI itself. ToolEnd closes arguments, NOT tool execution.
-export pure func validateRun(events: [Event]) -> Result[(), string] = match events {
+export pure func validateRun(events: [Event]) -> Result[(), string]
+ensures { listLength(events) != 0 || isErr(result) }
+{
+  match events {
   RunStarted(threadId, runId) :: rest =>
     if threadId == "" || runId == "" then Err("Empty run identity") else walk(rest, threadId, runId, "", "", false, ""),
   _ => Err("Run must begin with RUN_STARTED")
+  }
 }
 
-pure func walk(events: [Event], threadId: string, runId: string, textId: string, toolId: string, argsEnded: bool, args: string) -> Result[(), string] = match events {
+pure func walk(events: [Event], threadId: string, runId: string, textId: string, toolId: string, argsEnded: bool, args: string) -> Result[(), string]
+ensures { listLength(events) != 0 || isErr(result) }
+{
+  match events {
   [] => Err("Run missing terminal event"),
   event :: rest => match event {
     RunStarted(_, _) => Err("Nested run in sequential profile"),
@@ -79,5 +120,6 @@ pure func walk(events: [Event], threadId: string, runId: string, textId: string,
     ToolResult(messageId, id, _) => if messageId == "" || toolId == "" || id != toolId || not argsEnded then Err("Tool result without completed arguments") else walk(rest, threadId, runId, textId, "", false, ""),
     StateSnapshot(_) => walk(rest, threadId, runId, textId, toolId, argsEnded, args),
     Custom(_, _) => walk(rest, threadId, runId, textId, toolId, argsEnded, args)
+  }
   }
 }

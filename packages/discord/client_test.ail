@@ -1,0 +1,206 @@
+-- Native tests for sunholo/discord/client.
+--
+-- Offline only: no network, no credentials, no live Discord calls.
+-- Covers valid, invalid and boundary behavior for the pure surface.
+-- Effectful entry points (request/identity/channels/read*/send) are exercised
+-- by the demo integration suite and otherwise need live credentials.
+
+module sunholo/discord/client_test
+
+import std/json (Json, encode, decode, getString, getInt, getBool, getArray, getObject, jo, kv, js, ja, jb, jint)
+import std/option (Some, None, getOrElse)
+import std/result (Result, Ok, Err, isOk, isErr)
+import std/string (length)
+import std/list (length as listLength)
+import pkg/sunholo/discord/client (DiscordError, DiscordMessage, validId, problem, messagePath, messageBody, errorJson, responseJson, parseMessage, parseMessages, parseChannels, messageJson)
+
+pure func isError[a, b](r: Result[a, b]) -> bool = match r { Err(_) => true, Ok(_) => false }
+
+-- Complete message payload: content "hello", reply reference 31, one mention.
+pure func sampleMessage(id: string, channelId: string, authorId: string) -> Json =
+  jo([kv("id", js(id)), kv("channel_id", js(channelId)),
+    kv("author", jo([kv("id", js(authorId)), kv("username", js("alice"))])),
+    kv("content", js("hello")), kv("timestamp", js("2026-09-08T00:00:00Z")),
+    kv("message_reference", jo([kv("message_id", js("31"))])),
+    kv("mentions", ja([jo([kv("id", js("88"))])]))])
+
+-- Message payload without content/mention/reference, content overridable.
+pure func sparseMessage(id: string, channelId: string, authorId: string, content: string) -> Json =
+  jo([kv("id", js(id)), kv("channel_id", js(channelId)),
+    kv("author", jo([kv("id", js(authorId)), kv("username", js("alice"))])),
+    kv("content", js(content)), kv("timestamp", js("2026-09-08T00:00:00Z"))])
+
+pure func zeroMessage() -> DiscordMessage =
+  {id: "", channelId: "", authorId: "", authorName: "", content: "", timestamp: "", replyTo: "", mentions: []}
+
+
+test "validId accepts decimal snowflakes" {
+  validId("123") && validId("18446744073709551615") && validId("1000")
+}
+
+test "validId rejects unsafe identifiers" {
+  not validId("") && not validId("0") && not validId("01") &&
+  not validId("123/../456") && not validId("-1") && not validId("12 3") &&
+  not validId("184467440737095516150")
+}
+
+test "problem preserves kind and message with zeroed transport fields" {
+  let e = problem("validation", "bad input");
+  e.kind == "validation" && e.message == "bad input" && e.status == 0 && e.code == 0 && not e.global
+}
+
+test "messagePath encodes valid queries" {
+  match messagePath("123", {limit: 50, before: "", after: ""}) { Ok(p) => p == "/channels/123/messages?limit=50", Err(_) => false } &&
+  match messagePath("123", {limit: 1, before: "999", after: ""}) { Ok(p) => p == "/channels/123/messages?limit=1&before=999", Err(_) => false } &&
+  match messagePath("123", {limit: 100, before: "", after: "5"}) { Ok(p) => p == "/channels/123/messages?limit=100&after=5", Err(_) => false }
+}
+
+test "messagePath boundary limits" {
+  not isError(messagePath("123", {limit: 1, before: "", after: ""})) &&
+  not isError(messagePath("123", {limit: 100, before: "", after: ""})) &&
+  isError(messagePath("123", {limit: 0, before: "", after: ""})) &&
+  isError(messagePath("123", {limit: 101, before: "", after: ""}))
+}
+
+test "messagePath rejects unsafe ids and conflicting cursors" {
+  isError(messagePath("0", {limit: 50, before: "", after: ""})) &&
+  isError(messagePath("123/../x", {limit: 50, before: "", after: ""})) &&
+  isError(messagePath("123", {limit: 50, before: "111", after: "112"})) &&
+  isError(messagePath("123", {limit: 50, before: "abc", after: ""})) &&
+  isError(messagePath("123", {limit: 50, before: "", after: "x/1"}))
+}
+
+test "messageBody accepts 1..2000 characters" {
+  isOk(messageBody("Hello @everyone", "111", "123")) &&
+  isOk(messageBody("x", "", "")) &&
+  isOk(messageBody("     padded     ", "", ""))
+}
+
+test "messageBody rejects empty, oversized, bad reply and long nonce" {
+  isError(messageBody("", "", "")) &&
+  isError(messageBody("   ", "", "")) &&
+  isError(messageBody("ok", "abc", "")) &&
+  isError(messageBody("ok", "111/../", "")) &&
+  isError(messageBody("ok", "", "12345678901234567890123456"))
+}
+
+test "messageBody payload embeds content, reply reference and nonce" {
+  match messageBody("Hi", "555", "777") {
+    Err(_) => false,
+    Ok(raw) => match decode(raw) {
+      Err(_) => false,
+      Ok(j) => getOrElse(getString(j, "content"), "") == "Hi" &&
+        getOrElse(getString(getOrElse(getObject(j, "message_reference"), jo([])), "message_id"), "") == "555" &&
+        getOrElse(getString(j, "nonce"), "") == "777" &&
+        getOrElse(getBool(j, "enforce_nonce"), false)
+    }
+  }
+}
+
+test "messageBody suppresses pings on outgoing messages" {
+  match messageBody("Hi", "", "") {
+    Err(_) => false,
+    Ok(raw) => match decode(raw) {
+      Err(_) => false,
+      Ok(j) => match getArray(getOrElse(getObject(j, "allowed_mentions"), jo([])), "parse") {
+        Some(xs) => listLength(xs) == 0,
+        None => false
+      }
+    }
+  }
+}
+
+test "errorJson round-trips kind, message and status" {
+  let e = problem("validation", "boom");
+  match decode(encode(errorJson(e))) {
+    Err(_) => false,
+    Ok(j) => getOrElse(getString(j, "kind"), "") == "validation" &&
+      getOrElse(getString(j, "message"), "") == "boom" &&
+      getOrElse(getInt(j, "status"), -1) == 0
+  }
+}
+
+test "responseJson accepts 2xx payloads" {
+  match responseJson(200, [], "{\"id\":\"42\"}") { Ok(_) => true, Err(_) => false }
+}
+
+test "responseJson classifies HTTP errors without echoing bodies" {
+  let rate = match responseJson(429, [], "{\"retry_after\":1.5,\"global\":true,\"code\":0}") {
+    Err(e) => e.kind == "rate_limit" && e.retryAfter == 1.5 && e.global, Ok(_) => false };
+  let auth = match responseJson(401, [], "{\"token\":\"secret-value\"}") {
+    Err(e) => e.kind == "authentication" && e.message == "Discord HTTP 401", Ok(_) => false };
+  let perm = match responseJson(403, [], "{\"message\":\"secret echoed by remote\"}") {
+    Err(e) => e.kind == "permission" && e.message == "Discord HTTP 403", Ok(_) => false };
+  let plain = match responseJson(500, [], "anything") { Err(e) => e.kind == "http", Ok(_) => false };
+  rate && auth && perm && plain
+}
+
+test "responseJson rejects malformed 2xx JSON" {
+  isError(responseJson(200, [], "not JSON"))
+}
+
+test "responseJson falls back to the retry-after header" {
+  match responseJson(429, [{name: "Retry-After", value: "2.5"}], "{}") {
+    Err(e) => e.retryAfter == 2.5 && not e.global, Ok(_) => false
+  }
+}
+
+test "parseMessage accepts a complete message payload" {
+  match parseMessage(sampleMessage("42", "300", "77")) {
+    Err(_) => false,
+    Ok(m) => m.id == "42" && m.channelId == "300" && m.authorId == "77" && m.authorName == "alice" &&
+      m.content == "hello" && m.timestamp == "2026-09-08T00:00:00Z" && m.replyTo == "31" && listLength(m.mentions) == 1
+  }
+}
+
+test "parseMessage rejects malformed payloads" {
+  isError(parseMessage(jo([]))) &&
+  isError(parseMessage(sparseMessage("", "300", "77", "hello"))) &&
+  isError(parseMessage(sparseMessage("42", "0", "77", "hello"))) &&
+  isError(parseMessage(jo([kv("id", js("42")), kv("channel_id", js("300")),
+    kv("author", jo([kv("id", js("77")), kv("username", js("alice"))])),
+    kv("timestamp", js("2026-09-08T00:00:00Z"))]))) &&
+  isError(parseMessage(sparseMessage("42", "300", "0", "hello")))
+}
+
+test "parseMessages accepts pages and preserves order" {
+  match parseMessages([sampleMessage("1", "310", "2"), sampleMessage("10", "310", "2")]) {
+    Err(_) => false,
+    Ok(ms) => match ms {
+      [] => false,
+      first :: rest => match rest {
+        [] => false,
+        second :: _ => first.id == "1" && second.id == "10" && listLength(ms) == 2
+      }
+    }
+  }
+}
+
+test "parseMessages rejects pages with any malformed element" {
+  isError(parseMessages([sampleMessage("1", "310", "2"), jo([])]))
+}
+
+test "parseChannels accepts well-formed channel arrays" {
+  match parseChannels([jo([kv("id", js("1")), kv("name", js("general")), kv("type", jint(0))]),
+                       jo([kv("id", js("22")), kv("name", js("dev")), kv("type", jint(0))])]) {
+    Err(_) => false,
+    Ok(cs) => listLength(cs) == 2 && (match cs { [] => false, c1 :: rest => match rest {
+      [] => false, c2 :: _ => c1.id == "1" && c1.name == "general" && c1.kind == 0 && c2.id == "22" } })
+  }
+}
+
+test "parseChannels rejects invalid channel objects" {
+  isError(parseChannels([jo([kv("id", js("bad")), kv("name", js("x")), kv("type", jint(0))])])) &&
+  isError(parseChannels([jo([kv("id", js("1")), kv("name", js("x")), kv("type", jint(-1))])]))
+}
+
+test "messageJson preserves message identity and references" {
+  let m = match parseMessage(sampleMessage("42", "300", "77")) {
+    Err(_) => zeroMessage(), Ok(v) => v
+  };
+  match decode(encode(messageJson(m))) {
+    Err(_) => false,
+    Ok(j) => getOrElse(getString(j, "id"), "") == "42" && getOrElse(getString(j, "content"), "") == "hello" &&
+      getOrElse(getString(getOrElse(getObject(j, "message_reference"), jo([])), "message_id"), "") == "31"
+  }
+}
