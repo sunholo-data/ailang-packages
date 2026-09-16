@@ -9,7 +9,7 @@ Read the affected package's `AGENT.md` and `ailang.toml`; each `packages/*` dire
 is an independent package root.
 
 Compilation is one check. Include meaningful contracts, native tests/properties,
-effect ceilings and budgets. Run `ailang pkg quality --strict <package-dir>` when
+effect ceilings and budgets. Run `ailang pkg quality --strict <package-dir>` — NOT YET SHIPPED in any ailang binary (`unknown pkg command 'quality'` as of v0.39.0); skip it rather than report it as blocked — when
 available and report gaps; source evidence is not a test run or a proof. Use native
 package tests and relevant runtime/integration checks. Reproduce old compiler/test
 bug notes against the installed version before adopting workarounds.
