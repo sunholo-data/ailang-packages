@@ -141,7 +141,7 @@ To add a package:
 7. Declare max effects in `[effects].max`
 8. Add `ai_summary` in `[metadata]` for agent discovery
 9. Write `AGENT.md` with usage guide for AI agents
-10. **Validate**: `ailang lock`, `ailang check --package .`, `ailang test --package .`, and `ailang pkg quality --strict .` (requires a binary with the quality command). Run inline tests in their source files too; package test discovery targets `*_test.ail` files. Review actual test counts and skips.
+10. **Validate**: `ailang lock`, `ailang check --package .`, `ailang test --package .`, and `ailang pkg quality --strict .` (**not in any shipped binary as of v0.39.0** — `unknown pkg command 'quality'`; skip until it lands). Run inline tests in their source files too; package test discovery targets `*_test.ail` files. Review actual test counts and skips.
 11. Add meaningful `requires`/`ensures`, native tests/properties, and effect budgets where applicable. A quality inventory reports evidence gaps; it does not execute tests or prove contracts.
 12. Test with `ailang add --path` or `ailang add --git` from a test project
 

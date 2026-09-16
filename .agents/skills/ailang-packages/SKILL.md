@@ -31,7 +31,7 @@ From the package root, run `ailang lock`, `ailang check --package .`, and
 counts and skips. Add relevant runtime/integration checks and contract verification;
 report compile, test, proof and live-service outcomes separately.
 
-Run `ailang pkg quality --strict .` (or `--json` for automation) when supported.
+Run `ailang pkg quality --strict .` (or `--json` for automation) when supported — it is NOT in any shipped binary as of v0.39.0 (`unknown pkg command 'quality'`); skip it, do not report it as a blocker.
 This is a static evidence inventory, not test execution or proof. Report missing
 evidence and tool limitations explicitly; a passing compiler is not completion.
 For older binaries, review contracts, native tests/properties, effects/budgets and
