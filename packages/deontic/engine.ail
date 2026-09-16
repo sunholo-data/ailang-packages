@@ -52,7 +52,7 @@ import std/string (substring, length, endsWith)
 import ./types (Event, Deliver, Pay, AmendPrice, ForceMajeure, Notice, Waive, Terminate,
                 Suspend, Resume, AsOf, AttributedDelay,
                 Term, NoTerm, TermAt, SuspWindow, SuspW, Attribution, Attr,
-                Policy, State, aGet, aSet, hasStr)
+                Policy, State, aGet, aHas, aSet, hasStr)
 import ./settle (penaltyFor, interestFor, interestPerDiem, daysLateAt, netOf)
 
 -- ---------------------------------------------------------------- events --
@@ -72,7 +72,7 @@ func extendFm(dls: [(string, int)], delivered: [(string, int)], d1: int, d2: int
     p :: rest => match p {
       (id, dl) => {
         let span = d2 - d1 + 1;
-        let ndl = if dl >= d1 && dl <= d2 && aGet(delivered, id) < 0 then dl + span else dl;
+        let ndl = if dl >= d1 && dl <= d2 && not aHas(delivered, id) then dl + span else dl;
         (id, ndl) :: extendFm(rest, delivered, d1, d2)
       }
     }
@@ -86,7 +86,7 @@ func extendUndelivered(dls: [(string, int)], delivered: [(string, int)], span: i
     [] => [],
     p :: rest => match p {
       (id, dl) => {
-        let ndl = if aGet(delivered, id) < 0 then dl + span else dl;
+        let ndl = if not aHas(delivered, id) then dl + span else dl;
         (id, ndl) :: extendUndelivered(rest, delivered, span)
       }
     }
@@ -94,6 +94,13 @@ func extendUndelivered(dls: [(string, int)], delivered: [(string, int)], span: i
 }
 
 -- The day an open suspension began, or -1 if performance is running.
+export pure func hasOpenSusp(ws: [SuspWindow]) -> bool {
+  match ws {
+    [] => false,
+    w :: rest => match w { SuspW(r) => if r.to < 0 then true else hasOpenSusp(rest) }
+  }
+}
+
 export pure func openSuspFrom(ws: [SuspWindow]) -> int {
   match ws {
     [] => -1,
@@ -137,8 +144,7 @@ export pure func applyEvent(pol: Policy, s: State, ev: Event) -> State {
     Suspend(day, by) => (match findGrounds(pol, s, s.notices, day) {
       NoTerm => s,
       TermAt(_, _, g) => {
-        let already = openSuspFrom(s.susps);
-        if already >= 0 then s
+        if hasOpenSusp(s.susps) then s
         else {
           let w = SuspW({ from: day, to: -1, by: by, grounds: g });
           let ns = concat(s.susps, [w]);
@@ -147,16 +153,16 @@ export pure func applyEvent(pol: Policy, s: State, ev: Event) -> State {
       }
     }),
     Resume(day) => {
-      let from = openSuspFrom(s.susps);
-      if from < 0 then s
+      if not hasOpenSusp(s.susps) then s
       else {
+        let from = openSuspFrom(s.susps);
         let span = day - from;
         let nd = extendUndelivered(s.dls, s.delivered, span);
         let nw = closeSusps(s.susps, day);
         { s | dls: nd, susps: nw }
       }
     },
-    AsOf(day) => ({ s | asOf: day }),
+    AsOf(day) => ({ s | hasAsOf: true, asOf: day }),
     AttributedDelay(_, d1, d2, cause) => {
       let nd = extendFm(s.dls, s.delivered, d1, d2);
       let a = Attr({ from: d1, to: d2, span: d2 - d1 + 1, cause: cause });
@@ -171,8 +177,9 @@ export pure func applyEvent(pol: Policy, s: State, ev: Event) -> State {
 -- "<id>-delivery" cures by delivering within the window.
 export pure func isCured(pol: Policy, s: State, bid: string, nday: int) -> bool {
   let id = obligationOf(bid);
+  let done = if isPaymentBreach(bid) then aHas(s.paid, id) else aHas(s.delivered, id);
   let d = if isPaymentBreach(bid) then aGet(s.paid, id) else aGet(s.delivered, id);
-  d >= 0 && d <= nday + pol.cureDays
+  done && d <= nday + pol.cureDays
 }
 
 func findGrounds(pol: Policy, s: State, notices: [(string, int)], day: int) -> Term {
@@ -208,23 +215,34 @@ export pure func interestDue(pol: Policy, price: int, daysLate: int) -> int {
 -- ---------------------------------------------------------------- report --
 
 func termDay(t: Term) -> int {
-  match t { NoTerm => -1, TermAt(d, _, _) => d }
+  match t { NoTerm => 0, TermAt(d, _, _) => d }
 }
+
+func isTerminated(t: Term) -> bool {
+  match t { NoTerm => false, TermAt(_, _, _) => true }
+}
+
+-- Is the contract valued at all? Separate from WHEN, because a valuation day
+-- may legitimately be negative.
+func hasValuation(s: State) -> bool = s.hasAsOf || isTerminated(s.term)
 
 -- The date outstanding money is valued at: an explicit AsOf if one was
 -- supplied, otherwise the termination day, otherwise unvalued.
 func valuationDay(s: State) -> int {
-  if s.asOf >= 0 then s.asOf else termDay(s.term)
+  if s.hasAsOf then s.asOf else termDay(s.term)
 }
 
 func breachLine(pol: Policy, s: State, id: string, what: string) -> string {
   let bid = "${id}-${what}";
   if hasStr(s.waived, bid) then "${id} ${what} breach: WAIVED"
   else {
+    if not aHas(s.notices, bid) then ""
+    else {
     let nday = aGet(s.notices, bid);
-    if nday < 0 then ""
+    if false then ""
     else if isCured(pol, s, bid, nday) then "${id} ${what} breach: CURED"
     else "${id} ${what} breach: UNCURED"
+    }
   }
 }
 
@@ -246,15 +264,25 @@ func obligationReport(pol: Policy, s: State, id: string) -> ([string], (int, int
   let dDay = aGet(s.delivered, id);
   let tday = termDay(s.term);
   let vday = valuationDay(s);
-  let breaches = keepNonEmpty([breachLine(pol, s, id, "delivery"), breachLine(pol, s, id, "payment")]);
-  if dDay >= 0 then {
+  let valued = hasValuation(s);
+  let terminated = isTerminated(s.term);
+  -- A zero-price obligation has no payment leg at all. Reporting one leaves a
+  -- permanently OUTSTANDING line with principal=0 that nothing can discharge,
+  -- because no caller emits Pay for nothing. Pure performance obligations are
+  -- ordinary outside contracts — a decision that must be settled by a date owes
+  -- no money — and the engine is useful there only if it stays quiet about it.
+  let paysMoney = price != 0;
+  let breaches = keepNonEmpty([breachLine(pol, s, id, "delivery"),
+                               if paysMoney then breachLine(pol, s, id, "payment") else ""]);
+  if aHas(s.delivered, id) then {
     let late = daysLateAt(dDay, dl);
     let pen = penaltyFor(late, pol.penPerDay, pol.penCap);
     let penOwed = if hasStr(s.waived, "${id}-delivery") then 0 else pen;
     let dLine = "${id} delivery: DELIVERED day=${show(dDay)} late=${show(late)} penalty=${show(pen)}";
     let due = dDay + pol.payWithin;
     let pDay = aGet(s.paid, id);
-    if pDay >= 0 then {
+    if not paysMoney then (concat([dLine], breaches), (penOwed, 0))
+    else if aHas(s.paid, id) then {
       let lateP = daysLateAt(pDay, due);
       let interest = interestDue(pol, price, lateP);
       let intOwed = if hasStr(s.waived, "${id}-payment") then 0 else interest;
@@ -263,8 +291,8 @@ func obligationReport(pol: Policy, s: State, id: string) -> ([string], (int, int
     } else {
       -- Delivered and unpaid. The price is earned and stays owed whether or
       -- not the contract was terminated; only the future cancels.
-      let status = if tday >= 0 then "OUTSTANDING (survives termination)" else "OUTSTANDING";
-      if vday >= 0 then {
+      let status = if terminated then "OUTSTANDING (survives termination)" else "OUTSTANDING";
+      if valued then {
         let lateP = daysLateAt(vday, due);
         let interest = interestDue(pol, price, lateP);
         let intOwed = if hasStr(s.waived, "${id}-payment") then 0 else interest;
@@ -276,19 +304,20 @@ func obligationReport(pol: Policy, s: State, id: string) -> ([string], (int, int
       }
     }
   } else {
-    if tday >= 0 then {
+    if terminated then {
       let lateDays = daysLateAt(tday - 1, dl);
       let pen = penaltyFor(lateDays, pol.penPerDay, pol.penCap);
       let penOwed = if hasStr(s.waived, "${id}-delivery") then 0 else pen;
       let dLine = "${id} delivery: CANCELLED late_days=${show(lateDays)} penalty=${show(pen)}";
-      (concat([dLine, "${id} payment: CANCELLED"], breaches), (penOwed, 0))
+      let cancelLines = if paysMoney then [dLine, "${id} payment: CANCELLED"] else [dLine];
+      (concat(cancelLines, breaches), (penOwed, 0))
     } else {
       -- Undelivered and still running. Silent unless somebody has valued the
       -- contract, because "not yet delivered" is not news; overdue is.
       let sFrom = openSuspFrom(s.susps);
-      if sFrom >= 0 then
+      if hasOpenSusp(s.susps) then
         (concat(["${id} delivery: SUSPENDED since=${show(sFrom)} deadline_held=${show(dl)}"], breaches), (0, 0))
-      else if vday >= 0 && vday > dl then {
+      else if valued && vday > dl then {
         let lateDays = daysLateAt(vday, dl);
         let pen = penaltyFor(lateDays, pol.penPerDay, pol.penCap);
         let penOwed = if hasStr(s.waived, "${id}-delivery") then 0 else pen;

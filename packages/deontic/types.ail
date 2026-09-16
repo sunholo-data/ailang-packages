@@ -88,6 +88,9 @@ export type State = {
   notices: [(string, int)],
   waived: [string],
   term: Term,
+  -- asOf is a signed day like any other, so its presence needs its own flag
+  -- rather than a negative sentinel.
+  hasAsOf: bool,
   asOf: int,
   susps: [SuspWindow],
   attributions: [Attribution]
@@ -97,7 +100,7 @@ export type State = {
 export pure func initState(obligations: [(string, int, int)]) -> State {
   { dls: dlsOf(obligations), prs: prsOf(obligations),
     delivered: [], paid: [], notices: [], waived: [], term: NoTerm,
-    asOf: -1, susps: [], attributions: [] }
+    hasAsOf: false, asOf: 0, susps: [], attributions: [] }
 }
 
 pure func dlsOf(xs: [(string, int, int)]) -> [(string, int)] {
@@ -115,6 +118,20 @@ pure func prsOf(xs: [(string, int, int)]) -> [(string, int)] {
 }
 
 -- Association-list helpers shared by the engine.
+--
+-- aGet returns -1 when the key is absent, which is fine as long as nobody
+-- confuses that with a stored -1. Days are signed: any model anchored partway
+-- through an engagement has obligations that fell due BEFORE day 0, and those
+-- carry negative deadlines and negative delivery days. So presence is asked
+-- with aHas and only then read with aGet. Testing `aGet(...) >= 0` to mean
+-- "present" silently turns a met obligation into a breach.
+export pure func aHas(xs: [(string, int)], k: string) -> bool {
+  match xs {
+    [] => false,
+    p :: rest => match p { (n, _) => if n == k then true else aHas(rest, k) }
+  }
+}
+
 export pure func aGet(xs: [(string, int)], k: string) -> int {
   match xs {
     [] => -1,

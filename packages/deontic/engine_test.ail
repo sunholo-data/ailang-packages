@@ -202,3 +202,38 @@ test "attributed delay extends deadlines and records whose delay it was" {
     containsLine(report(p0(), s, ["M1"]),
       "delay: [5..25] +21d to undelivered deadlines — cause: Customer: inputs not supplied")
 }
+
+-- ── 0.3.0 · signed days, and obligations that owe no money ──────────────────
+--
+-- Both regressions came from the same habit: reading a negative integer as
+-- "absent". Days are signed — any model anchored partway through an engagement
+-- has obligations that fell due before day 0 — so presence must be asked
+-- separately from value.
+
+test "a delivery before day zero is recorded, not read as never delivered" {
+  let s = runEvents(p0(), initState([("X", -12, 0)]), [Deliver(-12, "X"), AsOf(10)]);
+  containsLine(report(p0(), s, ["X"]), "X delivery: DELIVERED day=-12 late=0 penalty=0")
+}
+
+test "lateness on a negative deadline is measured from the deadline, not the epoch" {
+  let s = runEvents(p0(), initState([("Z", -12, 0)]), [Deliver(-5, "Z"), AsOf(10)]);
+  containsLine(report(p0(), s, ["Z"]), "Z delivery: DELIVERED day=-5 late=7 penalty=0")
+}
+
+test "a negative AsOf values the contract rather than falling through to termination" {
+  let s = runEvents(p0(), initState([("W", -40, 0)]), [AsOf(-20)]);
+  containsLine(report(p0(), s, ["W"]), "W delivery: OVERDUE as_of=-20 late=20 penalty=0")
+}
+
+test "a zero-price obligation reports no payment leg" {
+  let s = runEvents(p0(), initState([("N", 10, 0)]), [Deliver(10, "N"), AsOf(40)]);
+  let r = report(p0(), s, ["N"]);
+  containsLine(r, "N delivery: DELIVERED day=10 late=0 penalty=0")
+    && not containsLine(r, "N payment: OUTSTANDING as_of=40 due=20 late=20 principal=0 interest=0")
+}
+
+test "a priced obligation still reports its payment leg" {
+  let s = runEvents(p0(), initState([("P", 10, 50000)]), [Deliver(10, "P"), AsOf(40)]);
+  containsLine(report(p0(), s, ["P"]),
+    "P payment: OUTSTANDING as_of=40 due=20 late=20 principal=50000 interest=273")
+}

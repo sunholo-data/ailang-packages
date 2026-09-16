@@ -1,9 +1,9 @@
 [package]
 name = "sunholo/deontic"
-version = "0.2.0"
+version = "0.3.0"
 edition = "1"
 ailang = ">=0.28.0"
-description = "Verified deontic reasoning engine: obligations, notice-and-cure, waiver, suspension, force majeure, attributed delay, amendment, termination — a pure event fold with Z3-contracted settlement arithmetic, per-diem or period interest, and earned money that survives termination"
+description = "Verified obligation engine: obligations with deadlines, notice-and-cure, waiver, suspension, force majeure, attributed delay, amendment, termination — a pure event fold with Z3-contracted settlement arithmetic. Signed days throughout, and zero-price obligations are pure performance obligations with no payment leg, so non-financial domains work too"
 license = "Apache-2.0"
 
 [exports]
@@ -13,8 +13,8 @@ modules = ["sunholo/deontic/types", "sunholo/deontic/settle", "sunholo/deontic/e
 max = ["IO"]  # exports are all pure; IO is used only by the wave5_demo gate — shrinking this to [] makes even the demo println fail at the manifest ceiling
 
 [metadata]
-tags = ["contracts", "deontic", "legal", "verification", "z3"]
-ai_summary = "Pure contract-reasoning engine (obligations, cure windows, waivers, suspension/resume, force majeure, attributed delay, termination cascade) with Z3-provable settlement math including per-diem statutory interest; outstanding principal is reported and survives termination; consumers supply events and print the report under their own capabilities"
+tags = ["contracts", "deontic", "legal", "verification", "z3", "obligations", "scheduling"]
+ai_summary = "Pure obligation-reasoning engine (obligations, cure windows, waivers, suspension/resume, force majeure, attributed delay, termination cascade) with Z3-provable settlement math including per-diem statutory interest; outstanding principal is reported and survives termination. Days are signed, so obligations falling due before the model epoch work correctly; an obligation priced at 0 has no payment leg, which makes the engine usable for non-financial deadlines such as decisions that must be settled by a date. It has NO permission or prohibition modality — it answers who owes what by when, not what anyone may do"
 repository = "https://github.com/sunholo-data/ailang-packages/tree/main/packages/deontic"
 homepage = "https://ailang.sunholo.com/docs/packages/sunholo/deontic"
 license_url = "https://github.com/sunholo-data/ailang-packages/blob/main/LICENSE"

@@ -10,6 +10,40 @@ Extracted and generalized from the AILANG frontier-benchmark campaign
 (wave 5, `legal_obligation_engine`), whose output is cross-validated
 byte-for-byte against an independent Python implementation.
 
+## 0.3.0 — signed days, and obligations that owe no money
+
+Two defects, both from the same habit: **reading a negative integer as "absent"**.
+Found by pointing the engine at a non-financial domain — a decision map, where a
+named party must settle a named question by a date. Filed as
+`inbox_1789540546802_9866535b`.
+
+**A `Deliver` at a negative day was silently dropped.** Identical obligations
+delivered exactly on their deadline reported `DELIVERED late=0` at day 12 and
+`OVERDUE late=22` at day −12. Any model anchored partway through an engagement
+has obligations that fell due before day 0, and those carry negative deadlines;
+the engine turned a met obligation into a breach, with no error. Presence is now
+asked with `aHas` and read with `aGet`, and `State.hasAsOf` separates *was the
+contract valued* from *when*. Lateness on a negative deadline is now measured
+from the deadline rather than the epoch.
+
+**A zero-price obligation emitted a payment leg that could never discharge** —
+`principal=0, interest=0`, permanently `OUTSTANDING`, because no caller emits
+`Pay` for nothing. An obligation priced at `0` is now a **pure performance
+obligation**: no payment line, no payment breach, no accrual. That is what makes
+non-financial use possible — *this must be done by this date, and here is what
+follows if it is not* — which is most obligations outside a contract.
+
+Breaking for anyone constructing `State` by hand (`hasAsOf` is new) or relying on
+a payment line for a free obligation. `initState` callers are unaffected. All
+sixteen previous tests and every published figure in this README are unchanged;
+five regression tests added.
+
+**What it still does not do**, and neither is planned: there is **no permission
+or prohibition modality** — no operator for *may*, so it cannot detect conflicts
+between norms or enumerate what is undetermined. And obligations are independent,
+so `AttributedDelay` moves every undelivered deadline uniformly; it cannot say
+*A slipping puts B out of reach*. Both want a constraint solver, not a fold.
+
 ## Why this exists (the four moats)
 
 1. **Illegal states are unrepresentable.** Events, termination outcomes and
