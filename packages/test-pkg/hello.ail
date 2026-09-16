@@ -1,10 +1,19 @@
 module sunholo/test_pkg/hello
 
+import std/string (toUpper, join)
+import std/list (map)
+
 -- Minimal test module for integration testing.
 -- Used by the coordinator package update pipeline tests.
 
 export func greet(name: string, suffix: string) -> string =
   "Hello, ${name}${suffix}"
+
+export func shout(name: string) -> string =
+  toUpper(greet(name, "!"))
+
+export func greetAll(names: [string]) -> string =
+  join(" ", map(\n. greet(n, "."), names))
 
 -- M-PKG-CASCADE-DETERMINISTIC-FIRST class C smoke: removed `version` export.
 -- This forces change_class=C (export removed) → wrapper skips deterministic
