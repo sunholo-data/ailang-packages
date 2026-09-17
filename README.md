@@ -141,8 +141,8 @@ To add a package:
 7. Declare max effects in `[effects].max`
 8. Add `ai_summary` in `[metadata]` for agent discovery
 9. Write `AGENT.md` with usage guide for AI agents
-10. **Validate**: `ailang lock`, `ailang check --package .`, `ailang test --package .`, and `ailang pkg quality --strict .` (**not in any shipped binary as of v0.39.0** — `unknown pkg command 'quality'`; skip until it lands). Run inline tests in their source files too; package test discovery targets `*_test.ail` files. Review actual test counts and skips.
-11. Add meaningful `requires`/`ensures`, native tests/properties, and effect budgets where applicable. A quality inventory reports evidence gaps; it does not execute tests or prove contracts.
+10. **Validate**: `ailang lock`, then `ailang pkg quality .` — the report the registry validator runs on upload (compile, Z3 contracts, interface identity, effects, release description, docs, pure ratio) plus your tests and `_smoke.ail` executed locally. `--strict` makes warnings block; exit 2 means `ailang publish` will refuse. Run inline tests in their source files too (`ailang test path/to/module.ail`); package test discovery targets `*_test.ail`. Review the printed counts, including `PUB016` (contracts Z3 could not encode — not proofs).
+11. Add meaningful `requires`/`ensures`, native tests/properties, and effect budgets where applicable. Add a `## <version>` section to `CHANGELOG.md` and `[release] kind` (gates from ailang v0.41.0), and `[metadata] repository` = this package's GitHub tree URL (the `pkg:<name>` inbox agent is derived from it).
 12. Test with `ailang add --path` or `ailang add --git` from a test project
 
 ### Critical Conventions

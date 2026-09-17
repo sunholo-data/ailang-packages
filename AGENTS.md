@@ -9,14 +9,30 @@ Read the affected package's `AGENT.md` and `ailang.toml`; each `packages/*` dire
 is an independent package root.
 
 Compilation is one check. Include meaningful contracts, native tests/properties,
-effect ceilings and budgets. Run `ailang pkg quality --strict <package-dir>` — NOT YET SHIPPED in any ailang binary (`unknown pkg command 'quality'` as of v0.39.0); skip it rather than report it as blocked — when
-available and report gaps; source evidence is not a test run or a proof. Use native
-package tests and relevant runtime/integration checks. Reproduce old compiler/test
-bug notes against the installed version before adopting workarounds.
+effect ceilings and budgets. Run `ailang pkg quality .` (shipped 2026-09-17, ailang
+after v0.39.5; older binaries answer `unknown pkg command 'quality'` — upgrade, do not
+skip) and report what it says, section by section. It runs the SAME report the registry
+validator runs on upload: compile, Z3 contracts (`verified/total` — and `PUB016` counts
+contracts Z3 could not encode, which are runtime assertions, not proofs), interface
+identity, effects, release description, docs, pure-export ratio — plus tests and
+`_smoke.ail`, which it EXECUTES on your machine (the validator never does; it banks
+them as attested). `--json` for automation, `--strict` to make warn-level badges
+block, `--no-run` to skip executing tests/smoke. Exit 2 = a `PUBnnn` gate that
+`ailang publish` will refuse on. Source evidence is not a test run or a proof; a report
+line is. Reproduce old compiler/test bug notes against the installed version before
+adopting workarounds.
+
+Every version describes itself: a non-empty `## <version>` section in `CHANGELOG.md`
+and `[release] kind = security|fix|feature|breaking` in `ailang.toml` (badges
+`PUB001`/`PUB002` now, publish gates from ailang v0.41.0). Set `[metadata] repository`
+to the package's GitHub tree URL (`https://github.com/sunholo-data/ailang-packages/tree/main/packages/<dir>`)
+— the `pkg:<name>` agent inbox is derived from it; without it nothing serves the inbox
+(`PUB021`).
 
 Use path dependencies for local development and registry versions for released
-consumers. `ailang publish --dry-run` checks packaging; it does not establish that
-tests passed or contracts were proved. Report those results separately.
+consumers. `ailang publish --dry-run` runs the quality report and refuses on the same
+gates the validator would, then previews the tarball; `--dry-run` still does not
+contact the validator.
 
 ## Coordinator-dispatched jobs only
 

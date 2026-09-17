@@ -90,7 +90,7 @@ upstream AG-UI's A2UI middleware; consumers register a compatible catalog.
 - `ailang test --package .` — 13 native tests, zero skips.
 - `ailang run -caps IO --entry main _smoke.ail` — 10/10 boot checks (run
   automatically by `ailang publish`).
-- `ailang pkg quality --strict .` — 0 declaration gaps.
+- `ailang pkg quality --strict .` — 19/19 tests, smoke ✓, 12 contracts (all Z3-skipped: runtime assertions); open gates: CHANGELOG section, `[release] kind`, `[metadata] repository`.
 - The demo additionally validates every emitted event against pinned
   `@ag-ui/core` 0.0.59.
 - Specification: https://docs.ag-ui.com/concepts/events

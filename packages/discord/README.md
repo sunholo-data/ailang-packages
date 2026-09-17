@@ -102,6 +102,6 @@ a durable exactly-once guarantee.
 - `ailang test --package .` — 22 native tests, zero skips.
 - `ailang run -caps IO --entry main _smoke.ail` — 12/12 boot checks (run
   automatically by `ailang publish`).
-- `ailang pkg quality --strict .` — 0 declaration gaps.
+- `ailang pkg quality --strict .` — 29/29 tests, smoke ✓, 1/21 contracts proved (19 Z3-skipped: runtime assertions); open gates: 10 uncontracted exports, CHANGELOG section, `[release] kind`, `[metadata] repository`.
 - Upstream protocol checks live in `ailang-demos/discord` (`npm test`), which
   additionally validates live behavior and the MCP tool surface.

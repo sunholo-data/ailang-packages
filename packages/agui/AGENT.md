@@ -54,8 +54,14 @@ Validation (2026-09-15, AILANG dev + `pkg quality` on `build/package-authoring-f
   the `Json` ADT sort, `std/json.encode`/`decode`, string interpolation (`show`), or
   callees returning `Option`/`Result`. 0 counterexamples. Behavioral evidence is the
   13 native tests plus the runtime property above.
-- `ailang pkg quality --strict .`: 0 declaration gaps (13 native tests, 8 contract
-  clauses, zero-effect ceiling preserved).
+- `ailang pkg quality --strict .` (2026-09-17, the shipped command — the 2026-09-15 line
+  above came from a branch prototype): compile ✓ 5 files · contracts 0/12 verified,
+  12 skipped by Z3 (`PUB016`, unencodable `Json`/string builtins — runtime assertions,
+  not proofs) · interface v2 24 signatures · effects `[IO]` · 8/8 exported funcs pure ·
+  tests 19/19 in 2 files · smoke ✓. Under `--strict` three gates: `PUB001` (no
+  `## 0.2.1` CHANGELOG section), `PUB002` (no `[release] kind`), `PUB021` (no
+  `[metadata] repository` → no `pkg:sunholo/agui` inbox agent). Fix all three on the
+  next release.
 - Explicit `properties [...]` (forall) blocks are not used: the forall lowering is
   broken upstream (core #624).
 
