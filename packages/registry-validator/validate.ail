@@ -17,7 +17,7 @@ module sunholo/registry_validator/validate
 import std/fs (readFile, fileExists, listDir)
 import std/json (encode, jo, kv, js, jb, jnum, ja)
 import std/string (endsWith, contains, split, trim, length as strlen)
-import std/list (map, filter, foldl, concat)
+import std/list (map, filter, foldlE, concat)
 import std/math (intToFloat)
 import std/list as List
 import std/option (Option, Some, None, getOrElse)
@@ -54,7 +54,7 @@ export pure func isAilFile(filename: string) -> bool
 -- Does a TOML line contain a field assignment?
 export pure func isFieldLine(line: string, key: string) -> bool
   ensures { result == true || result == false }
-= contains(line, key ++ " =") || contains(line, key ++ "=")
+= contains(line, "${key} =") || contains(line, "${key}=")
 
 -- Negate a boolean (helper for contracts)
 pure func negate(b: bool) -> bool = if b then false else true
@@ -67,13 +67,13 @@ pure func negate(b: bool) -> bool = if b then false else true
 -- Validate a package at the given directory path.
 -- Returns JSON string with validation results.
 export func validatePackage(packageDir: string) -> string ! {IO, FS} {
-  let manifestPath = packageDir ++ "/ailang.toml";
+  let manifestPath = "${packageDir}/ailang.toml";
   let manifestFound = fileExists(manifestPath);
   if manifestFound
   then validateWithManifest(packageDir, manifestPath)
   else encode(jo([
     kv("valid", jb(false)),
-    kv("errors", ja([js("ailang.toml not found at " ++ manifestPath)]))
+    kv("errors", ja([js("ailang.toml not found at ${manifestPath}")]))
   ]))
 }
 
@@ -101,7 +101,7 @@ func validateWithManifest(packageDir: string, manifestPath: string) -> string ! 
     else {
       let parts = split(name, "/");
       if List.length(parts) != 2
-      then ["[package].name must be vendor/name format, got: " ++ name]
+      then ["[package].name must be vendor/name format, got: ${name}"]
       else []
     };
 
@@ -109,12 +109,12 @@ func validateWithManifest(packageDir: string, manifestPath: string) -> string ! 
   let rootFiles = listDir(packageDir);
   let ailFiles = filter(func(f: string) -> bool { isAilFile(f) }, rootFiles);
 
-  let srcPath = packageDir ++ "/src";
+  let srcPath = "${packageDir}/src";
   let srcExists = fileExists(srcPath);
   let srcFiles = if srcExists
     then {
       let sf = listDir(srcPath);
-      map(func(f: string) -> string { "src/" ++ f }, filter(func(f: string) -> bool { isAilFile(f) }, sf))
+      map(func(f: string) -> string { "src/${f}" }, filter(func(f: string) -> bool { isAilFile(f) }, sf))
     }
     else [];
   let allAilFiles = concat(ailFiles, srcFiles);
@@ -124,11 +124,11 @@ func validateWithManifest(packageDir: string, manifestPath: string) -> string ! 
     else [];
 
   -- Check AGENT.md
-  let hasAgent = fileExists(packageDir ++ "/AGENT.md");
+  let hasAgent = fileExists("${packageDir}/AGENT.md");
 
   -- Compute hashes (effectful — reads files)
   let contentHash = computeHash(packageDir, allAilFiles);
-  let ifaceHash = "sha256:" ++ sha256Hex("name:" ++ name ++ "\nedition:" ++ edition);
+  let ifaceHash = "sha256:${sha256Hex("name:${name}\nedition:${edition}")}";
 
   let allErrors = concat(concat(fieldErrors, nameErrors), fileErrors);
   let isValid = List.length(allErrors) == 0;
@@ -150,11 +150,11 @@ func validateWithManifest(packageDir: string, manifestPath: string) -> string ! 
 
 -- Compute SHA-256 content hash from sorted .ail file contents
 func computeHash(dir: string, files: [string]) -> string ! {FS} {
-  let combined = foldl(func(acc: string, f: string) -> string ! {FS} {
-    let c = readFile(dir ++ "/" ++ f);
-    acc ++ "file:" ++ f ++ "\n" ++ c
+  let combined = foldlE(func(acc: string, f: string) -> string ! {FS} {
+    let c = readFile("${dir}/${f}");
+    "${acc}file:${f}\n${c}"
   }, "", files);
-  "sha256:" ++ sha256Hex(combined)
+  "sha256:${sha256Hex(combined)}"
 }
 
 -- ============================================================
