@@ -52,6 +52,16 @@ export func main() -> () ! {IO} {
     Ok(_) => check("safeMessage REFUSES an injected subject", false),
     Err(m) => check("safeMessage REFUSES an injected subject", contains(m, "subject"))
   };
+  -- RFC 2047 (0.4.1): a non-ASCII subject goes on the wire as encoded words, all
+  -- ASCII; an ASCII subject is untouched. The em dash that arrived as "Ã¢Â€Â”".
+  let ew = match safeMessage(msg("a@b.com", "LinkedIn posting — decisions needed")) {
+    Ok(s) => check("a non-ASCII subject is sent as =?UTF-8?B?…?= encoded words", contains(s, "Subject: =?UTF-8?B?") && not(contains(s, "—"))),
+    Err(_) => check("a non-ASCII subject is sent as =?UTF-8?B?…?= encoded words", false)
+  };
+  let ea = match safeMessage(msg("a@b.com", "Answer [DNL-34c00c]")) {
+    Ok(s) => check("an ASCII subject is untouched", contains(s, "Subject: Answer [DNL-34c00c]\r\n")),
+    Err(_) => check("an ASCII subject is untouched", false)
+  };
   let h = match safeMessage(msg("", "hello")) {
     Ok(_) => check("safeMessage refuses an empty recipient", false),
     Err(_) => check("safeMessage refuses an empty recipient", true)
