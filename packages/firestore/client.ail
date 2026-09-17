@@ -158,13 +158,17 @@ export func docExists(collection: string, docId: string) -> Result[bool, string]
 --
 -- Returns a list of {name, fields} objects. Each "name" is the full document
 -- path and "fields" is the document's field data.
--- Returns empty list if collection is empty.
+-- Returns empty list if collection is empty. Firestore omits the
+-- "documents" field in the list response when the collection has no
+-- documents, so the empty-Ok fallback is the by-spec result, not a
+-- swallowed error.
 --
 -- Example:
 --   match listDocs("api_keys", 100) {
 --     Ok(docs) => -- docs is a Json array of document objects
 --     Err(e) => -- error
 --   }
+@allow_empty_ok("Firestore's documents:runQuery/list response omits the documents field entirely when the collection is empty; an empty array is the populated-by-spec result, not a masked failure")
 export func listDocs(collection: string, pageSize: int) -> Result[Json, string] ! {Net, FS, Env} =
   match baseUrl() {
     Err(e) => Err(e),

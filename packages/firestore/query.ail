@@ -167,7 +167,11 @@ func parseQueryResponse(body: string) -> Result[[{id: string, fields: Json}], st
     Err(e) => Err("JSON decode error: ${e}"),
     Ok(json) =>
       match asArray(json) {
-        None => Ok([]),
+        None =>
+          -- A runQuery response body must be a JSON array of result
+          -- entries. Anything else is a malformed response; report it
+          -- instead of masking it as an empty result set.
+          Err("Firestore query response is not a result array"),
         Some(results) => Ok(extractDocs(results))
       }
   }
