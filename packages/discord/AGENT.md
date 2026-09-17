@@ -7,7 +7,7 @@ declares IO solely for the offline `_smoke.ail` boot gate (`ailang run -caps IO
 --entry main _smoke.ail`); no library module uses IO. Never pass a bot token as an MCP tool
 argument. Guild membership of a human user does not imply bot channel access.
 
-Install: `ailang install sunholo/discord@0.1.0`, then
+Install: `ailang install sunholo/discord@0.2.0`, then
 `import pkg/sunholo/discord/client (...)`. Consumer programs need `--caps Net`
 for the effectful entry points; the pure codecs run with no capabilities. Full
 quickstart, pagination pattern and error-kind table: package README.md and
@@ -30,9 +30,14 @@ Exports in `sunholo/discord/client`:
 | readMessages(token, channelId, query) | One page, limit 1..100, exclusive before/after cursors |
 | readMessage(token, channelId, messageId) | One message, useful for read-back |
 | sendMessage(token, channelId, text, replyTo, nonce) | Text or reply; mentions disabled; optional nonce dedup |
+| editMessage(token, channelId, messageId, text) | PATCH content on an existing message; reply reference untouched |
+| typing(token, channelId) | Typing indicator (~10s); 204 No Content handled, any 2xx is success |
+| startThread(token, channelId, messageId, name) | Start a thread from a message; returns the thread channel |
+| activeThreads(token, channelId) | Active threads of a channel (response {threads, members} → thread channels) |
+| classifyError(status, headers, body) | Shared non-2xx classification (responseJson and unit requests) |
 | validId(id), messagePath(...), messageBody(...) | Pure request validation/building |
 | responseJson(status, headers, body) | Pure response classification |
-| parseMessage(json), parseMessages(array), parseChannels(array), messageJson(message) | Typed message codecs |
+| parseMessage(json), parseMessages(array), parseChannel(json), parseChannels(array), messageJson(message) | Typed message and channel codecs |
 | problem(kind, message), errorJson(error) | Structured errors |
 
 `DiscordMessage` stores IDs as strings, author identity/name, content, timestamp,
@@ -40,6 +45,11 @@ reply reference and mentioned user IDs. Empty content can be legitimate (non-tex
 messages or Message Content Intent restrictions); missing content is a decode error.
 Unknown Discord fields are ignored. Attachments, embeds and edits are not modeled
 in this first version. Host should construct guild message links from its guild ID.
+
+Threads are channels: pass a thread ID to readMessages/sendMessage and it works
+unchanged. `startThread` creates one from an existing message; thread names are
+1..100 characters. `activeThreads` unwraps the `{threads, members}` response to
+just the thread channels.
 
 `DiscordError`: kind, status, code, message, retryAfter (seconds, may be fractional),
 global. HTTP bodies and token-bearing headers are not echoed. A 429 is returned to

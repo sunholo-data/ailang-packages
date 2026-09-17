@@ -6,7 +6,7 @@ decoding and sequential run validation. Zero effects — runnable anywhere.
 ## Install
 
 ```sh
-ailang install sunholo/agui@0.1.0
+ailang install sunholo/agui@0.2.0
 ```
 
 ```ailang
@@ -37,6 +37,15 @@ export func main() -> () ! {IO} {
   println(sseFrame(TextContent("m1", "hi")))
 }
 ```
+
+## Request side
+
+`sunholo/agui/input` decodes what a client sends to start a run:
+`decodeRunAgentInput(raw) -> Result[RunAgentInput, string]` — required
+`threadId`/`runId`, strict role discrimination (user, assistant, system,
+developer, tool; tool messages must carry `toolCallId`), tool names required,
+`state`/`forwardedProps` defaulted to empty objects. Malformed JSON and unknown
+roles are errors; empty message/tool lists are valid.
 
 Round-trip: `decodeEvent(encodeEvent(e))` reconstructs every supported event;
 unsupported or malformed upstream events decode to `Err` — nothing is silently

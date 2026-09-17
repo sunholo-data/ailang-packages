@@ -7,10 +7,10 @@
 module _smoke
 
 import std/io (println)
-import std/json (Json, decode, encode, getString, jo, kv, js)
+import std/json (Json, decode, encode, getString, jo, kv, js, jint)
 import std/option (getOrElse)
 import std/result (isOk, isErr)
-import pkg/sunholo/discord/client (validId, problem, messagePath, messageBody, responseJson, parseMessage, messageJson)
+import pkg/sunholo/discord/client (validId, problem, messagePath, messageBody, responseJson, classifyError, parseMessage, parseChannel, messageJson)
 
 func check(name: string, ok: bool) -> int ! {IO @limit=1} {
   if ok then { println("  ✓ ${name}"); 1 } else { println("  ✗ ${name}"); 0 }
@@ -26,7 +26,7 @@ ensures { getOrElse(getString(result, "id"), "") == id }
     kv("author", jo([kv("id", js("77")), kv("username", js("alice"))])),
     kv("content", js("hello")), kv("timestamp", js("2026-09-17T00:00:00Z"))])
 
-export func main() -> () ! {IO @limit=13} {
+export func main() -> () ! {IO @limit=15} {
   let a = check("validId accepts a decimal snowflake", validId("18446744073709551615"));
   let b = check("validId rejects an injected path", not validId("123/../456"));
   let c = check("messagePath encodes a bounded query",
@@ -43,8 +43,13 @@ export func main() -> () ! {IO @limit=13} {
   let k = check("parseMessage rejects an empty payload", isError(parseMessage(jo([]))));
   let l = check("messageJson preserves identity",
     match parseMessage(sampleMessage("42")) { Err(_) => false, Ok(m) => match decode(encode(messageJson(m))) { Ok(j) => getOrElse(getString(j, "id"), "") == "42", Err(_) => false } });
+  let ce = classifyError(403, [], "x");
+  let m1 = check("classifyError keeps the HTTP status and class",
+    ce.status == 403 && ce.kind == "permission" && ce.message == "Discord HTTP 403");
+  let n = check("parseChannel accepts a thread channel object",
+    match parseChannel(jo([kv("id", js("9")), kv("name", js("thread")), kv("type", jint(0))])) { Err(_) => false, Ok(c) => c.id == "9" });
 
-  let passed = a + b + c + d + e + f + g + h + i + j + k + l;
-  if passed == 12 then println("OK: 12/12 checks passed")
-  else println("FAIL: ${show(passed)}/12 checks passed")
+  let passed = a + b + c + d + e + f + g + h + i + j + k + l + m1 + n;
+  if passed == 14 then println("OK: 14/14 checks passed")
+  else println("FAIL: ${show(passed)}/14 checks passed")
 }

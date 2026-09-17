@@ -7,7 +7,7 @@ Pure codecs and validators; a thin effectful Net surface.
 ## Install
 
 ```sh
-ailang install sunholo/discord@0.1.0
+ailang install sunholo/discord@0.2.0
 ```
 
 ```ailang
@@ -18,7 +18,7 @@ import pkg/sunholo/discord/client (readMessages, sendMessage, parseMessage, mess
 
 | Surface | Effects | Notes |
 |---|---|---|
-| `identity`, `channels`, `readMessages`, `readMessage`, `sendMessage` | `Net` (`@limit=1` each: exactly one HTTP request per call) | run with `--caps Net`; the caller supplies the token |
+| `identity`, `channels`, `readMessages`, `readMessage`, `sendMessage`, `editMessage`, `typing`, `startThread`, `activeThreads` | `Net` (`@limit=1` each: exactly one HTTP request per call) | run with `--caps Net`; the caller supplies the token |
 | codecs and validators (`validId`, `messagePath`, `messageBody`, `responseJson`, `parse*`, `messageJson`, `problem`, `errorJson`) | pure | runnable offline, no capabilities |
 
 The package ceiling is `[Net, IO]`; IO exists solely for the offline `_smoke.ail`
@@ -49,6 +49,15 @@ export func main() -> () ! {Net} {
 Pagination: pass the previous page's oldest message ID as `before` (or the newest
 as `after`); the two are mutually exclusive and validated. `limit` is bounded to
 1..100.
+
+Threads: a thread is a channel — pass its ID to `readMessages`/`sendMessage` and
+everything works unchanged. `startThread(token, channelId, messageId, name)`
+creates a thread from an existing message (names 1..100 chars) and returns the
+thread channel; `activeThreads(token, channelId)` lists a channel's active
+threads. `editMessage` PATCHes content on an existing message (same 1..2000
+validation and mention suppression as sends; the reply reference is untouched);
+`typing` raises the ~10s typing indicator and treats any 2xx as success
+(Discord answers 204 with an empty body).
 
 ## Error handling
 

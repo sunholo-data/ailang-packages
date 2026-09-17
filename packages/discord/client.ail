@@ -75,6 +75,18 @@ ensures { getOrElse(getString(result, "kind"), "") == e.kind, getOrElse(getStrin
   kv("message", js(e.message)), kv("retry_after", jnum(e.retryAfter)), kv("global", jb(e.global))])
 }
 
+-- Non-2xx response classification shared by the JSON and unit request paths.
+-- Do not include raw response bodies, request headers or tokens in errors.
+export pure func classifyError(status: int, headers: [{name: string, value: string}], body: string) -> DiscordError
+ensures { result.status == status }
+{
+  let j = match decode(body) { Ok(v) => v, Err(_) => jo([]) };
+  let kind = if status == 429 then "rate_limit" else if status == 401 then "authentication" else if status == 403 then "permission" else "http";
+  let retry = getOrElse(getNumber(j, "retry_after"), getOrElse(stringToFloat(header(headers, "retry-after")), 0.0));
+  {kind: kind, status: status, code: getOrElse(getInt(j, "code"), 0),
+    message: "Discord HTTP ${status}", retryAfter: retry, global: getOrElse(getBool(j, "global"), header(headers, "x-ratelimit-global") == "true")}
+}
+
 pure func header(headers: [{name: string, value: string}], name: string) -> string
 ensures { result == "" || any(\h. h.value == result, headers) }
 {
@@ -88,23 +100,16 @@ ensures {
   match result { Err(e) => status != 429 || e.kind == "rate_limit", Ok(_) => true }
 }
 {
-  let parsed = decode(body);
   if status >= 200 && status < 300 then
-    match parsed { Ok(j) => Ok(j), Err(_) => Err(problem("decode", "Discord returned malformed JSON")) }
-  else {
-    let j = match parsed { Ok(v) => v, Err(_) => jo([]) };
-    let kind = if status == 429 then "rate_limit" else if status == 401 then "authentication" else if status == 403 then "permission" else "http";
-    let retry = getOrElse(getNumber(j, "retry_after"), getOrElse(stringToFloat(header(headers, "retry-after")), 0.0));
-    Err({kind: kind, status: status, code: getOrElse(getInt(j, "code"), 0),
-      message: "Discord HTTP ${status}", retryAfter: retry, global: getOrElse(getBool(j, "global"), header(headers, "x-ratelimit-global") == "true")})
-  }
+    match decode(body) { Ok(j) => Ok(j), Err(_) => Err(problem("decode", "Discord returned malformed JSON")) }
+  else Err(classifyError(status, headers, body))
 }
 
 func request(token: string, method: string, path: string, body: string) -> Result[Json, DiscordError] ! {Net @limit=1} =
   if trim(token) == "" then Err(problem("authentication", "DISCORD_BOT_TOKEN or token file is required"))
   else match httpRequest(method, "https://discord.com/api/v10${path}", [
     {name: "Authorization", value: "Bot ${token}"}, {name: "Content-Type", value: "application/json"},
-    {name: "User-Agent", value: "DiscordBot (https://github.com/sunholo-data/ailang-packages, 0.1.0)"}], body) {
+    {name: "User-Agent", value: "DiscordBot (https://github.com/sunholo-data/ailang-packages, 0.2.0)"}], body) {
     Ok(r) => responseJson(r.status, r.headers, r.body),
     Err(_) => Err(problem("network", if method == "POST" then "Send outcome unknown; reconcile before retrying" else "Discord request failed"))
   }
@@ -116,18 +121,23 @@ export func channels(token: string, guild: string) -> Result[[DiscordChannel], D
   else match request(token, "GET", "/guilds/${guild}/channels", "") {
     Err(e) => Err(e), Ok(JArray(xs)) => parseChannels(xs), Ok(_) => Err(problem("decode", "Expected channelId array")) }
 
+export pure func parseChannel(j: Json) -> Result[DiscordChannel, DiscordError]
+ensures { match result { Ok(c) => validId(c.id), Err(_) => true } }
+{
+  let id = getOrElse(getString(j, "id"), "");
+  let name = getOrElse(getString(j, "name"), "");
+  let kind = getOrElse(getInt(j, "type"), -1);
+  if not validId(id) || kind < 0 then Err(problem("decode", "Invalid channelId object"))
+  else Ok({id: id, name: name, kind: kind})
+}
+
 @allow_empty_ok("An empty channel array is a valid Discord response and recursion base case")
 export pure func parseChannels(xs: [Json]) -> Result[[DiscordChannel], DiscordError]
 ensures { length(xs) != 0 || isOk(result) }
 {
   match xs {
-  [] => Ok([]), x :: rest => {
-    let id = getOrElse(getString(x, "id"), "");
-    let name = getOrElse(getString(x, "name"), "");
-    let kind = getOrElse(getInt(x, "type"), -1);
-    if not validId(id) || kind < 0 then Err(problem("decode", "Invalid channelId object"))
-    else match parseChannels(rest) { Err(e) => Err(e), Ok(tail) => Ok({id: id, name: name, kind: kind} :: tail) }
-  }
+  [] => Ok([]), x :: rest => match parseChannel(x) {
+    Err(e) => Err(e), Ok(c) => match parseChannels(rest) { Err(e) => Err(e), Ok(tail) => Ok(c :: tail) } }
   }
 }
 
@@ -175,6 +185,48 @@ export func sendMessage(token: string, channelId: string, text: string, replyTo:
   else match messageBody(text, replyTo, nonce) {
     Err(e) => Err(e), Ok(body) => match request(token, "POST", "/channels/${channelId}/messages", body) {
       Err(e) => Err(e), Ok(j) => parseMessage(j) }
+  }
+
+-- Edit an existing message's content. Same validation and mention policy as
+-- sendMessage; the reply reference is not changed by edits. Attachments are
+-- kept by Discord when the body omits them.
+export func editMessage(token: string, channelId: string, messageId: string, text: string) -> Result[DiscordMessage, DiscordError] ! {Net @limit=1} =
+  if not validId(channelId) || not validId(messageId) then Err(problem("validation", "Invalid channelId/message ID"))
+  else match messageBody(text, "", "") {
+    Err(e) => Err(e), Ok(body) => match request(token, "PATCH", "/channels/${channelId}/messages/${messageId}", body) {
+      Err(e) => Err(e), Ok(j) => parseMessage(j) }
+  }
+
+-- Show a typing indicator in the channel for up to 10 seconds. Discord answers
+-- 204 No Content with an empty body; any 2xx is success and non-2xx is classified.
+func requestUnit(token: string, method: string, path: string) -> Result[(), DiscordError] ! {Net @limit=1} =
+  if trim(token) == "" then Err(problem("authentication", "DISCORD_BOT_TOKEN or token file is required"))
+  else match httpRequest(method, "https://discord.com/api/v10${path}", [
+    {name: "Authorization", value: "Bot ${token}"}, {name: "Content-Type", value: "application/json"},
+    {name: "User-Agent", value: "DiscordBot (https://github.com/sunholo-data/ailang-packages, 0.2.0)"}], "") {
+    Ok(r) => if r.status >= 200 && r.status < 300 then Ok(()) else Err(classifyError(r.status, r.headers, r.body)),
+    Err(_) => Err(problem("network", "Discord request failed"))
+  }
+
+export func typing(token: string, channelId: string) -> Result[(), DiscordError] ! {Net @limit=1} =
+  if not validId(channelId) then Err(problem("validation", "Invalid channelId ID"))
+  else requestUnit(token, "POST", "/channels/${channelId}/typing")
+
+-- Start a thread from an existing message; returns the created thread channel.
+-- The thread is itself a channel: reads and sends work with its ID directly.
+export func startThread(token: string, channelId: string, messageId: string, name: string) -> Result[DiscordChannel, DiscordError] ! {Net @limit=1} =
+  if not validId(channelId) || not validId(messageId) then Err(problem("validation", "Invalid channelId/message ID"))
+  else if length(trim(name)) == 0 || length(name) > 100 then Err(problem("validation", "Thread name must contain 1..100 characters"))
+  else match request(token, "POST", "/channels/${channelId}/messages/${messageId}/threads", encode(jo([kv("name", js(name))]))) {
+    Err(e) => Err(e), Ok(j) => parseChannel(j) }
+
+-- List a channel's active threads. Response shape is {threads: [...], members: [...]};
+-- only the thread channels are returned here.
+export func activeThreads(token: string, channelId: string) -> Result[[DiscordChannel], DiscordError] ! {Net @limit=1} =
+  if not validId(channelId) then Err(problem("validation", "Invalid channelId ID"))
+  else match request(token, "GET", "/channels/${channelId}/threads/active", "") {
+    Err(e) => Err(e), Ok(j) => match getArray(j, "threads") {
+      Some(xs) => parseChannels(xs), None => Err(problem("decode", "Expected threads array")) }
   }
 
 export pure func messageJson(m: DiscordMessage) -> Json

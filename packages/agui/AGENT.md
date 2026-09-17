@@ -5,9 +5,16 @@ declares IO solely for the offline `_smoke.ail` boot gate (`ailang run -caps IO
 --entry main _smoke.ail`); every library module is pure (zero effects) — consumer
 programs need no capabilities beyond their own effects.
 
-Install: `ailang install sunholo/agui@0.1.0`. Full quickstart, the sequential
+Install: `ailang install sunholo/agui@0.2.0`. Full quickstart, the sequential
 run profile and the round-trip guarantee: package README.md and
 `ailang pkg-docs sunholo/agui` (this file).
+
+Second module `sunholo/agui/input` decodes the request side: `decodeRunAgentInput`
+parses the RunAgentInput payload a client sends to start a run — required
+`threadId`/`runId`, strict role discrimination (user, assistant, system,
+developer, tool; tool messages must carry toolCallId), tool names required,
+`state`/`forwardedProps` defaulted to empty objects. Malformed JSON and unknown
+roles are errors; empty message/tool lists are valid.
 
 `Event` constructors: RunStarted(threadId, runId), RunFinished(threadId, runId),
 RunError(message), TextStart(messageId), TextContent(messageId, delta),

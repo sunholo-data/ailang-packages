@@ -11,6 +11,7 @@ import std/option (getOrElse)
 import std/result (isOk, isErr)
 import std/string (startsWith, endsWith)
 import pkg/sunholo/agui/events (RunStarted, TextStart, TextContent, TextEnd, ToolResult, RunFinished, RunError, StateSnapshot, Custom, encodeEvent, decodeEvent, jsonLines, sseFrame, validateRun)
+import pkg/sunholo/agui/input (decodeRunAgentInput)
 
 func check(name: string, ok: bool) -> int ! {IO @limit=1} {
   if ok then { println("  ✓ ${name}"); 1 } else { println("  ✗ ${name}"); 0 }
@@ -21,7 +22,7 @@ ensures { result == isErr(r) }
 = match r { Err(_) => true, Ok(_) => false }
 
 
-export func main() -> () ! {IO @limit=11} {
+export func main() -> () ! {IO @limit=13} {
   let a = check("encodeEvent starts with the RUN_STARTED discriminator",
     startsWith(encodeEvent(RunStarted("t", "r")), "{\"type\":\"RUN_STARTED\""));
   let b = check("decode inverts encode for a lifecycle event",
@@ -40,10 +41,14 @@ export func main() -> () ! {IO @limit=11} {
     isErr(validateRun([RunStarted("t", "r")])));
   let j = check("validateRun accepts state and custom events mid-run",
     isOk(validateRun([RunStarted("t", "r"), StateSnapshot(snapshot()), Custom("tag", snapshot()), RunFinished("t", "r")])));
+  let k = check("decodeRunAgentInput accepts a minimal request",
+    match decodeRunAgentInput("{\"threadId\":\"t\",\"runId\":\"r\"}") { Err(_) => false, Ok(v) => v.threadId == "t" && v.runId == "r" });
+  let l = check("decodeRunAgentInput rejects unknown roles",
+    isErr(decodeRunAgentInput("{\"threadId\":\"t\",\"runId\":\"r\",\"messages\":[{\"role\":\"moderator\",\"id\":\"m\",\"content\":\"x\"}]}")));
 
-  let passed = a + b + c + d + e + f + g + h + i + j;
-  if passed == 10 then println("OK: 10/10 checks passed")
-  else println("FAIL: ${show(passed)}/10 checks passed")
+  let passed = a + b + c + d + e + f + g + h + i + j + k + l;
+  if passed == 12 then println("OK: 12/12 checks passed")
+  else println("FAIL: ${show(passed)}/12 checks passed")
 }
 
 pure func snapshot() -> Json

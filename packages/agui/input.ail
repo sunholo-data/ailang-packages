@@ -1,0 +1,91 @@
+module sunholo/agui/input
+
+-- Request-side AG-UI codec: the RunAgentInput payload a client sends to start
+-- a run (https://docs.ag-ui.com/concepts/run-agent-input). Mirrors the upstream
+-- @ag-ui/core schema at the level AILANG consumers need: strict role
+-- discrimination, required identities, everything optional defaulted. This
+-- module is pure; pair it with sunholo/agui/events (the event output side).
+
+import std/json (Json, decode, getString, getArray, get, jo)
+import std/option (Some, None, getOrElse)
+import std/result (Result, Ok, Err, isErr)
+import std/list (map, length as listLength)
+
+export type AgentMessage = {role: string, id: string, content: string, name: string, toolCallId: string}
+export type AgentTool = {name: string, description: string}
+export type RunAgentInput = {threadId: string, runId: string, state: Json, messages: [AgentMessage], tools: [AgentTool], forwardedProps: Json}
+
+-- Roles accepted in the request conversation. Tool messages carry the
+-- toolCallId that ties them to a tool call; name is the optional display name.
+pure func decodeMessage(m: Json) -> Result[AgentMessage, string]
+ensures { match result { Ok(v) => v.role == "user" || v.role == "assistant" || v.role == "system" || v.role == "developer" || v.role == "tool", Err(_) => true } }
+{
+  let id = getOrElse(getString(m, "id"), "");
+  let role = getOrElse(getString(m, "role"), "");
+  if id == "" then Err("Message missing id")
+  else if role == "user" || role == "assistant" || role == "system" || role == "developer" then
+    match getString(m, "content") {
+      None => Err("Message role ${role} requires string content"),
+      Some(content) => Ok({role: role, id: id, content: content,
+        name: getOrElse(getString(m, "name"), ""), toolCallId: ""})
+    }
+  else if role == "tool" then
+    match getString(m, "toolCallId") {
+      None => Err("Tool message missing toolCallId"),
+      Some(toolCallId) => if toolCallId == "" then Err("Tool message missing toolCallId")
+        else match getString(m, "content") {
+          None => Err("Tool message missing content"),
+          Some(content) => Ok({role: role, id: id, content: content,
+            name: getOrElse(getString(m, "name"), ""), toolCallId: toolCallId})
+        }
+    }
+  else Err("Unsupported message role: ${role}")
+}
+
+pure func decodeTool(t: Json) -> Result[AgentTool, string]
+ensures { match result { Ok(v) => v.name != "", Err(_) => true } }
+{
+  let name = getOrElse(getString(t, "name"), "");
+  if name == "" then Err("Tool missing name")
+  else Ok({name: name, description: getOrElse(getString(t, "description"), "")})
+}
+
+@allow_empty_ok("An empty message/tool list is a valid RunAgentInput and the recursion base case")
+pure func decodeAll[f, b](f: f, xs: [Json]) -> Result[[b], string]
+ensures { listLength(xs) != 0 || isOk(result) }
+{
+  match xs {
+  [] => Ok([]), x :: rest => match f(x) {
+    Err(e) => Err(e), Ok(b) => match decodeAll(f, rest) { Err(e) => Err(e), Ok(bs) => Ok(b :: bs) } }
+  }
+}
+
+-- The request decoder is deliberately strict: malformed JSON, unknown roles,
+-- empty identities and tool messages without toolCallId are all errors. Empty
+-- message/tool lists are valid; state and forwardedProps default to empty
+-- objects when absent.
+export pure func decodeRunAgentInput(raw: string) -> Result[RunAgentInput, string]
+ensures {
+  isOk(decode(raw)) || isErr(result),
+  match result { Ok(v) => v.threadId != "" && v.runId != "", Err(_) => true }
+}
+{
+  match decode(raw) {
+  Err(_) => Err("Malformed AG-UI request JSON"), Ok(j) => {
+    let threadId = getOrElse(getString(j, "threadId"), "");
+    let runId = getOrElse(getString(j, "runId"), "");
+    if threadId == "" then Err("Missing threadId")
+    else if runId == "" then Err("Missing runId")
+    else match decodeAll(decodeMessage, getOrElse(getArray(j, "messages"), [])) {
+      Err(e) => Err(e),
+      Ok(messages) => match decodeAll(decodeTool, getOrElse(getArray(j, "tools"), [])) {
+        Err(e) => Err(e),
+        Ok(tools) => Ok({threadId: threadId, runId: runId,
+          state: match get(j, "state") { Some(s) => s, None => jo([]) },
+          messages: messages, tools: tools,
+          forwardedProps: match get(j, "forwardedProps") { Some(v) => v, None => jo([]) }})
+      }
+    }
+  }
+  }
+}

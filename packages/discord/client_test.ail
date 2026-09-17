@@ -12,7 +12,7 @@ import std/option (Some, None, getOrElse)
 import std/result (Result, Ok, Err, isOk, isErr)
 import std/string (length)
 import std/list (length as listLength)
-import pkg/sunholo/discord/client (DiscordError, DiscordMessage, validId, problem, messagePath, messageBody, errorJson, responseJson, parseMessage, parseMessages, parseChannels, messageJson)
+import pkg/sunholo/discord/client (DiscordError, DiscordMessage, validId, problem, messagePath, messageBody, errorJson, responseJson, classifyError, parseMessage, parseMessages, parseChannel, parseChannels, messageJson)
 
 pure func isError[a, b](r: Result[a, b]) -> bool = match r { Err(_) => true, Ok(_) => false }
 
@@ -203,4 +203,22 @@ test "messageJson preserves message identity and references" {
     Ok(j) => getOrElse(getString(j, "id"), "") == "42" && getOrElse(getString(j, "content"), "") == "hello" &&
       getOrElse(getString(getOrElse(getObject(j, "message_reference"), jo([])), "message_id"), "") == "31"
   }
+}
+
+test "classifyError maps HTTP error classes" {
+  let rate = classifyError(429, [], "{\"retry_after\":2.0,\"code\":0}");
+  let perm = classifyError(403, [{name: "x-ratelimit-global", value: "true"}], "{}");
+  let plain = classifyError(500, [], "garbage");
+  rate.status == 429 && rate.kind == "rate_limit" && not rate.global &&
+  perm.kind == "permission" && perm.global && perm.message == "Discord HTTP 403" &&
+  plain.kind == "http" && plain.status == 500
+}
+
+test "parseChannel accepts valid channels and rejects invalid ones" {
+  match parseChannel(jo([kv("id", js("9")), kv("name", js("thread")), kv("type", jint(0))])) {
+    Err(_) => false, Ok(c) => c.id == "9" && c.name == "thread" && c.kind == 0
+  } &&
+  isError(parseChannel(jo([]))) &&
+  isError(parseChannel(jo([kv("id", js("x")), kv("name", js("t")), kv("type", jint(0))]))) &&
+  isError(parseChannel(jo([kv("id", js("9")), kv("name", js("t")), kv("type", jint(-1))])))
 }

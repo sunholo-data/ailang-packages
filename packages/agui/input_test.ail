@@ -1,0 +1,60 @@
+-- Native tests for sunholo/agui/input (request-side AG-UI codec).
+--
+-- Offline only: RunAgentInput decoding against the upstream @ag-ui/core shape.
+
+module sunholo/agui/input_test
+
+import std/result (isOk, isErr)
+import std/list (length as listLength)
+import pkg/sunholo/agui/input (decodeRunAgentInput)
+
+pure func isError[a, b](r: Result[a, b]) -> bool = match r { Err(_) => true, Ok(_) => false }
+
+test "decodes a full request payload" {
+  match decodeRunAgentInput("{\"threadId\":\"t1\",\"runId\":\"r1\",\"state\":{\"n\":1},\"messages\":[{\"role\":\"user\",\"id\":\"m1\",\"content\":\"hi\"},{\"role\":\"assistant\",\"id\":\"m2\",\"content\":\"hello\"},{\"role\":\"tool\",\"id\":\"m3\",\"content\":\"result\",\"toolCallId\":\"c1\",\"name\":\"tooler\"}],\"tools\":[{\"name\":\"search\",\"description\":\"web search\"}],\"forwardedProps\":{\"k\":\"v\"}}") {
+    Err(_) => false,
+    Ok(v) => v.threadId == "t1" && v.runId == "r1" && listLength(v.messages) == 3 && listLength(v.tools) == 1
+  }
+}
+
+test "decodes a minimal payload with defaults" {
+  match decodeRunAgentInput("{\"threadId\":\"t\",\"runId\":\"r\"}") {
+    Err(_) => false,
+    Ok(v) => listLength(v.messages) == 0 && listLength(v.tools) == 0
+  }
+}
+
+test "rejects malformed and incomplete payloads" {
+  isError(decodeRunAgentInput("not json")) &&
+  isError(decodeRunAgentInput("{}")) &&
+  isError(decodeRunAgentInput("{\"threadId\":\"t\"}")) &&
+  isError(decodeRunAgentInput("{\"runId\":\"r\"}"))
+}
+
+test "rejects unsupported roles and malformed messages" {
+  isError(decodeRunAgentInput("{\"threadId\":\"t\",\"runId\":\"r\",\"messages\":[{\"role\":\"moderator\",\"id\":\"m1\",\"content\":\"x\"}]}")) &&
+  isError(decodeRunAgentInput("{\"threadId\":\"t\",\"runId\":\"r\",\"messages\":[{\"role\":\"user\",\"content\":\"x\"}]}")) &&
+  isError(decodeRunAgentInput("{\"threadId\":\"t\",\"runId\":\"r\",\"messages\":[{\"role\":\"tool\",\"id\":\"m1\",\"content\":\"x\"}]}")) &&
+  isError(decodeRunAgentInput("{\"threadId\":\"t\",\"runId\":\"r\",\"messages\":[{\"role\":\"assistant\",\"id\":\"m2\"}]}"))
+}
+
+test "tool message keeps its toolCallId" {
+  match decodeRunAgentInput("{\"threadId\":\"t\",\"runId\":\"r\",\"messages\":[{\"role\":\"tool\",\"id\":\"m3\",\"content\":\"out\",\"toolCallId\":\"c1\"}]}") {
+    Err(_) => false,
+    Ok(v) => match v.messages {
+      [] => false,
+      first :: rest => match rest { [] => first.toolCallId == "c1" && first.role == "tool", _ => false }
+    }
+  }
+}
+
+test "tools require names and keep descriptions" {
+  isError(decodeRunAgentInput("{\"threadId\":\"t\",\"runId\":\"r\",\"tools\":[{\"description\":\"no name\"}]}")) &&
+  match decodeRunAgentInput("{\"threadId\":\"t\",\"runId\":\"r\",\"tools\":[{\"name\":\"search\"}]}") {
+    Err(_) => false,
+    Ok(v) => match v.tools {
+      [] => false,
+      t :: rest => match rest { [] => t.name == "search" && t.description == "", _ => false }
+    }
+  }
+}
