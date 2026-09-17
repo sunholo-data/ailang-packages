@@ -30,9 +30,9 @@
 
 module sunholo/gmail/message
 
-import std/string (contains, concat)
+import std/string (contains, concat, foldChars, join)
 import std/list (map, foldl, length)
-import std/bytes (fromString, toBase64URL)
+import std/bytes (fromString, toBase64URL, toBase64)
 import std/result (Result, Ok, Err)
 
 -- A message before encoding. `body` is deliberately unconstrained: newlines in a
@@ -46,6 +46,21 @@ export type Message = {
 }
 
 -- True when a header VALUE cannot break out of its header.
+-- RFC 2047 (0.4.1): a header may carry only ASCII. A Subject with any non-ASCII
+-- character is sent as encoded words, `=?UTF-8?B?<base64>?=`, in chunks of 11
+-- characters (≤44 bytes → ≤60 base64 + 12 = 72, under the 75-char word limit),
+-- joined by a space that decoders drop between adjacent encoded words. An
+-- all-ASCII subject is untouched. Found 17 Sept 2026 when the first non-ASCII
+-- subject a caller sent — an em dash — arrived in Gmail as "Ã¢Â€Â”".
+pure func isAscii(s: string) -> bool { foldChars(\ok. \c. ok && c <= "\u007f", true, s) }
+pure func chunks11(s: string) -> list[string] {
+  let r = foldChars(\st. \c. if st.k == 11 then {acc: st.acc ++ [st.cur], cur: c, k: 1} else {acc: st.acc, cur: "${st.cur}${c}", k: st.k + 1}, {acc: [], cur: "", k: 0}, s) in
+  if r.cur == "" then r.acc else r.acc ++ [r.cur]
+}
+export pure func encodedWord(s: string) -> string {
+  if isAscii(s) then s else join(" ", map(\ch. "=?UTF-8?B?${toBase64(fromString(ch))}?=", chunks11(s)))
+}
+
 export pure func headerSafe(v: string) -> bool {
   not(contains(v, "\r")) && not(contains(v, "\n"))
 }
@@ -57,7 +72,7 @@ requires {
 }
 ensures { contains(result, "\r\n\r\n") }
 {
-  "To: ${m.to}\r\nFrom: ${m.from}\r\nSubject: ${m.subject}\r\nMIME-Version: 1.0\r\nContent-Type: text/plain; charset=UTF-8\r\n\r\n${m.body}"
+  "To: ${m.to}\r\nFrom: ${m.from}\r\nSubject: ${encodedWord(m.subject)}\r\nMIME-Version: 1.0\r\nContent-Type: text/plain; charset=UTF-8\r\n\r\n${m.body}"
 }
 
 -- The one callers should use. Refuses rather than composing something dangerous,
@@ -133,7 +148,7 @@ requires {
 }
 {
   concat([
-    "To: ${m.to}\r\nFrom: ${m.from}\r\nSubject: ${m.subject}\r\n",
+    "To: ${m.to}\r\nFrom: ${m.from}\r\nSubject: ${encodedWord(m.subject)}\r\n",
     "MIME-Version: 1.0\r\n",
     "Content-Type: multipart/alternative; boundary=\"${boundary}\"\r\n\r\n",
     "--${boundary}\r\nContent-Type: text/plain; charset=UTF-8\r\n\r\n${m.text}\r\n",
@@ -275,7 +290,7 @@ requires {
 }
 {
   concat([
-    "To: ${r.alt.to}\r\nFrom: ${r.alt.from}\r\nSubject: ${r.alt.subject}\r\n",
+    "To: ${r.alt.to}\r\nFrom: ${r.alt.from}\r\nSubject: ${encodedWord(r.alt.subject)}\r\n",
     "MIME-Version: 1.0\r\n",
     "Content-Type: multipart/related; boundary=\"${relBoundary}\"\r\n\r\n",
     "--${relBoundary}\r\n",
