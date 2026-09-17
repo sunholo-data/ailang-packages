@@ -1,0 +1,50 @@
+-- Boot smoke test for sunholo/discord.
+--
+-- Offline: no network, no credential. Pure-surface checks only — request
+-- validation, payload construction, response classification and message codecs.
+-- The deep behavioral suite lives in client_test.ail (ailang test --package).
+
+module _smoke
+
+import std/io (println)
+import std/json (Json, decode, encode, getString, jo, kv, js)
+import std/option (getOrElse)
+import std/result (isOk, isErr)
+import pkg/sunholo/discord/client (validId, problem, messagePath, messageBody, responseJson, parseMessage, messageJson)
+
+func check(name: string, ok: bool) -> int ! {IO @limit=1} {
+  if ok then { println("  ✓ ${name}"); 1 } else { println("  ✗ ${name}"); 0 }
+}
+
+pure func isError[a, b](r: Result[a, b]) -> bool
+ensures { result == isErr(r) }
+= match r { Err(_) => true, Ok(_) => false }
+
+pure func sampleMessage(id: string) -> Json
+ensures { getOrElse(getString(result, "id"), "") == id }
+= jo([kv("id", js(id)), kv("channel_id", js("300")),
+    kv("author", jo([kv("id", js("77")), kv("username", js("alice"))])),
+    kv("content", js("hello")), kv("timestamp", js("2026-09-17T00:00:00Z"))])
+
+export func main() -> () ! {IO @limit=13} {
+  let a = check("validId accepts a decimal snowflake", validId("18446744073709551615"));
+  let b = check("validId rejects an injected path", not validId("123/../456"));
+  let c = check("messagePath encodes a bounded query",
+    match messagePath("123", {limit: 50, before: "", after: ""}) { Ok(p) => p == "/channels/123/messages?limit=50", Err(_) => false });
+  let d = check("messagePath rejects limit 101", isError(messagePath("123", {limit: 101, before: "", after: ""})));
+  let e = check("messageBody suppresses pings", isOk(messageBody("Hello", "", "")));
+  let f = check("messageBody rejects an empty message", isError(messageBody("   ", "", "")));
+  let p = problem("validation", "x");
+  let g = check("problem zeroes transport fields", p.status == 0 && p.code == 0 && not p.global);
+  let h = check("responseJson classifies rate limits",
+    match responseJson(429, [], "{\"retry_after\":1.5,\"code\":0}") { Err(ev) => ev.kind == "rate_limit" && ev.retryAfter == 1.5, Ok(_) => false });
+  let i = check("responseJson rejects malformed 2xx bodies", isError(responseJson(200, [], "not json")));
+  let j = check("parseMessage accepts a complete payload", isOk(parseMessage(sampleMessage("42"))));
+  let k = check("parseMessage rejects an empty payload", isError(parseMessage(jo([]))));
+  let l = check("messageJson preserves identity",
+    match parseMessage(sampleMessage("42")) { Err(_) => false, Ok(m) => match decode(encode(messageJson(m))) { Ok(j) => getOrElse(getString(j, "id"), "") == "42", Err(_) => false } });
+
+  let passed = a + b + c + d + e + f + g + h + i + j + k + l;
+  if passed == 12 then println("OK: 12/12 checks passed")
+  else println("FAIL: ${show(passed)}/12 checks passed")
+}

@@ -1,8 +1,10 @@
 # sunholo/discord 0.1.0
 
 Use for Discord **bot** REST v10 reads and writes in AILANG. The host application
-loads credentials and enforces its channel/write policy. This package has only Net
-as an effect; codecs and validators are pure. Never pass a bot token as an MCP tool
+loads credentials and enforces its channel/write policy. The library surface has
+only Net as an effect; codecs and validators are pure. The package ceiling also
+declares IO solely for the offline `_smoke.ail` boot gate (`ailang run -caps IO
+--entry main _smoke.ail`); no library module uses IO. Never pass a bot token as an MCP tool
 argument. Guild membership of a human user does not imply bot channel access.
 
 ```ailang

@@ -1,0 +1,51 @@
+-- Boot smoke test for sunholo/agui.
+--
+-- Offline: pure codecs and sequential-run validation only. The deep behavioral
+-- suite lives in events_test.ail (ailang test --package).
+
+module _smoke
+
+import std/io (println)
+import std/json (Json, getString, jo, kv, js)
+import std/option (getOrElse)
+import std/result (isOk, isErr)
+import std/string (startsWith, endsWith)
+import pkg/sunholo/agui/events (RunStarted, TextStart, TextContent, TextEnd, ToolResult, RunFinished, RunError, StateSnapshot, Custom, encodeEvent, decodeEvent, jsonLines, sseFrame, validateRun)
+
+func check(name: string, ok: bool) -> int ! {IO @limit=1} {
+  if ok then { println("  ✓ ${name}"); 1 } else { println("  ✗ ${name}"); 0 }
+}
+
+pure func isError[a, b](r: Result[a, b]) -> bool
+ensures { result == isErr(r) }
+= match r { Err(_) => true, Ok(_) => false }
+
+
+export func main() -> () ! {IO @limit=11} {
+  let a = check("encodeEvent starts with the RUN_STARTED discriminator",
+    startsWith(encodeEvent(RunStarted("t", "r")), "{\"type\":\"RUN_STARTED\""));
+  let b = check("decode inverts encode for a lifecycle event",
+    match decodeEvent(encodeEvent(RunStarted("t", "r"))) { Ok(e) => encodeEvent(e) == encodeEvent(RunStarted("t", "r")), Err(_) => false });
+  let c = check("decode inverts encode for a tool result",
+    match decodeEvent(encodeEvent(ToolResult("m", "c", "x"))) { Ok(e) => encodeEvent(e) == encodeEvent(ToolResult("m", "c", "x")), Err(_) => false });
+  let d = check("decoder rejects an unsupported type", isErr(decodeEvent("{\"type\":\"UNKNOWN\"}")));
+  let e = check("decoder rejects malformed JSON", isErr(decodeEvent("not json")));
+  let f = check("jsonLines joins two events with a newline",
+    jsonLines([TextStart("m"), TextEnd("m")]) == "${encodeEvent(TextStart("m"))}\n${encodeEvent(TextEnd("m"))}");
+  let g = check("sseFrame wraps the encoded event",
+    startsWith(sseFrame(RunError("x")), "data: ") && endsWith(sseFrame(RunError("x")), "\n\n"));
+  let h = check("validateRun accepts a sequential run",
+    isOk(validateRun([RunStarted("t", "r"), TextStart("m"), TextContent("m", "hi"), TextEnd("m"), RunFinished("t", "r")])));
+  let i = check("validateRun rejects a run without a terminal event",
+    isErr(validateRun([RunStarted("t", "r")])));
+  let j = check("validateRun accepts state and custom events mid-run",
+    isOk(validateRun([RunStarted("t", "r"), StateSnapshot(snapshot()), Custom("tag", snapshot()), RunFinished("t", "r")])));
+
+  let passed = a + b + c + d + e + f + g + h + i + j;
+  if passed == 10 then println("OK: 10/10 checks passed")
+  else println("FAIL: ${show(passed)}/10 checks passed")
+}
+
+pure func snapshot() -> Json
+ensures { getOrElse(getString(result, "step"), "") == "plan" }
+= jo([kv("step", js("plan"))])
