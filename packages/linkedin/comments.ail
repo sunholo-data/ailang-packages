@@ -109,7 +109,7 @@ func linkedinParseCommentsResponse(body: string, postUrn: string) -> Result[[Lin
     Ok(json) => {
       match getArray(json, "elements") {
         Some(elements) => Ok(linkedinParseCommentList(elements, postUrn)),
-        None => Ok([])
+        None => Err("Comments response for ${postUrn} is missing the 'elements' field (malformed or unexpected shape)")
       }
     },
     Err(e) => Err("Failed to parse comments: ${e}")
@@ -191,7 +191,7 @@ func linkedinParseRepliesResponse(body: string, parentCommentUrn: string) -> Res
     Ok(json) => {
       match getArray(json, "elements") {
         Some(elements) => Ok(linkedinParseReplyList(elements, parentCommentUrn)),
-        None => Ok([])
+        None => Err("Comment replies response for ${parentCommentUrn} is missing the 'elements' field (malformed or unexpected shape)")
       }
     },
     Err(e) => Err("Failed to parse replies: ${e}")
