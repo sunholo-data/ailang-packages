@@ -7,7 +7,7 @@ declares IO solely for the offline `_smoke.ail` boot gate (`ailang run -caps IO
 --entry main _smoke.ail`); no library module uses IO. Never pass a bot token as an MCP tool
 argument. Guild membership of a human user does not imply bot channel access.
 
-Install: `ailang install sunholo/discord@0.3.0`, then
+Install: `ailang install sunholo/discord@0.4.0`, then
 `import pkg/sunholo/discord/client (...)`. Consumer programs need `--caps Net`
 for the effectful entry points; the pure codecs run with no capabilities. Full
 quickstart, pagination pattern and error-kind table: package README.md and
@@ -48,10 +48,16 @@ messages or Message Content Intent restrictions); missing content is a decode er
 Unknown Discord fields are ignored. Attachments are not modeled; embeds are (0.3.0); gateway edits are not. Host should construct guild message links from its guild ID.
 
 Embeds replace the wall-of-text failure mode: a structured card with a title,
-a description, labelled fields (name/value/inline) and a footer. Discord gives
-embeds a 6000-character budget (vs 2000 for content) and keeps field layout.
-`validEmbed` enforces every limit; `sendMessageEmbeds` takes optional text plus
-up to 10 embeds; mentions stay suppressed.
+a description, labelled fields (name/value/inline), a footer and an accent
+color — plus `image` and `thumbnail` by URL (Discord fetches the image; svg is
+not supported, use png/jpg/webp — e.g. the hosted brand studies on
+www.sunholo.com). The worked example uses Sunholo orange (#E73C17, decimal
+15154199) as the accent and the AILANG architectural study as the image.
+Discord gives embeds a 6000-character budget (vs 2000 for content) and keeps
+field layout. `validEmbed` enforces every limit (image URLs ≤ 2048, not counted
+against the budget); `sendMessageEmbeds` takes optional text plus up to 10
+embeds; mentions stay suppressed. File uploads (multipart attachments) are not
+modeled — host the asset and embed it by URL.
 
 Threads are channels: pass a thread ID to readMessages/sendMessage and it works
 unchanged. `startThread` creates one from an existing message; thread names are

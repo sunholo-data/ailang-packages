@@ -48,8 +48,10 @@ export func main() -> () ! {IO @limit=17} {
     ce.status == 403 && ce.kind == "permission" && ce.message == "Discord HTTP 403");
   let n = check("parseChannel accepts a thread channel object",
     match parseChannel(jo([kv("id", js("9")), kv("name", js("thread")), kv("type", jint(0))])) { Err(_) => false, Ok(c) => c.id == "9" });
-  let embed = {title: "How to ask me for things", description: "Put what you want in the address and I will not have to guess.", color: 3447003,
-    footer: "Forward a thread or send two lines.", fields: [
+  let embed = {title: "How to ask me for things", description: "Put what you want in the address and I will not have to guess.", color: 15154199,
+    footer: "Forward a thread or send two lines.",
+    thumbnail: "https://www.sunholo.com/assets/visuals/service-studies/v2/ailang.webp",
+    image: "https://www.sunholo.com/assets/visuals/service-studies/v2/ailang.webp", fields: [
       {name: "daneel+document@", value: "Draft a document from what you send.", inline: false},
       {name: "daneel+summarise@", value: "Read something and summarise it.", inline: true}]};
   let o = check("address-book embed fits Discord limits and encodes", validEmbed(embed) && match decode(encode(embedJson(embed))) { Ok(j) => getOrElse(getString(j, "title"), "") == "How to ask me for things", Err(_) => false });

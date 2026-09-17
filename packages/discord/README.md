@@ -7,7 +7,7 @@ Pure codecs and validators; a thin effectful Net surface.
 ## Install
 
 ```sh
-ailang install sunholo/discord@0.3.0
+ailang install sunholo/discord@0.4.0
 ```
 
 ```ailang
@@ -52,10 +52,15 @@ as `after`); the two are mutually exclusive and validated. `limit` is bounded to
 
 Embeds: structured cards that survive Discord's text wrapping — the fix for
 long formatted output. `Embed` = title, description, color, footer, fields
-(`{name, value, inline}`), with Discord's limits enforced by `validEmbed`
-(title ≤ 256, description ≤ 4096, ≤ 25 fields of 256/1024, total ≤ 6000) and
-encoded by `embedJson`. `sendMessageEmbeds` takes optional text plus the embeds;
-empty content with embeds is fine, mentions stay suppressed.
+(`{name, value, inline}`), plus `image` and `thumbnail` URLs (Discord fetches
+the image; png/jpg/webp — not svg). Sunholo brand example: accent color
+`15154199` (Sunholo orange #E73C17) and the AILANG study illustration as the
+thumbnail. Discord's limits are enforced by `validEmbed` (title ≤ 256,
+description ≤ 4096, ≤ 25 fields of 256/1024, total ≤ 6000, image URLs ≤ 2048)
+and encoded by `embedJson`. `sendMessageEmbeds` takes optional text plus the
+embeds; empty content with embeds is fine, mentions stay suppressed. File
+uploads (multipart attachments) are not modeled — host the asset and embed it
+by URL.
 
 Threads: a thread is a channel — pass its ID to `readMessages`/`sendMessage` and
 everything works unchanged. `startThread(token, channelId, messageId, name)`

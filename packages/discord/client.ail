@@ -12,17 +12,21 @@ export type DiscordMessage = {id: string, channelId: string, authorId: string, a
 export type DiscordChannel = {id: string, name: string, kind: int}
 export type MessageQuery = {limit: int, before: string, after: string}
 export type EmbedField = {name: string, value: string, inline: bool}
-export type Embed = {title: string, description: string, color: int, footer: string, fields: [EmbedField]}
+-- Image URLs are referenced, not uploaded: Discord fetches them. Empty means omit.
+-- Brand note: embeds support png/jpg/gif/webp by URL (not svg).
+export type EmbedImage = {url: string}
+export type Embed = {title: string, description: string, color: int, footer: string, fields: [EmbedField], thumbnail: string, image: string}
 
 -- Total rendered characters of an embed (Discord counts title, description,
--- footer, and every field name+value against one 6000 budget).
+-- footer, and every field name+value against one 6000 budget). Image URLs do
+-- not count toward it.
 export pure func embedBudget(e: Embed) -> int
 ensures { result >= length(e.title), result >= length(e.description) }
 {
   match e.fields {
     [] => length(e.title) + length(e.description) + length(e.footer),
     f :: rest => embedBudget({title: e.title, description: e.description, color: e.color,
-      footer: e.footer, fields: rest}) + length(f.name) + length(f.value)
+      footer: e.footer, thumbnail: e.thumbnail, image: e.image, fields: rest}) + length(f.name) + length(f.value)
   }
 }
 
@@ -39,10 +43,11 @@ ensures { match fs { [] => result == true, f :: rest => result == false || (leng
 -- Discord embed limits: title 256, description 4096, 25 fields, per-field
 -- 256/1024, total 6000, and at least a title or a description to render.
 export pure func validEmbed(e: Embed) -> bool
-ensures { result == (length(e.title) <= 256 && length(e.description) <= 4096 && listLength(e.fields) <= 25 && (e.title != "" || e.description != "") && embedBudget(e) <= 6000 && fieldsFit(e.fields)) }
+ensures { result == (length(e.title) <= 256 && length(e.description) <= 4096 && listLength(e.fields) <= 25 && (e.title != "" || e.description != "") && embedBudget(e) <= 6000 && fieldsFit(e.fields) && (e.thumbnail == "" || length(e.thumbnail) <= 2048) && (e.image == "" || length(e.image) <= 2048)) }
 {
   length(e.title) <= 256 && length(e.description) <= 4096 && listLength(e.fields) <= 25 &&
-  (e.title != "" || e.description != "") && embedBudget(e) <= 6000 && fieldsFit(e.fields)
+  (e.title != "" || e.description != "") && embedBudget(e) <= 6000 && fieldsFit(e.fields) &&
+  (e.thumbnail == "" || length(e.thumbnail) <= 2048) && (e.image == "" || length(e.image) <= 2048)
 }
 
 export pure func embedJson(e: Embed) -> Json
@@ -58,6 +63,8 @@ ensures {
     (if e.description != "" then [kv("description", js(e.description))] else []) ++
     (if e.color != 0 then [kv("color", jint(e.color))] else []) ++
     (if e.footer != "" then [kv("footer", jo([kv("text", js(e.footer))]))] else []) ++
+    (if e.thumbnail != "" then [kv("thumbnail", jo([kv("url", js(e.thumbnail))]))] else []) ++
+    (if e.image != "" then [kv("image", jo([kv("url", js(e.image))]))] else []) ++
     (if listLength(e.fields) != 0 then [kv("fields", ja(map(fieldJson, e.fields)))] else [])
   )
 }
@@ -196,7 +203,7 @@ func request(token: string, method: string, path: string, body: string) -> Resul
   if trim(token) == "" then Err(problem("authentication", "DISCORD_BOT_TOKEN or token file is required"))
   else match httpRequest(method, "https://discord.com/api/v10${path}", [
     {name: "Authorization", value: "Bot ${token}"}, {name: "Content-Type", value: "application/json"},
-    {name: "User-Agent", value: "DiscordBot (https://github.com/sunholo-data/ailang-packages, 0.3.0)"}], body) {
+    {name: "User-Agent", value: "DiscordBot (https://github.com/sunholo-data/ailang-packages, 0.4.0)"}], body) {
     Ok(r) => responseJson(r.status, r.headers, r.body),
     Err(_) => Err(problem("network", if method == "POST" then "Send outcome unknown; reconcile before retrying" else "Discord request failed"))
   }
@@ -300,7 +307,7 @@ func requestUnit(token: string, method: string, path: string) -> Result[(), Disc
   if trim(token) == "" then Err(problem("authentication", "DISCORD_BOT_TOKEN or token file is required"))
   else match httpRequest(method, "https://discord.com/api/v10${path}", [
     {name: "Authorization", value: "Bot ${token}"}, {name: "Content-Type", value: "application/json"},
-    {name: "User-Agent", value: "DiscordBot (https://github.com/sunholo-data/ailang-packages, 0.3.0)"}], "") {
+    {name: "User-Agent", value: "DiscordBot (https://github.com/sunholo-data/ailang-packages, 0.4.0)"}], "") {
     Ok(r) => if r.status >= 200 && r.status < 300 then Ok(()) else Err(classifyError(r.status, r.headers, r.body)),
     Err(_) => Err(problem("network", "Discord request failed"))
   }

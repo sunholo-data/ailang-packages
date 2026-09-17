@@ -229,7 +229,9 @@ test "parseChannel accepts valid channels and rejects invalid ones" {
 -- footer with the listening note. Replaces a 2000-char wall of plain text.
 pure func addressBookEmbed() -> Embed =
   {title: "How to ask me for things", description: "Put what you want in the address and I will not have to guess.",
-   color: 3447003, footer: "Forward a thread or send two lines — either is fine, tagged or not.", fields: [
+   color: 15154199, footer: "Forward a thread or send two lines — either is fine, tagged or not.",
+   thumbnail: "https://www.sunholo.com/assets/visuals/service-studies/v2/ailang.webp",
+   image: "https://www.sunholo.com/assets/visuals/service-studies/v2/ailang.webp", fields: [
     {name: "daneel+document@", value: "Draft a document from what you send — local model, uploaded to Drive; the content never leaves this machine.", inline: false},
     {name: "daneel+summarise@", value: "Read something and summarise it. Also local.", inline: true},
     {name: "daneel+activity@", value: "What has been happening on the Studio.", inline: true},
@@ -250,7 +252,7 @@ test "embedJson preserves fields and omits empty keys" {
       match getArray(j, "fields") { Some(fs) => listLength(fs) == 6, None => false } &&
       isErr(decode("x"))
   } &&
-  match decode(encode(embedJson({title: "", description: "only a description", color: 0, footer: "", fields: []}))) {
+  match decode(encode(embedJson({title: "", description: "only a description", color: 0, footer: "", fields: [], thumbnail: "", image: ""}))) {
     Err(_) => false,
     Ok(j) => getOrElse(getString(j, "description"), "") == "only a description" &&
       match getArray(j, "fields") { None => true, Some(_) => false }
@@ -258,13 +260,13 @@ test "embedJson preserves fields and omits empty keys" {
 }
 
 test "embed limits are enforced" {
-  let big = {title: "t", description: "", color: 0, footer: "", fields: []};
-  let oversized = {title: "t", description: "", color: 0, footer: "", fields: []};
+  let big = {title: "t", description: "", color: 0, footer: "", fields: [], thumbnail: "", image: ""};
+  let oversized = {title: "t", description: "", color: 0, footer: "", fields: [], thumbnail: "", image: ""};
   -- 26 fields exceed the cap
-  let many = {title: "t", description: "", color: 0, footer: "", fields: manyFields(26)};
+  let many = {title: "t", description: "", color: 0, footer: "", fields: manyFields(26), thumbnail: "", image: ""};
   not validEmbed(many) &&
   isError(messageBodyEmbeds("", [many], "", "")) &&
-  not validEmbed({title: longStr(257), description: "", color: 0, footer: "", fields: []})
+  not validEmbed({title: longStr(257), description: "", color: 0, footer: "", fields: [], thumbnail: "", image: ""})
 }
 
 pure func manyFields(n: int) -> [EmbedField] =
@@ -273,9 +275,22 @@ pure func manyFields(n: int) -> [EmbedField] =
 pure func longStr(n: int) -> string =
   if n <= 0 then "" else concat(["x", longStr(n - 1)])
 
+test "embed images and thumbnails render as URL objects" {
+  let withImage = {title: "AILANG", description: "Verified code and mechanical guarantees.", color: 15154199,
+    footer: "", fields: [],
+    thumbnail: "https://www.sunholo.com/assets/visuals/service-studies/v2/ailang.webp",
+    image: "https://www.sunholo.com/assets/visuals/service-studies/v2/ailang.webp"};
+  match decode(encode(embedJson(withImage))) {
+    Err(_) => false,
+    Ok(j) => match getObject(j, "image") { None => false, Some(img) => getOrElse(getString(img, "url"), "") == "https://www.sunholo.com/assets/visuals/service-studies/v2/ailang.webp" } &&
+      match getObject(j, "thumbnail") { None => false, Some(t) => getOrElse(getString(t, "url"), "") == "https://www.sunholo.com/assets/visuals/service-studies/v2/ailang.webp" }
+  } &&
+  not validEmbed({title: "t", description: "", color: 0, footer: "", fields: [], thumbnail: "https://ok.example", image: longStr(2049)})
+}
+
 test "messageBodyEmbeds requires content or embeds and keeps mention policy" {
   isError(messageBodyEmbeds("", [], "", "")) &&
   isOk(messageBodyEmbeds("", [addressBookEmbed()], "", "")) &&
   isOk(messageBodyEmbeds("see card", [addressBookEmbed()], "", "")) &&
-  isError(messageBodyEmbeds("ok", [{title: "broken", description: "", color: 0, footer: "", fields: manyFields(30)}], "", ""))
+  isError(messageBodyEmbeds("ok", [{title: "broken", description: "", color: 0, footer: "", fields: manyFields(30), thumbnail: "", image: ""}], "", ""))
 }
