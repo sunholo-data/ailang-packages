@@ -31,11 +31,24 @@ From the package root, run `ailang lock`, `ailang check --package .`, and
 counts and skips. Add relevant runtime/integration checks and contract verification;
 report compile, test, proof and live-service outcomes separately.
 
-Run `ailang pkg quality --strict .` (or `--json` for automation) when supported — it is NOT in any shipped binary as of v0.39.0 (`unknown pkg command 'quality'`); skip it, do not report it as a blocker.
-This is a static evidence inventory, not test execution or proof. Report missing
-evidence and tool limitations explicitly; a passing compiler is not completion.
-For older binaries, review contracts, native tests/properties, effects/budgets and
-package documentation manually and state that the automated inventory was unavailable.
+Run `ailang pkg quality .` (`--json` for automation, `--strict` to make warn-level
+badges block, `--no-run` to skip executing tests and `_smoke.ail`). It exists from
+ailang v0.39.5+dev (2026-09-17); an older binary says `unknown pkg command 'quality'` —
+upgrade rather than skip. It is the report the registry validator runs on upload:
+
+| section | what it is | provenance |
+|---|---|---|
+| compile | `check --package` | server — a gate everywhere |
+| contracts | Z3 `verified/total`; `PUB016` = contracts Z3 cannot encode (runtime assertions, not proofs); `PUB006` = a refuted contract, a gate everywhere; `PUB011` = exported functions without a contract | server |
+| interface | signature-sensitive identity (v2); mismatch with the validator's = `PUB005` | server |
+| effects | `max`, privilege `rank_max`; `PUB010` = no ceiling declared (unlimited) | server |
+| release | `[release] kind` + `CHANGELOG.md` `## <version>` section (`PUB001`/`PUB002`, gates from v0.41.0) | server |
+| docs / style | AGENT.md, `ai_summary`, pure-export ratio; `PUB021` = no parseable `[metadata] repository` → no inbox agent | server |
+| tests / smoke | `*_test.ail` and `_smoke.ail` EXECUTED here; never by the validator | attested |
+
+Report the numbers it prints, not a summary of them ("7/7 verified, 14 uncontracted,
+21/21 tests, smoke ✓"). A passing compiler is not completion; a Z3-skipped contract is
+not a proof. Exit 2 means `ailang publish` will refuse.
 
 ## Delivery
 

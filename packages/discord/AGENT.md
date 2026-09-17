@@ -84,8 +84,14 @@ Validation (2026-09-15, AILANG dev + `pkg quality` on `build/package-authoring-f
   `trim`/`charAt`/`toLower`/`stringToFloat`, string interpolation (`show`), or callees
   returning `Option`/`Result`. 0 counterexamples, 0 unknown. Contracts are also
   executed as runtime properties (above), which is the primary behavioral evidence.
-- `ailang pkg quality --strict .`: 0 declaration gaps (22 native tests, 22 contract
-  clauses, `@limit=1` on all six `Net` functions, each performing exactly one request).
+- `ailang pkg quality --strict .` (2026-09-17, the shipped command — the 2026-09-15 line
+  above came from a branch prototype): compile ✓ 3 files · contracts 1/21 verified
+  (`problem`), 19 skipped by Z3 (`PUB016`, unencodable string builtins — runtime
+  assertions, not proofs), 10 exported functions uncontracted (`PUB011`) · interface v2
+  33 signatures · effects `[IO, Net]`, `@limit=1` on the six `Net` functions ·
+  16/26 exported funcs pure · tests 29/29 · smoke ✓. Under `--strict` four gates:
+  `PUB011`, `PUB001` (no `## 0.4.0` CHANGELOG section), `PUB002` (no `[release] kind`),
+  `PUB021` (no `[metadata] repository` → no `pkg:sunholo/discord` inbox agent).
 - Explicit `properties [...]` (forall) blocks are not used: the forall lowering is
   broken upstream (core #624). Runtime property evidence comes from `ensures` clauses.
 
