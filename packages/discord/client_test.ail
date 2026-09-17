@@ -10,9 +10,11 @@ module sunholo/discord/client_test
 import std/json (Json, encode, decode, getString, getInt, getBool, getArray, getObject, jo, kv, js, ja, jb, jint)
 import std/option (Some, None, getOrElse)
 import std/result (Result, Ok, Err, isOk, isErr)
-import std/string (length)
+import std/string (length, concat)
 import std/list (length as listLength)
-import pkg/sunholo/discord/client (DiscordError, DiscordMessage, validId, problem, messagePath, messageBody, errorJson, responseJson, classifyError, parseMessage, parseMessages, parseChannel, parseChannels, messageJson)
+import std/list (length as listLength, map as listMap)
+import std/option (isSome)
+import pkg/sunholo/discord/client (DiscordError, DiscordMessage, Embed, EmbedField, validId, problem, messagePath, messageBody, messageBodyEmbeds, embedBudget, validEmbed, embedJson, errorJson, responseJson, sendMessageEmbeds, classifyError, parseMessage, parseMessages, parseChannel, parseChannels, messageJson)
 
 pure func isError[a, b](r: Result[a, b]) -> bool = match r { Err(_) => true, Ok(_) => false }
 
@@ -221,4 +223,59 @@ test "parseChannel accepts valid channels and rejects invalid ones" {
   isError(parseChannel(jo([]))) &&
   isError(parseChannel(jo([kv("id", js("x")), kv("name", js("t")), kv("type", jint(0))]))) &&
   isError(parseChannel(jo([kv("id", js("9")), kv("name", js("t")), kv("type", jint(-1))])))
+}
+
+-- Address-book embed: the daneel help card shape — one field per address tag,
+-- footer with the listening note. Replaces a 2000-char wall of plain text.
+pure func addressBookEmbed() -> Embed =
+  {title: "How to ask me for things", description: "Put what you want in the address and I will not have to guess.",
+   color: 3447003, footer: "Forward a thread or send two lines — either is fine, tagged or not.", fields: [
+    {name: "daneel+document@", value: "Draft a document from what you send — local model, uploaded to Drive; the content never leaves this machine.", inline: false},
+    {name: "daneel+summarise@", value: "Read something and summarise it. Also local.", inline: true},
+    {name: "daneel+activity@", value: "What has been happening on the Studio.", inline: true},
+    {name: "daneel+followup@", value: "Put it on my calendar and reopen the thread that day — friday, next week, 3 days, or YYYY-MM-DD. Or reply \"remind me <when>\" on any thread.", inline: false},
+    {name: "daneel+design-<project>@", value: "Write a design doc and send it to that project's agent. Hyphenated package form too: daneel+design-pkg-sunholo-email@.", inline: false},
+    {name: "daneel@ (untagged)", value: "I work out what you meant, which works but is a guess.", inline: false}
+  ]}
+
+test "address-book embed is valid and fits the budget" {
+  let e = addressBookEmbed();
+  validEmbed(e) && embedBudget(e) <= 6000 && embedBudget(e) > 600
+}
+
+test "embedJson preserves fields and omits empty keys" {
+  match decode(encode(embedJson(addressBookEmbed()))) {
+    Err(_) => false,
+    Ok(j) => getOrElse(getString(j, "title"), "") == "How to ask me for things" &&
+      match getArray(j, "fields") { Some(fs) => listLength(fs) == 6, None => false } &&
+      isErr(decode("x"))
+  } &&
+  match decode(encode(embedJson({title: "", description: "only a description", color: 0, footer: "", fields: []}))) {
+    Err(_) => false,
+    Ok(j) => getOrElse(getString(j, "description"), "") == "only a description" &&
+      match getArray(j, "fields") { None => true, Some(_) => false }
+  }
+}
+
+test "embed limits are enforced" {
+  let big = {title: "t", description: "", color: 0, footer: "", fields: []};
+  let oversized = {title: "t", description: "", color: 0, footer: "", fields: []};
+  -- 26 fields exceed the cap
+  let many = {title: "t", description: "", color: 0, footer: "", fields: manyFields(26)};
+  not validEmbed(many) &&
+  isError(messageBodyEmbeds("", [many], "", "")) &&
+  not validEmbed({title: longStr(257), description: "", color: 0, footer: "", fields: []})
+}
+
+pure func manyFields(n: int) -> [EmbedField] =
+  if n <= 0 then [] else {name: "f", value: "v", inline: false} :: manyFields(n - 1)
+
+pure func longStr(n: int) -> string =
+  if n <= 0 then "" else concat(["x", longStr(n - 1)])
+
+test "messageBodyEmbeds requires content or embeds and keeps mention policy" {
+  isError(messageBodyEmbeds("", [], "", "")) &&
+  isOk(messageBodyEmbeds("", [addressBookEmbed()], "", "")) &&
+  isOk(messageBodyEmbeds("see card", [addressBookEmbed()], "", "")) &&
+  isError(messageBodyEmbeds("ok", [{title: "broken", description: "", color: 0, footer: "", fields: manyFields(30)}], "", ""))
 }

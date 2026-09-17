@@ -7,7 +7,7 @@ declares IO solely for the offline `_smoke.ail` boot gate (`ailang run -caps IO
 --entry main _smoke.ail`); no library module uses IO. Never pass a bot token as an MCP tool
 argument. Guild membership of a human user does not imply bot channel access.
 
-Install: `ailang install sunholo/discord@0.2.0`, then
+Install: `ailang install sunholo/discord@0.3.0`, then
 `import pkg/sunholo/discord/client (...)`. Consumer programs need `--caps Net`
 for the effectful entry points; the pure codecs run with no capabilities. Full
 quickstart, pagination pattern and error-kind table: package README.md and
@@ -30,6 +30,8 @@ Exports in `sunholo/discord/client`:
 | readMessages(token, channelId, query) | One page, limit 1..100, exclusive before/after cursors |
 | readMessage(token, channelId, messageId) | One message, useful for read-back |
 | sendMessage(token, channelId, text, replyTo, nonce) | Text or reply; mentions disabled; optional nonce dedup |
+| sendMessageEmbeds(token, channelId, text, embeds, replyTo, nonce) | Rich send: optional text + up to 10 embeds (structured cards) |
+| embedBudget(e), validEmbed(e), embedJson(e) | Embed codec: Discord limits enforced (title 256, description 4096, 25 fields, total 6000) |
 | editMessage(token, channelId, messageId, text) | PATCH content on an existing message; reply reference untouched |
 | typing(token, channelId) | Typing indicator (~10s); 204 No Content handled, any 2xx is success |
 | startThread(token, channelId, messageId, name) | Start a thread from a message; returns the thread channel |
@@ -43,8 +45,13 @@ Exports in `sunholo/discord/client`:
 `DiscordMessage` stores IDs as strings, author identity/name, content, timestamp,
 reply reference and mentioned user IDs. Empty content can be legitimate (non-text
 messages or Message Content Intent restrictions); missing content is a decode error.
-Unknown Discord fields are ignored. Attachments, embeds and edits are not modeled
-in this first version. Host should construct guild message links from its guild ID.
+Unknown Discord fields are ignored. Attachments are not modeled; embeds are (0.3.0); gateway edits are not. Host should construct guild message links from its guild ID.
+
+Embeds replace the wall-of-text failure mode: a structured card with a title,
+a description, labelled fields (name/value/inline) and a footer. Discord gives
+embeds a 6000-character budget (vs 2000 for content) and keeps field layout.
+`validEmbed` enforces every limit; `sendMessageEmbeds` takes optional text plus
+up to 10 embeds; mentions stay suppressed.
 
 Threads are channels: pass a thread ID to readMessages/sendMessage and it works
 unchanged. `startThread` creates one from an existing message; thread names are

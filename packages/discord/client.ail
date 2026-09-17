@@ -5,12 +5,68 @@ import std/json (Json, JArray, encode, decode, getString, getInt, getNumber, get
 import std/option (Some, None, getOrElse, isSome)
 import std/result (Result, Ok, Err, isOk, isErr)
 import std/string (length, charAt, trim, toLower, stringToFloat, startsWith)
-import std/list (map, any)
+import std/list (map, any, length as listLength)
 
 export type DiscordError = {kind: string, status: int, code: int, message: string, retryAfter: float, global: bool}
 export type DiscordMessage = {id: string, channelId: string, authorId: string, authorName: string, content: string, timestamp: string, replyTo: string, mentions: [string]}
 export type DiscordChannel = {id: string, name: string, kind: int}
 export type MessageQuery = {limit: int, before: string, after: string}
+export type EmbedField = {name: string, value: string, inline: bool}
+export type Embed = {title: string, description: string, color: int, footer: string, fields: [EmbedField]}
+
+-- Total rendered characters of an embed (Discord counts title, description,
+-- footer, and every field name+value against one 6000 budget).
+export pure func embedBudget(e: Embed) -> int
+ensures { result >= length(e.title), result >= length(e.description) }
+{
+  match e.fields {
+    [] => length(e.title) + length(e.description) + length(e.footer),
+    f :: rest => embedBudget({title: e.title, description: e.description, color: e.color,
+      footer: e.footer, fields: rest}) + length(f.name) + length(f.value)
+  }
+}
+
+-- Every field fits Discord's per-field limits.
+pure func fieldsFit(fs: [EmbedField]) -> bool
+ensures { match fs { [] => result == true, f :: rest => result == false || (length(f.name) <= 256 && length(f.value) <= 1024) } }
+{
+  match fs {
+  [] => true,
+  f :: rest => length(f.name) <= 256 && length(f.value) <= 1024 && fieldsFit(rest)
+  }
+}
+
+-- Discord embed limits: title 256, description 4096, 25 fields, per-field
+-- 256/1024, total 6000, and at least a title or a description to render.
+export pure func validEmbed(e: Embed) -> bool
+ensures { result == (length(e.title) <= 256 && length(e.description) <= 4096 && listLength(e.fields) <= 25 && (e.title != "" || e.description != "") && embedBudget(e) <= 6000 && fieldsFit(e.fields)) }
+{
+  length(e.title) <= 256 && length(e.description) <= 4096 && listLength(e.fields) <= 25 &&
+  (e.title != "" || e.description != "") && embedBudget(e) <= 6000 && fieldsFit(e.fields)
+}
+
+export pure func embedJson(e: Embed) -> Json
+ensures {
+  isSome(getString(result, "title")) == (e.title != ""),
+  e.title == "" || getOrElse(getString(result, "title"), "") == e.title,
+  isSome(getString(result, "description")) == (e.description != ""),
+  e.description == "" || getOrElse(getString(result, "description"), "") == e.description
+}
+{
+  jo(
+    (if e.title != "" then [kv("title", js(e.title))] else []) ++
+    (if e.description != "" then [kv("description", js(e.description))] else []) ++
+    (if e.color != 0 then [kv("color", jint(e.color))] else []) ++
+    (if e.footer != "" then [kv("footer", jo([kv("text", js(e.footer))]))] else []) ++
+    (if listLength(e.fields) != 0 then [kv("fields", ja(map(fieldJson, e.fields)))] else [])
+  )
+}
+
+pure func fieldJson(f: EmbedField) -> Json
+ensures { getOrElse(getString(result, "name"), "") == f.name, getOrElse(getString(result, "value"), "") == f.value }
+{
+  jo([kv("name", js(f.name)), kv("value", js(f.value)), kv("inline", jb(f.inline))])
+}
 
 export pure func problem(kind: string, message: string) -> DiscordError
 ensures { result.kind == kind, result.message == message, result.status == 0, result.code == 0, result.retryAfter == 0.0, result.global == false }
@@ -67,6 +123,37 @@ ensures {
   }
 }
 
+-- Body for a rich message: optional content plus validated embeds (Discord
+-- requires at least one of the two). Same mention policy and nonce handling
+-- as plain sends.
+export pure func messageBodyEmbeds(text: string, embeds: [Embed], replyTo: string, nonce: string) -> Result[string, DiscordError]
+ensures {
+  isOk(result) == ((length(trim(text)) > 0 || listLength(embeds) != 0) && length(text) <= 2000 && (replyTo == "" || validId(replyTo)) && length(nonce) <= 25 && allEmbedsValid(embeds))
+}
+{
+  if length(trim(text)) == 0 && listLength(embeds) == 0 then Err(problem("validation", "Message needs content or at least one embed"))
+  else if length(text) > 2000 then Err(problem("validation", "Message must contain 1..2000 characters"))
+  else if replyTo != "" && not validId(replyTo) then Err(problem("validation", "Invalid reply message ID"))
+  else if length(nonce) > 25 then Err(problem("validation", "Nonce exceeds 25 characters"))
+  else if not allEmbedsValid(embeds) then Err(problem("validation", "Embed exceeds Discord limits"))
+  else {
+    let base = if length(trim(text)) == 0 then [] else [kv("content", js(text))];
+    let embedsPart = if listLength(embeds) == 0 then [] else [kv("embeds", ja(map(embedJson, embeds)))];
+    let reply = if replyTo == "" then [] else [kv("message_reference", jo([kv("message_id", js(replyTo)), kv("fail_if_not_exists", jb(true))]))];
+    let dedup = if nonce == "" then [] else [kv("nonce", js(nonce)), kv("enforce_nonce", jb(true))];
+    Ok(encode(jo(base ++ embedsPart ++ reply ++ dedup)))
+  }
+}
+
+pure func allEmbedsValid(es: [Embed]) -> bool
+ensures { match es { [] => result == true, e :: rest => result == false || validEmbed(e) } }
+{
+  match es {
+  [] => true,
+  e :: rest => validEmbed(e) && allEmbedsValid(rest)
+  }
+}
+
 export pure func errorJson(e: DiscordError) -> Json
 ensures { getOrElse(getString(result, "kind"), "") == e.kind, getOrElse(getString(result, "message"), "") == e.message }
 {
@@ -109,7 +196,7 @@ func request(token: string, method: string, path: string, body: string) -> Resul
   if trim(token) == "" then Err(problem("authentication", "DISCORD_BOT_TOKEN or token file is required"))
   else match httpRequest(method, "https://discord.com/api/v10${path}", [
     {name: "Authorization", value: "Bot ${token}"}, {name: "Content-Type", value: "application/json"},
-    {name: "User-Agent", value: "DiscordBot (https://github.com/sunholo-data/ailang-packages, 0.2.0)"}], body) {
+    {name: "User-Agent", value: "DiscordBot (https://github.com/sunholo-data/ailang-packages, 0.3.0)"}], body) {
     Ok(r) => responseJson(r.status, r.headers, r.body),
     Err(_) => Err(problem("network", if method == "POST" then "Send outcome unknown; reconcile before retrying" else "Discord request failed"))
   }
@@ -187,6 +274,16 @@ export func sendMessage(token: string, channelId: string, text: string, replyTo:
       Err(e) => Err(e), Ok(j) => parseMessage(j) }
   }
 
+-- Rich send: optional text plus up to 10 embeds (Discord's per-message cap).
+-- Same policy as sendMessage: mentions suppressed, nonce dedup optional.
+export func sendMessageEmbeds(token: string, channelId: string, text: string, embeds: [Embed], replyTo: string, nonce: string) -> Result[DiscordMessage, DiscordError] ! {Net @limit=1} =
+  if not validId(channelId) then Err(problem("validation", "Invalid channelId ID"))
+  else if listLength(embeds) > 10 then Err(problem("validation", "At most 10 embeds per message"))
+  else match messageBodyEmbeds(text, embeds, replyTo, nonce) {
+    Err(e) => Err(e), Ok(body) => match request(token, "POST", "/channels/${channelId}/messages", body) {
+      Err(e) => Err(e), Ok(j) => parseMessage(j) }
+  }
+
 -- Edit an existing message's content. Same validation and mention policy as
 -- sendMessage; the reply reference is not changed by edits. Attachments are
 -- kept by Discord when the body omits them.
@@ -203,7 +300,7 @@ func requestUnit(token: string, method: string, path: string) -> Result[(), Disc
   if trim(token) == "" then Err(problem("authentication", "DISCORD_BOT_TOKEN or token file is required"))
   else match httpRequest(method, "https://discord.com/api/v10${path}", [
     {name: "Authorization", value: "Bot ${token}"}, {name: "Content-Type", value: "application/json"},
-    {name: "User-Agent", value: "DiscordBot (https://github.com/sunholo-data/ailang-packages, 0.2.0)"}], "") {
+    {name: "User-Agent", value: "DiscordBot (https://github.com/sunholo-data/ailang-packages, 0.3.0)"}], "") {
     Ok(r) => if r.status >= 200 && r.status < 300 then Ok(()) else Err(classifyError(r.status, r.headers, r.body)),
     Err(_) => Err(problem("network", "Discord request failed"))
   }

@@ -7,7 +7,7 @@ Pure codecs and validators; a thin effectful Net surface.
 ## Install
 
 ```sh
-ailang install sunholo/discord@0.2.0
+ailang install sunholo/discord@0.3.0
 ```
 
 ```ailang
@@ -18,7 +18,7 @@ import pkg/sunholo/discord/client (readMessages, sendMessage, parseMessage, mess
 
 | Surface | Effects | Notes |
 |---|---|---|
-| `identity`, `channels`, `readMessages`, `readMessage`, `sendMessage`, `editMessage`, `typing`, `startThread`, `activeThreads` | `Net` (`@limit=1` each: exactly one HTTP request per call) | run with `--caps Net`; the caller supplies the token |
+| `identity`, `channels`, `readMessages`, `readMessage`, `sendMessage`, `sendMessageEmbeds`, `editMessage`, `typing`, `startThread`, `activeThreads` | `Net` (`@limit=1` each: exactly one HTTP request per call) | run with `--caps Net`; the caller supplies the token |
 | codecs and validators (`validId`, `messagePath`, `messageBody`, `responseJson`, `parse*`, `messageJson`, `problem`, `errorJson`) | pure | runnable offline, no capabilities |
 
 The package ceiling is `[Net, IO]`; IO exists solely for the offline `_smoke.ail`
@@ -49,6 +49,13 @@ export func main() -> () ! {Net} {
 Pagination: pass the previous page's oldest message ID as `before` (or the newest
 as `after`); the two are mutually exclusive and validated. `limit` is bounded to
 1..100.
+
+Embeds: structured cards that survive Discord's text wrapping — the fix for
+long formatted output. `Embed` = title, description, color, footer, fields
+(`{name, value, inline}`), with Discord's limits enforced by `validEmbed`
+(title ≤ 256, description ≤ 4096, ≤ 25 fields of 256/1024, total ≤ 6000) and
+encoded by `embedJson`. `sendMessageEmbeds` takes optional text plus the embeds;
+empty content with embeds is fine, mentions stay suppressed.
 
 Threads: a thread is a channel — pass its ID to `readMessages`/`sendMessage` and
 everything works unchanged. `startThread(token, channelId, messageId, name)`
