@@ -1,4 +1,4 @@
-# sunholo/discord 0.1.0
+# sunholo/discord
 
 Use for Discord **bot** REST v10 reads and writes in AILANG. The host application
 loads credentials and enforces its channel/write policy. The library surface has
@@ -6,6 +6,12 @@ only Net as an effect; codecs and validators are pure. The package ceiling also
 declares IO solely for the offline `_smoke.ail` boot gate (`ailang run -caps IO
 --entry main _smoke.ail`); no library module uses IO. Never pass a bot token as an MCP tool
 argument. Guild membership of a human user does not imply bot channel access.
+
+Install: `ailang install sunholo/discord@0.1.0`, then
+`import pkg/sunholo/discord/client (...)`. Consumer programs need `--caps Net`
+for the effectful entry points; the pure codecs run with no capabilities. Full
+quickstart, pagination pattern and error-kind table: package README.md and
+`ailang pkg-docs sunholo/discord` (this file).
 
 ```ailang
 import pkg/sunholo/discord/client (readMessages, messageJson)

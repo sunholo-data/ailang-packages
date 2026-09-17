@@ -1,8 +1,13 @@
-# sunholo/agui 0.1.0
+# sunholo/agui
 
 Pure AG-UI codecs for AILANG. Import `pkg/sunholo/agui/events`. The package ceiling
 declares IO solely for the offline `_smoke.ail` boot gate (`ailang run -caps IO
---entry main _smoke.ail`); every library module is pure (zero effects).
+--entry main _smoke.ail`); every library module is pure (zero effects) — consumer
+programs need no capabilities beyond their own effects.
+
+Install: `ailang install sunholo/agui@0.1.0`. Full quickstart, the sequential
+run profile and the round-trip guarantee: package README.md and
+`ailang pkg-docs sunholo/agui` (this file).
 
 `Event` constructors: RunStarted(threadId, runId), RunFinished(threadId, runId),
 RunError(message), TextStart(messageId), TextContent(messageId, delta),

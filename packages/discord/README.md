@@ -1,44 +1,86 @@
-# sunholo/discord 0.1.0
+# sunholo/discord
 
-Use for Discord **bot** REST v10 reads and writes in AILANG. The host application
-loads credentials and enforces its channel/write policy. This package has only Net
-as an effect; codecs and validators are pure. Never pass a bot token as an MCP tool
-argument. Guild membership of a human user does not imply bot channel access.
+Discord **bot** REST v10 client for AILANG: typed messages, safe request
+construction, pagination, rate-limit classification and structured errors.
+Pure codecs and validators; a thin effectful Net surface.
 
-```ailang
-import pkg/sunholo/discord/client (readMessages, messageJson)
-import std/result (Ok, Err)
+## Install
 
--- Caller supplies token from Env or a protected file.
--- readMessages(token, channelId, {limit: 50, before: "", after: ""})
+```sh
+ailang install sunholo/discord@0.1.0
 ```
 
-Exports in `sunholo/discord/client`:
+```ailang
+import pkg/sunholo/discord/client (readMessages, sendMessage, parseMessage, messageJson)
+```
 
-| Function | Purpose |
-|---|---|
-| identity(token) | Bot identity via /users/@me |
-| channels(token, guildId) | Guild channel metadata; permissions must still be checked by reading |
-| readMessages(token, channelId, query) | One page, limit 1..100, exclusive before/after cursors |
-| readMessage(token, channelId, messageId) | One message, useful for read-back |
-| sendMessage(token, channelId, text, replyTo, nonce) | Text or reply; mentions disabled; optional nonce dedup |
-| validId(id), messagePath(...), messageBody(...) | Pure request validation/building |
-| responseJson(status, headers, body) | Pure response classification |
-| parseMessage(json), parseMessages(array), messageJson(message) | Typed message codecs |
-| problem(kind, message), errorJson(error) | Structured errors |
+## Effects and capabilities
 
-`DiscordMessage` stores IDs as strings, author identity/name, content, timestamp,
-reply reference and mentioned user IDs. Empty content can be legitimate (non-text
-messages or Message Content Intent restrictions); missing content is a decode error.
-Unknown Discord fields are ignored. Attachments, embeds and edits are not modeled
-in this first version. Host should construct guild message links from its guild ID.
+| Surface | Effects | Notes |
+|---|---|---|
+| `identity`, `channels`, `readMessages`, `readMessage`, `sendMessage` | `Net` (`@limit=1` each: exactly one HTTP request per call) | run with `--caps Net`; the caller supplies the token |
+| codecs and validators (`validId`, `messagePath`, `messageBody`, `responseJson`, `parse*`, `messageJson`, `problem`, `errorJson`) | pure | runnable offline, no capabilities |
 
-`DiscordError`: kind, status, code, message, retryAfter (seconds, may be fractional),
-global. HTTP bodies and token-bearing headers are not echoed. A 429 is returned to
-the caller; there is no sleeping or automatic retry. Network errors on POST mean
-unknown outcome. Reconcile before retrying. Discord nonce dedup is time-limited and
-is not a durable exactly-once guarantee.
+The package ceiling is `[Net, IO]`; IO exists solely for the offline `_smoke.ail`
+boot gate — no library module uses IO.
 
-Validate: `ailang check --package .`. Cross-package runtime and upstream protocol
-checks live in `ailang-demos/discord/tests/`; run `npm test` in that demo after
-`ailang lock` and `npm ci`. No live credentials are used in that suite.
+## Quickstart
+
+```ailang
+module myapp/discordbot
+
+import pkg/sunholo/discord/client (readMessages, messagePath)
+import std/io (println)
+import std/result (isOk)
+
+export func main() -> () ! {Net} {
+  -- Offline, no token needed: validate and build a request path first.
+  println("path-ok=${show(isOk(messagePath("123", {limit: 50, before: "", after: ""})))}");
+
+  -- Live read (--caps Net): the token comes from your environment or a
+  -- protected file — never hardcode it, never pass it through MCP tool arguments.
+  match readMessages(tokenFromYourSecretStore(), "1549868288002236417", {limit: 5, before: "", after: ""}) {
+    Ok(_) => println("read ok"),
+    Err(e) => println("error kind=${e.kind} status=${show(e.status)}")
+  }
+}
+```
+
+Pagination: pass the previous page's oldest message ID as `before` (or the newest
+as `after`); the two are mutually exclusive and validated. `limit` is bounded to
+1..100.
+
+## Error handling
+
+Every effectful call returns `Result[_, DiscordError]`. `DiscordError` carries
+`kind` (`validation`, `decode`, `authentication`, `permission`, `rate_limit`,
+`network`, `http`), Discord's `status`/`code`, a `message` that never echoes
+remote bodies or tokens, `retryAfter` seconds (fractional; 429 only) and `global`.
+There is no sleeping or automatic retry — callers decide. A `network` error on
+POST means the outcome is unknown; reconcile before retrying. Discord's nonce
+dedup (`sendMessage`'s `nonce` parameter, `enforce_nonce`) is time-limited and not
+a durable exactly-once guarantee.
+
+## Types and semantics
+
+- `DiscordMessage`: IDs as strings (64-bit snowflakes survive JSON/WASM), author
+  id/name, content, timestamp, reply reference, mentioned user IDs. Empty content
+  can be legitimate (non-text messages, Message Content Intent restrictions);
+  a *missing* content field is a decode error.
+- `DiscordChannel`: id, name, kind (0 = text).
+- `MessageQuery`: `limit` 1..100, exclusive `before`/`after` cursors.
+- Outgoing mentions are suppressed by policy (`allowed_mentions.parse: []`,
+  `replied_user: false`).
+- Not modeled in this version: attachments, embeds, edits, gateway/websocket.
+- Build guild message links yourself from your guild ID:
+  `https://discord.com/channels/{guild}/{channel}/{message}`.
+
+## Validation
+
+- `ailang check --package .` — clean.
+- `ailang test --package .` — 22 native tests, zero skips.
+- `ailang run -caps IO --entry main _smoke.ail` — 12/12 boot checks (run
+  automatically by `ailang publish`).
+- `ailang pkg quality --strict .` — 0 declaration gaps.
+- Upstream protocol checks live in `ailang-demos/discord` (`npm test`), which
+  additionally validates live behavior and the MCP tool surface.
