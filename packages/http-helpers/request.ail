@@ -31,19 +31,19 @@ export pure func apiKeyHeaders(key: string) -> [{name: string, value: string}] =
   ]
 
 -- GET with Bearer token
-export func authGet(url: string, token: string) -> Result[{status: int, headers: [{name: string, value: string}], body: string, ok: bool}, string] ! {Net} =
+export func authGet(url: string, token: string) -> Result[{status: int, headers: [{name: string, value: string}], body: string, bodyBytes: bytes, ok: bool}, string] ! {Net} =
   match httpRequest("GET", url, bearerHeaders(token), "") {
     Ok(resp) => Ok(resp),
     Err(_) => Err("Network error: GET ${url}")
   }
 
 -- POST with Bearer token and JSON body
-export func authPost(url: string, token: string, body: string) -> Result[{status: int, headers: [{name: string, value: string}], body: string, ok: bool}, string] ! {Net} =
+export func authPost(url: string, token: string, body: string) -> Result[{status: int, headers: [{name: string, value: string}], body: string, bodyBytes: bytes, ok: bool}, string] ! {Net} =
   match httpRequest("POST", url, bearerHeaders(token), body) {
     Ok(resp) => Ok(resp),
     Err(_) => Err("Network error: POST ${url}")
   }
 
 -- POST JSON object with Bearer token (encodes body automatically)
-export func authPostJson(url: string, token: string, jsonBody: Json) -> Result[{status: int, headers: [{name: string, value: string}], body: string, ok: bool}, string] ! {Net} =
+export func authPostJson(url: string, token: string, jsonBody: Json) -> Result[{status: int, headers: [{name: string, value: string}], body: string, bodyBytes: bytes, ok: bool}, string] ! {Net} =
   authPost(url, token, encode(jsonBody))
