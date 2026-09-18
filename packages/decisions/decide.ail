@@ -26,7 +26,7 @@
 
 module sunholo/decisions/decide
 
-import std/json (Json, encode, decode, jo, ja, kv, js, jnum, get, getString, getNumber, getInt, getObject, asObject, asNumber)
+import std/json (Json, encode, decode, jo, ja, kv, js, jb, jnum, get, getString, getNumber, getInt, getObject, asObject, asNumber)
 import std/net (httpRequest, NetError)
 import std/env (getEnv)
 import std/list (map, length)
@@ -119,9 +119,6 @@ func questionSchema(q: Question) -> Json =
 
 func indexKeys(n: int, i: int) -> [string] =
   if i >= n then [] else [show(i)] ++ indexKeys(n, i + 1)
-
-func jb(b: bool) -> Json = if b then js("true") else jsonFalse()
-func jsonFalse() -> Json = match decode("false") { Ok(j) => j, Err(_) => js("false") }
 
 -- ---------------------------------------------------------------- response (pure)
 

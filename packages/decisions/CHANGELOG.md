@@ -1,5 +1,10 @@
 # Changelog — sunholo/decisions
 
+## 0.1.1 — 2026-09-18
+
+- Fix: `questionsToJsonSchema` emitted `additionalProperties` as the string `"false"`; now a JSON boolean
+  (strict structured-output modes reject the string form). Test added.
+
 ## 0.1.0 — 2026-09-18
 
 First release. Typed decisions from a System One model (TypeSafe Jev) via

@@ -207,6 +207,12 @@ test "gate: threshold exactly equal to confidence acts (>=)" {
 
 -- ---------------------------------------------------------------- schema for the LLM control arm
 
+pure func schemaClosesObjects() -> bool = contains(schemaJson(), "\"additionalProperties\":false")
+
+test "questionsToJsonSchema: additionalProperties is boolean false, not the string \"false\" (strict mode rejects strings)" {
+  schemaClosesObjects()
+}
+
 test "questionsToJsonSchema: per-label number properties for choice/score, a single number for noul, all required" {
   match decode(schemaJson()) {
     Err(_) => false,
