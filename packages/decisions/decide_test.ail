@@ -1,0 +1,221 @@
+-- Native tests for sunholo/decisions/decide.
+--
+-- Offline only: the pure half of the package (request building, response
+-- parsing, gating) against three REAL responses banked from the 2026-09-18
+-- spike and three malformed bodies. The effectful `decide` is exercised by
+-- examples/runnable/decide_jev.ail in the ailang repo and by the shadow runner.
+
+module sunholo/decisions/decide_test
+
+import std/json (decode, get, getString, getObject, jo, kv, js, encode)
+import std/option (Option, Some, None)
+import std/result (Result, Ok, Err)
+import std/string (contains)
+import std/list (length)
+import pkg/sunholo/decisions/decide (
+  Question, Noul, Choice, Score,
+  Answer, NoulA, ChoiceA, ScoreA,
+  DecideError, MissingKey, Http, Transport, BadResponse, MissingAnswer, WrongVariant,
+  Decision, Gate, Act, Escalate, Ungateable,
+  buildRequest, parseAnswers, questionsToJsonSchema, answer, gate, expectedScore
+)
+
+-- ---------------------------------------------------------------- fixtures
+
+-- Real response, OpenRouter, 2026-09-18 12:11Z (support-ticket state).
+pure func fixtureTicket() -> string =
+  "{\"model\":\"typesafe/jev-1.13-20260917\",\"answers\":{\"department\":{\"type\":\"choice\",\"choice\":\"billing\",\"probabilities\":{\"billing\":0.71,\"technical\":0.29,\"sales\":0},\"confidence\":0.57},\"frustration\":{\"type\":\"score\",\"score\":1,\"legend\":{\"0\":\"Calm, just stating facts\",\"1\":\"Frustrated but civil\",\"2\":\"Very angry, strong language\"},\"probabilities\":{\"0\":0,\"1\":1,\"2\":0},\"confidence\":1},\"is_urgent\":{\"type\":\"noul\",\"noul\":0.99}},\"usage\":{\"input_tokens\":424,\"output_tokens\":73,\"cost\":1.7808e-05},\"id\":\"gen-dec-1789733469-jJrSJRclp0uzuG7JQktA\",\"provider\":\"TypeSafe\"}"
+
+-- Real response, OpenRouter, 2026-09-18 12:12Z (AILANG compile-error friction).
+pure func fixtureFriction() -> string =
+  "{\"model\":\"typesafe/jev-1.13-20260917\",\"answers\":{\"lane\":{\"type\":\"choice\",\"choice\":\"motoko_extension\",\"probabilities\":{\"core_floor_fix\":0,\"model_capability\":0.04,\"ailang_fix\":0.37,\"motoko_extension\":0.59},\"confidence\":0.45},\"auto_fixable\":{\"type\":\"noul\",\"noul\":0.79},\"prompt_defect\":{\"type\":\"noul\",\"noul\":0.62},\"severity\":{\"type\":\"score\",\"score\":2.78,\"legend\":{\"0\":\"Cosmetic; ignore\",\"1\":\"Nice to have\",\"2\":\"Worth a sprint milestone\",\"3\":\"Top-of-backlog; blocks the pass-rate goal\"},\"probabilities\":{\"0\":0.01,\"1\":0.04,\"2\":0.11,\"3\":0.84},\"confidence\":0.78}},\"usage\":{\"input_tokens\":737,\"output_tokens\":107,\"cost\":3.0954e-05},\"id\":\"gen-dec-1789733525-MyhunCACU057zbmZp9pu\",\"provider\":\"TypeSafe\"}"
+
+-- Real response shape from TypeSafe's DIRECT API (adapter-repo cassette):
+-- no id/provider/cost, extra `stats: {}` per answer, `assets_used: null`.
+pure func fixtureDirect() -> string =
+  "{\"model\":\"speed_v12_snowy_flower\",\"answers\":{\"positive\":{\"type\":\"noul\",\"noul\":0.98,\"stats\":{}},\"genre\":{\"type\":\"choice\",\"choice\":\"fiction\",\"confidence\":1.0,\"probabilities\":{\"fiction\":1.0,\"nonfiction\":0.0},\"stats\":{}}},\"usage\":{\"input_tokens\":448,\"output_tokens\":55},\"assets_used\":null}"
+
+pure func ticketQs() -> [{ name: string, q: Question }] = [
+  { name: "department", q: Choice("Which team", [{ key: "billing", desc: "b" }, { key: "technical", desc: "t" }, { key: "sales", desc: "s" }]) },
+  { name: "frustration", q: Score("How frustrated", ["Calm", "Frustrated", "Angry"]) },
+  { name: "is_urgent", q: Noul("Urgent?") }]
+
+pure func frictionQs() -> [{ name: string, q: Question }] = [
+  { name: "lane", q: Choice("Which lane", [{ key: "ailang_fix", desc: "a" }, { key: "motoko_extension", desc: "m" }, { key: "core_floor_fix", desc: "c" }, { key: "model_capability", desc: "x" }]) },
+  { name: "auto_fixable", q: Noul("Auto-fixable?") },
+  { name: "prompt_defect", q: Noul("Prompt defect?") },
+  { name: "severity", q: Score("Severity", ["0", "1", "2", "3"]) }]
+
+pure func isErr[a, b](r: Result[a, b]) -> bool = match r { Err(_) => true, Ok(_) => false }
+pure func optIs(o: Option[string], s: string) -> bool = match o { Some(x) => x == s, None => false }
+
+pure func requestJson() -> string = buildRequest("typesafe/jev-1.13", jo([kv("text", js("hi"))]), ticketQs())
+pure func criteriaJson() -> string = buildRequest("m", js("s"), ticketQs())
+pure func schemaJson() -> string = questionsToJsonSchema(ticketQs())
+pure func criteriaObjFragment() -> string = "\"criteria\":{\"billing\":\"b\""
+pure func criteriaArrFragment() -> string = "\"criteria\":[\"Calm\",\"Frustrated\",\"Angry\"]"
+pure func bodyNoAnswers() -> string = "{\"model\":\"x\",\"usage\":{\"input_tokens\":1,\"output_tokens\":1}}"
+pure func bodyUnknownType() -> string = "{\"model\":\"x\",\"answers\":{\"is_urgent\":{\"type\":\"vibe\",\"vibe\":1}},\"usage\":{\"input_tokens\":1,\"output_tokens\":1}}"
+pure func bodyNotJson() -> string = "<html>502</html>"
+pure func ghostQs() -> [{ name: string, q: Question }] = ticketQs() ++ [{ name: "ghost", q: Noul("?") }]
+pure func directQs() -> [{ name: string, q: Question }] = [{ name: "positive", q: Noul("p") }, { name: "genre", q: Choice("g", [{ key: "fiction", desc: "" }, { key: "nonfiction", desc: "" }]) }]
+pure func urgentQs() -> [{ name: string, q: Question }] = [{ name: "is_urgent", q: Noul("u") }]
+-- Float expectations live in helpers: the named-test harness re-prints test
+-- bodies and integral float literals (1.0, 0.0) do not survive the round-trip.
+pure func approx(x: float, target: float, tol: float) -> bool = x > target - tol && x < target + tol
+pure func ticketCost() -> float = 0.000017808
+pure func tiny() -> float = 0.000000000001
+pure func one() -> float = 1.0
+pure func zero() -> float = 0.0
+
+-- ---------------------------------------------------------------- request
+
+test "buildRequest carries model, state and every question under its name and type" {
+  match decode(requestJson()) {
+    Err(_) => false,
+    Ok(j) => optIs(getString(j, "model"), "typesafe/jev-1.13")
+      && (match getObject(j, "questions") {
+            None => false,
+            Some(qs) => (match getObject(qs, "department") { None => false, Some(d) => optIs(getString(d, "type"), "choice") })
+                     && (match getObject(qs, "frustration") { None => false, Some(f) => optIs(getString(f, "type"), "score") })
+                     && (match getObject(qs, "is_urgent") { None => false, Some(u) => optIs(getString(u, "type"), "noul") })
+          })
+  }
+}
+
+test "buildRequest: choice criteria is an object keyed by option, score criteria is an ordered array" {
+  contains(criteriaJson(), criteriaObjFragment()) && contains(criteriaJson(), criteriaArrFragment())
+}
+
+-- ---------------------------------------------------------------- parsing (real fixtures)
+
+test "parseAnswers: ticket fixture yields typed answers with distributions, usage and provenance" {
+  match parseAnswers(fixtureTicket(), ticketQs()) {
+    Err(_) => false,
+    Ok(d) => d.model == "typesafe/jev-1.13-20260917"
+      && d.id == "gen-dec-1789733469-jJrSJRclp0uzuG7JQktA"
+      && d.input_tokens == 424 && d.output_tokens == 73
+      && approx(d.cost_usd, ticketCost(), tiny())
+      && length(d.answers) == 3
+      && (match answer(d, "department") {
+            Ok(ChoiceA(c)) => c.choice == "billing" && c.confidence == 0.57 && length(c.probabilities) == 3,
+            _ => false })
+      && (match answer(d, "frustration") {
+            Ok(ScoreA(s)) => approx(s.score, one(), tiny()) && approx(s.confidence, one(), tiny()) && length(s.probabilities) == 3,
+            _ => false })
+      && (match answer(d, "is_urgent") { Ok(NoulA(p)) => p == 0.99, _ => false })
+  }
+}
+
+test "parseAnswers: friction fixture — a split choice keeps its full distribution" {
+  match parseAnswers(fixtureFriction(), frictionQs()) {
+    Err(_) => false,
+    Ok(d) => match answer(d, "lane") {
+      Ok(ChoiceA(c)) => c.choice == "motoko_extension" && c.confidence == 0.45 && length(c.probabilities) == 4,
+      _ => false
+    }
+  }
+}
+
+test "parseAnswers: direct-API shape (no id/cost, extra stats) still parses; absent fields are zero/empty, not errors" {
+  match parseAnswers(fixtureDirect(), directQs()) {
+    Err(_) => false,
+    Ok(d) => d.id == "" && approx(d.cost_usd, zero(), tiny()) && d.input_tokens == 448
+      && (match answer(d, "genre") { Ok(ChoiceA(c)) => c.choice == "fiction", _ => false })
+  }
+}
+
+-- ---------------------------------------------------------------- parsing (malformed)
+
+test "parseAnswers: body without answers is BadResponse" {
+  match parseAnswers(bodyNoAnswers(), ticketQs()) {
+    Err(BadResponse(_)) => true,
+    _ => false
+  }
+}
+
+test "parseAnswers: unknown answer type is BadResponse naming the type" {
+  match parseAnswers(bodyUnknownType(), urgentQs()) {
+    Err(BadResponse(msg)) => contains(msg, "vibe"),
+    _ => false
+  }
+}
+
+test "parseAnswers: a question the response did not answer is MissingAnswer, never an empty Ok" {
+  match parseAnswers(fixtureTicket(), ghostQs()) {
+    Err(MissingAnswer(n)) => n == "ghost",
+    _ => false
+  }
+}
+
+test "parseAnswers: not JSON is BadResponse" {
+  isErr(parseAnswers(bodyNotJson(), ticketQs()))
+}
+
+-- ---------------------------------------------------------------- answer / expectedScore
+
+test "answer: unknown name is MissingAnswer" {
+  match parseAnswers(fixtureTicket(), ticketQs()) {
+    Err(_) => false,
+    Ok(d) => match answer(d, "nope") { Err(MissingAnswer(n)) => n == "nope", _ => false }
+  }
+}
+
+test "expectedScore: sum of level*p on ScoreA; WrongVariant otherwise" {
+  match parseAnswers(fixtureFriction(), frictionQs()) {
+    Err(_) => false,
+    Ok(d) => (match answer(d, "severity") {
+                Ok(a) => (match expectedScore(a) { Ok(x) => x > 2.77 && x < 2.79, Err(_) => false }),
+                Err(_) => false })
+          && (match answer(d, "lane") {
+                Ok(a) => (match expectedScore(a) { Err(WrongVariant(_)) => true, _ => false }),
+                Err(_) => false })
+  }
+}
+
+-- ---------------------------------------------------------------- gate (three-way, no defaults)
+
+test "gate: ChoiceA above threshold is Act(label); below is Escalate(confidence)" {
+  match parseAnswers(fixtureFriction(), frictionQs()) {
+    Err(_) => false,
+    Ok(d) => match answer(d, "lane") {
+      Ok(a) => (match gate(a, 0.4) { Act(l) => l == "motoko_extension", _ => false })
+            && (match gate(a, 0.7) { Escalate(c) => c == 0.45, _ => false }),
+      Err(_) => false
+    }
+  }
+}
+
+test "gate: ScoreA is gateable (Act carries the rounded level) and NoulA is Ungateable, never Escalate" {
+  match parseAnswers(fixtureFriction(), frictionQs()) {
+    Err(_) => false,
+    Ok(d) => (match answer(d, "severity") {
+                Ok(a) => (match gate(a, 0.5) { Act(l) => l == "3", _ => false }),
+                Err(_) => false })
+          && (match answer(d, "auto_fixable") {
+                Ok(a) => (match gate(a, 0.5) { Ungateable(_) => true, _ => false }),
+                Err(_) => false })
+  }
+}
+
+test "gate: threshold exactly equal to confidence acts (>=)" {
+  match parseAnswers(fixtureFriction(), frictionQs()) {
+    Err(_) => false,
+    Ok(d) => match answer(d, "lane") { Ok(a) => (match gate(a, 0.45) { Act(_) => true, _ => false }), Err(_) => false }
+  }
+}
+
+-- ---------------------------------------------------------------- schema for the LLM control arm
+
+test "questionsToJsonSchema: per-label number properties for choice/score, a single number for noul, all required" {
+  match decode(schemaJson()) {
+    Err(_) => false,
+    Ok(j) => match getObject(j, "properties") {
+      None => false,
+      Some(props) =>
+        (match getObject(props, "department") { None => false, Some(dq) => (match getObject(dq, "properties") { None => false, Some(pp) => (match getObject(pp, "billing") { None => false, Some(b) => optIs(getString(b, "type"), "number") }) }) })
+        && (match getObject(props, "frustration") { None => false, Some(fq) => (match getObject(fq, "properties") { None => false, Some(pp) => (match getObject(pp, "2") { None => false, Some(l) => optIs(getString(l, "type"), "number") }) }) })
+        && (match getObject(props, "is_urgent") { None => false, Some(u) => optIs(getString(u, "type"), "number") })
+    }
+  }
+}

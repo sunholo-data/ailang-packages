@@ -1,0 +1,251 @@
+-- sunholo/decisions/decide — typed decisions from a System One model.
+--
+-- A System One model (TypeSafe Jev) is not an LLM: it takes a JSON `state`
+-- plus typed `questions` and returns typed answers, each with a probability
+-- distribution and (for Choice/Score) a calibrated `confidence`. This module
+-- is the AILANG binding, in pure AILANG over std/net + std/json + std/env.
+--
+-- Transport (v0.1): OpenRouter `POST /api/alpha/decisions`, model
+-- `typesafe/jev-1.13`, bearer OPENROUTER_API_KEY. Same body as TypeSafe's
+-- direct `/v1/systemone`; a direct transport is a URL + header swap.
+--
+-- Rules for consumers (design_docs/planned/m-ai-decide-system-one.md):
+--   D4  No default threshold lives here. `gate` REQUIRES minConfidence and
+--       returns a three-way Gate; a wrong variant is never "low confidence".
+--   D6  The model is NON-DETERMINISTIC (identical calls: ±0.04 on the
+--       distribution; argmax usually stable). Bank the whole Decision
+--       (model, id, answers with distributions, usage) — never argmax alone.
+--   Answer.confidence is meaningful only for a Decision whose `model` is a
+--       System One model. parseAnswers is exported for replay of banked
+--       bodies; it makes no provenance claim about what you feed it.
+--
+-- Limitations (v0.1): calls go through the Net effect, so they are bounded
+-- by --net-timeout (30s default) but are NOT in the AI effect's budget or
+-- `ailang trace` cost totals — OpenRouter Broadcast is the independent
+-- record. Text only; English primary; 32k-token state ceiling.
+
+module sunholo/decisions/decide
+
+import std/json (Json, encode, decode, jo, ja, kv, js, jnum, get, getString, getNumber, getInt, getObject, asObject, asNumber)
+import std/net (httpRequest, NetError)
+import std/env (getEnv)
+import std/list (map, length)
+import std/option (Option, Some, None)
+import std/result (Result, Ok, Err)
+import std/math (round, intToFloat, floatToInt)
+import std/string (stringToInt, startsWith, endsWith)
+
+-- ---------------------------------------------------------------- types
+
+-- A typed question. Names mirror TypeSafe's three primitives.
+export type Question =
+  | Noul(string)                                     -- instructions -> P(yes)
+  | Choice(string, [{ key: string, desc: string }])  -- instructions, options
+  | Score(string, [string])                          -- instructions, ordered levels (index = level)
+
+-- A typed answer. Distributions are ordered {key, p} records and are always
+-- carried, never discarded. Score keys are the level index as a string.
+export type Answer =
+  | NoulA(float)
+  | ChoiceA({ choice: string, confidence: float, probabilities: [{ key: string, p: float }] })
+  | ScoreA({ score: float, confidence: float, probabilities: [{ key: string, p: float }] })
+
+export type DecideError =
+  | MissingKey(string)      -- OPENROUTER_API_KEY not set
+  | Http(int, string)       -- non-2xx: status + body
+  | Transport(string)       -- Net effect error (incl. the 30s deadline)
+  | BadResponse(string)     -- 2xx but not the Decisions shape
+  | MissingAnswer(string)   -- a question the response did not answer / a name you never asked
+  | WrongVariant(string)    -- a helper applied to the wrong Answer constructor
+
+-- One round trip's full result. `model`/`id` are the wire values (provenance);
+-- cost_usd is OpenRouter's usage.cost (0.0 when the transport does not send one).
+export type Decision = {
+  model: string,
+  id: string,
+  answers: [{ name: string, answer: Answer }],
+  input_tokens: int,
+  output_tokens: int,
+  cost_usd: float
+}
+
+-- The ONLY policy-shaped value here, and three-way on purpose: a wrong
+-- variant is never reported as "not confident enough".
+export type Gate =
+  | Act(string)          -- confidence >= minConfidence: the label (ChoiceA) or the rounded level (ScoreA)
+  | Escalate(float)      -- confidence <  minConfidence: carries the confidence for the caller's log
+  | Ungateable(string)   -- NoulA has no confidence: threshold its probability directly
+
+-- ---------------------------------------------------------------- request (pure)
+
+func questionJson(q: Question) -> Json =
+  match q {
+    Noul(instr) => jo([kv("type", js("noul")), kv("instructions", js(instr))]),
+    Choice(instr, opts) => jo([kv("type", js("choice")), kv("instructions", js(instr)),
+                               kv("criteria", jo(map(\o. kv(o.key, js(o.desc)), opts)))]),
+    Score(instr, levels) => jo([kv("type", js("score")), kv("instructions", js(instr)),
+                                kv("criteria", ja(map(\l. js(l), levels)))])
+  }
+
+-- buildRequest: the exact Decisions body (OpenRouter and TypeSafe direct).
+export pure func buildRequest(model: string, state: Json, questions: [{ name: string, q: Question }]) -> string
+  ensures { startsWith(result, "{") && endsWith(result, "}") }
+= encode(jo([kv("model", js(model)), kv("state", state),
+             kv("questions", jo(map(\nq. kv(nq.name, questionJson(nq.q)), questions)))]))
+
+-- questionsToJsonSchema: a strict JSON Schema asking a chat LLM for the SAME
+-- questions as a per-label probability distribution (Choice/Score) or a
+-- single probability (Noul). The only LLM-facing export: it yields a schema,
+-- never an Answer. Used by the shadow runner's control arm.
+export pure func questionsToJsonSchema(questions: [{ name: string, q: Question }]) -> string
+  ensures { startsWith(result, "{") && endsWith(result, "}") }
+= encode(jo([kv("type", js("object")), kv("additionalProperties", jb(false)),
+             kv("required", ja(map(\nq. js(nq.name), questions))),
+             kv("properties", jo(map(\nq. kv(nq.name, questionSchema(nq.q)), questions)))]))
+
+func numberProp() -> Json = jo([kv("type", js("number")), kv("minimum", jnum(0.0)), kv("maximum", jnum(1.0))])
+
+func labelledDist(keys: [string]) -> Json =
+  jo([kv("type", js("object")), kv("additionalProperties", jb(false)),
+      kv("required", ja(map(\k. js(k), keys))),
+      kv("properties", jo(map(\k. kv(k, numberProp()), keys)))])
+
+func questionSchema(q: Question) -> Json =
+  match q {
+    Noul(_) => numberProp(),
+    Choice(_, opts) => labelledDist(map(\o. o.key, opts)),
+    Score(_, levels) => labelledDist(indexKeys(length(levels), 0))
+  }
+
+func indexKeys(n: int, i: int) -> [string] =
+  if i >= n then [] else [show(i)] ++ indexKeys(n, i + 1)
+
+func jb(b: bool) -> Json = if b then js("true") else jsonFalse()
+func jsonFalse() -> Json = match decode("false") { Ok(j) => j, Err(_) => js("false") }
+
+-- ---------------------------------------------------------------- response (pure)
+
+func num(j: Json, k: string) -> float =
+  match getNumber(j, k) { Some(x) => x, None => 0.0 }
+
+func str(j: Json, k: string) -> string =
+  match getString(j, k) { Some(s) => s, None => "" }
+
+func dist(j: Json) -> [{ key: string, p: float }] =
+  match getObject(j, "probabilities") {
+    None => [],
+    Some(ps) => match asObject(ps) {
+      None => [],
+      Some(kvs) => map(\e. { key: e.key, p: match asNumber(e.value) { Some(x) => x, None => 0.0 } }, kvs)
+    }
+  }
+
+func answerOf(name: string, j: Json) -> Result[Answer, DecideError] =
+  match getString(j, "type") {
+    Some("noul") => Ok(NoulA(num(j, "noul"))),
+    Some("choice") => Ok(ChoiceA({ choice: str(j, "choice"), confidence: num(j, "confidence"), probabilities: dist(j) })),
+    Some("score") => Ok(ScoreA({ score: num(j, "score"), confidence: num(j, "confidence"), probabilities: dist(j) })),
+    Some(other) => Err(BadResponse("answer ${name}: unknown type ${other}")),
+    None => Err(BadResponse("answer ${name}: no type"))
+  }
+
+@allow_empty_ok("recursion base case: an empty question list legitimately yields an empty answer list")
+func collect(questions: [{ name: string, q: Question }], answers: Json) -> Result[[{ name: string, answer: Answer }], DecideError] =
+  match questions {
+    [] => Ok([]),
+    [nq, ...rest] => match get(answers, nq.name) {
+      None => Err(MissingAnswer(nq.name)),
+      Some(aj) => match answerOf(nq.name, aj) {
+        Err(e) => Err(e),
+        Ok(a) => match collect(rest, answers) {
+          Err(e) => Err(e),
+          Ok(tail) => Ok([{ name: nq.name, answer: a }] ++ tail)
+        }
+      }
+    }
+  }
+
+func usageInt(body: Json, k: string) -> int =
+  match getObject(body, "usage") { None => 0, Some(u) => match getInt(u, k) { Some(n) => n, None => 0 } }
+
+func usageCost(body: Json) -> float =
+  match getObject(body, "usage") { None => 0.0, Some(u) => num(u, "cost") }
+
+-- parseAnswers: decode a Decisions response body against the questions that
+-- were asked. Pure; replayable from a banked body. Every question must be
+-- answered (MissingAnswer otherwise); unknown answer types are BadResponse.
+export pure func parseAnswers(body: string, questions: [{ name: string, q: Question }]) -> Result[Decision, DecideError]
+  ensures { match result { Ok(d) => length(d.answers) == length(questions), Err(_) => true } }
+= match decode(body) {
+    Err(e) => Err(BadResponse("not JSON: ${e}")),
+    Ok(j) => match getObject(j, "answers") {
+      None => Err(BadResponse("no answers object")),
+      Some(answers) => match collect(questions, answers) {
+        Err(e) => Err(e),
+        Ok(named) => Ok({ model: str(j, "model"), id: str(j, "id"), answers: named,
+                          input_tokens: usageInt(j, "input_tokens"), output_tokens: usageInt(j, "output_tokens"),
+                          cost_usd: usageCost(j) })
+      }
+    }
+  }
+
+-- ---------------------------------------------------------------- helpers (pure, no policy)
+
+-- answer: look one answer up by the name you asked under.
+export pure func answer(d: Decision, name: string) -> Result[Answer, DecideError] =
+  findNamed(d.answers, name)
+
+func findNamed(xs: [{ name: string, answer: Answer }], name: string) -> Result[Answer, DecideError] =
+  match xs {
+    [] => Err(MissingAnswer(name)),
+    [x, ...rest] => if x.name == name then Ok(x.answer) else findNamed(rest, name)
+  }
+
+-- gate: the caller supplies the threshold; the result is exhaustive.
+export pure func gate(a: Answer, minConfidence: float) -> Gate
+  requires { minConfidence >= 0.0 && minConfidence <= 1.0 }
+= match a {
+    NoulA(_) => Ungateable("NoulA carries a probability, not a confidence: threshold the probability directly"),
+    ChoiceA(c) => if c.confidence >= minConfidence then Act(c.choice) else Escalate(c.confidence),
+    ScoreA(s) => if s.confidence >= minConfidence then Act(show(floatToInt(round(s.score)))) else Escalate(s.confidence)
+  }
+
+-- expectedScore: Σ level·p over a ScoreA's distribution.
+export pure func expectedScore(a: Answer) -> Result[float, DecideError]
+  ensures { match result { Ok(x) => x >= 0.0, Err(_) => true } }
+= match a {
+    ScoreA(s) => Ok(weighted(s.probabilities)),
+    ChoiceA(_) => Err(WrongVariant("expectedScore: ChoiceA has no ordinal levels")),
+    NoulA(_) => Err(WrongVariant("expectedScore: NoulA has no levels"))
+  }
+
+func weighted(ps: [{ key: string, p: float }]) -> float =
+  match ps {
+    [] => 0.0,
+    [x, ...rest] => (match stringToInt(x.key) { Some(i) => intToFloat(i) * x.p, None => 0.0 }) + weighted(rest)
+  }
+
+-- ---------------------------------------------------------------- the effectful shell
+
+-- decide: one round trip. Every question sees the same state; answers come
+-- back keyed by the question name. Bounded by the Net effect's deadline.
+export func decide(model: string, state: Json, questions: [{ name: string, q: Question }])
+  -> Result[Decision, DecideError] ! {Net, Env} =
+  match getEnv("OPENROUTER_API_KEY") {
+    Err(_) => Err(MissingKey("OPENROUTER_API_KEY")),
+    Ok(key) => decideWith("https://openrouter.ai/api/alpha/decisions", key, model, state, questions)
+  }
+
+-- decideWith: the same call against an explicit endpoint + bearer (a direct
+-- TypeSafe transport, a proxy, a recorder). Still ! {Env} for signature
+-- parity with decide; reads nothing.
+export func decideWith(endpoint: string, bearer: string, model: string, state: Json, questions: [{ name: string, q: Question }])
+  -> Result[Decision, DecideError] ! {Net, Env} =
+  match httpRequest("POST", endpoint,
+                    [{ name: "Authorization", value: "Bearer ${bearer}" },
+                     { name: "Content-Type", value: "application/json" },
+                     { name: "X-Title", value: "sunholo/decisions" }],
+                    buildRequest(model, state, questions)) {
+    Err(e) => Err(Transport(show(e))),
+    Ok(resp) => if not resp.ok then Err(Http(resp.status, resp.body)) else parseAnswers(resp.body, questions)
+  }

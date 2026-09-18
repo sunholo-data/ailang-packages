@@ -1,0 +1,31 @@
+-- Boot probe for sunholo/decisions (offline). Builds a request, parses a
+-- banked response, gates it, and prints OK:. No network: the effectful
+-- `decide` is exercised by examples/runnable/decide_jev.ail in the ailang
+-- repo and by tools/decisions/lane_shadow.ail.
+module _smoke
+
+import std/json (jo, kv, js)
+import std/result (Ok, Err)
+import std/string (contains)
+import std/io (println)
+import pkg/sunholo/decisions/decide (Noul, Choice, Score, ChoiceA, Act, Escalate, Ungateable, buildRequest, parseAnswers, answer, gate)
+
+pure func fixture() -> string =
+  "{\"model\":\"typesafe/jev-1.13-20260917\",\"answers\":{\"lane\":{\"type\":\"choice\",\"choice\":\"motoko_extension\",\"probabilities\":{\"ailang_fix\":0.37,\"motoko_extension\":0.59,\"core_floor_fix\":0,\"model_capability\":0.04},\"confidence\":0.45}},\"usage\":{\"input_tokens\":737,\"output_tokens\":107,\"cost\":3.0954e-05},\"id\":\"gen-dec-1789733525-MyhunCACU057zbmZp9pu\"}"
+
+export func main() -> () ! {IO} = {
+  let qs = [{ name: "lane", q: Choice("Which lane", [{ key: "ailang_fix", desc: "a" }, { key: "motoko_extension", desc: "m" }, { key: "core_floor_fix", desc: "c" }, { key: "model_capability", desc: "x" }]) }];
+  let req = buildRequest("typesafe/jev-1.13", jo([kv("k", js("v"))]), qs);
+  if not contains(req, "\"questions\"") then println("FAIL: request has no questions") else
+  match parseAnswers(fixture(), qs) {
+    Err(e) => println("FAIL: parse ${show(e)}"),
+    Ok(d) => match answer(d, "lane") {
+      Err(e) => println("FAIL: answer ${show(e)}"),
+      Ok(a) => match gate(a, 0.7) {
+        Escalate(c) => println("OK: sunholo/decisions boot probe — parsed ${d.model}, gate(0.7) escalated at confidence ${show(c)}"),
+        Act(l) => println("FAIL: expected Escalate, got Act(${l})"),
+        Ungateable(w) => println("FAIL: ${w}")
+      }
+    }
+  }
+}
