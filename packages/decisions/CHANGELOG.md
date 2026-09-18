@@ -1,5 +1,11 @@
 # Changelog — sunholo/decisions
 
+## 0.1.2 — 2026-09-18
+
+- Docs only: AGENT.md gains a migration guide from `std/ai.callJson` classifiers (schema-property →
+  Question mapping, what is lost, a complete feedback-gate example, the Go route via `internal/embed`,
+  the data-boundary note). No code change.
+
 ## 0.1.1 — 2026-09-18
 
 - Fix: `questionsToJsonSchema` emitted `additionalProperties` as the string `"false"`; now a JSON boolean
