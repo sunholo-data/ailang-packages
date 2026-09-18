@@ -1,0 +1,111 @@
+-- DISABLED: rename to fallback_test.ail and run `ailang test --package` to reproduce the
+-- ailang test-harness defect (8/9 fail with "function expects 3 arguments, got 1" /
+-- nil deref) while the identical assertions pass under `ailang run` in _smoke.ail.
+-- Filed against sunholo-data/ailang 2026-09-18 (see CHANGELOG 0.2.0).
+-- Native tests for the fallback half of sunholo/decisions/decide (offline; the pure half).
+-- HARNESS TRAP (measured 2026-09-18): `ailang test --package` injects every loaded
+-- module's functions — private ones and OTHER test files' helpers included — by
+-- bare name into one environment, last writer wins. A helper here must not share
+-- a name with any function in decide.ail or the sibling test file, or calls resolve
+-- to the wrong arity ("expects 3 arguments, got 1"). Filed against ailang.
+module sunholo/decisions/fallback_test
+
+import std/list (length)
+import std/string (contains, startsWith)
+import std/option (Option, Some, None)
+import std/result (Result, Ok, Err)
+import pkg/sunholo/decisions/decide (Question, Noul, Choice, Score, Answer, NoulA, ChoiceA, ScoreA, DecideError, BadResponse, MissingAnswer, Transport, Decision, Gate, Act, Escalate, Ungateable, answer, gate, Outcome, Calibrated, Degraded, parseFallback, decisionOf, isDegraded)
+
+-- A chat-completions body whose content is a REAL glm-5.3-flash answer from the
+-- 2026-09-18 lane_shadow run (m-eval-elo-priority-rotation), wrapped in the
+-- OpenRouter envelope shape. The numbers deliberately do not sum to exactly 1
+-- for `lane` (0.97+0.01+0.01+0.01 = 1.00) and are off for `severity`
+-- (0.2+0.7+0.1 = 1.0) — and `skewed` below sums to 2.0 to test renormalisation.
+pure func chatBody() -> string =
+  "{\"id\":\"gen-1789740000-abc\",\"model\":\"z-ai/glm-5.3-flash\",\"choices\":[{\"message\":{\"role\":\"assistant\",\"content\":\"{\\\"lane\\\":{\\\"extension\\\":0.97,\\\"ailang_fix\\\":0.01,\\\"core_floor_fix\\\":0.01,\\\"other\\\":0.01},\\\"touches_core\\\":0.02,\\\"severity\\\":{\\\"0\\\":0.2,\\\"1\\\":0.7,\\\"2\\\":0.1},\\\"skewed\\\":{\\\"a\\\":1.5,\\\"b\\\":0.5}}\"},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":900,\"completion_tokens\":60,\"cost\":0.0003}}"
+
+pure func qs() -> [{ name: string, q: Question }] = [
+  { name: "lane", q: Choice("lane", [{ key: "extension", desc: "" }, { key: "ailang_fix", desc: "" }, { key: "core_floor_fix", desc: "" }, { key: "other", desc: "" }]) },
+  { name: "touches_core", q: Noul("touches core") },
+  { name: "severity", q: Score("sev", ["P2", "P1", "P0"]) },
+  { name: "skewed", q: Choice("skewed", [{ key: "a", desc: "" }, { key: "b", desc: "" }]) }]
+
+pure func fbModel() -> string = "z-ai/glm-5.3-flash"
+pure func bodyNoChoices() -> string = "{\"id\":\"x\",\"choices\":[],\"usage\":{}}"
+pure func bodyNotJsonContent() -> string = "{\"id\":\"x\",\"choices\":[{\"message\":{\"content\":\"sure! here you go\"}}]}"
+pure func approx(x: float, t: float) -> bool = x > t - 0.000001 && x < t + 0.000001
+pure func zeroF() -> float = 0.0
+pure func half() -> float = 0.5
+pure func threeQuarters() -> float = 0.75
+pure func nine() -> float = 0.9
+pure func fallbackReason() -> DecideError = Transport("connection refused")
+
+test "parseFallback tags provenance: model = fallback:<chat-model>, id = completion id, usage carried" {
+  match parseFallback(chatBody(), fbModel(), qs()) {
+    Err(_) => false,
+    Ok(d) => d.model == "fallback:z-ai/glm-5.3-flash" && d.id == "gen-1789740000-abc" && d.input_tokens == 900 && d.output_tokens == 60 && length(d.answers) == 4
+  }
+}
+
+test "a degraded ChoiceA keeps the label and the self-reported spread but confidence is forced to 0" {
+  match parseFallback(chatBody(), fbModel(), qs()) {
+    Err(_) => false,
+    Ok(d) => match answer(d, "lane") {
+      Ok(ChoiceA(c)) => c.choice == "extension" && approx(c.confidence, zeroF()) && length(c.probabilities) == 4,
+      _ => false
+    }
+  }
+}
+
+test "gate on a degraded answer ESCALATES at any positive threshold — acting is an explicit opt-in" {
+  match parseFallback(chatBody(), fbModel(), qs()) {
+    Err(_) => false,
+    Ok(d) => match answer(d, "lane") {
+      Ok(a) => (match gate(a, half()) { Escalate(c) => approx(c, zeroF()), _ => false })
+            && (match gate(a, nine()) { Escalate(_) => true, _ => false })
+            && (match gate(a, zeroF()) { Act(l) => l == "extension", _ => false }),   -- threshold 0 = the opt-in
+      Err(_) => false
+    }
+  }
+}
+
+test "a degraded ScoreA carries the expected level as score and confidence 0" {
+  match parseFallback(chatBody(), fbModel(), qs()) {
+    Err(_) => false,
+    Ok(d) => match answer(d, "severity") {
+      Ok(ScoreA(s)) => approx(s.score, nine()) && approx(s.confidence, zeroF()),   -- 0*0.2 + 1*0.7 + 2*0.1 = 0.9
+      _ => false
+    }
+  }
+}
+
+test "self-reported numbers are renormalised to sum to 1" {
+  match parseFallback(chatBody(), fbModel(), qs()) {
+    Err(_) => false,
+    Ok(d) => match answer(d, "skewed") {
+      Ok(ChoiceA(c)) => c.choice == "a" && (match c.probabilities { [x, y] => approx(x.p, threeQuarters()) && approx(y.p, half() - (half() - (threeQuarters() - half()))), _ => false }),
+      _ => false
+    }
+  }
+}
+
+test "a degraded NoulA keeps the LLM's self-reported probability (the Degraded constructor is the signal)" {
+  match parseFallback(chatBody(), fbModel(), qs()) { Err(_) => false, Ok(d) => match answer(d, "touches_core") { Ok(NoulA(p)) => p > 0.019 && p < 0.021, _ => false } }
+}
+
+test "Outcome helpers: decisionOf and isDegraded" {
+  match parseFallback(chatBody(), fbModel(), qs()) {
+    Err(_) => false,
+    Ok(d) => isDegraded(Degraded(d, fallbackReason())) && not isDegraded(Calibrated(d)) && decisionOf(Degraded(d, fallbackReason())).model == d.model
+  }
+}
+
+test "empty choices / non-JSON content are BadResponse, never a Decision" {
+  (match parseFallback(bodyNoChoices(), "m", qs()) { Err(BadResponse(_)) => true, _ => false })
+  && (match parseFallback(bodyNotJsonContent(), "m", qs()) { Err(BadResponse(_)) => true, _ => false })
+}
+
+test "a question the LLM skipped is MissingAnswer" {
+  match parseFallback(chatBody(), "m", qs() ++ [{ name: "ghost", q: Noul("?") }]) { Err(MissingAnswer(n)) => n == "ghost", _ => false }
+}
+

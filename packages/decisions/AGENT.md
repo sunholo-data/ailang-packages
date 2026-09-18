@@ -107,6 +107,32 @@ Bank `d` (the whole `Decision`) alongside the `Gated` outcome — D6 below.
 sends the same content to another vendor under an existing ruling (eparse → Gemini, Daneel →
 Vertex under its Decision 13) needs that ruling extended before switching, not after.
 
+## If Jev is unavailable: the fallback (0.2.0)
+
+```ailang
+import pkg/sunholo/decisions/decide (decideOrFallback, Calibrated, Degraded, gate, Act, Escalate, Ungateable, answer)
+
+match decideOrFallback("typesafe/jev-1.13", "z-ai/glm-5.3-flash", state, qs) {
+  Err(e) => …,                                    -- neither oracle answered (or no key)
+  Ok(Calibrated(d)) => …gate as usual…,           -- the System One model answered
+  Ok(Degraded(d, why)) =>                         -- Jev failed with `why`; a chat LLM answered instead
+    match answer(d, "dept") {                     -- d.model == "fallback:z-ai/glm-5.3-flash"
+      Ok(a) => match gate(a, 0.8) {
+        Escalate(_)  => escalate(d, why),         -- ALWAYS this branch for t > 0: degraded confidence is 0.0
+        Act(label)   => …,                        -- unreachable unless you passed t = 0.0 (the explicit opt-in)
+        Ungateable(w) => …
+      },
+      Err(e) => …
+    }
+}
+```
+
+The fallback answers the **same typed questions** (strict schema from `questionsToJsonSchema`, per-label
+probabilities, renormalised), on the **same transport and deadline**. What it cannot give you is calibration: the
+LLM's spread is a self-report, so the package refuses to let it read as confidence. Bank `d` and `why` together —
+a run with many `Degraded` rows is an availability incident, visible in the data, not a silent quality drop.
+`MissingKey` is not retried against the fallback (it needs the same `OPENROUTER_API_KEY`).
+
 ## Rules for consumers (from the design doc, ratified 2026-09-18)
 
 1. **No default threshold.** This package ships none; `gate` requires `minConfidence`. The vendor's own
@@ -140,8 +166,8 @@ Different thing; the names are close, the mechanisms are not.
 ## Testing
 
 ```bash
-ailang test --package          # 15 offline tests, three real fixtures + three malformed bodies
-AILANG_RELAX_MODULES=1 ailang run --caps IO --entry main _smoke.ail   # boot probe, prints OK:
+ailang test --package          # 16 offline tests, three real fixtures + three malformed bodies
+AILANG_RELAX_MODULES=1 ailang run --caps IO --entry main _smoke.ail   # boot probe + fallback invariants, prints OK:
 ailang pkg quality .           # the registry's publish report
 ```
 

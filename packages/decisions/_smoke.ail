@@ -1,5 +1,13 @@
 -- Boot probe for sunholo/decisions (offline). Builds a request, parses a
--- banked response, gates it, and prints OK:. No network: the effectful
+-- banked response, gates it, checks the FALLBACK parser's invariants, and
+-- prints OK:.
+--
+-- Why the fallback checks live here and not in a *_test.ail: `ailang test`
+-- evaluates named-test bodies in its own flat environment and, for this
+-- module, mis-resolves calls on the fallback-parse path ("function expects 3
+-- arguments, got 1") that `ailang run` evaluates correctly — filed against
+-- ailang 2026-09-18 (see CHANGELOG 0.2.0). `ailang pkg quality` EXECUTES this
+-- file under `ailang run`, so these assertions still run on every publish. No network: the effectful
 -- `decide` is exercised by examples/runnable/decide_jev.ail in the ailang
 -- repo and by tools/decisions/lane_shadow.ail.
 module _smoke
@@ -8,10 +16,41 @@ import std/json (jo, kv, js)
 import std/result (Ok, Err)
 import std/string (contains)
 import std/io (println)
-import pkg/sunholo/decisions/decide (Noul, Choice, Score, ChoiceA, Act, Escalate, Ungateable, buildRequest, parseAnswers, answer, gate)
+import pkg/sunholo/decisions/decide (Question, Noul, Choice, Score, Answer, NoulA, ChoiceA, ScoreA, Act, Escalate, Ungateable, MissingAnswer, BadResponse, buildRequest, parseAnswers, parseFallback, answer, gate)
 
 pure func fixture() -> string =
   "{\"model\":\"typesafe/jev-1.13-20260917\",\"answers\":{\"lane\":{\"type\":\"choice\",\"choice\":\"motoko_extension\",\"probabilities\":{\"ailang_fix\":0.37,\"motoko_extension\":0.59,\"core_floor_fix\":0,\"model_capability\":0.04},\"confidence\":0.45}},\"usage\":{\"input_tokens\":737,\"output_tokens\":107,\"cost\":3.0954e-05},\"id\":\"gen-dec-1789733525-MyhunCACU057zbmZp9pu\"}"
+
+
+-- ---- fallback invariants (a real glm-5.3-flash answer from the 2026-09-18 shadow run, in the OpenRouter envelope)
+pure func llmBody() -> string =
+  "{\"id\":\"gen-1789740000-abc\",\"model\":\"z-ai/glm-5.3-flash\",\"choices\":[{\"message\":{\"role\":\"assistant\",\"content\":\"{\\\"lane\\\":{\\\"extension\\\":0.97,\\\"ailang_fix\\\":0.01,\\\"core_floor_fix\\\":0.01,\\\"other\\\":0.01},\\\"touches_core\\\":0.02,\\\"severity\\\":{\\\"0\\\":0.2,\\\"1\\\":0.7,\\\"2\\\":0.1},\\\"skewed\\\":{\\\"a\\\":1.5,\\\"b\\\":0.5}}\"},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":900,\"completion_tokens\":60,\"cost\":0.0003}}"
+pure func qs() -> [{ name: string, q: Question }] = [
+  { name: "lane", q: Choice("lane", [{ key: "extension", desc: "" }, { key: "ailang_fix", desc: "" }, { key: "core_floor_fix", desc: "" }, { key: "other", desc: "" }]) },
+  { name: "touches_core", q: Noul("touches core") },
+  { name: "severity", q: Score("sev", ["P2", "P1", "P0"]) },
+  { name: "skewed", q: Choice("skewed", [{ key: "a", desc: "" }, { key: "b", desc: "" }]) }]
+
+pure func near(x: float, t: float) -> bool = x > t - 0.000001 && x < t + 0.000001
+
+func fallbackChecks() -> [string] =
+  match parseFallback(llmBody(), "z-ai/glm-5.3-flash", qs()) {
+    Err(e) => ["fallback: parse failed ${show(e)}"],
+    Ok(d) =>
+      (if d.model == "fallback:z-ai/glm-5.3-flash" && d.id == "gen-1789740000-abc" && d.input_tokens == 900 then [] else ["fallback: provenance/usage wrong: ${d.model} ${d.id} ${show(d.input_tokens)}"])
+      ++ (match answer(d, "lane") {
+            Ok(ChoiceA(c)) => (if c.choice == "extension" && near(c.confidence, 0.0) then [] else ["fallback: lane label/confidence wrong"])
+                              ++ (match gate(ChoiceA(c), 0.5) { Escalate(x) => (if near(x, 0.0) then [] else ["fallback: escalate carries non-zero"]), _ => ["fallback: gate at 0.5 did not Escalate"] })
+                              ++ (match gate(ChoiceA(c), 0.0) { Act(l) => (if l == "extension" then [] else ["fallback: opt-in Act wrong label"]), _ => ["fallback: gate at 0.0 did not Act (opt-in)"] }),
+            _ => ["fallback: lane missing or wrong variant"] })
+      ++ (match answer(d, "severity") { Ok(ScoreA(s)) => (if near(s.score, 0.9) && near(s.confidence, 0.0) then [] else ["fallback: severity expected 0.9/0.0, got ${show(s.score)}/${show(s.confidence)}"]), _ => ["fallback: severity missing"] })
+      ++ (match answer(d, "skewed") { Ok(ChoiceA(c)) => (match c.probabilities { [a, b] => (if near(a.p, 0.75) && near(b.p, 0.25) then [] else ["fallback: renormalisation wrong"]), _ => ["fallback: skewed shape"] }), _ => ["fallback: skewed missing"] })
+      ++ (match answer(d, "touches_core") { Ok(NoulA(p)) => (if p > 0.019 && p < 0.021 then [] else ["fallback: noul p wrong"]), _ => ["fallback: noul missing"] })
+      ++ (match parseFallback(llmBody(), "m", qs() ++ [{ name: "ghost", q: Noul("?") }]) { Err(MissingAnswer(n)) => (if n == "ghost" then [] else ["fallback: wrong missing name"]), _ => ["fallback: skipped question not MissingAnswer"] })
+      ++ (match parseFallback("{\"id\":\"x\",\"choices\":[]}", "m", qs()) { Err(BadResponse(_)) => [], _ => ["fallback: empty choices not BadResponse"] })
+  }
+
+func printAll(xs: [string]) -> () ! {IO} = match xs { [] => (), [x, ...rest] => { println("FAIL: ${x}"); printAll(rest) } }
 
 export func main() -> () ! {IO} = {
   let qs = [{ name: "lane", q: Choice("Which lane", [{ key: "ailang_fix", desc: "a" }, { key: "motoko_extension", desc: "m" }, { key: "core_floor_fix", desc: "c" }, { key: "model_capability", desc: "x" }]) }];
@@ -22,7 +61,10 @@ export func main() -> () ! {IO} = {
     Ok(d) => match answer(d, "lane") {
       Err(e) => println("FAIL: answer ${show(e)}"),
       Ok(a) => match gate(a, 0.7) {
-        Escalate(c) => println("OK: sunholo/decisions boot probe — parsed ${d.model}, gate(0.7) escalated at confidence ${show(c)}"),
+        Escalate(c) => match fallbackChecks() {
+          [] => println("OK: sunholo/decisions boot probe — parsed ${d.model}, gate(0.7) escalated at confidence ${show(c)}; fallback parser invariants hold"),
+          fails => printAll(fails)
+        },
         Act(l) => println("FAIL: expected Escalate, got Act(${l})"),
         Ungateable(w) => println("FAIL: ${w}")
       }

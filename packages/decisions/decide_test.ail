@@ -5,6 +5,11 @@
 -- spike and three malformed bodies. The effectful `decide` is exercised by
 -- examples/runnable/decide_jev.ail in the ailang repo and by the shadow runner.
 
+-- HARNESS TRAP (measured 2026-09-18): `ailang test --package` injects every loaded
+-- module's functions — private ones and OTHER test files' helpers included — by
+-- bare name into one environment, last writer wins. A helper here must not share
+-- a name with any function in decide.ail or the sibling test file, or calls resolve
+-- to the wrong arity ("expects 3 arguments, got 1"). Filed against ailang.
 module sunholo/decisions/decide_test
 
 import std/json (decode, get, getString, getObject, jo, kv, js, encode)

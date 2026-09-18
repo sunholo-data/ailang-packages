@@ -26,7 +26,7 @@
 
 module sunholo/decisions/decide
 
-import std/json (Json, encode, decode, jo, ja, kv, js, jb, jnum, get, getString, getNumber, getInt, getObject, asObject, asNumber)
+import std/json (Json, encode, decode, jo, ja, kv, js, jb, jnum, get, getString, getNumber, getInt, getObject, getArray, asObject, asNumber)
 import std/net (httpRequest, NetError)
 import std/env (getEnv)
 import std/list (map, length)
@@ -99,9 +99,14 @@ export pure func buildRequest(model: string, state: Json, questions: [{ name: st
 -- never an Answer. Used by the shadow runner's control arm.
 export pure func questionsToJsonSchema(questions: [{ name: string, q: Question }]) -> string
   ensures { startsWith(result, "{") && endsWith(result, "}") }
-= encode(jo([kv("type", js("object")), kv("additionalProperties", jb(false)),
-             kv("required", ja(map(\nq. js(nq.name), questions))),
-             kv("properties", jo(map(\nq. kv(nq.name, questionSchema(nq.q)), questions)))]))
+= encode(schemaValue(questions))
+
+-- schemaValue: the schema as Json (the fallback embeds it in a request body
+-- without a decode round-trip).
+func schemaValue(questions: [{ name: string, q: Question }]) -> Json =
+  jo([kv("type", js("object")), kv("additionalProperties", jb(false)),
+      kv("required", ja(map(\nq. js(nq.name), questions))),
+      kv("properties", jo(map(\nq. kv(nq.name, questionSchema(nq.q)), questions)))])
 
 func numberProp() -> Json = jo([kv("type", js("number")), kv("minimum", jnum(0.0)), kv("maximum", jnum(1.0))])
 
@@ -246,3 +251,187 @@ export func decideWith(endpoint: string, bearer: string, model: string, state: J
     Err(e) => Err(Transport(show(e))),
     Ok(resp) => if not resp.ok then Err(Http(resp.status, resp.body)) else parseAnswers(resp.body, questions)
   }
+
+-- ============================================================================
+-- Fallback: decide, or degrade to a chat LLM when the System One model is unavailable
+-- ============================================================================
+-- (formerly module sunholo/decisions/fallback — merged 0.2.0: a second module
+-- importing this one trips an `ailang test` engine defect; see CHANGELOG.) Decide, or degrade to a chat LLM when the
+-- System One model is unavailable, WITHOUT letting the fallback masquerade as
+-- a calibrated answer.
+--
+-- The trap (quorum objection, 2026-09-18): an LLM asked for a "probability
+-- distribution" self-reports one; it is not calibrated, and if it flowed into
+-- Answer.confidence every gate(...) downstream would act on it. So:
+--
+--   type Outcome = Calibrated(Decision)            -- from the System One model
+--                | Degraded(Decision, DecideError) -- from the fallback LLM, and WHY
+--
+--   * A Degraded Decision's ChoiceA/ScoreA carry confidence = 0.0 (forced), so
+--     gate(a, t) returns Escalate(0.0) for any t > 0. Acting on a degraded
+--     answer is an explicit opt-in: match Degraded, read the label yourself.
+--   * NoulA(p) keeps the LLM's self-reported p — a noul has no confidence to
+--     force; the Degraded constructor is the signal.
+--   * Decision.model is "fallback:<chat-model>" and Decision.id the chat
+--     completion id, so a banked row (D6) says where it came from.
+--   * The fallback runs on the SAME std/net transport and 30s deadline, with a
+--     strict json_schema built from the same Question list (per-label
+--     probabilities requested, renormalised client-side).
+--
+-- What triggers the fallback: Transport, Http (any status), BadResponse and
+-- MissingAnswer from the System One call — i.e. "Jev is not available or not
+-- speaking the protocol". MissingKey does NOT: the fallback needs the same key.
+
+export type Outcome =
+  | Calibrated(Decision)
+  | Degraded(Decision, DecideError)
+
+-- decisionOf: the Decision either way — for banking (D6), not for gating.
+export pure func decisionOf(o: Outcome) -> Decision =
+  match o { Calibrated(d) => d, Degraded(d, _) => d }
+
+export pure func isDegraded(o: Outcome) -> bool =
+  match o { Calibrated(_) => false, Degraded(_, _) => true }
+
+-- decideOrFallback: the System One model first; on unavailability, the chat
+-- model named by fallbackModel (an OpenRouter chat slug, e.g. "z-ai/glm-5.3-flash").
+export func decideOrFallback(model: string, fallbackModel: string, state: Json, questions: [{ name: string, q: Question }])
+  -> Result[Outcome, DecideError] ! {Net, Env} =
+  match decide(model, state, questions) {
+    Ok(d) => Ok(Calibrated(d)),
+    Err(MissingKey(k)) => Err(MissingKey(k)),
+    Err(why) => match getEnv("OPENROUTER_API_KEY") {
+      Err(_) => Err(MissingKey("OPENROUTER_API_KEY")),
+      Ok(key) => match llmCall(key, fallbackModel, state, questions) {
+        Err(e) => Err(e),
+        Ok(body) => match parseFallback(body, fallbackModel, questions) {
+          Err(e) => Err(e),
+          Ok(d) => Ok(Degraded(d, why))
+        }
+      }
+    }
+  }
+
+-- ---------------------------------------------------------------- the chat call
+
+func chatBody(model: string, state: Json, qs: [{ name: string, q: Question }]) -> string =
+  encode(jo([
+    kv("model", js(model)),
+    kv("temperature", jnum(0.0)),
+    kv("messages", ja([
+      jo([kv("role", js("system")), kv("content", js("You are a fallback classifier standing in for a System One decision model. You receive a STATE and QUESTIONS in the TypeSafe System One format (noul = probability the statement is true; choice = one option among the criteria keys; score = one ordered level among the criteria, index 0 upwards). Answer with a JSON object keyed by question name: for choice and score give a probability for EVERY key summing to 1; for noul give the probability the statement is true. Do not explain."))]),
+      jo([kv("role", js("user")), kv("content", js(buildRequest("n/a", state, qs)))])])),
+    kv("response_format", jo([kv("type", js("json_schema")), kv("json_schema", jo([kv("name", js("decisions")), kv("strict", jb(true)), kv("schema", schemaValue(qs))]))]))]))
+
+func llmCall(key: string, model: string, state: Json, qs: [{ name: string, q: Question }]) -> Result[string, DecideError] ! {Net} =
+  match httpRequest("POST", "https://openrouter.ai/api/v1/chat/completions",
+                    [{ name: "Authorization", value: "Bearer ${key}" }, { name: "Content-Type", value: "application/json" }, { name: "X-Title", value: "sunholo/decisions fallback" }],
+                    chatBody(model, state, qs)) {
+    Err(e) => Err(Transport("fallback: ${show(e)}")),
+    Ok(resp) => if resp.ok then Ok(resp.body) else Err(Http(resp.status, "fallback: ${resp.body}"))
+  }
+
+-- ---------------------------------------------------------------- parsing (pure)
+
+-- parseFallback: a chat-completions body -> a DEGRADED Decision (confidence
+-- forced to 0.0 on ChoiceA/ScoreA; model tagged "fallback:<model>").
+export pure func parseFallback(body: string, fallbackModel: string, questions: [{ name: string, q: Question }]) -> Result[Decision, DecideError] =
+  match decode(body) {
+    Err(e) => Err(BadResponse("fallback body not JSON: ${e}")),
+    Ok(j) => match contentOf(j) {
+      Err(e) => Err(BadResponse("fallback: ${e}")),
+      Ok(content) => match fbCollect(questions, content) {
+        Err(e) => Err(e),
+        Ok(named) => Ok({ model: "fallback:${fallbackModel}", id: fbStr(j, "id"), answers: named,
+                          input_tokens: fbUsageInt(j, "prompt_tokens"), output_tokens: fbUsageInt(j, "completion_tokens"),
+                          cost_usd: fbUsageCost(j) })
+      }
+    }
+  }
+
+func contentOf(body: Json) -> Result[Json, string] =
+  match getArray(body, "choices") {
+    None => Err("no choices"),
+    Some([]) => Err("empty choices"),
+    Some([c, ..._]) => match getObject(c, "message") {
+      None => Err("no message"),
+      Some(m) => match getString(m, "content") {
+        None => Err("no content"),
+        Some(text) => match decode(text) { Ok(j) => Ok(j), Err(e) => Err("content not JSON: ${e}") }
+      }
+    }
+  }
+
+@allow_empty_ok("recursion base case: an empty question list legitimately yields an empty answer list")
+func fbCollect(questions: [{ name: string, q: Question }], content: Json) -> Result[[{ name: string, answer: Answer }], DecideError] =
+  match questions {
+    [] => Ok([]),
+    [nq, ...rest] => match get(content, nq.name) {
+      None => Err(MissingAnswer(nq.name)),
+      Some(v) => match degradedAnswer(nq.q, v) {
+        Err(e) => Err(e),
+        Ok(a) => match fbCollect(rest, content) {
+          Err(e) => Err(e),
+          Ok(tail) => Ok([{ name: nq.name, answer: a }] ++ tail)
+        }
+      }
+    }
+  }
+
+func degradedAnswer(q: Question, v: Json) -> Result[Answer, DecideError] =
+  match q {
+    Noul(_) => match asNumber(v) { Some(p) => Ok(NoulA(p)), None => Err(BadResponse("fallback: noul is not a number")) },
+    Choice(_, _) => match asObject(v) {
+      None => Err(BadResponse("fallback: choice is not an object")),
+      Some(kvs) => {
+        let ps = normalised(kvs);
+        Ok(ChoiceA({ choice: argmax(ps, "", -1.0), confidence: 0.0, probabilities: ps }))
+      }
+    },
+    Score(_, _) => match asObject(v) {
+      None => Err(BadResponse("fallback: score is not an object")),
+      Some(kvs) => {
+        let ps = normalised(kvs);
+        Ok(ScoreA({ score: expected(ps), confidence: 0.0, probabilities: ps }))
+      }
+    }
+  }
+
+func numOr0(j: Json) -> float = match asNumber(j) { Some(x) => x, None => 0.0 }
+
+func sumP(kvs: [{ key: string, value: Json }]) -> float =
+  match kvs { [] => 0.0, [x, ...rest] => numOr0(x.value) + sumP(rest) }
+
+-- normalised: the LLM's self-reported numbers rescaled to sum to 1 (the
+-- adapter's normalize_probabilities); a zero-sum vector stays all-zero.
+func normalised(kvs: [{ key: string, value: Json }]) -> [{ key: string, p: float }] =
+  scaled(kvs, sumP(kvs))
+
+func scaled(kvs: [{ key: string, value: Json }], s: float) -> [{ key: string, p: float }] =
+  match kvs {
+    [] => [],
+    [x, ...rest] => [{ key: x.key, p: if s > 0.0 then numOr0(x.value) / s else 0.0 }] ++ scaled(rest, s)
+  }
+
+func argmax(ps: [{ key: string, p: float }], bestK: string, bestP: float) -> string =
+  match ps {
+    [] => bestK,
+    [x, ...rest] => if x.p > bestP then argmax(rest, x.key, x.p) else argmax(rest, bestK, bestP)
+  }
+
+func expected(ps: [{ key: string, p: float }]) -> float =
+  match ps {
+    [] => 0.0,
+    [x, ...rest] => (match keyIndex(x.key) { Some(i) => i * x.p, None => 0.0 }) + expected(rest)
+  }
+
+func keyIndex(k: string) -> Option[float] =
+  match decode(k) { Ok(j) => asNumber(j), Err(_) => None }
+
+func fbStr(j: Json, k: string) -> string = match getString(j, k) { Some(s) => s, None => "" }
+
+func fbUsageInt(body: Json, k: string) -> int =
+  match getObject(body, "usage") { None => 0, Some(u) => match getInt(u, k) { Some(n) => n, None => 0 } }
+
+func fbUsageCost(body: Json) -> float =
+  match getObject(body, "usage") { None => 0.0, Some(u) => match get(u, "cost") { Some(v) => numOr0(v), None => 0.0 } }
