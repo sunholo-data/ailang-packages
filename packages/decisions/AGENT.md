@@ -95,6 +95,44 @@ func classifyFeedback(subject: string, body: string, sender: string) -> Result[G
 
 Bank `d` (the whole `Decision`) alongside the `Gated` outcome — D6 below.
 
+## Phase-2 candidate: open-ended extraction (`Extract`) — requested by docparse
+
+**Requested 2026-09-19** (docparse, structured document extraction): a fourth question variant so a
+System One call could return one or more *typed field values* — a date, an amount, an invoice number,
+a free-text label — with the same calibrated-confidence contract the closed primitives have:
+
+```ailang
+-- PROPOSED (not implemented — blocked on the vendor wire, see below):
+| Extract(string, Json)                       -- description, JSON Schema of the fields to pull
+-- answering with
+| ExtractA({ value: Json, confidence: float })
+```
+
+Use case: docparse's core workload (DOCX/PDF/PPTX/XLSX field + metadata extraction) currently runs a
+costly Gemini `std/ai` turn per document for exactly this. If Jev could serve it at ~400 ms / ~$0.00003,
+cost-sensitive structured extraction moves off the frontier LLM, and this package becomes the
+classification *and* extraction layer. Until then, docparse (and any consumer in the same position)
+can still use this package for the **gating/classification layer around** extraction — doc-type routing,
+backend choice, confidence-based escalation to human review — which is what the migration guide above
+covers; the extraction turn itself stays on `std/ai`.
+
+**Why it cannot ship now.** Jev answers only the three closed primitives and generates no text at all
+(see "What you lose" above); the wire has no open-ended answer type. Shipping `Extract` today would
+either (a) fabricate wire behaviour `parseAnswers` would reject at runtime as `BadResponse`, or (b)
+funnel every `Extract` question through the fallback chat LLM — which the package deliberately refuses
+to present as calibrated (rule 3; degraded confidence is forced to 0.0), so it would be useless as a
+gate. Registering the use case instead; TypeSafe's own announcement (classify, route, score, extract,
+branch — typesafe.ai blog, 2026-09) lists "extract" among System One use cases, so track the vendor's
+API changelog for an open-ended primitive.
+
+**What shipping it would need** (when the vendor supports it — the Phase-2 checklist):
+- a fourth wire answer type handled in `answerOf` (System One path) and `degradedAnswer` (fallback path);
+- an `ExtractA` carrying the raw `Json` value **plus a confidence whose meaning is decided BEFORE
+  shipping** — "the LLM is 0.9 sure its JSON is well-formed" is not calibration, and reusing
+  `Answer.confidence` for that would poison every downstream `gate`;
+- `questionsToJsonSchema` / `schemaValue` extended to pass the caller's field schema through;
+- a real banked fixture with an `Extract` answer in `decide_test.ail`, plus a malformed-body test.
+
 **Calling from Go.** Go code cannot import this package directly. Two routes, in order of preference:
 1. Move the *decision* into an AILANG program and call it through `internal/embed` (`Engine.Call` /
    `CallPreserveFloats`) — the repo's standing "policy decisions belong in AILANG, Go is the shell"
