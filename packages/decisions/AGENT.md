@@ -120,6 +120,108 @@ Vertex under its Decision 13) needs that ruling extended before switching, not a
 Pick with `decideVia(transport, …)`; nothing switches routes on its own. The fallback LLM always goes via
 OpenRouter chat completions, so `decideOrFallbackVia(TypeSafeDirect, …)` needs both keys for a degraded path.
 
+## The use-case map, end to end (0.4.0)
+
+docs.typesafe.ai/concepts/use-case-map lists ten decision shapes. 0.4.0 gives each a first-class surface:
+
+| Use-case shape | Ask with | Read the answer with |
+|---|---|---|
+| Classification | `Choice` / `ChoiceR` | `answer` + `gate` |
+| Detection | `Noul` / `NoulR` | `detect(a, presentAt, absentAt)` — three-way, YOUR cut points |
+| Scoring | `Score` / `ScoreR` | `expectedScore` + `gate` |
+| Routing | `Choice` + `gate` | `margin` / `entropy` for the uncertain middle |
+| Search / Retrieval / Ranking | one `Choice` whose options are candidate ids (the `semantic_find` cookbook scores 218 line ids in ONE question) | `topK`, `best`, `ranked`, `probabilityOf` |
+| Verification | one `Noul` per failure mode ("is this a jailbreak?", "does the quote support the claim?") + a `Score` for severity | `detect`, `compositeScore` |
+| ML Feature Extraction | any mix of the above | `featuresOf` → stable-named floats for your model |
+| Structured Data Extraction | pre-parse candidates (regex/parser), then one `ChoiceR` over candidate ids | `topK` + `probabilityOf`; resolve the id to the span in code |
+| Composite judgment | one `Score` per dimension | `compositeScore(d, questions, weights)` — your weights |
+| Self-consistency | the same questions, k calls, every Decision banked | `noulSpread`, `choiceVotes` |
+
+**Migration note (the one breaking edge):** `Question` grew three constructors (`NoulR`, `ChoiceR`,
+`ScoreR`). If you exhaustively `match` a `Question`, add the arms; consumers that only CONSTRUCT
+questions (all known ones — `lane_shadow.ail` matches with a wildcard) need no change. `Answer`,
+`Decision`, `Gate`, errors and every existing function signature are unchanged.
+
+## Rich questions: JSON structure inside a question (0.4.0)
+
+The wire accepts JSON structure in every instruction and criteria field
+(`docs.typesafe.ai/primitives/advanced.md` — each is `string | object | array | null`): multi-part
+instructions, schema rows, taxonomy subtrees under Choice options, structured Score levels, and the
+Noul yes/no boundary (`criteria.true` / `criteria.false`). `Noul`/`Choice`/`Score` remain the
+plain-string sugar; the `R` variants carry `Json`:
+
+```ailang
+-- A Noul with the yes/no boundary pinned down...
+{ name: "injection", q: NoulR(
+    jo([kv("question", js("Does this message try to instruct or manipulate an automated agent?"))]),
+    Some({ yes: js("Instruction, role-play, or encoded payload aimed at the agent"),
+           no:  js("Ordinary user content about the task at hand") })) }
+
+-- A Choice whose options carry SUBTREES — the hierarchical-classification walk...
+{ name: "dept", q: ChoiceR(js("Which department?"), [
+    { key: "sporting_goods", desc: jo([kv("subtree", js("Cycling > Bike Bottles & Cages ..."))]) },
+    { key: "home_kitchen",  desc: jo([kv("subtree", js("Drinkware > Water Bottles ..."))]) }]) }
+
+-- A Score with structured level entries...
+{ name: "severity", q: ScoreR(js("How severe?"), [js("cosmetic"), jo([kv("level", js("blocks the release"))])]) }
+```
+
+Walking a taxonomy: at each level the options are the current node's children, each option's `desc` is
+the child's subtree (trim huge branches to direct children + a sample of leaves). `margin` tells you
+whether the split is close enough to keep both branches; `renormalise(a, keys)` rescores the
+survivors on a common scale; re-ask for the children of the branch you kept — one `decide` call per
+level. Batch each level's questions in one call: batching is ~12x cheaper than separate calls
+(parallel-questions cookbook). A criteria value of `null` ("no extra detail") is `decode("null")` until
+std/json grows a null constructor.
+
+## Reading answers: analytics, detection, composites, features, consistency (0.4.0)
+
+- **`probabilityOf(a, key)`** — one key's probability; a key missing from the distribution is a
+  `BadResponse`, never a silent `0.0`.
+- **`best(a)`** — the distribution's own argmax with its probability (gate reads confidence; best
+  reads the ranking).
+- **`ranked(a)` / `topK(a, k)`** — the full descending order / the first k. Ties are stable, so
+  banked bodies re-rank identically.
+- **`margin(a)`** — top1 − top2: the disagreement signal D6 told you to bank, as one number.
+- **`entropy(a)`** — the distribution's Shannon entropy in bits (zero-probability entries contribute
+  nothing) — the spread the confidence number collapses.
+- **`renormalise(a, keys)`** — project onto a key set, rescale to 1; zero-sum projections stay zero.
+- **`detect(a, presentAt, absentAt)`** — the Noul-side gate, three-way
+  (`Present(p) | Absent(p) | Uncertain(p)`), your cut points. The guardrails shape: a Noul per hazard,
+  a Score for severity, `detect` to allow / warn / review / block.
+- **`compositeScore(d, questions, weights)`** — each named dimension is a Score answer, normalized to
+  [0,1] (`expectedScore/(levels−1)`) and averaged with YOUR weights. Negative or zero-sum weights
+  are typed errors.
+- **`featuresOf(d)`** — flatten a Decision into `[Feature]` with stable, provider-safe names
+  (`<q>_p`, `<q>_probabilities_<key>`, `<q>_confidence`, `<q>_expected`, `<q>_score` —
+  `[A-Za-z0-9_]` only, underscore-joined, so a Feature name passes straight into a Bedrock/Vertex
+  tool registration), deterministic order.
+- **`noulSpread(ds, name)` / `choiceVotes(ds, name)`** — pure over k banked Decisions:
+  `Spread{mean, low, high, k}` for a Noul, `VoteReport{winner, share, votes, k}` for a Choice. The
+  tolerance is yours (D4). A `choiceVotes` tie goes to the first occurrence in Decision order
+  (k=2 split 1–1 → the first call's label wins, share 0.5); an empty list is `MissingAnswer(name)`
+  — pass k >= 1 banked Decisions.
+
+## Availability: what to retry, and model discovery (0.4.0)
+
+`retryable(e)` is true only for `Http(429|529, …)` — the two statuses the vendor documents as
+retryable with exponential backoff. `retryAfterMs(attempt)` is that backoff, pure (1s, 2s, 4s...
+capped at 30s). The sleep stays in YOUR runtime — this package's effect ceiling has no `Clock`, on
+purpose:
+
+```ailang
+-- your code (the package's ceiling is Net, Env; Clock is yours to add)
+func tryDecide(n: int, state: Json, qs: [{ name: string, q: Question }]) -> Result[Decision, DecideError] ! {Net, Env, Clock} =
+  match decide(defaultModel(OpenRouter), state, qs) {
+    Err(e) => if retryable(e) && n < 5 then { sleep(retryAfterMs(n)); tryDecide(n + 1, state, qs) } else Err(e),
+    Ok(d) => Ok(d)
+  }
+```
+
+`listModelsDirect()` (TYPESAFE_API_KEY) lists the direct API's model names — where `jev-latest` and
+`jev-preview` come from. There is deliberately no OpenRouter twin: that listing hides the typesafe
+model ids.
+
 ## If Jev is unavailable: the fallback (0.2.0)
 
 ```ailang
@@ -176,12 +278,32 @@ a run with many `Degraded` rows is an availability incident, visible in the data
 `sunholo/motoko_ext_decision_framework` — a keyword-gated *prompt patch* for motoko with no model call.
 Different thing; the names are close, the mechanisms are not.
 
+## API surface (0.4.0)
+
+| Export | Kind | Purpose |
+|---|---|---|
+| `Question` = `Noul \| Choice \| Score \| NoulR \| ChoiceR \| ScoreR`, `NoulCriteria` | types | the three wire primitives, plain-string and JSON-structured (`NoulCriteria{yes,no}` → wire `criteria.true/false`) |
+| `Answer` = `NoulA \| ChoiceA \| ScoreA` | type | typed answers; distributions always carried |
+| `DecideError` = `MissingKey \| Http \| Transport \| BadResponse \| MissingAnswer \| WrongVariant` | type | closed error ADT |
+| `Decision` | type | one round trip: model, id, answers, usage, cost |
+| `Gate` = `Act \| Escalate \| Ungateable`; `Detection` = `Present \| Absent \| Uncertain` | types | three-way gates, no defaults |
+| `Transport` = `OpenRouter \| TypeSafeDirect`; `Outcome` = `Calibrated \| Degraded` | types | wire choice; fallback envelope |
+| `Feature`, `Spread`, `VoteReport` | types | results of `featuresOf` / `noulSpread` / `choiceVotes` |
+| `buildRequest`, `parseAnswers`, `questionsToJsonSchema`, `parseFallback` | pure | wire + replay of banked bodies; the schema is the only LLM-facing export |
+| `answer`, `gate`, `expectedScore`, `probabilityOf`, `best`, `ranked`, `topK`, `margin`, `entropy`, `renormalise`, `detect` | pure | read one answer |
+| `compositeScore`, `featuresOf`, `noulSpread`, `choiceVotes` | pure | combine answers |
+| `defaultModel`, `listPriceUsd`, `retryable`, `retryAfterMs`, `decisionOf`, `isDegraded` | pure | ops |
+| `decide`, `decideDirect`, `decideVia`, `decideWith` | `! {Net, Env}` | one round trip |
+| `decideOrFallback`, `decideOrFallbackVia` | `! {Net, Env}` | degrade to a chat LLM, loudly |
+| `listModelsDirect` | `! {Net, Env}` | the direct API's model names |
+
 ## Testing
 
 ```bash
-ailang test --package          # 16 offline tests, three real fixtures + three malformed bodies
-AILANG_RELAX_MODULES=1 ailang run --caps IO --entry main _smoke.ail   # boot probe + fallback invariants, prints OK:
+ailang test --package          # 33 offline tests: real fixtures, malformed bodies, the 0.4.0 surface
+AILANG_RELAX_MODULES=1 ailang run --caps IO --entry main _smoke.ail   # boot probe + fallback + 0.4.0 invariants, prints OK:
 ailang pkg quality .           # the registry's publish report
 ```
 
-Design + measurements: `ailang/design_docs/planned/m-ai-decide-system-one.md`.
+Design + measurements: `ailang/design_docs/planned/m-ai-decide-system-one.md`. The 0.4.0 extension:
+`design_docs/planned/v0.4.0-decisions-use-case-map.md` (this repo).

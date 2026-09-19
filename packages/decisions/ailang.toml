@@ -1,9 +1,9 @@
 [package]
 name = "sunholo/decisions"
-version = "0.3.0"
+version = "0.4.0"
 edition = "1"
 ailang = ">=0.40.0"
-description = "Typed decisions from a System One model (TypeSafe Jev via OpenRouter): state + typed questions in, calibrated typed answers with probability distributions out"
+description = "Typed decisions from a System One model (TypeSafe Jev via OpenRouter or TypeSafe direct): state + typed questions in (plain or JSON-structured criteria), calibrated typed answers with probability distributions out, plus ranked top-k/margin/entropy analytics, three-way detection gating, composite scoring, ML feature flattening and k-call self-consistency"
 license = "Apache-2.0"
 
 [exports]
@@ -15,11 +15,11 @@ modules = [
 max = ["Net", "Env", "IO"]  # IO serves the _smoke boot probe only; the library surface is Net+Env
 
 [release]
-kind = "feature"
+kind = "breaking"
 
 [metadata]
-tags = ["ai", "decisions", "typesafe", "openrouter", "classification", "confidence"]
-ai_summary = "Ask a System One decision model (TypeSafe Jev, via OpenRouter POST /api/alpha/decisions) typed questions about a JSON state: Noul (P(yes)), Choice (categorical + distribution + confidence), Score (ordinal + distribution + confidence). Answers are a closed ADT; gate(answer, minConfidence) is three-way (Act | Escalate | Ungateable) and the package ships NO default threshold. Calls are ! {Net, Env}, non-deterministic (bank the distribution, never argmax alone), and — in this version — outside the AI effect's budget/trace-cost accounting (visible in OpenRouter Broadcast only)."
+tags = ["ai", "decisions", "typesafe", "openrouter", "classification", "detection", "ranking", "features", "guardrails"]
+ai_summary = "Ask a System One decision model (TypeSafe Jev, via OpenRouter POST /api/alpha/decisions or TypeSafe direct /v1/systemone) typed questions about a JSON state: Noul (P(yes)), Choice (categorical + distribution + confidence), Score (ordinal + distribution + confidence), each also in a JSON-structured variant (NoulR/ChoiceR/ScoreR — the wire accepts structure in every instruction/criteria field). Answers are a closed ADT, read with probabilityOf/best/ranked/topK/margin/entropy/renormalise (search/ranking over the distribution), gate(answer, minConfidence) for confidence routing (Act | Escalate | Ungateable), detect(answer, presentAt, absentAt) for three-way Noul gating, expectedScore/compositeScore for ordinal and composite judgments, featuresOf for ML feature extraction, noulSpread/choiceVotes for self-consistency across k banked Decisions. The package ships NO default threshold — every cut point is the caller's. Calls are ! {Net, Env}, non-deterministic (bank the distribution, never argmax alone), and outside the AI effect's budget/trace-cost accounting. retryable/retryAfterMs cover the vendor's 429/529; listModelsDirect lists the direct API's models."
 repository = "https://github.com/sunholo-data/ailang-packages/tree/main/packages/decisions"
 homepage = "https://ailang.sunholo.com/docs/packages/sunholo/decisions"
 license_url = "https://github.com/sunholo-data/ailang-packages/blob/main/LICENSE"

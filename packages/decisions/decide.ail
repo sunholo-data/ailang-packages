@@ -15,6 +15,19 @@
 -- Same request/response body on both. `decide` = OpenRouter (unchanged since 0.1);
 -- `decideDirect` = TypeSafe direct; `decideVia` takes the transport explicitly.
 --
+-- 0.4.0 — the use-case map surface (docs.typesafe.ai use-case map / patterns /
+-- cookbooks). The three wire primitives were half the story:
+--   * Rich questions: the wire accepts JSON structure in every instruction and
+--     criteria field — NoulR/ChoiceR/ScoreR + NoulCriteria (primitives/advanced.md).
+--   * Distribution analytics: probabilityOf, best, ranked, topK, margin, entropy,
+--     renormalise — Search/Retrieval/Ranking over any answer's distribution.
+--   * Detection: detect(a, presentAt, absentAt) — the Noul-side gate, three-way,
+--     caller's cut points (D4 holds: no defaults).
+--   * compositeScore / featuresOf — the composite-scoring and ML-feature patterns.
+--   * noulSpread / choiceVotes — self-consistency over k banked Decisions (D6,
+--     the ±0.04 non-determinism, made queryable).
+--   * retryable / retryAfterMs (429/529, api.md) and listModelsDirect (GET /v1/models).
+--
 -- Rules for consumers (design_docs/planned/m-ai-decide-system-one.md):
 --   D4  No default threshold lives here. `gate` REQUIRES minConfidence and
 --       returns a three-way Gate; a wrong variant is never "low confidence".
@@ -38,16 +51,29 @@ import std/env (getEnv)
 import std/list (map, length)
 import std/option (Option, Some, None)
 import std/result (Result, Ok, Err)
-import std/math (round, intToFloat, floatToInt)
-import std/string (stringToInt, startsWith, endsWith)
+import std/math (round, intToFloat, floatToInt, log)
+import std/string (stringToInt, startsWith, endsWith, concat)
 
 -- ---------------------------------------------------------------- types
 
--- A typed question. Names mirror TypeSafe's three primitives.
+-- A typed question. Noul/Choice/Score are TypeSafe's three primitives with
+-- plain-string instructions. NoulR/ChoiceR/ScoreR are the SAME primitives with
+-- JSON-structured instructions and criteria — the wire accepts structure in
+-- every EntryType field (docs.typesafe.ai/primitives/advanced.md: `string |
+-- object | array | null`): multi-part instructions, schema rows, taxonomy
+-- subtrees under Choice options, structured Score levels, and the Noul yes/no
+-- boundary descriptions. Rich questions parse identically; only the request
+-- body differs. (A criteria value of `null` — "no extra detail" — is expressible
+-- as Json; std/json has no null constructor yet, `decode("null")` yields one.)
+export type NoulCriteria = { yes: Json, no: Json }
+
 export type Question =
   | Noul(string)                                     -- instructions -> P(yes)
   | Choice(string, [{ key: string, desc: string }])  -- instructions, options
   | Score(string, [string])                          -- instructions, ordered levels (index = level)
+  | NoulR(Json, Option[NoulCriteria])                -- structured instructions, optional yes/no criteria (wire: criteria.true/false)
+  | ChoiceR(Json, [{ key: string, desc: Json }])      -- structured instructions, structured (or null) option rubrics
+  | ScoreR(Json, [Json])                              -- structured instructions, structured level entries
 
 -- A typed answer. Distributions are ordered {key, p} records and are always
 -- carried, never discarded. Score keys are the level index as a string.
@@ -82,6 +108,16 @@ export type Gate =
   | Escalate(float)      -- confidence <  minConfidence: carries the confidence for the caller's log
   | Ungateable(string)   -- NoulA has no confidence: threshold its probability directly
 
+-- Detection: the Noul-side gate. `gate` refuses NoulA (a probability is not a
+-- confidence); `detect` is its proper shape — TWO caller-supplied cut points,
+-- because a detection usually has somewhere to go on "no" as well as "yes".
+-- The middle band is explicit: collapsing Uncertain into "fine" is how a
+-- moderation system stops being trustworthy.
+export type Detection =
+  | Present(float)     -- p >= presentAt: act on the property being there
+  | Absent(float)      -- p <= absentAt: act on it not being there
+  | Uncertain(float)   -- between the cut points: review, ask, or re-run — never act silently
+
 -- Transport: which wire the System One call goes over. Explicit on purpose —
 -- the two differ in model naming, cost reporting and observability.
 export type Transport =
@@ -107,7 +143,21 @@ func questionJson(q: Question) -> Json =
     Choice(instr, opts) => jo([kv("type", js("choice")), kv("instructions", js(instr)),
                                kv("criteria", jo(map(\o. kv(o.key, js(o.desc)), opts)))]),
     Score(instr, levels) => jo([kv("type", js("score")), kv("instructions", js(instr)),
-                                kv("criteria", ja(map(\l. js(l), levels)))])
+                                kv("criteria", ja(map(\l. js(l), levels)))]),
+    NoulR(instr, criteria) => noulJson(instr, criteria),
+    ChoiceR(instr, opts) => jo([kv("type", js("choice")), kv("instructions", instr),
+                                kv("criteria", jo(map(\o. kv(o.key, o.desc), opts)))]),
+    ScoreR(instr, levels) => jo([kv("type", js("score")), kv("instructions", instr),
+                                 kv("criteria", ja(levels))])
+  }
+
+-- noulJson: the wire's optional Noul criteria are `criteria.true`/`criteria.false`;
+-- AILANG's `true`/`false` are keywords, so NoulCriteria spells them `yes`/`no`.
+func noulJson(instr: Json, criteria: Option[NoulCriteria]) -> Json =
+  match criteria {
+    None => jo([kv("type", js("noul")), kv("instructions", instr)]),
+    Some(c) => jo([kv("type", js("noul")), kv("instructions", instr),
+                   kv("criteria", jo([kv("true", c.yes), kv("false", c.no)]))])
   }
 
 -- buildRequest: the exact Decisions body (OpenRouter and TypeSafe direct).
@@ -142,7 +192,10 @@ func questionSchema(q: Question) -> Json =
   match q {
     Noul(_) => numberProp(),
     Choice(_, opts) => labelledDist(map(\o. o.key, opts)),
-    Score(_, levels) => labelledDist(indexKeys(length(levels), 0))
+    Score(_, levels) => labelledDist(indexKeys(length(levels), 0)),
+    NoulR(_, _) => numberProp(),
+    ChoiceR(_, opts) => labelledDist(map(\o. o.key, opts)),
+    ScoreR(_, levels) => labelledDist(indexKeys(length(levels), 0))
   }
 
 func indexKeys(n: int, i: int) -> [string] =
@@ -250,6 +303,354 @@ func weighted(ps: [{ key: string, p: float }]) -> float =
     [x, ...rest] => (match stringToInt(x.key) { Some(i) => intToFloat(i) * x.p, None => 0.0 }) + weighted(rest)
   }
 
+-- ---------------------------------------------------------------- distribution analytics (pure)
+
+-- The use-case map's Search / Retrieval / Ranking rows: the distribution the
+-- model already returned IS the ranking — these helpers read it without
+-- throwing the numbers away. All pure over a banked Decision (D6).
+
+func distOf(a: Answer) -> Result[[{ key: string, p: float }], DecideError] =
+  match a {
+    NoulA(_) => Err(WrongVariant("NoulA is one probability, not a distribution")),
+    ChoiceA(c) => Ok(c.probabilities),
+    ScoreA(s) => Ok(s.probabilities)
+  }
+
+func findP(ps: [{ key: string, p: float }], key: string) -> Option[float] =
+  match ps {
+    [] => None,
+    [x, ...rest] => if x.key == key then Some(x.p) else findP(rest, key)
+  }
+
+-- probabilityOf: one key's probability. A key missing from a parsed
+-- distribution is a wire anomaly (the API promises every criteria key appears
+-- in probabilities) — an error, never a silent 0.0.
+export pure func probabilityOf(a: Answer, key: string) -> Result[float, DecideError] =
+  match distOf(a) {
+    Err(e) => Err(e),
+    Ok(ps) => match findP(ps, key) {
+      Some(p) => Ok(p),
+      None => Err(BadResponse("probabilityOf: distribution has no key ${key}"))
+    }
+  }
+
+-- best: the top of the distribution with its probability — the wire's own
+-- argmax (gate reads confidence; best reads the ranking itself).
+export pure func best(a: Answer) -> Result[{ key: string, p: float }, DecideError] =
+  match distOf(a) {
+    Err(e) => Err(e),
+    Ok([]) => Err(BadResponse("best: empty distribution")),
+    Ok([x, ...rest]) => Ok(bestP(rest, x))
+  }
+
+func bestP(ps: [{ key: string, p: float }], acc: { key: string, p: float }) -> { key: string, p: float } =
+  match ps {
+    [] => acc,
+    [x, ...rest] => if x.p > acc.p then bestP(rest, x) else bestP(rest, acc)
+  }
+
+-- ranked: the distribution ordered by probability, descending; ties keep the
+-- wire's order, so a banked body always re-ranks identically.
+export pure func ranked(a: Answer) -> Result[[{ key: string, p: float }], DecideError] =
+  match distOf(a) { Err(e) => Err(e), Ok(ps) => Ok(byDesc(ps, [])) }
+
+func byDesc(xs: [{ key: string, p: float }], acc: [{ key: string, p: float }]) -> [{ key: string, p: float }] =
+  match xs {
+    [] => acc,
+    [x, ...rest] => byDesc(rest, insertDesc(x, acc))
+  }
+
+func insertDesc(x: { key: string, p: float }, acc: [{ key: string, p: float }]) -> [{ key: string, p: float }] =
+  match acc {
+    [] => [x],
+    [y, ...rest] => if x.p > y.p then [x, y] ++ rest else [y] ++ insertDesc(x, rest)
+  }
+
+-- topK: the ranked shortlist — which candidates the next stage sees, numbers
+-- kept. k is the caller's cut; nothing here decides what "relevant" means.
+export pure func topK(a: Answer, k: int) -> Result[[{ key: string, p: float }], DecideError]
+  requires { k >= 1 }
+= match ranked(a) { Err(e) => Err(e), Ok(ps) => Ok(firstK(ps, k)) }
+
+func firstK(xs: [{ key: string, p: float }], k: int) -> [{ key: string, p: float }] =
+  match xs {
+    [] => [],
+    [x, ...rest] => if k <= 1 then [x] else [x] ++ firstK(rest, k - 1)
+  }
+
+-- margin: the winner's lead over its best rival (top1 - top2; with no rival
+-- the lead is the winner's own probability). D6's disagreement signal as one
+-- queryable number — the consistency cookbooks threshold it, never this package.
+export pure func margin(a: Answer) -> Result[float, DecideError] =
+  match ranked(a) {
+    Err(e) => Err(e),
+    Ok([]) => Err(BadResponse("margin: empty distribution")),
+    Ok([x, ...rest]) => Ok(x.p - rivalP(rest))
+  }
+
+func rivalP(ps: [{ key: string, p: float }]) -> float =
+  match ps { [] => 0.0, [x, ..._] => x.p }
+
+-- entropy: the Shannon entropy of the distribution in bits — the spread the
+-- confidence number collapses (confidence.md: flat = uncertain, concentrated =
+-- confident). H = -Σ p·log₂p: the per-term negation is load-bearing — log₂p is
+-- negative for p < 1, and without the negation every real split scored
+-- NEGATIVE (the lane fixture: -1.1642 bits; caught by the first quality run).
+-- Zero-probability entries contribute 0 bits.
+export pure func entropy(a: Answer) -> Result[float, DecideError]
+  ensures { match result { Ok(x) => x >= 0.0, Err(_) => true } }
+= match distOf(a) { Err(e) => Err(e), Ok(ps) => Ok(bits(ps)) }
+
+func bits(ps: [{ key: string, p: float }]) -> float =
+  match ps { [] => 0.0, [x, ...rest] => bitTerm(x.p) + bits(rest) }
+
+func bitTerm(p: float) -> float =
+  if p <= 0.0 then 0.0 else 0.0 - (p * (log(p) / log(2.0)))
+
+-- renormalise: project a distribution onto a key set and rescale to sum 1 —
+-- the hierarchical-classification beam step (keep two branches alive, compare
+-- them on the same scale). Absent keys enter at 0.0; a zero-sum projection
+-- stays all-zero: nothing is invented.
+export pure func renormalise(a: Answer, keys: [string]) -> Result[[{ key: string, p: float }], DecideError] =
+  match distOf(a) { Err(e) => Err(e), Ok(ps) => Ok(renormKeys(ps, keys)) }
+
+func renormKeys(ps: [{ key: string, p: float }], keys: [string]) -> [{ key: string, p: float }] =
+  rescaleTo(map(\k. { key: k, p: match findP(ps, k) { Some(p) => p, None => 0.0 } }, keys))
+
+func rescaleTo(ps: [{ key: string, p: float }]) -> [{ key: string, p: float }] = rescale(ps, distSum(ps))
+
+func distSum(ps: [{ key: string, p: float }]) -> float =
+  match ps { [] => 0.0, [x, ...rest] => x.p + distSum(rest) }
+
+func rescale(ps: [{ key: string, p: float }], s: float) -> [{ key: string, p: float }] =
+  match ps {
+    [] => [],
+    [x, ...rest] => [{ key: x.key, p: if s > 0.0 then x.p / s else 0.0 }] ++ rescale(rest, s)
+  }
+
+-- ---------------------------------------------------------------- detection (the Noul-side gate)
+
+-- detect: three-way Noul gating with the CALLER's two cut points (D4: this
+-- package ships no defaults, and detect is no exception). Present/Absent carry
+-- p for the log; Uncertain is the band the moderation pattern refuses to
+-- collapse — route it to a human, a stronger model, or another signal.
+export pure func detect(a: Answer, presentAt: float, absentAt: float) -> Result[Detection, DecideError]
+  requires { presentAt >= 0.0 && presentAt <= 1.0 && absentAt >= 0.0 && absentAt <= 1.0 && presentAt >= absentAt }
+= match a {
+    NoulA(p) => if p >= presentAt then Ok(Present(p))
+                else if p <= absentAt then Ok(Absent(p))
+                else Ok(Uncertain(p)),
+    _ => Err(WrongVariant("detect: NoulA only — gate Choice/Score answers with gate"))
+  }
+
+-- ---------------------------------------------------------------- composite scoring + ML features
+
+-- One ML feature: a stable name and its value (featuresOf).
+export type Feature = { name: string, value: float }
+
+-- compositeScore: the composite-scoring pattern — every named dimension is a
+-- Score answer, normalized to [0,1] (expectedScore / (levels-1)) and averaged
+-- with the CALLER's weights (the cookbook's Senior-IC and EM weights are the
+-- same answers under two weight vectors). Negative or zero-sum weights are
+-- typed errors, never clamps.
+export pure func compositeScore(d: Decision, questions: [{ name: string, q: Question }], weights: [{ name: string, weight: float }]) -> Result[float, DecideError]
+  ensures { match result { Ok(x) => x >= 0.0 && x <= 1.0, Err(_) => true } }
+= if negWeight(weights) then Err(WrongVariant("compositeScore: weights must be >= 0"))
+  else if weightTotal(weights) <= 0.0 then Err(WrongVariant("compositeScore: weights must sum > 0"))
+  else match normsOf(d, questions, weights) { Err(e) => Err(e), Ok(parts) => Ok(meanWeighted(parts)) }
+
+func negWeight(ws: [{ name: string, weight: float }]) -> bool =
+  match ws { [] => false, [w, ...rest] => w.weight < 0.0 || negWeight(rest) }
+
+func weightTotal(ws: [{ name: string, weight: float }]) -> float =
+  match ws { [] => 0.0, [w, ...rest] => w.weight + weightTotal(rest) }
+
+@allow_empty_ok("recursion base case: an empty weight list yields an empty part list — unreachable, the sum>0 guard rejects it first")
+func normsOf(d: Decision, questions: [{ name: string, q: Question }], ws: [{ name: string, weight: float }]) -> Result[[{ w: float, norm: float }], DecideError] =
+  match ws {
+    [] => Ok([]),
+    [w, ...rest] => match partNorm(d, questions, w.name) {
+      Err(e) => Err(e),
+      Ok(norm) => match normsOf(d, questions, rest) {
+        Err(e) => Err(e),
+        Ok(tail) => Ok([{ w: w.weight, norm: norm }] ++ tail)
+      }
+    }
+  }
+
+-- partNorm: one dimension — the question must exist and be a Score (its levels
+-- define the 0..1 scale) and the answer must be its ScoreA.
+func partNorm(d: Decision, questions: [{ name: string, q: Question }], name: string) -> Result[float, DecideError] =
+  match levelCount(questions, name) {
+    Err(e) => Err(e),
+    Ok(levels) => match findNamed(d.answers, name) {
+      Err(e) => Err(e),
+      Ok(a) => match expectedScore(a) {
+        Err(e) => Err(e),
+        Ok(es) => if levels <= 1 then Err(WrongVariant("compositeScore: ${name} needs >= 2 levels"))
+                  else Ok(es / (intToFloat(levels) - 1.0))
+      }
+    }
+  }
+
+func levelCount(questions: [{ name: string, q: Question }], name: string) -> Result[int, DecideError] =
+  match questions {
+    [] => Err(WrongVariant("compositeScore: no question named ${name}")),
+    [nq, ...rest] => if nq.name == name then levelsOf(nq.q, name) else levelCount(rest, name)
+  }
+
+func levelsOf(q: Question, name: string) -> Result[int, DecideError] =
+  match q {
+    Score(_, ls) => Ok(length(ls)),
+    ScoreR(_, ls) => Ok(length(ls)),
+    _ => Err(WrongVariant("compositeScore: ${name} is not a Score question"))
+  }
+
+func meanWeighted(parts: [{ w: float, norm: float }]) -> float = weightedNum(parts) / weightSum(parts)
+
+func weightedNum(parts: [{ w: float, norm: float }]) -> float =
+  match parts { [] => 0.0, [x, ...rest] => x.w * x.norm + weightedNum(rest) }
+
+func weightSum(parts: [{ w: float, norm: float }]) -> float =
+  match parts { [] => 0.0, [x, ...rest] => x.w + weightSum(rest) }
+
+-- featuresOf: flatten a Decision into ML features with stable names — the
+-- use-case map's ML Feature Extraction row (purchase intent, churn signals,
+-- risk indicators feeding a classical model alongside structured data):
+--   NoulA   -> <q>_p
+--   ChoiceA -> <q>_probabilities_<key> for every key, then <q>_confidence
+--   ScoreA  -> <q>_probabilities_<i> for every level, <q>_expected,
+--              <q>_score, <q>_confidence
+-- Names are provider-safe by construction: [A-Za-z0-9_] only, underscore-joined
+-- via std/string concat — NO interpolation in the name field. The registry's
+-- tool-name scan reads name-field literals and rejects '$'/'.', so a Feature
+-- name can pass straight through to a Bedrock/Vertex tool registration. Order
+-- follows the question order: two runs over the same banked body agree cell
+-- for cell.
+export pure func featuresOf(d: Decision) -> [Feature] = featureList(d.answers)
+
+func featureList(xs: [{ name: string, answer: Answer }]) -> [Feature] =
+  match xs {
+    [] => [],
+    [x, ...rest] => answerFeatures(x.name, x.answer) ++ featureList(rest)
+  }
+
+func answerFeatures(name: string, a: Answer) -> [Feature] =
+  match a {
+    NoulA(p) => [{ name: concat([name, "_p"]), value: p }],
+    ChoiceA(c) => distFeatures(concat([name, "_probabilities"]), c.probabilities)
+      ++ [{ name: concat([name, "_confidence"]), value: c.confidence }],
+    ScoreA(s) => distFeatures(concat([name, "_probabilities"]), s.probabilities)
+      ++ [{ name: concat([name, "_expected"]), value: weighted(s.probabilities) },
+          { name: concat([name, "_score"]), value: s.score },
+          { name: concat([name, "_confidence"]), value: s.confidence }]
+  }
+
+func distFeatures(prefix: string, ps: [{ key: string, p: float }]) -> [Feature] =
+  match ps {
+    [] => [],
+    [x, ...rest] => [{ name: concat([prefix, "_", x.key]), value: x.p }] ++ distFeatures(prefix, rest)
+  }
+
+-- ---------------------------------------------------------------- self-consistency (D6, queryable)
+
+-- Spread: the same Noul question across k banked Decisions.
+export type Spread = { mean: float, low: float, high: float, k: int }
+
+-- VoteReport: the same Choice question across k banked Decisions.
+export type VoteReport = { winner: string, share: float, votes: [{ key: string, count: int }], k: int }
+
+-- noulSpread: the model is non-deterministic (D6: ±0.04 on identical calls);
+-- ask k times, bank every Decision, read the spread. mean/low/high/k — the
+-- tolerance is the caller's, as ever (the consistency cookbook routes wide
+-- spreads to human review while keeping every p visible).
+export pure func noulSpread(ds: [Decision], name: string) -> Result[Spread, DecideError] =
+  match ds {
+    [] => Err(MissingAnswer(name)),
+    [d, ...rest] => match answer(d, name) {
+      Err(e) => Err(e),
+      Ok(NoulA(p)) => spreadTail(rest, name, p, p, p, 1),
+      Ok(_) => Err(WrongVariant("noulSpread: ${name} is not a Noul answer"))
+    }
+  }
+
+func spreadTail(ds: [Decision], name: string, low: float, high: float, total: float, k: int) -> Result[Spread, DecideError] =
+  match ds {
+    [] => Ok({ mean: total / intToFloat(k), low: low, high: high, k: k }),
+    [d, ...rest] => match answer(d, name) {
+      Err(e) => Err(e),
+      Ok(NoulA(p)) => spreadTail(rest, name, if p < low then p else low, if p > high then p else high, total + p, k + 1),
+      Ok(_) => Err(WrongVariant("noulSpread: ${name} is not a Noul answer"))
+    }
+  }
+
+-- choiceVotes: which label won each of k rounds, and by what share. What
+-- share is "enough" is the caller's call (D4) — the report carries the tally,
+-- the winner and k, nothing else.
+export pure func choiceVotes(ds: [Decision], name: string) -> Result[VoteReport, DecideError] =
+  match ds {
+    [] => Err(MissingAnswer(name)),
+    [d, ...rest] => match answer(d, name) {
+      Err(e) => Err(e),
+      Ok(ChoiceA(_)) => match tally(ds, name, []) { Err(e) => Err(e), Ok(vs) => Ok(voteReport(vs)) },
+      Ok(_) => Err(WrongVariant("choiceVotes: ${name} is not a Choice answer"))
+    }
+  }
+
+func tally(ds: [Decision], name: string, acc: [{ key: string, count: int }]) -> Result[[{ key: string, count: int }], DecideError] =
+  match ds {
+    [] => Ok(acc),
+    [d, ...rest] => match answer(d, name) {
+      Err(e) => Err(e),
+      Ok(ChoiceA(c)) => tally(rest, name, bump(acc, c.choice)),
+      Ok(_) => Err(WrongVariant("choiceVotes: ${name} is not a Choice answer"))
+    }
+  }
+
+func bump(vs: [{ key: string, count: int }], key: string) -> [{ key: string, count: int }] =
+  match vs {
+    [] => [{ key: key, count: 1 }],
+    [x, ...rest] => if x.key == key then [{ key: x.key, count: x.count + 1 }] ++ rest else [x] ++ bump(rest, key)
+  }
+
+func voteReport(vs: [{ key: string, count: int }]) -> VoteReport = {
+  let w = bestVote(vs, { key: "", count: 0 });
+  let rounds = totalVotes(vs);
+  { winner: w.key, share: intToFloat(w.count) / intToFloat(rounds), votes: vs, k: rounds }
+}
+
+func bestVote(vs: [{ key: string, count: int }], acc: { key: string, count: int }) -> { key: string, count: int } =
+  match vs {
+    [] => acc,
+    [x, ...rest] => if x.count > acc.count then bestVote(rest, x) else bestVote(rest, acc)
+  }
+
+func totalVotes(vs: [{ key: string, count: int }]) -> int =
+  match vs { [] => 0, [x, ...rest] => x.count + totalVotes(rest) }
+
+-- ---------------------------------------------------------------- availability (what to retry)
+
+-- retryable: the failures the vendor documents as retryable — HTTP 429 Too
+-- Many Requests and 529 Overloaded ("retry the request with exponential
+-- backoff", api.md). Everything else (your key, your question shape, the Net
+-- deadline) will not fix itself by resending.
+export pure func retryable(e: DecideError) -> bool =
+  match e {
+    Http(status, _) => status == 429 || status == 529,
+    _ => false
+  }
+
+-- retryAfterMs: the exponential backoff as a pure function of the 0-based
+-- attempt: 1s, 2s, 4s, ... capped at 30s. The SLEEP stays in the caller's
+-- runtime — this package's effect ceiling has no Clock, on purpose: loop,
+-- sleep (std/clock), re-decide, until retryable says stop or you give up.
+export pure func retryAfterMs(attempt: int) -> int
+  requires { attempt >= 0 }
+  ensures { result >= 1000 && result <= 30000 }
+= if attempt >= 5 then 30000 else 1000 * twoTo(attempt)
+
+func twoTo(n: int) -> int = if n <= 0 then 1 else 2 * twoTo(n - 1)
+
 -- ---------------------------------------------------------------- the effectful shell
 
 -- decide: one round trip via OpenRouter (the 0.1 behaviour, unchanged). Every
@@ -288,10 +689,57 @@ export func decideWith(endpoint: string, bearer: string, model: string, state: J
                     [{ name: "Authorization", value: "Bearer ${bearer}" },
                      { name: "Content-Type", value: "application/json" },
                      { name: "X-Title", value: "sunholo/decisions" },
-                     { name: "x-typesafe-sdk", value: "sunholo-decisions/0.3.0" }],
+                     { name: "x-typesafe-sdk", value: "sunholo-decisions/0.4.0" }],
                     buildRequest(model, state, questions)) {
     Err(e) => Err(Transport(show(e))),
     Ok(resp) => if not resp.ok then Err(Http(resp.status, resp.body)) else parseAnswers(resp.body, questions)
+  }
+
+-- ---------------------------------------------------------------- model discovery (direct API only)
+
+-- listModelsDirect: the model names the direct API serves (GET /v1/models) —
+-- where "jev-latest" and "jev-preview" come from. OpenRouter's model listing
+-- HIDES the typesafe ids, so there is deliberately no OpenRouter twin: it
+-- would answer the question with the one id you need missing. Rows without
+-- an id/name are skipped; a listing with no ids at all is a BadResponse —
+-- the response shape is exactly what the live probe pins.
+export func listModelsDirect() -> Result[[string], DecideError] ! {Net, Env} =
+  match getEnv("TYPESAFE_API_KEY") {
+    Err(_) => Err(MissingKey("TYPESAFE_API_KEY")),
+    Ok(key) => match httpRequest("GET", "https://api.typesafe.ai/v1/models",
+                                [{ name: "Authorization", value: "Bearer ${key}" },
+                                 { name: "Content-Type", value: "application/json" },
+                                 { name: "x-typesafe-sdk", value: "sunholo-decisions/0.4.0" }], "") {
+      Err(e) => Err(Transport(show(e))),
+      Ok(resp) => if not resp.ok then Err(Http(resp.status, resp.body)) else parseModels(resp.body)
+    }
+  }
+
+func parseModels(body: string) -> Result[[string], DecideError] =
+  match decode(body) {
+    Err(e) => Err(BadResponse("models: not JSON: ${e}")),
+    Ok(j) => match getArray(j, "data") {
+      Some(rows) => namedIds(rows),
+      None => match getArray(j, "models") {
+        Some(rows) => namedIds(rows),
+        None => Err(BadResponse("models: no data/models array"))
+      }
+    }
+  }
+
+func namedIds(rows: [Json]) -> Result[[string], DecideError] =
+  match modelIds(rows) {
+    [] => Err(BadResponse("models: rows carried no ids")),
+    ids => Ok(ids)
+  }
+
+func modelIds(rows: [Json]) -> [string] =
+  match rows {
+    [] => [],
+    [r, ...rest] => match getString(r, "id") {
+      Some(id) => [id] ++ modelIds(rest),
+      None => match getString(r, "name") { Some(n) => [n] ++ modelIds(rest), None => modelIds(rest) }
+    }
   }
 
 -- ============================================================================
@@ -430,20 +878,34 @@ func fbCollect(questions: [{ name: string, q: Question }], content: Json) -> Res
 
 func degradedAnswer(q: Question, v: Json) -> Result[Answer, DecideError] =
   match q {
-    Noul(_) => match asNumber(v) { Some(p) => Ok(NoulA(p)), None => Err(BadResponse("fallback: noul is not a number")) },
-    Choice(_, _) => match asObject(v) {
-      None => Err(BadResponse("fallback: choice is not an object")),
-      Some(kvs) => {
-        let ps = normalised(kvs);
-        Ok(ChoiceA({ choice: argmax(ps, "", -1.0), confidence: 0.0, probabilities: ps }))
-      }
-    },
-    Score(_, _) => match asObject(v) {
-      None => Err(BadResponse("fallback: score is not an object")),
-      Some(kvs) => {
-        let ps = normalised(kvs);
-        Ok(ScoreA({ score: expected(ps), confidence: 0.0, probabilities: ps }))
-      }
+    Noul(_) => degradedNoul(v),
+    Choice(_, _) => degradedChoice(v),
+    Score(_, _) => degradedScore(v),
+    NoulR(_, _) => degradedNoul(v),
+    ChoiceR(_, _) => degradedChoice(v),
+    ScoreR(_, _) => degradedScore(v)
+  }
+
+-- Rich questions degrade exactly like their plain twins: only the request
+-- shape differs, never the answer handling.
+func degradedNoul(v: Json) -> Result[Answer, DecideError] =
+  match asNumber(v) { Some(p) => Ok(NoulA(p)), None => Err(BadResponse("fallback: noul is not a number")) }
+
+func degradedChoice(v: Json) -> Result[Answer, DecideError] =
+  match asObject(v) {
+    None => Err(BadResponse("fallback: choice is not an object")),
+    Some(kvs) => {
+      let ps = normalised(kvs);
+      Ok(ChoiceA({ choice: argmax(ps, "", -1.0), confidence: 0.0, probabilities: ps }))
+    }
+  }
+
+func degradedScore(v: Json) -> Result[Answer, DecideError] =
+  match asObject(v) {
+    None => Err(BadResponse("fallback: score is not an object")),
+    Some(kvs) => {
+      let ps = normalised(kvs);
+      Ok(ScoreA({ score: expected(ps), confidence: 0.0, probabilities: ps }))
     }
   }
 
