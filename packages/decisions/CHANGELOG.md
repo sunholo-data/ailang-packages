@@ -1,5 +1,16 @@
 # Changelog — sunholo/decisions
 
+## 0.3.1 — 2026-09-19
+
+- Docs only: AGENT.md registers docparse's requested Phase-2 candidate — an open-ended
+  `Extract(description, schema) -> ExtractA{value, confidence}` question for typed field extraction
+  (dates, amounts, invoice numbers, free-text labels) with calibrated confidence. Blocked until the
+  vendor wire supports it: Jev answers only `noul`/`choice`/`score` and generates no text, and the
+  fallback path deliberately never presents an LLM answer as calibrated. The section spells out the
+  full shipping checklist (wire answer type, calibrated-confidence semantics, schema passthrough,
+  banked fixture). No code change; every existing export is unchanged.
+- Header string `x-typesafe-sdk: sunholo-decisions/0.3.1` follows the version.
+
 ## 0.3.0 — 2026-09-19
 
 - **TypeSafe direct transport.** `Transport = OpenRouter | TypeSafeDirect`; `decideVia(transport, …)`,
