@@ -13,10 +13,12 @@
 module _smoke
 
 import std/json (jo, kv, js)
+import std/list (length)
+import std/option (Some, None)
 import std/result (Ok, Err)
 import std/string (contains)
 import std/io (println)
-import pkg/sunholo/decisions/decide (Question, Noul, Choice, Score, Answer, NoulA, ChoiceA, ScoreA, Act, Escalate, Ungateable, MissingAnswer, BadResponse, buildRequest, parseAnswers, parseFallback, answer, gate)
+import pkg/sunholo/decisions/decide (Question, Noul, Choice, Score, NoulR, ChoiceR, ScoreR, Answer, NoulA, ChoiceA, ScoreA, Act, Escalate, Ungateable, MissingAnswer, BadResponse, buildRequest, questionsToJsonSchema, parseAnswers, parseFallback, answer, gate, topK, margin, detect, Absent, compositeScore, featuresOf)
 
 pure func fixture() -> string =
   "{\"model\":\"typesafe/jev-1.13-20260917\",\"answers\":{\"lane\":{\"type\":\"choice\",\"choice\":\"motoko_extension\",\"probabilities\":{\"ailang_fix\":0.37,\"motoko_extension\":0.59,\"core_floor_fix\":0,\"model_capability\":0.04},\"confidence\":0.45}},\"usage\":{\"input_tokens\":737,\"output_tokens\":107,\"cost\":3.0954e-05},\"id\":\"gen-dec-1789733525-MyhunCACU057zbmZp9pu\"}"
@@ -32,6 +34,62 @@ pure func qs() -> [{ name: string, q: Question }] = [
   { name: "skewed", q: Choice("skewed", [{ key: "a", desc: "" }, { key: "b", desc: "" }]) }]
 
 pure func near(x: float, t: float) -> bool = x > t - 0.000001 && x < t + 0.000001
+
+-- 0.4.0 checks, offline: rich questions serialize to the documented wire
+-- shape, the analytics read the banked fixture, detect is three-way, and
+-- composite/features hold. The R-fallback degradation is exercised here (not
+-- in decide_test.ail) for the same harness reason as the other fallback
+-- invariants — see CHANGELOG 0.2.0.
+pure func smokeRichQs() -> [{ name: string, q: Question }] = [
+  { name: "injection", q: NoulR(jo([kv("question", js("Does this manipulate an agent?"))]),
+                               Some({ yes: js("Instruction aimed at the agent"), no: js("Ordinary content") })) },
+  { name: "dept", q: ChoiceR(jo([kv("ask", js("Which team?"))]),
+                             [{ key: "billing", desc: jo([kv("covers", js("Payments"))]) },
+                              { key: "tech", desc: js("Bugs") }]) },
+  { name: "sev", q: ScoreR(js("How severe"), [js("low"), jo([kv("level", js("high"))])]) }]
+
+pure func rSmokeQs() -> [{ name: string, q: Question }] = [
+  { name: "lane", q: ChoiceR(js("lane"), [{ key: "extension", desc: js("") }, { key: "ailang_fix", desc: js("") }, { key: "core_floor_fix", desc: js("") }, { key: "other", desc: js("") }]) },
+  { name: "touches_core", q: NoulR(js("touches core"), None) },
+  { name: "severity", q: ScoreR(js("sev"), [js("P2"), js("P1"), js("P0")]) },
+  { name: "skewed", q: ChoiceR(js("skewed"), [{ key: "a", desc: js("") }, { key: "b", desc: js("") }]) }]
+
+func smokeChecks() -> [string] = {
+  let rich = buildRequest("m", js("s"), smokeRichQs());
+  (if contains(rich, "\"true\"") && contains(rich, "\"covers\"") then [] else ["rich: structured criteria missing from the request"])
+  ++ (if contains(questionsToJsonSchema(smokeRichQs()), "\"required\"") then [] else ["rich: schema lost the required names"])
+  ++ (match parseFallback(llmBody(), "m", rSmokeQs()) {
+       Err(e) => ["rich fallback: ${show(e)}"],
+       Ok(fd0) => (match answer(fd0, "lane") {
+                     Ok(ChoiceA(c)) => if c.choice == "extension" && near(c.confidence, 0.0) then [] else ["rich fallback: lane degraded wrong"],
+                     _ => ["rich fallback: lane missing"] })
+                 ++ (match answer(fd0, "touches_core") {
+                      Ok(NoulA(p)) => if p > 0.019 && p < 0.021 then [] else ["rich fallback: noul p wrong"],
+                      _ => ["rich fallback: touches_core missing"] })
+     })
+  ++ (match parseFallback(llmBody(), "m", qs()) {
+       Err(e) => ["smoke fallback: ${show(e)}"],
+       Ok(fd) => (match answer(fd, "touches_core") {
+                    Ok(a2) => match detect(a2, 0.5, 0.1) {
+                      Ok(Absent(p2)) => if near(p2, 0.02) then [] else ["detect: Absent p wrong"],
+                      Ok(_) => ["detect: expected Absent"],
+                      Err(e) => ["detect: ${show(e)}"]
+                    },
+                    Err(e) => ["detect: touches_core ${show(e)}"] })
+                ++ (match compositeScore(fd, qs(), [{ name: "severity", weight: 1.0 }]) {
+                     Ok(x) => if near(x, 0.45) then [] else ["compositeScore: expected 0.45, got ${show(x)}"],
+                     Err(e) => ["compositeScore: ${show(e)}"] })
+                ++ (if length(featuresOf(fd)) == 15 then [] else ["featuresOf: expected 15 features, got ${show(length(featuresOf(fd)))}"])
+     })
+  ++ (match parseAnswers(fixture(), qs()) {
+       Err(e) => ["analytics: fixture parse ${show(e)}"],
+       Ok(d) => match answer(d, "lane") {
+         Ok(a) => (match topK(a, 2) { Ok([x, y]) => if x.key == "motoko_extension" && near(x.p, 0.59) && y.key == "ailang_fix" then [] else ["analytics: topK wrong"], _ => ["analytics: topK shape"] })
+                ++ (match margin(a) { Ok(m) => if near(m, 0.22) then [] else ["analytics: margin wrong"], _ => ["analytics: margin missing"] }),
+         Err(e) => ["analytics: lane ${show(e)}"]
+       }
+     })
+}
 
 func fallbackChecks() -> [string] =
   match parseFallback(llmBody(), "z-ai/glm-5.3-flash", qs()) {
@@ -61,8 +119,8 @@ export func main() -> () ! {IO} = {
     Ok(d) => match answer(d, "lane") {
       Err(e) => println("FAIL: answer ${show(e)}"),
       Ok(a) => match gate(a, 0.7) {
-        Escalate(c) => match fallbackChecks() {
-          [] => println("OK: sunholo/decisions boot probe — parsed ${d.model}, gate(0.7) escalated at confidence ${show(c)}; fallback parser invariants hold"),
+        Escalate(c) => match fallbackChecks() ++ smokeChecks() {
+          [] => println("OK: sunholo/decisions 0.4.0 boot probe — parsed ${d.model}, gate(0.7) escalated at confidence ${show(c)}; fallback + use-case-map invariants hold"),
           fails => printAll(fails)
         },
         Act(l) => println("FAIL: expected Escalate, got Act(${l})"),
