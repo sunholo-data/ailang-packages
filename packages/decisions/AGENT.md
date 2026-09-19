@@ -11,7 +11,7 @@ text only, English primary.
 import pkg/sunholo/decisions/decide (decide, Noul, Choice, Score, answer, gate, Act, Escalate, Ungateable)
 import std/json (jo, kv, js)
 
--- ! {Net, Env}; run with --caps Net,Env and OPENROUTER_API_KEY set
+-- ! {Net, Env}; run with --caps Net,Env and OPENROUTER_API_KEY set (or decideDirect + TYPESAFE_API_KEY)
 match decide("typesafe/jev-1.13", jo([kv("ticket", js("My card was charged twice"))]),
              [{ name: "dept", q: Choice("Which team", [{ key: "billing", desc: "Payments" }, { key: "tech", desc: "Bugs" }]) },
               { name: "urgent", q: Noul("The message conveys urgency") }]) {
@@ -106,6 +106,19 @@ Bank `d` (the whole `Decision`) alongside the `Gated` outcome — D6 below.
 **Data boundary.** `state` leaves the machine for TypeSafe via OpenRouter. Any consumer that today
 sends the same content to another vendor under an existing ruling (eparse → Gemini, Daneel →
 Vertex under its Decision 13) needs that ruling extended before switching, not after.
+
+## Which wire: OpenRouter or TypeSafe direct (0.3.0)
+
+| | `OpenRouter` (`decide`, default) | `TypeSafeDirect` (`decideDirect`) |
+|---|---|---|
+| Key | `OPENROUTER_API_KEY` | `TYPESAFE_API_KEY` |
+| Model names | `typesafe/jev-1.13` | `jev-latest`, `jev-preview` — `defaultModel(TypeSafeDirect)` |
+| Cost on the wire | `usage.cost` (what was billed) | none → `listPriceUsd(d)` (list price from input tokens) |
+| Provider-side trace | OpenRouter Broadcast (`gen_ai.operation.name: decisions`) | **none** |
+| Latency (2026-09-19, one machine) | 565 ms | 621 ms |
+
+Pick with `decideVia(transport, …)`; nothing switches routes on its own. The fallback LLM always goes via
+OpenRouter chat completions, so `decideOrFallbackVia(TypeSafeDirect, …)` needs both keys for a degraded path.
 
 ## If Jev is unavailable: the fallback (0.2.0)
 

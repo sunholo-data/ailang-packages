@@ -43,7 +43,7 @@ package; the caller encodes the risk.
 |---|---|
 | `Question = Noul \| Choice \| Score` | the three TypeSafe primitives: P(yes), categorical, ordinal |
 | `Answer = NoulA \| ChoiceA \| ScoreA` | typed answers; distributions always carried |
-| `decide` / `decideWith` | one round trip via OpenRouter, or any endpoint + bearer |
+| `decide` / `decideDirect` / `decideVia` / `decideWith` | one round trip via OpenRouter, via TypeSafe direct, via an explicit `Transport`, or any endpoint + bearer |
 | `decideOrFallback` → `Calibrated \| Degraded` | chat-LLM fallback with confidence **forced to 0** — acting on it is an explicit opt-in |
 | `gate`, `answer`, `expectedScore`, `parseAnswers`, `questionsToJsonSchema` | pure helpers; `parseAnswers` replays a banked body |
 
@@ -62,10 +62,10 @@ and the [shadow measurement](https://github.com/sunholo-data/ailang/blob/dev/des
 ```toml
 # ailang.toml
 [dependencies]
-"sunholo/decisions" = "0.2.0"
+"sunholo/decisions" = "0.3.0"
 ```
 
-`ailang lock`, then run with `--caps Net,Env` and `OPENROUTER_API_KEY` set. Agent-facing notes, the migration
+`ailang lock`, then run with `--caps Net,Env` and `OPENROUTER_API_KEY` set (or `TYPESAFE_API_KEY` for `decideDirect`). Agent-facing notes, the migration
 guide from `std/ai.callJson` classifiers, and the consumer rules are in [AGENT.md](AGENT.md)
 (`ailang pkg-docs sunholo/decisions`).
 

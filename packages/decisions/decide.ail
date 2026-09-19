@@ -5,9 +5,15 @@
 -- distribution and (for Choice/Score) a calibrated `confidence`. This module
 -- is the AILANG binding, in pure AILANG over std/net + std/json + std/env.
 --
--- Transport (v0.1): OpenRouter `POST /api/alpha/decisions`, model
--- `typesafe/jev-1.13`, bearer OPENROUTER_API_KEY. Same body as TypeSafe's
--- direct `/v1/systemone`; a direct transport is a URL + header swap.
+-- Transports (v0.3): an explicit `Transport` — nothing switches routes silently.
+--   OpenRouter      POST https://openrouter.ai/api/alpha/decisions   bearer OPENROUTER_API_KEY
+--                   model names like "typesafe/jev-1.13"; calls appear in OpenRouter
+--                   Broadcast traces (our provider-side instrument) and carry usage.cost.
+--   TypeSafeDirect  POST https://api.typesafe.ai/v1/systemone        bearer TYPESAFE_API_KEY
+--                   model names "jev-latest" | "jev-preview" (GET /v1/models); the response
+--                   carries no id and no cost (use listPriceUsd), and NO Broadcast trace exists.
+-- Same request/response body on both. `decide` = OpenRouter (unchanged since 0.1);
+-- `decideDirect` = TypeSafe direct; `decideVia` takes the transport explicitly.
 --
 -- Rules for consumers (design_docs/planned/m-ai-decide-system-one.md):
 --   D4  No default threshold lives here. `gate` REQUIRES minConfidence and
@@ -75,6 +81,23 @@ export type Gate =
   | Act(string)          -- confidence >= minConfidence: the label (ChoiceA) or the rounded level (ScoreA)
   | Escalate(float)      -- confidence <  minConfidence: carries the confidence for the caller's log
   | Ungateable(string)   -- NoulA has no confidence: threshold its probability directly
+
+-- Transport: which wire the System One call goes over. Explicit on purpose —
+-- the two differ in model naming, cost reporting and observability.
+export type Transport =
+  | OpenRouter        -- via OpenRouter: OPENROUTER_API_KEY, "typesafe/jev-1.13", Broadcast-traced, usage.cost on the wire
+  | TypeSafeDirect    -- via api.typesafe.ai: TYPESAFE_API_KEY, "jev-latest" | "jev-preview", no trace, no cost on the wire
+
+-- defaultModel: the current default model NAME for a transport (they differ).
+export pure func defaultModel(t: Transport) -> string =
+  match t { OpenRouter => "typesafe/jev-1.13", TypeSafeDirect => "jev-latest" }
+
+-- listPriceUsd: the vendor's list price for a Decision when the wire carried
+-- no cost (TypeSafe direct): $0.042 per 1M input tokens, output free
+-- (openrouter.ai/typesafe/jev-1.13 and typesafe.ai pricing, 2026-09-18).
+-- Prefer d.cost_usd when it is non-zero — that is what was actually billed.
+export pure func listPriceUsd(d: Decision) -> float =
+  if d.cost_usd > 0.0 then d.cost_usd else intToFloat(d.input_tokens) * 0.000000042
 
 -- ---------------------------------------------------------------- request (pure)
 
@@ -229,24 +252,43 @@ func weighted(ps: [{ key: string, p: float }]) -> float =
 
 -- ---------------------------------------------------------------- the effectful shell
 
--- decide: one round trip. Every question sees the same state; answers come
--- back keyed by the question name. Bounded by the Net effect's deadline.
+-- decide: one round trip via OpenRouter (the 0.1 behaviour, unchanged). Every
+-- question sees the same state; answers come back keyed by the question name.
+-- Bounded by the Net effect's deadline.
 export func decide(model: string, state: Json, questions: [{ name: string, q: Question }])
   -> Result[Decision, DecideError] ! {Net, Env} =
-  match getEnv("OPENROUTER_API_KEY") {
-    Err(_) => Err(MissingKey("OPENROUTER_API_KEY")),
-    Ok(key) => decideWith("https://openrouter.ai/api/alpha/decisions", key, model, state, questions)
+  decideVia(OpenRouter, model, state, questions)
+
+-- decideDirect: one round trip via api.typesafe.ai (TYPESAFE_API_KEY). Model
+-- names are the direct API's ("jev-latest", "jev-preview").
+export func decideDirect(model: string, state: Json, questions: [{ name: string, q: Question }])
+  -> Result[Decision, DecideError] ! {Net, Env} =
+  decideVia(TypeSafeDirect, model, state, questions)
+
+-- decideVia: the transport made explicit. MissingKey names the key the chosen
+-- transport needs.
+export func decideVia(transport: Transport, model: string, state: Json, questions: [{ name: string, q: Question }])
+  -> Result[Decision, DecideError] ! {Net, Env} =
+  match transport {
+    OpenRouter => match getEnv("OPENROUTER_API_KEY") {
+      Err(_) => Err(MissingKey("OPENROUTER_API_KEY")),
+      Ok(key) => decideWith("https://openrouter.ai/api/alpha/decisions", key, model, state, questions)
+    },
+    TypeSafeDirect => match getEnv("TYPESAFE_API_KEY") {
+      Err(_) => Err(MissingKey("TYPESAFE_API_KEY")),
+      Ok(key) => decideWith("https://api.typesafe.ai/v1/systemone", key, model, state, questions)
+    }
   }
 
--- decideWith: the same call against an explicit endpoint + bearer (a direct
--- TypeSafe transport, a proxy, a recorder). Still ! {Env} for signature
--- parity with decide; reads nothing.
+-- decideWith: the same call against an explicit endpoint + bearer (a proxy, a
+-- recorder, a future vendor). Still ! {Env} for signature parity; reads nothing.
 export func decideWith(endpoint: string, bearer: string, model: string, state: Json, questions: [{ name: string, q: Question }])
   -> Result[Decision, DecideError] ! {Net, Env} =
   match httpRequest("POST", endpoint,
                     [{ name: "Authorization", value: "Bearer ${bearer}" },
                      { name: "Content-Type", value: "application/json" },
-                     { name: "X-Title", value: "sunholo/decisions" }],
+                     { name: "X-Title", value: "sunholo/decisions" },
+                     { name: "x-typesafe-sdk", value: "sunholo-decisions/0.3.0" }],
                     buildRequest(model, state, questions)) {
     Err(e) => Err(Transport(show(e))),
     Ok(resp) => if not resp.ok then Err(Http(resp.status, resp.body)) else parseAnswers(resp.body, questions)
@@ -297,7 +339,15 @@ export pure func isDegraded(o: Outcome) -> bool =
 -- model named by fallbackModel (an OpenRouter chat slug, e.g. "z-ai/glm-5.3-flash").
 export func decideOrFallback(model: string, fallbackModel: string, state: Json, questions: [{ name: string, q: Question }])
   -> Result[Outcome, DecideError] ! {Net, Env} =
-  match decide(model, state, questions) {
+  decideOrFallbackVia(OpenRouter, model, fallbackModel, state, questions)
+
+-- decideOrFallbackVia: the same, with the System One transport explicit. The
+-- fallback LLM always goes via OpenRouter chat completions (OPENROUTER_API_KEY),
+-- so with TypeSafeDirect you need BOTH keys for the degraded path to exist;
+-- without the OpenRouter key a direct failure returns Err(MissingKey("OPENROUTER_API_KEY")).
+export func decideOrFallbackVia(transport: Transport, model: string, fallbackModel: string, state: Json, questions: [{ name: string, q: Question }])
+  -> Result[Outcome, DecideError] ! {Net, Env} =
+  match decideVia(transport, model, state, questions) {
     Ok(d) => Ok(Calibrated(d)),
     Err(MissingKey(k)) => Err(MissingKey(k)),
     Err(why) => match getEnv("OPENROUTER_API_KEY") {

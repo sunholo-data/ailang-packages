@@ -21,8 +21,8 @@ import pkg/sunholo/decisions/decide (
   Question, Noul, Choice, Score,
   Answer, NoulA, ChoiceA, ScoreA,
   DecideError, MissingKey, Http, Transport, BadResponse, MissingAnswer, WrongVariant,
-  Decision, Gate, Act, Escalate, Ungateable,
-  buildRequest, parseAnswers, questionsToJsonSchema, answer, gate, expectedScore
+  Decision, Gate, Act, Escalate, Ungateable, Transport, OpenRouter, TypeSafeDirect,
+  buildRequest, parseAnswers, questionsToJsonSchema, answer, gate, expectedScore, defaultModel, listPriceUsd
 )
 
 -- ---------------------------------------------------------------- fixtures
@@ -72,6 +72,11 @@ pure func ticketCost() -> float = 0.000017808
 pure func tiny() -> float = 0.000000000001
 pure func one() -> float = 1.0
 pure func zero() -> float = 0.0
+pure func directListPrice() -> float = 0.000018816   -- 448 input tokens × $0.042/MTok
+-- Real direct-API response, 2026-09-19 (jev-latest resolved to jev-1.13.0): no id, no cost, no stats.
+pure func fixtureDirectLive() -> string =
+  "{\"model\":\"jev-1.13.0\",\"answers\":{\"department\":{\"type\":\"choice\",\"choice\":\"billing\",\"probabilities\":{\"technical\":0.35,\"sales\":0.0,\"billing\":0.65},\"confidence\":0.47},\"frustration\":{\"type\":\"score\",\"score\":1.0,\"legend\":{\"0\":\"a\",\"1\":\"b\",\"2\":\"c\"},\"probabilities\":{\"0\":0.0,\"1\":1.0,\"2\":0.0},\"confidence\":1.0},\"is_urgent\":{\"type\":\"noul\",\"noul\":0.99}},\"usage\":{\"input_tokens\":424,\"output_tokens\":73}}"
+pure func directLivePrice() -> float = 0.000017808   -- 424 × 0.042e-6
 
 -- ---------------------------------------------------------------- request
 
@@ -228,5 +233,24 @@ test "questionsToJsonSchema: per-label number properties for choice/score, a sin
         && (match getObject(props, "frustration") { None => false, Some(fq) => (match getObject(fq, "properties") { None => false, Some(pp) => (match getObject(pp, "2") { None => false, Some(l) => optIs(getString(l, "type"), "number") }) }) })
         && (match getObject(props, "is_urgent") { None => false, Some(u) => optIs(getString(u, "type"), "number") })
     }
+  }
+}
+
+-- ---------------------------------------------------------------- transports (0.3.0)
+
+test "defaultModel differs per transport (the two wires name the model differently)" {
+  defaultModel(OpenRouter) == "typesafe/jev-1.13" && defaultModel(TypeSafeDirect) == "jev-latest"
+}
+
+test "listPriceUsd: wire cost wins when present (OpenRouter), list price when absent (direct)" {
+  (match parseAnswers(fixtureTicket(), ticketQs()) { Ok(d) => approx(listPriceUsd(d), ticketCost(), tiny()), Err(_) => false })
+  && (match parseAnswers(fixtureDirect(), directQs()) { Ok(d) => approx(listPriceUsd(d), directListPrice(), tiny()), Err(_) => false })
+}
+
+test "the 2026-09-19 direct-API response parses: model jev-1.13.0, empty id, zero wire cost, list price from input tokens" {
+  match parseAnswers(fixtureDirectLive(), ticketQs()) {
+    Err(_) => false,
+    Ok(d) => d.model == "jev-1.13.0" && d.id == "" && approx(d.cost_usd, zero(), tiny()) && approx(listPriceUsd(d), directLivePrice(), tiny())
+      && (match answer(d, "department") { Ok(ChoiceA(c)) => c.choice == "billing", _ => false })
   }
 }

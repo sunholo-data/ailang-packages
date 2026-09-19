@@ -1,5 +1,18 @@
 # Changelog — sunholo/decisions
 
+## 0.3.0 — 2026-09-19
+
+- **TypeSafe direct transport.** `Transport = OpenRouter | TypeSafeDirect`; `decideVia(transport, …)`,
+  `decideDirect(model, …)` (TYPESAFE_API_KEY, `https://api.typesafe.ai/v1/systemone`, model names
+  `jev-latest` | `jev-preview`), `decideOrFallbackVia(transport, …)`, `defaultModel(transport)`. `decide` and
+  `decideOrFallback` are unchanged (OpenRouter). Measured 2026-09-19 through the package: direct 621 ms,
+  OpenRouter 565 ms, identical token counts.
+- `listPriceUsd(d)`: the wire cost when present, else input tokens × the vendor list price ($0.042/MTok) —
+  the direct API reports no cost. Reproduces OpenRouter's billed `usage.cost` exactly on the same call.
+- Every call sends `x-typesafe-sdk: sunholo-decisions/0.3.0`.
+- Observability note: direct calls produce **no OpenRouter Broadcast trace**; if you rely on Broadcast as the
+  provider-side record, stay on OpenRouter.
+
 ## 0.2.0 — 2026-09-18
 
 - **Fallback when the System One model is unavailable.** `decideOrFallback(model, fallbackModel, state, questions)`
