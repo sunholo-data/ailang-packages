@@ -288,7 +288,7 @@ export func decideWith(endpoint: string, bearer: string, model: string, state: J
                     [{ name: "Authorization", value: "Bearer ${bearer}" },
                      { name: "Content-Type", value: "application/json" },
                      { name: "X-Title", value: "sunholo/decisions" },
-                     { name: "x-typesafe-sdk", value: "sunholo-decisions/0.3.0" }],
+                     { name: "x-typesafe-sdk", value: "sunholo-decisions/0.3.1" }],
                     buildRequest(model, state, questions)) {
     Err(e) => Err(Transport(show(e))),
     Ok(resp) => if not resp.ok then Err(Http(resp.status, resp.body)) else parseAnswers(resp.body, questions)
