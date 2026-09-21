@@ -1,0 +1,106 @@
+-- sunholo/gemini_agents/answer — reading an interaction's record.
+--
+-- Pure over the raw JSON the API returns from GET /interactions/{id}. The record's
+-- shape, measured 21 Sept 2026 on Vertex: `status` (in_progress | completed | failed |
+-- cancelled), `usage` (total_tokens, grounding_tool_count[{type,count}]), `steps` —
+-- `user_input` (content[].text, echoed verbatim), `thought`, `model_output`
+-- (content[].text with `[cite: n]` markers and content[].annotations[] of type
+-- `url_citation` carrying `url`), and `errors[]` ({message, code}) when it failed.
+-- Everything here is tested against a captured record (_smoke.ail); the closed-set
+-- decisions are in agents.ail, proven.
+module sunholo/gemini_agents/answer
+
+import std/json (decode, get, getString, getInt, asString, asArray, asObject)
+import std/option (Some, None, getOrElse, isSome)
+import std/result (Ok, Err)
+import std/list (map, filter, foldl, flatMap, contains, length, concat)
+import std/string (replace, join, contains as strContains)
+import pkg/sunholo/gemini_agents/request (nonceOf)
+
+-- Helpers over Option[Json].
+pure func arr(o: Option[Json]) -> list[Json] {
+  match o { Some(j) => getOrElse(asArray(j), []), None => [] }
+}
+pure func str(j: Json, k: string) -> string { getOrElse(getString(j, k), "") }
+pure func steps(body: string) -> list[Json] {
+  match decode(body) { Ok(j) => arr(get(j, "steps")), Err(_) => [] }
+}
+pure func stepsOfType(body: string, t: string) -> list[Json] {
+  filter(\s. str(s, "type") == t, steps(body))
+}
+pure func contentOf(step: Json) -> list[Json] { arr(get(step, "content")) }
+
+-- The status word as the API wrote it ("" when the body is not a record).
+export pure func statusRaw(body: string) -> string {
+  match decode(body) { Ok(j) => str(j, "status"), Err(_) => "" }
+}
+
+-- The interaction id, or "".
+export pure func idOf(body: string) -> string {
+  match decode(body) { Ok(j) => str(j, "id"), Err(_) => "" }
+}
+
+-- The report: every model_output text part, in order, joined.
+export pure func reportOf(body: string) -> string {
+  let parts = flatMap(\s. map(\c. str(c, "text"), contentOf(s)), stepsOfType(body, "model_output"));
+  join("\n\n", filter(\t. t != "", parts))
+}
+
+pure func addUnique(acc: list[string], u: string) -> list[string] {
+  if u == "" || contains(acc, u) then acc else concat(acc, [u])
+}
+
+-- The cited sources: every url_citation annotation's url, first-seen order, no repeats.
+export pure func sourcesOf(body: string) -> list[string] {
+  let anns = flatMap(\s. flatMap(\c. arr(get(c, "annotations")), contentOf(s)), stepsOfType(body, "model_output"));
+  let urls = map(\a. str(a, "url"), filter(\a. str(a, "type") == "url_citation", anns));
+  foldl(\acc. \u. addUnique(acc, u), [], urls)
+}
+
+-- The nonce the record carries: the first user_input text part that is one.
+export pure func recordNonce(body: string) -> string {
+  let texts = flatMap(\s. map(\c. str(c, "text"), contentOf(s)), stepsOfType(body, "user_input"));
+  foldl(\acc. \t. if acc != "" then acc else nonceOf(t), "", texts)
+}
+
+-- Usage: total tokens and the number of Google searches the run made.
+export pure func usageOf(body: string) -> {tokens: int, searches: int} {
+  match decode(body) {
+    Ok(j) => match get(j, "usage") {
+      Some(u) => {
+        let counts = arr(get(u, "grounding_tool_count"));
+        let searches = foldl(\n. \c. n + (if str(c, "type") == "google_search" then getOrElse(getInt(c, "count"), 0) else 0), 0, counts);
+        {tokens: getOrElse(getInt(u, "total_tokens"), 0), searches: searches}
+      },
+      None => {tokens: 0, searches: 0}
+    },
+    Err(_) => {tokens: 0, searches: 0}
+  }
+}
+
+-- The first error message, or "".
+export pure func errorOf(body: string) -> string {
+  match decode(body) {
+    Ok(j) => foldl(\acc. \e. if acc != "" then acc else str(e, "message"), "", arr(get(j, "errors"))),
+    Err(_) => ""
+  }
+}
+
+-- A transient failure: the API's own internal error (code 13 / api_error), which a
+-- repeat of the same request completed (measured 21 Sept: 1 of 6 runs).
+export pure func transient(body: string) -> bool {
+  match decode(body) {
+    Ok(j) => foldl(\acc. \e. acc || str(e, "code") == "api_error" || strContains(str(e, "message"), "Internal error"), false, arr(get(j, "errors"))),
+    Err(_) => false
+  }
+}
+
+-- The report with Google's `[cite: n]` markers as `[n]`, so a numbered Sources list
+-- below it reads as one document.
+export pure func rewriteCitations(text: string) -> string { replace(text, "[cite: ", "[") }
+
+-- The numbered Sources list matching the markers.
+export pure func sourcesBlock(sources: list[string]) -> string {
+  let numbered = foldl(\acc. \u. {n: acc.n + 1, lines: concat(acc.lines, ["[${show(acc.n + 1)}] ${u}"])}, {n: 0, lines: []}, sources);
+  join("\n", numbered.lines)
+}

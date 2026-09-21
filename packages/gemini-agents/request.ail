@@ -1,0 +1,55 @@
+-- sunholo/gemini_agents/request — the request body and the URLs.
+--
+-- Every Deep Research interaction is `background: true` and `store: true` — the API
+-- refuses both other settings ("background=true is required for agent interactions",
+-- "Setting store=true is required for interactions running in the background", measured
+-- 21 Sept 2026). The question is the first text part; the second is the request's
+-- identity: `Request id: <nonce>`. The API has no client idempotency key, and `user_input`
+-- is the one thing it echoes back verbatim in the record — so the nonce, not the words,
+-- is how a record is matched to the request that made it.
+module sunholo/gemini_agents/request
+
+import std/string (startsWith, substring, length, trim)
+import std/json (encode, jo, kv, js, jb, ja)
+import pkg/sunholo/gemini_agents/agents (deepResearch)
+
+-- Vertex AI, the global location, v1beta1 — the only version that serves /interactions.
+export pure func interactionsUrl(project: string) -> string {
+  "https://aiplatform.googleapis.com/v1beta1/projects/${project}/locations/global/interactions"
+}
+
+export pure func interactionUrl(project: string, id: string) -> string {
+  "${interactionsUrl(project)}/${id}"
+}
+
+-- The Api-Revision header pins the schema this package was written against.
+export pure func apiRevision() -> string { "2026-05-20" }
+
+export pure func noncePrefix() -> string { "Request id: " }
+
+-- The second text part of the input.
+export pure func noncePart(nonce: string) -> string { "${noncePrefix()}${nonce}" }
+
+-- The nonce inside a text part, or "" when the part is not one.
+export pure func nonceOf(text: string) -> string {
+  let t = trim(text);
+  if startsWith(t, noncePrefix()) then trim(substring(t, length(noncePrefix()), length(t))) else ""
+}
+
+-- The body of a start: the agent (proven elsewhere to be the one this package names),
+-- the question, the nonce, background and store. Tested, not proven — JSON assembly
+-- has no SMT encoding; `agentOk` is the gate.
+export pure func startBody(question: string, nonce: string) -> string {
+  encode(jo([
+    kv("agent", js(deepResearch())),
+    kv("input", ja([jo([
+      kv("type", js("user_input")),
+      kv("content", ja([
+        jo([kv("type", js("text")), kv("text", js(question))]),
+        jo([kv("type", js("text")), kv("text", js(noncePart(nonce)))])
+      ]))
+    ])])),
+    kv("background", jb(true)),
+    kv("store", jb(true))
+  ]))
+}

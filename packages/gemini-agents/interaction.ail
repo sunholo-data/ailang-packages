@@ -1,0 +1,84 @@
+-- sunholo/gemini_agents/interaction — the calls: start, get, list, cancel, delete.
+--
+-- Vertex AI under Application Default Credentials (sunholo/gcp_auth: the ADC file's
+-- refresh exchange, or the metadata server). Every call carries `Api-Revision`. Nothing
+-- here decides anything: the body comes from request.ail, the agent id is gated by
+-- agents.agentOk, the record is read by answer.ail. A caller names the project and the
+-- Net allowlist (aiplatform.googleapis.com, oauth2.googleapis.com).
+--
+-- Measured 21 Sept 2026 (project sunholo-daneel, as the account that runs):
+--   POST  …/interactions             → {"id": …, "status": "in_progress"}  (listed immediately)
+--   GET   …/interactions/{id}        → the record (answer.ail)
+--   GET   …/interactions?pageSize=N  → {"interaction_metadatas":[{"id":…}], "next_page_token"?: …}
+--   POST  …/interactions/{id}/cancel → the record with status "cancelled" (the `:cancel` form is 404)
+--   DELETE …/interactions/{id}       → {} 200; refused "is not finished yet" straight after a cancel
+module sunholo/gemini_agents/interaction
+
+import std/net (httpRequest)
+import std/json (decode, get, getString, asArray)
+import std/option (Some, None, getOrElse)
+import std/result (Ok, Err)
+import std/list (map)
+import pkg/sunholo/gcp_auth/token (getAccessToken)
+import pkg/sunholo/gemini_agents/request (interactionsUrl, interactionUrl, apiRevision)
+
+export type Listing = { ids: list[string], next: string }
+
+pure func headers(token: string) -> list[{name: string, value: string}] {
+  [ { name: "Authorization", value: "Bearer ${token}" },
+    { name: "Api-Revision", value: apiRevision() },
+    { name: "Content-Type", value: "application/json" } ]
+}
+
+-- One authenticated call; the body on 2xx, an Err naming the status otherwise.
+func call(method: string, url: string, body: string) -> Result[string, string] ! {FS, Net, Env} {
+  match getAccessToken() {
+    Err(e) => Err("gemini_agents: auth: ${e}"),
+    Ok(token) => match httpRequest(method, url, headers(token), body) {
+      Err(e) => Err("gemini_agents: ${method} ${url}: ${show(e)}"),
+      Ok(resp) => if resp.ok then Ok(resp.body) else Err("gemini_agents: ${method} status=${show(resp.status)} ${resp.body}")
+    }
+  }
+}
+
+-- Start an interaction; the body is request.startBody. Returns the id.
+export func start(project: string, body: string) -> Result[string, string] ! {FS, Net, Env} {
+  match call("POST", interactionsUrl(project), body) {
+    Err(e) => Err(e),
+    Ok(raw) => match decode(raw) {
+      Ok(j) => match getString(j, "id") { Some(id) => Ok(id), None => Err("gemini_agents: start: no id in ${raw}") },
+      Err(e) => Err("gemini_agents: start: ${e}")
+    }
+  }
+}
+
+-- The record, raw, for answer.ail.
+export func get(project: string, id: string) -> Result[string, string] ! {FS, Net, Env} {
+  call("GET", interactionUrl(project, id), "")
+}
+
+-- One page of ids, newest first, and the token for the next page ("" when none).
+export func list(project: string, pageToken: string) -> Result[Listing, string] ! {FS, Net, Env} {
+  let url = if pageToken == "" then "${interactionsUrl(project)}?pageSize=50" else "${interactionsUrl(project)}?pageSize=50&pageToken=${pageToken}";
+  match call("GET", url, "") {
+    Err(e) => Err(e),
+    Ok(raw) => match decode(raw) {
+      Ok(j) => {
+        let metas = match get(j, "interaction_metadatas") { Some(a) => getOrElse(asArray(a), []), None => [] };
+        Ok({ ids: map(\m. getOrElse(getString(m, "id"), ""), metas), next: getOrElse(getString(j, "next_page_token"), "") })
+      },
+      Err(e) => Err("gemini_agents: list: ${e}")
+    }
+  }
+}
+
+-- Cancel a running interaction; the record comes back with its usage so far.
+export func cancel(project: string, id: string) -> Result[string, string] ! {FS, Net, Env} {
+  call("POST", "${interactionUrl(project, id)}/cancel", "")
+}
+
+-- Delete a finished interaction. A record that is not finished yet is refused (400);
+-- a caller retries later.
+export func delete(project: string, id: string) -> Result[string, string] ! {FS, Net, Env} {
+  call("DELETE", interactionUrl(project, id), "")
+}

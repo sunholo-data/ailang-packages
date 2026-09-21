@@ -1,0 +1,63 @@
+-- Boot smoke for sunholo/gemini_agents — offline: no network, no credential.
+--
+-- The record below is a Deep Research interaction captured on Vertex AI on 21 Sept 2026
+-- (project id and interaction id scrubbed; thoughts elided). Everything answer.ail reads
+-- is exercised against it; the proven decisions in agents.ail are re-asserted at their
+-- edges; request.ail's body is decoded back and checked field by field.
+
+module _smoke
+
+import std/io (println)
+import std/string (contains, startsWith)
+import std/list (length, nth_or)
+import std/json (decode, get, getString, asArray)
+import std/option (Some, None, getOrElse)
+import std/result (Ok, Err)
+import pkg/sunholo/gemini_agents/agents (deepResearch, agentOk, statusOf, retryOk)
+import pkg/sunholo/gemini_agents/request (startBody, noncePart, nonceOf, interactionsUrl, interactionUrl, apiRevision)
+import pkg/sunholo/gemini_agents/answer (statusRaw, idOf, reportOf, sourcesOf, recordNonce, usageOf, errorOf, transient, rewriteCitations, sourcesBlock)
+
+func check(name: string, ok: bool) -> int ! {IO} {
+  if ok then { println("  ✓ ${name}"); 1 } else { println("  ✗ ${name}"); 0 }
+}
+
+pure func completed() -> string { "{\"id\": \"FIXTURE-ID\", \"status\": \"completed\", \"usage\": {\"total_tokens\": 60132, \"total_input_tokens\": 43111, \"input_tokens_by_modality\": [{\"modality\": \"text\", \"tokens\": 43111}], \"total_output_tokens\": 1571, \"output_tokens_by_modality\": [{\"modality\": \"text\", \"tokens\": 1571}], \"total_thought_tokens\": 9053, \"grounding_tool_count\": [{\"type\": \"google_search\", \"count\": 4}]}, \"steps\": [{\"type\": \"user_input\", \"content\": [{\"text\": \"In three sentences: what is the Gemini Interactions API? Cite one source.\", \"type\": \"text\"}]}, {\"type\": \"thought\", \"summary\": [{\"text\": \"\\u2026\", \"type\": \"text\"}]}, {\"type\": \"thought\", \"summary\": [{\"text\": \"\\u2026\", \"type\": \"text\"}]}, {\"type\": \"model_output\", \"content\": [{\"type\": \"text\", \"text\": \"# The Gemini Interactions API\\n\\nAccording to the official Google Blog, the Gemini Interactions API is a unified endpoint for building stateful, multimodal AI applications using standard Gemini models and specialized autonomous agents [cite: 1]. It simplifies development by shifting complex tasks\\u2014such as conversation history tracking, tool combination, and background execution for long-running processes\\u2014directly to server-side management [cite: 1]. Made generally available in June 2026, the API serves as the new default standard for interacting with Gemini features in production environments [cite: 1].\", \"annotations\": [{\"start_index\": 233, \"end_index\": 242, \"url\": \"https://blog.google/innovation-and-ai/technology/developers-tools/interactions-api-general-availability/\", \"title\": \"Interactions API: our primary interface for Gemini models and agents - Google Blog\\nblog.google\", \"type\": \"url_citation\"}, {\"start_index\": 444, \"end_index\": 453, \"url\": \"https://blog.google/innovation-and-ai/technology/developers-tools/interactions-api-general-availability/\", \"title\": \"Interactions API: our primary interface for Gemini models and agents - Google Blog\\nblog.google\", \"type\": \"url_citation\"}, {\"start_index\": 601, \"end_index\": 610, \"url\": \"https://blog.google/innovation-and-ai/technology/developers-tools/interactions-api-general-availability/\", \"title\": \"Interactions API: our primary interface for Gemini models and agents - Google Blog\\nblog.google\", \"type\": \"url_citation\"}]}]}], \"object\": \"interaction\", \"agent\": \"deep-research-preview-04-2026\"}" }
+
+pure func failed() -> string {
+  "{\"id\":\"F\",\"status\":\"failed\",\"usage\":{},\"steps\":[{\"type\":\"user_input\",\"content\":[{\"text\":\"q\",\"type\":\"text\"},{\"text\":\"Request id: abc123\",\"type\":\"text\"}]},{\"error\":{\"code\":13,\"message\":\"Internal error encountered.\"},\"type\":\"model_output\"}],\"errors\":[{\"message\":\"Internal error encountered.\",\"code\":\"api_error\"}],\"object\":\"interaction\",\"agent\":\"deep-research-preview-04-2026\"}"
+}
+
+pure func quota() -> string {
+  "{\"id\":\"Q\",\"status\":\"failed\",\"errors\":[{\"message\":\"Quota exceeded\",\"code\":\"resource_exhausted\"}],\"steps\":[]}"
+}
+
+export func main() -> () ! {IO} {
+  println("sunholo/gemini_agents smoke");
+  let c = completed();
+  let body = startBody("What is X?", "n0nce");
+  let bodyOk = match decode(body) {
+    Ok(j) => getOrElse(getString(j, "agent"), "") == deepResearch()
+          && getOrElse(getString(j, "background"), "x") == "x"   -- a bool, not a string
+          && contains(body, "\"background\":true") && contains(body, "\"store\":true")
+          && contains(body, "Request id: n0nce") && contains(body, "What is X?"),
+    Err(_) => false
+  };
+  let n =
+    check("agentOk names the one agent", agentOk(deepResearch()) && not agentOk("antigravity-preview-05-2026") && not agentOk(""))
+    + check("statusOf: in_progress→running, completed→done, anything else→failed", statusOf("in_progress") == "running" && statusOf("completed") == "done" && statusOf("cancelled") == "failed" && statusOf("bogus") == "failed" && statusOf("") == "failed")
+    + check("retryOk: once, and only when transient", retryOk(1, true) && not retryOk(2, true) && not retryOk(1, false))
+    + check("startBody: agent, background, store, question, nonce part", bodyOk)
+    + check("nonceOf round-trips noncePart", nonceOf(noncePart("abc")) == "abc" && nonceOf("What is X?") == "" && nonceOf("  Request id: z ") == "z")
+    + check("urls: v1beta1, global, the id appended", interactionsUrl("p") == "https://aiplatform.googleapis.com/v1beta1/projects/p/locations/global/interactions" && interactionUrl("p", "I") == "https://aiplatform.googleapis.com/v1beta1/projects/p/locations/global/interactions/I" && apiRevision() == "2026-05-20")
+    + check("record: status and id", statusRaw(c) == "completed" && statusOf(statusRaw(c)) == "done" && idOf(c) == "FIXTURE-ID")
+    + check("record: the report is the model_output text", startsWith(reportOf(c), "# The Gemini Interactions API") && contains(reportOf(c), "[cite: 1]"))
+    + check("record: sources deduplicated, first-seen", length(sourcesOf(c)) == 1 && startsWith(nth_or(sourcesOf(c), 0, ""), "https://blog.google/"))
+    + check("record: usage tokens and searches", usageOf(c).tokens == 60132 && usageOf(c).searches == 4)
+    + check("record: no nonce in a record started without one", recordNonce(c) == "")
+    + check("failed record: nonce, error, transient", recordNonce(failed()) == "abc123" && errorOf(failed()) == "Internal error encountered." && transient(failed()) && statusOf(statusRaw(failed())) == "failed")
+    + check("failed record: a quota error is not transient", not transient(quota()) && errorOf(quota()) == "Quota exceeded")
+    + check("not a record: everything empty, nothing panics", statusRaw("nope") == "" && reportOf("") == "" && length(sourcesOf("{}")) == 0 && usageOf("[]").tokens == 0 && not transient("{}"))
+    + check("citations rewritten and numbered", rewriteCitations("a [cite: 1] b [cite: 2]") == "a [1] b [2]" && sourcesBlock(["https://x", "https://y"]) == "[1] https://x\n[2] https://y" && sourcesBlock([]) == "");
+  if n == 15 then println("OK: 15/15") else println("FAIL: ${show(n)}/15")
+}
+
