@@ -1,0 +1,34 @@
+-- sunholo/gemini_agents/agents — the agents this package will name, as a proven closed set.
+--
+-- The Interactions API's `agent` field takes a model id or an agent id. Measured on
+-- Vertex AI (project sunholo-daneel, 21 Sept 2026): `deep-research-preview-04-2026` runs;
+-- `deep-research-max-preview-04-2026` and `antigravity-preview-09-2026` are not found
+-- (only `antigravity-preview-05-2026` resolves). Only what runs is in the set; adding an
+-- id is a version bump with its own probe, never a string a caller passes through.
+--
+-- The literal is inlined in the `ensures` (a zero-arg constant has no SMT encoding);
+-- a consumer's smoke mirrors it.
+module sunholo/gemini_agents/agents
+
+-- The one agent this version names.
+export pure func deepResearch() -> string { "deep-research-preview-04-2026" }
+
+-- Proven: a request body can only ever name the agent above.
+export pure func agentOk(id: string) -> bool
+  ensures { result == (id == "deep-research-preview-04-2026") }
+{ id == "deep-research-preview-04-2026" }
+
+-- Proven: the interaction status words this package understands map onto three
+-- outcomes and nothing else — a word outside the API's set is `failed`, never `done`.
+export pure func statusOf(status: string) -> string
+  ensures { result == "running" || result == "done" || result == "failed" }
+{
+  if status == "in_progress" || status == "requires_action" then "running"
+  else if status == "completed" then "done"
+  else "failed"
+}
+
+-- Proven: one retry, and only on a transient failure.
+export pure func retryOk(attempt: int, transient: bool) -> bool
+  ensures { result == (attempt < 2 && transient) }
+{ attempt < 2 && transient }
