@@ -1,0 +1,19 @@
+module .ailang/verify_doc
+
+import std/string (toUpper, join)
+import std/list (map)
+
+func greet(name: string, suffix: string) -> string =
+  "Hello, ${name}${suffix}"
+
+func shout(name: string) -> string =
+  toUpper(greet(name, "!"))
+
+func greetAll(names: [string]) -> string =
+  join(" ", map(\n. greet(n, "."), names))
+
+pure func checkQuickStart(msg: string, s: string, all: string) -> bool =
+  msg == "Hello, world!" && s == "HI" && all == "a. b. c."
+
+export func main() -> string =
+  "unused"
