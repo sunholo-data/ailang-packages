@@ -1,15 +1,64 @@
--- Gemini Live API voice catalog and model defaults.
+-- Gemini Live API voice catalog, model names and defaults.
 --
--- 30 prebuilt voices available for native audio output.
--- Models: 2.5 (Vertex AI), 3.1 (Google AI Studio).
+-- 30 prebuilt voices available for native audio output. The voices have no fixed
+-- accent: ask for one with a languageCode (e.g. britishEnglish()) and a style line —
+-- with neither, Charon was judged American English (measured 25 Sept 2026).
+--
+-- Models on Vertex AI, listed from GET /v1beta1/publishers/google/models on
+-- 25 Sept 2026 (availability is per region and changes — list, do not assume):
+--   Live:  gemini-3.8-live (GA; us-central1 only; live avatars),
+--          gemini-live-2.5-flash-native-audio (GA; us-central1, europe-west4),
+--          gemini-3.5-transcribe-live-preview, gemini-3.5-live-translate-preview
+--   TTS:   gemini-2.5-flash-tts, gemini-2.5-pro-tts (GA), gemini-3.1-flash-tts-preview
+-- Google AI Studio: gemini-3.1-flash-live-preview.
 
 module sunholo/gemini_live/voices
 
 import std/json (encode, jo, kv, js, ja, Json)
 
--- Default model for Vertex AI (2.5, ADC auth).
+-- Default model for Vertex AI (2.5, ADC auth). Unchanged in 0.5.0 so existing
+-- callers keep their behaviour; new callers should choose explicitly below.
 export pure func defaultVertexModel() -> string =
   "gemini-live-2.5-flash-native-audio"
+
+-- Vertex Live models, by name.
+export pure func vertexLive38() -> string = "gemini-3.8-live"
+export pure func vertexLive25() -> string = "gemini-live-2.5-flash-native-audio"
+
+-- Vertex text-to-speech models (generateContent, responseModalities AUDIO).
+export pure func ttsFlash25() -> string = "gemini-2.5-flash-tts"
+export pure func ttsPro25() -> string = "gemini-2.5-pro-tts"
+export pure func ttsFlash31Preview() -> string = "gemini-3.1-flash-tts-preview"
+
+-- The Vertex Live models this version knows. A name outside the set is not
+-- refused by Vertex for being unknown here — this is a caller's closed set.
+export pure func isVertexLiveModel(m: string) -> bool
+  ensures { result == (m == "gemini-3.8-live" || m == "gemini-live-2.5-flash-native-audio"
+                       || m == "gemini-3.5-transcribe-live-preview" || m == "gemini-3.5-live-translate-preview") }
+{
+  m == "gemini-3.8-live" || m == "gemini-live-2.5-flash-native-audio"
+    || m == "gemini-3.5-transcribe-live-preview" || m == "gemini-3.5-live-translate-preview"
+}
+
+-- The Vertex TTS models this version knows.
+export pure func isTtsModel(m: string) -> bool
+  ensures { result == (m == "gemini-2.5-flash-tts" || m == "gemini-2.5-pro-tts" || m == "gemini-3.1-flash-tts-preview") }
+{
+  m == "gemini-2.5-flash-tts" || m == "gemini-2.5-pro-tts" || m == "gemini-3.1-flash-tts-preview"
+}
+
+-- Live avatars (responseModalities VIDEO + avatarConfig) exist only on 3.8.
+export pure func supportsAvatar(m: string) -> bool
+  ensures { result == (m == "gemini-3.8-live") }
+{
+  m == "gemini-3.8-live"
+}
+
+-- A prebuilt avatar name measured to work on gemini-3.8-live (25 Sept 2026).
+export pure func defaultAvatar() -> string = "Ben"
+
+-- The language code for British English speech.
+export pure func britishEnglish() -> string = "en-GB"
 
 -- Default model for Google AI Studio (3.1, API key auth).
 export pure func defaultGoogleAiModel() -> string =

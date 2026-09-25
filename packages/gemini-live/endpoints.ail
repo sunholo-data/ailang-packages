@@ -1,7 +1,7 @@
--- Gemini Live API WebSocket endpoint URL constructors.
+-- Gemini Live API endpoint URL constructors, and the Vertex model path.
 --
 -- Supports two backends:
---   Vertex AI: ADC Bearer token, regional endpoints
+--   Vertex AI: ADC Bearer token, regional endpoints (and "global", which has no prefix)
 --   Google AI Studio: API key in URL, global endpoint
 --
 -- API versions:
@@ -10,12 +10,31 @@
 
 module sunholo/gemini_live/endpoints
 
--- Vertex AI WebSocket URL.
--- region: e.g. "us-central1"
+-- Vertex AI host for a region. "global" is `aiplatform.googleapis.com` — no
+-- region prefix; every other region is `<region>-aiplatform.googleapis.com`.
+-- (0.4.1 built `global-aiplatform.googleapis.com` for "global", which does not
+-- resolve to the Live endpoint: HTTP 404 on the WebSocket handshake, measured
+-- 25 Sept 2026.)
+export pure func vertexHost(region: string) -> string
+  ensures { region != "global" || result == "aiplatform.googleapis.com" }
+{
+  if region == "global" then "aiplatform.googleapis.com" else "${region}-aiplatform.googleapis.com"
+}
+
+-- Vertex AI WebSocket URL for the Live API.
+-- region: e.g. "us-central1", or "global"
 -- apiVersion: e.g. "v1" or "v1beta1"
 -- Returns URL without auth — caller must pass Bearer token as WebSocket header.
 export pure func vertexAiUrl(region: string, apiVersion: string) -> string =
-  "wss://${region}-aiplatform.googleapis.com/ws/google.cloud.aiplatform.${apiVersion}.LlmBidiService/BidiGenerateContent"
+  "wss://${vertexHost(region)}/ws/google.cloud.aiplatform.${apiVersion}.LlmBidiService/BidiGenerateContent"
+
+-- Full Vertex publisher-model path, the `model` field of a Live setup message.
+export pure func vertexModelPath(project: string, region: string, model: string) -> string =
+  "projects/${project}/locations/${region}/publishers/google/models/${model}"
+
+-- Vertex generateContent URL (batch text-to-speech, see sunholo/gemini_live/tts).
+export pure func vertexGenerateContentUrl(project: string, region: string, model: string) -> string =
+  "https://${vertexHost(region)}/v1/${vertexModelPath(project, region, model)}:generateContent"
 
 -- Google AI Studio WebSocket URL.
 -- apiKey: Google AI Studio API key (included in URL query string)

@@ -12,6 +12,7 @@ import std/json (encode, decode, jo, kv, js, jb, ja, jnum, Json)
 import std/list (concat)
 import std/math (intToFloat)
 import std/result (Ok, Err)
+import pkg/sunholo/gemini_live/config (buildGenerationConfig, buildAvatarConfig)
 
 -- ══════════════════════════════════════════════════════
 -- Setup Messages (sent immediately after WebSocket connect)
@@ -44,36 +45,45 @@ export pure func buildSetup(model: string, voice: string, instruction: string) -
 -- thinkingBudget: -1 = skip, 0+ = set budget.
 export pure func buildSetupWithFeatures(model: string, voice: string, instruction: string,
     proactive: bool, affective: bool, thinkingBudget: int) -> string {
-  let baseKvs = [
-    kv("model", js(model)),
-    kv("generationConfig", jo([
-      kv("responseModalities", ja([js("AUDIO")])),
-      kv("speechConfig", jo([
-        kv("voiceConfig", jo([
-          kv("prebuiltVoiceConfig", jo([
-            kv("voiceName", js(voice))
-          ]))
-        ]))
-      ]))
-    ])),
-    kv("systemInstruction", jo([
-      kv("parts", ja([jo([kv("text", js(instruction))])]))
-    ])),
-    kv("outputAudioTranscription", jo([])),
-    kv("inputAudioTranscription", jo([]))
-  ];
   let proactiveKvs = if proactive then
     [kv("proactivity", jo([kv("proactiveAudio", jb(true))]))]
   else [];
   let affectiveKvs = if affective then
     [kv("enableAffectiveDialog", jb(true))]
   else [];
-  let thinkingKvs = if thinkingBudget >= 0 then
-    [kv("thinkingConfig", jo([kv("thinkingBudget", jnum(intToFloat(thinkingBudget)))]))]
-  else [];
-  let allKvs = concat(concat(concat(baseKvs, proactiveKvs), affectiveKvs), thinkingKvs);
+  -- 0.5.0: thinking goes INSIDE generationConfig. 0.4.1 put it at setup level,
+  -- which Vertex refuses: close 1007 "Unknown name \"thinkingConfig\" at 'setup'"
+  -- (measured on gemini-3.8-live, 25 Sept 2026).
+  let genKvs = buildGenerationConfig("AUDIO", voice, "", thinkingBudget);
+  let allKvs = concat(concat(concat([kv("model", js(model))], genKvs), tailKvs(instruction)),
+                      concat(proactiveKvs, affectiveKvs));
   encode(jo([kv("setup", jo(allKvs))]))
 }
+
+-- System instruction plus both transcriptions — the tail every setup shares.
+pure func tailKvs(instruction: string) -> [{key: string, value: Json}] =
+  [kv("systemInstruction", jo([kv("parts", ja([jo([kv("text", js(instruction))])]))])),
+   kv("outputAudioTranscription", jo([])),
+   kv("inputAudioTranscription", jo([]))]
+
+-- A spoken Live session: audio out, a voice, a languageCode ("" for none;
+-- "en-GB" for British English), thinking budget (-1 to leave the model's default,
+-- 0 to turn thinking off — gemini-3.8-live thinks by default: 78 thought tokens on
+-- one sentence, first audio ~540 → ~350 ms with 0, measured 25 Sept 2026).
+export pure func buildSpeechSetup(model: string, voice: string, languageCode: string,
+                                  instruction: string, thinkingBudget: int) -> string =
+  encode(jo([kv("setup", jo(concat(concat([kv("model", js(model))],
+    buildGenerationConfig("AUDIO", voice, languageCode, thinkingBudget)), tailKvs(instruction))))]))
+
+-- A live-avatar session (gemini-3.8-live only — see voices.supportsAvatar):
+-- responseModalities VIDEO, a prebuilt avatar, the voice it speaks with. The
+-- server streams fragmented MP4 (video + AAC audio) as inlineData parts of
+-- mimeType video/mp4 in ~16 KB chunks; their concatenation is a playable file.
+export pure func buildAvatarSetup(model: string, voice: string, languageCode: string, avatarName: string,
+                                  instruction: string, thinkingBudget: int) -> string =
+  encode(jo([kv("setup", jo(concat(concat(concat([kv("model", js(model))],
+    buildGenerationConfig("VIDEO", voice, languageCode, thinkingBudget)),
+    buildAvatarConfig(avatarName)), tailKvs(instruction))))]))
 
 -- Setup with tool declarations.
 -- toolsJson: JSON string of tool array, e.g. [{"functionDeclarations": [...]}]
@@ -161,6 +171,12 @@ export pure func buildRealtimeAudio(b64Audio: string, mimeType: string) -> strin
       ]))
     ]))
   ]))
+
+-- End of the client's audio stream (realtimeInput.audioStreamEnd). Send after the
+-- last audio chunk so voice-activity detection closes the turn without waiting for
+-- silence. Measured on Vertex 2.5 and 3.8 (25 Sept 2026).
+export pure func buildAudioStreamEnd() -> string =
+  encode(jo([kv("realtimeInput", jo([kv("audioStreamEnd", jb(true))]))]))
 
 -- Build video frame using 3.1 protocol (realtimeInput.video).
 -- b64Video: base64-encoded image/video data.

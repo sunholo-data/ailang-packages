@@ -1,0 +1,113 @@
+-- Gemini batch text-to-speech on Vertex AI (generateContent, responseModalities AUDIO).
+--
+-- One request, one response: the whole utterance comes back as base64 PCM
+-- (16-bit, 24 kHz, mono) in candidates[0].content.parts[0].inlineData. Pair with
+-- endpoints.vertexGenerateContentUrl and a Bearer token (sunholo/gcp_auth).
+--
+-- The spend ceiling is the provider's: generationConfig.maxOutputTokens is ENFORCED
+-- on audio output (measured 25 Sept 2026 on gemini-2.5-flash-tts: cap 300 returned
+-- 292 audio tokens and cut the speech at 11.7 s; uncapped, 1,222 tokens for the same
+-- 121-word script). Audio is billed at 25 tokens per second. A response that stopped
+-- at the cap is truncated speech — completeOk says so; do not publish it.
+--
+-- Measured tokens per word (same voice): prose 8.7–10.2, a number-heavy script 18.2.
+--
+-- All functions are pure.
+
+module sunholo/gemini_live/tts
+
+import std/json (encode, decode, jo, kv, js, ja, jnum, Json, getObject, getArray, getString, getInt)
+import std/list (concat, nth)
+import std/math (intToFloat)
+import std/option (Option, Some, None, getOrElse)
+import std/result (Ok, Err)
+import pkg/sunholo/gemini_live/config (buildSpeechConfig)
+
+-- The request body. style is prepended to the text (e.g. "Read this aloud in a calm
+-- British English accent: "); languageCode "" omits it ("en-GB" for British English —
+-- the voices carry no accent of their own); maxOutputTokens <= 0 omits the cap.
+export pure func buildTtsRequest(text: string, voice: string, languageCode: string, style: string,
+                                 maxOutputTokens: int) -> string =
+  encode(jo([
+    kv("contents", ja([jo([kv("role", js("user")), kv("parts", ja([jo([kv("text", js("${style}${text}"))])]))])])),
+    kv("generationConfig", jo(concat(
+      [kv("responseModalities", ja([js("AUDIO")])),
+       kv("speechConfig", buildSpeechConfig(voice, languageCode))],
+      if maxOutputTokens > 0 then [kv("maxOutputTokens", jnum(intToFloat(maxOutputTokens)))] else [])))
+  ]))
+
+pure func firstPart(j: Json) -> Option[Json] =
+  match getArray(j, "candidates") {
+    Some(cs) => match nth(cs, 0) {
+      Some(c) => match getObject(c, "content") {
+        Some(ct) => match getArray(ct, "parts") { Some(ps) => nth(ps, 0), None => None },
+        None => None
+      },
+      None => None
+    },
+    None => None
+  }
+
+pure func firstCandidate(j: Json) -> Option[Json] =
+  match getArray(j, "candidates") { Some(cs) => nth(cs, 0), None => None }
+
+-- The base64 audio of a generateContent response body, if there is one.
+export pure func ttsAudioOf(body: string) -> Option[string] =
+  match decode(body) {
+    Ok(j) => match firstPart(j) {
+      Some(p) => match getObject(p, "inlineData") { Some(d) => getString(d, "data"), None => None },
+      None => None
+    },
+    Err(_) => None
+  }
+
+-- The audio's mime type (e.g. "audio/L16;codec=pcm;rate=24000"), or "".
+export pure func ttsMimeOf(body: string) -> string =
+  match decode(body) {
+    Ok(j) => match firstPart(j) {
+      Some(p) => match getObject(p, "inlineData") { Some(d) => getOrElse(getString(d, "mimeType"), ""), None => "" },
+      None => ""
+    },
+    Err(_) => ""
+  }
+
+-- candidates[0].finishReason ("STOP", "MAX_TOKENS", …), or "".
+export pure func finishReasonOf(body: string) -> string =
+  match decode(body) {
+    Ok(j) => match firstCandidate(j) { Some(c) => getOrElse(getString(c, "finishReason"), ""), None => "" },
+    Err(_) => ""
+  }
+
+-- usageMetadata.candidatesTokenCount (billed output tokens), or -1 when absent.
+export pure func outputTokensOf(body: string) -> int =
+  match decode(body) {
+    Ok(j) => match getObject(j, "usageMetadata") { Some(u) => getOrElse(getInt(u, "candidatesTokenCount"), -1), None => -1 },
+    Err(_) => -1
+  }
+
+-- usageMetadata.promptTokenCount, or -1 when absent.
+export pure func inputTokensOf(body: string) -> int =
+  match decode(body) {
+    Ok(j) => match getObject(j, "usageMetadata") { Some(u) => getOrElse(getInt(u, "promptTokenCount"), -1), None => -1 },
+    Err(_) => -1
+  }
+
+-- A response is complete speech only if it did not stop at the output cap: not
+-- finishReason MAX_TOKENS, and (when a cap was set) fewer than cap − 10 tokens
+-- returned. The token rule is the one that bites: capped at 300, Vertex returned 292
+-- tokens of cut-off speech with finishReason **STOP**, not MAX_TOKENS (measured 25 Sept
+-- 2026) — so a stop "near" the cap is a stop AT it, whatever finishReason says.
+-- A missing token count (-1) with a cap set is not complete: it cannot be judged.
+export pure func completeOk(returned: int, cap: int, finishReason: string) -> bool
+  ensures { result == (finishReason != "MAX_TOKENS" && (cap <= 0 || (returned >= 0 && returned < cap - 10))) }
+{
+  finishReason != "MAX_TOKENS" && (cap <= 0 || (returned >= 0 && returned < cap - 10))
+}
+
+-- Seconds of audio for a byte count of 16-bit mono PCM at `rate` Hz.
+export pure func pcmSeconds(bytes: int, rate: int) -> int
+  requires { rate > 0 && bytes >= 0 }
+  ensures { result >= 0 }
+{
+  bytes / (rate * 2)
+}
