@@ -23,6 +23,8 @@ import pkg/sunholo/gmail/message (Message)
 import pkg/sunholo/gmail/api (createDraft, sendMessage)
 
 let m = { to: "someone@example.com",
+          cc: [],                       -- copy lines: ["principal@example.com"]
+          bcc: [],
           from: "R. Daneel Automation <bot@example.com>",
           subject: "Nightly report",
           body: "..." };
@@ -87,6 +89,7 @@ consumer that is the `daneel` CLI, which owns the limits and the run log.
 | Function | Module | Signature |
 |---|---|---|
 | `headerSafe` | message | `(string) -> bool` |
+| `headerSafeAll` | message | `([string]) -> bool` — list form, for cc/bcc |
 | `buildMessage` | message | `(Message) -> string` — contract-bearing, unguarded |
 | `safeMessage` | message | `(Message) -> Result[string, string]` — **prefer this** |
 | `encodeRaw` | message | `(string) -> string` — base64url |
@@ -94,9 +97,15 @@ consumer that is the `daneel` CLI, which owns the limits and the run log.
 | `createDraft` | api | `(string, Message) -> Result[string, string] ! {Net}` |
 | `sendMessage` | api | `(string, Message) -> Result[string, string] ! {Net}` |
 
-`Message` is `{ to, from, subject, body }`. `body` is unconstrained — newlines
-there are ordinary and cannot escape upward, because the body is everything
-after the blank line.
+`Message` is `{ to, cc, bcc, from, subject, body }`; `Alt` is the same shape
+with `text`/`html` in place of `body`. `cc`/`bcc` (0.5.0) are lists of
+addresses rendered as one comma-separated `Cc:`/`Bcc:` header and omitted when
+empty; every address gets the same CR/LF guard as `to` — a copy recipient
+comes from exactly the same untrusted places, and CR/LF in any of them would
+terminate the header block. Gmail derives recipients from the raw message, so
+a `Cc:` header is folded into the recipients by Google — no API change.
+`body` is unconstrained — newlines there are ordinary and cannot escape
+upward, because the body is everything after the blank line.
 
 ## Sharp edges
 

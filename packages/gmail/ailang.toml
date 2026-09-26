@@ -1,12 +1,18 @@
 [package]
 name = "sunholo/gmail"
-version = "0.4.1"
+version = "0.5.0"
 edition = "1"
 # 0.35.4 for std/bytes.toBase64URL — Gmail's `raw` field is base64url and
 # rejects standard base64. Earlier toolchains cannot build this package.
 ailang = ">=0.35.4"
-description = "Compose and send Gmail — RFC 5322 and multipart/alternative, with header-injection and MIME-boundary guards, base64url encoding, drafts and sends"
+description = "Compose and send Gmail — RFC 5322 and multipart/alternative, with cc/bcc, header-injection and MIME-boundary guards, base64url encoding, drafts and sends"
 license = "Apache-2.0"
+
+# Breaking (0.5.0): Message and Alt gain required `cc`/`bcc` fields, so every
+# existing record literal fails to compile until the two lists are added
+# (empty `[]` restores the previous wire format exactly).
+[release]
+kind = "breaking"
 
 [exports]
 modules = [
@@ -22,7 +28,7 @@ modules = [
 max = ["Net", "IO"]
 
 [metadata]
-tags = ["gmail", "email", "rfc5322", "smtp", "google", "header-injection", "multipart", "html-email"]
+tags = ["gmail", "email", "rfc5322", "smtp", "google", "header-injection", "multipart", "html-email", "cc", "bcc"]
 ai_summary = "Build an RFC 5322 message with CR/LF header-injection guards, encode it base64url, and create a Gmail draft or send it. Pure composition separated from the effectful call so the security-critical half is testable without a network or a credential."
 repository = "https://github.com/sunholo-data/ailang-packages/tree/main/packages/gmail"
 homepage = "https://ailang.sunholo.com/docs/packages/sunholo/gmail"

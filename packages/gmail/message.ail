@@ -29,7 +29,6 @@
 -- comment should be revisited rather than quietly left to rot.
 
 module sunholo/gmail/message
-
 import std/string (contains, concat, foldChars, join)
 import std/list (map, foldl, length)
 import std/bytes (fromString, toBase64URL, toBase64)
@@ -38,12 +37,13 @@ import std/result (Result, Ok, Err)
 -- A message before encoding. `body` is deliberately unconstrained: newlines in a
 -- body are ordinary and harmless, because the body is everything after the
 -- blank line and cannot escape upward.
-export type Message = {
-  to: string,
-  from: string,
-  subject: string,
-  body: string
-}
+--
+-- `cc` and `bcc` (0.5.0) are lists of addresses rendered as one `Cc:`/`Bcc:`
+-- header, comma-separated, and omitted entirely when empty — an empty header
+-- line is noise a picky client may reject. Every address gets the same CR/LF
+-- guard as `to`: a list is no wider a door than a string, because a copy
+-- recipient comes from exactly the same untrusted places.
+export type Message = { to: string, cc: [string], bcc: [string], from: string, subject: string, body: string }
 
 -- True when a header VALUE cannot break out of its header.
 -- RFC 2047 (0.4.1): a header may carry only ASCII. A Subject with any non-ASCII
@@ -52,38 +52,49 @@ export type Message = {
 -- joined by a space that decoders drop between adjacent encoded words. An
 -- all-ASCII subject is untouched. Found 17 Sept 2026 when the first non-ASCII
 -- subject a caller sent — an em dash — arrived in Gmail as "Ã¢Â€Â”".
-pure func isAscii(s: string) -> bool { foldChars(\ok. \c. ok && c <= "\u007f", true, s) }
-pure func chunks11(s: string) -> list[string] {
-  let r = foldChars(\st. \c. if st.k == 11 then {acc: st.acc ++ [st.cur], cur: c, k: 1} else {acc: st.acc, cur: "${st.cur}${c}", k: st.k + 1}, {acc: [], cur: "", k: 0}, s) in
+pure func isAscii(s: string) -> bool {
+  foldChars(\ok. \c. ok && c <= "\u{7F}", true, s)
+}
+
+pure func chunks11(s: string) -> [string] {
+  let r = foldChars(\st. \c. if st.k == 11 then { acc: st.acc ++ [st.cur], cur: c, k: 1 } else { acc: st.acc, cur: "${st.cur}${c}", k: st.k + 1 }, { acc: [], cur: "", k: 0 }, s) in
   if r.cur == "" then r.acc else r.acc ++ [r.cur]
 }
+
 export pure func encodedWord(s: string) -> string {
   if isAscii(s) then s else join(" ", map(\ch. "=?UTF-8?B?${toBase64(fromString(ch))}?=", chunks11(s)))
 }
 
 export pure func headerSafe(v: string) -> bool {
-  not(contains(v, "\r")) && not(contains(v, "\n"))
+  not contains(v, "\r") && not contains(v, "\n")
+}
+
+-- The list form of the guard, for `cc`/`bcc`. An empty list is trivially safe:
+-- no header is emitted for it, so there is nothing to inject into.
+export pure func headerSafeAll(addrs: [string]) -> bool {
+  foldl(func(acc: bool, a: string) -> bool {
+    acc && headerSafe(a)
+  }, true, addrs)
+}
+
+-- One address-list header, or nothing. Callers never see this; it exists so the
+-- three builders below cannot disagree about how a copy line is spelled.
+pure func optHeader(name: string, addrs: [string]) -> string {
+  if length(addrs) == 0 then "" else "${name}: ${join(", ", addrs)}\r\n"
 }
 
 -- Compose. The contract states the property; `safeMessage` enforces it.
 export pure func buildMessage(m: Message) -> string
-requires {
-  headerSafe(m.to), headerSafe(m.from), headerSafe(m.subject)
-}
-ensures { contains(result, "\r\n\r\n") }
-{
-  "To: ${m.to}\r\nFrom: ${m.from}\r\nSubject: ${encodedWord(m.subject)}\r\nMIME-Version: 1.0\r\nContent-Type: text/plain; charset=UTF-8\r\n\r\n${m.body}"
+requires { headerSafe(m.to), headerSafe(m.from), headerSafe(m.subject), headerSafeAll(m.cc), headerSafeAll(m.bcc) }
+ensures { contains(result, "\r\n\r\n") } {
+  concat(["To: ${m.to}\r\n", optHeader("Cc", m.cc), optHeader("Bcc", m.bcc), "From: ${m.from}\r\nSubject: ${encodedWord(m.subject)}\r\nMIME-Version: 1.0\r\nContent-Type: text/plain; charset=UTF-8\r\n\r\n${m.body}"])
 }
 
 -- The one callers should use. Refuses rather than composing something dangerous,
 -- and names which field was at fault — a rejection nobody can act on gets
 -- retried with the same input.
 export pure func safeMessage(m: Message) -> Result[string, string] {
-  if not(headerSafe(m.to)) then Err("recipient contains CR or LF — header injection")
-  else if not(headerSafe(m.from)) then Err("from contains CR or LF — header injection")
-  else if not(headerSafe(m.subject)) then Err("subject contains CR or LF — header injection")
-  else if m.to == "" then Err("no recipient")
-  else Ok(buildMessage(m))
+  if not headerSafe(m.to) then Err("recipient contains CR or LF — header injection") else if not headerSafe(m.from) then Err("from contains CR or LF — header injection") else if not headerSafe(m.subject) then Err("subject contains CR or LF — header injection") else if not headerSafeAll(m.cc) then Err("a cc address contains CR or LF — header injection") else if not headerSafeAll(m.bcc) then Err("a bcc address contains CR or LF — header injection") else if m.to == "" then Err("no recipient") else Ok(buildMessage(m))
 }
 
 -- Gmail's `raw` field is base64url, and rejects standard base64 — the alphabets
@@ -105,7 +116,6 @@ export pure func safeRaw(m: Message) -> Result[string, string] {
   }
 }
 
-
 -- ---------------------------------------------------------------------------
 -- multipart/alternative — added 0.2.0
 -- ---------------------------------------------------------------------------
@@ -124,17 +134,13 @@ export pure func safeRaw(m: Message) -> Result[string, string] {
 --
 -- The boundary is safe because it is CHECKED, not because it is hard to guess.
 
-export type Alt = {
-  to: string,
-  from: string,
-  subject: string,
-  text: string,
-  html: string
-}
+-- `cc`/`bcc` as on Message (0.5.0): one header line, comma-separated, omitted
+-- when empty, every address CR/LF-guarded like `to`.
+export type Alt = { to: string, cc: [string], bcc: [string], from: string, subject: string, text: string, html: string }
 
 -- Neither part may contain the delimiter that separates them.
 export pure func boundarySafe(boundary: string, text: string, html: string) -> bool {
-  boundary != "" && not(contains(text, boundary)) && not(contains(html, boundary))
+  boundary != "" && not contains(text, boundary) && not contains(html, boundary)
 }
 
 -- Part order is not cosmetic. RFC 2046 says the LAST part is the most-preferred
@@ -142,30 +148,14 @@ export pure func boundarySafe(boundary: string, text: string, html: string) -> b
 -- cannot render HTML shows the plain part, and anything reading the raw message
 -- — including another agent — gets a complete text version rather than tag soup.
 export pure func buildAlt(m: Alt, boundary: string) -> string
-requires {
-  headerSafe(m.to), headerSafe(m.from), headerSafe(m.subject),
-  boundarySafe(boundary, m.text, m.html)
-}
-{
-  concat([
-    "To: ${m.to}\r\nFrom: ${m.from}\r\nSubject: ${encodedWord(m.subject)}\r\n",
-    "MIME-Version: 1.0\r\n",
-    "Content-Type: multipart/alternative; boundary=\"${boundary}\"\r\n\r\n",
-    "--${boundary}\r\nContent-Type: text/plain; charset=UTF-8\r\n\r\n${m.text}\r\n",
-    "--${boundary}\r\nContent-Type: text/html; charset=UTF-8\r\n\r\n${m.html}\r\n",
-    "--${boundary}--\r\n"
-  ])
+requires { headerSafe(m.to), headerSafe(m.from), headerSafe(m.subject), headerSafeAll(m.cc), headerSafeAll(m.bcc), boundarySafe(boundary, m.text, m.html) } {
+  concat(["To: ${m.to}\r\n", optHeader("Cc", m.cc), optHeader("Bcc", m.bcc), "From: ${m.from}\r\nSubject: ${encodedWord(m.subject)}\r\n", "MIME-Version: 1.0\r\n", "Content-Type: multipart/alternative; boundary=\"${boundary}\"\r\n\r\n", "--${boundary}\r\nContent-Type: text/plain; charset=UTF-8\r\n\r\n${m.text}\r\n", "--${boundary}\r\nContent-Type: text/html; charset=UTF-8\r\n\r\n${m.html}\r\n", "--${boundary}--\r\n"])
 }
 
 -- The one callers should use. Names which field was at fault, because a refusal
 -- nobody can act on gets retried with the same input.
 export pure func safeAlt(m: Alt, boundary: string) -> Result[string, string] {
-  if not(headerSafe(m.to)) then Err("recipient contains CR or LF — header injection")
-  else if not(headerSafe(m.from)) then Err("from contains CR or LF — header injection")
-  else if not(headerSafe(m.subject)) then Err("subject contains CR or LF — header injection")
-  else if m.to == "" then Err("no recipient")
-  else if not(boundarySafe(boundary, m.text, m.html)) then Err("a body part contains the MIME boundary — part injection")
-  else Ok(buildAlt(m, boundary))
+  if not headerSafe(m.to) then Err("recipient contains CR or LF — header injection") else if not headerSafe(m.from) then Err("from contains CR or LF — header injection") else if not headerSafe(m.subject) then Err("subject contains CR or LF — header injection") else if not headerSafeAll(m.cc) then Err("a cc address contains CR or LF — header injection") else if not headerSafeAll(m.bcc) then Err("a bcc address contains CR or LF — header injection") else if m.to == "" then Err("no recipient") else if not boundarySafe(boundary, m.text, m.html) then Err("a body part contains the MIME boundary — part injection") else Ok(buildAlt(m, boundary))
 }
 
 export pure func safeAltRaw(m: Alt, boundary: string) -> Result[string, string] {
@@ -174,7 +164,6 @@ export pure func safeAltRaw(m: Alt, boundary: string) -> Result[string, string] 
     Err(e) => Err(e)
   }
 }
-
 
 -- ---------------------------------------------------------------------------
 -- The taint gate — 0.2.1
@@ -208,16 +197,9 @@ export pure func safeAltRaw(m: Alt, boundary: string) -> Result[string, string] 
 -- The direct record literal is still available for callers whose text never came
 -- from a mailbox. That is deliberate: a gate nobody can bypass for legitimate
 -- reasons gets bypassed for illegitimate ones.
-export pure func altFrom(
-  to: string,
-  from: string,
-  subject: string,
-  text: string{not email},
-  html: string{not email}
-) -> Alt {
-  { to: to, from: from, subject: subject, text: text, html: html }
+export pure func altFrom(to: string, cc: [string], bcc: [string], from: string, subject: string, text: string{not email}, html: string{not email}) -> Alt {
+  { to: to, cc: cc, bcc: bcc, from: from, subject: subject, text: text, html: html }
 }
-
 
 -- ---------------------------------------------------------------------------
 -- multipart/related — inline images, added 0.3.0
@@ -245,73 +227,33 @@ export pure func altFrom(
 -- IMAGE. A layout that depends on the logo loading is a layout that breaks for
 -- every recipient whose client blocks it.
 
-export type InlinePart = {
-  cid: string,          -- referenced from the HTML as cid:<this>
-  mimeType: string,     -- e.g. "image/png"
-  filename: string,
-  b64: string           -- base64, already line-wrapped
-}
+-- An inline image. `cid` is referenced from the HTML as cid:<this>; `mimeType`
+-- is e.g. "image/png"; `b64` is base64, already line-wrapped.
+export type InlinePart = { cid: string, mimeType: string, filename: string, b64: string }
 
-export type Related = {
-  alt: Alt,
-  parts: [InlinePart]
-}
+export type Related = { alt: Alt, parts: [InlinePart] }
 
 -- A part is safe when neither boundary appears in its payload and its
 -- content-id cannot break out of the header it is interpolated into.
 export pure func partSafe(rel: string, alt: string, p: InlinePart) -> bool {
-  not(contains(p.b64, rel)) && not(contains(p.b64, alt)) &&
-  not(contains(p.cid, "\r")) && not(contains(p.cid, "\n")) && p.cid != "" &&
-  not(contains(p.filename, "\r")) && not(contains(p.filename, "\n"))
+  not contains(p.b64, rel) && not contains(p.b64, alt) && not contains(p.cid, "\r") && not contains(p.cid, "\n") && p.cid != "" && not contains(p.filename, "\r") && not contains(p.filename, "\n")
 }
 
 export pure func relatedSafe(rel: string, alt: string, r: Related) -> bool {
-  rel != "" && alt != "" && rel != alt &&
-  not(contains(r.alt.text, rel)) && not(contains(r.alt.html, rel)) &&
-  foldl(\acc. \p. acc && partSafe(rel, alt, p), true, r.parts)
+  rel != "" && alt != "" && rel != alt && not contains(r.alt.text, rel) && not contains(r.alt.html, rel) && foldl(\acc. \p. acc && partSafe(rel, alt, p), true, r.parts)
 }
 
 export pure func renderPart(boundary: string, p: InlinePart) -> string {
-  concat([
-    "--${boundary}\r\n",
-    "Content-Type: ${p.mimeType}\r\n",
-    "Content-Transfer-Encoding: base64\r\n",
-    "Content-ID: <${p.cid}>\r\n",
-    "Content-Disposition: inline; filename=\"${p.filename}\"\r\n\r\n",
-    "${p.b64}\r\n"
-  ])
+  concat(["--${boundary}\r\n", "Content-Type: ${p.mimeType}\r\n", "Content-Transfer-Encoding: base64\r\n", "Content-ID: <${p.cid}>\r\n", "Content-Disposition: inline; filename=\"${p.filename}\"\r\n\r\n", "${p.b64}\r\n"])
 }
 
 export pure func buildRelated(r: Related, relBoundary: string, altBoundary: string) -> string
-requires {
-  headerSafe(r.alt.to), headerSafe(r.alt.from), headerSafe(r.alt.subject),
-  boundarySafe(altBoundary, r.alt.text, r.alt.html),
-  relatedSafe(relBoundary, altBoundary, r)
-}
-{
-  concat([
-    "To: ${r.alt.to}\r\nFrom: ${r.alt.from}\r\nSubject: ${encodedWord(r.alt.subject)}\r\n",
-    "MIME-Version: 1.0\r\n",
-    "Content-Type: multipart/related; boundary=\"${relBoundary}\"\r\n\r\n",
-    "--${relBoundary}\r\n",
-    "Content-Type: multipart/alternative; boundary=\"${altBoundary}\"\r\n\r\n",
-    "--${altBoundary}\r\nContent-Type: text/plain; charset=UTF-8\r\n\r\n${r.alt.text}\r\n",
-    "--${altBoundary}\r\nContent-Type: text/html; charset=UTF-8\r\n\r\n${r.alt.html}\r\n",
-    "--${altBoundary}--\r\n\r\n",
-    concat(map(\p. renderPart(relBoundary, p), r.parts)),
-    "--${relBoundary}--\r\n"
-  ])
+requires { headerSafe(r.alt.to), headerSafe(r.alt.from), headerSafe(r.alt.subject), headerSafeAll(r.alt.cc), headerSafeAll(r.alt.bcc), boundarySafe(altBoundary, r.alt.text, r.alt.html), relatedSafe(relBoundary, altBoundary, r) } {
+  concat(["To: ${r.alt.to}\r\n", optHeader("Cc", r.alt.cc), optHeader("Bcc", r.alt.bcc), "From: ${r.alt.from}\r\nSubject: ${encodedWord(r.alt.subject)}\r\n", "MIME-Version: 1.0\r\n", "Content-Type: multipart/related; boundary=\"${relBoundary}\"\r\n\r\n", "--${relBoundary}\r\n", "Content-Type: multipart/alternative; boundary=\"${altBoundary}\"\r\n\r\n", "--${altBoundary}\r\nContent-Type: text/plain; charset=UTF-8\r\n\r\n${r.alt.text}\r\n", "--${altBoundary}\r\nContent-Type: text/html; charset=UTF-8\r\n\r\n${r.alt.html}\r\n", "--${altBoundary}--\r\n\r\n", concat(map(\p. renderPart(relBoundary, p), r.parts)), "--${relBoundary}--\r\n"])
 }
 
 export pure func safeRelated(r: Related, relBoundary: string, altBoundary: string) -> Result[string, string] {
-  if not(headerSafe(r.alt.to)) then Err("recipient contains CR or LF — header injection")
-  else if not(headerSafe(r.alt.from)) then Err("from contains CR or LF — header injection")
-  else if not(headerSafe(r.alt.subject)) then Err("subject contains CR or LF — header injection")
-  else if r.alt.to == "" then Err("no recipient")
-  else if not(boundarySafe(altBoundary, r.alt.text, r.alt.html)) then Err("a body part contains the alternative boundary — part injection")
-  else if length(r.parts) == 0 then Err("multipart/related with no inline parts — use safeAlt instead")
-  else if not(relatedSafe(relBoundary, altBoundary, r)) then Err("the related boundary is empty, equal to the alternative boundary, or present in a part, or a content-id contains CR/LF")
-  else Ok(buildRelated(r, relBoundary, altBoundary))
+  if not headerSafe(r.alt.to) then Err("recipient contains CR or LF — header injection") else if not headerSafe(r.alt.from) then Err("from contains CR or LF — header injection") else if not headerSafe(r.alt.subject) then Err("subject contains CR or LF — header injection") else if not headerSafeAll(r.alt.cc) then Err("a cc address contains CR or LF — header injection") else if not headerSafeAll(r.alt.bcc) then Err("a bcc address contains CR or LF — header injection") else if r.alt.to == "" then Err("no recipient") else if not boundarySafe(altBoundary, r.alt.text, r.alt.html) then Err("a body part contains the alternative boundary — part injection") else if length(r.parts) == 0 then Err("multipart/related with no inline parts — use safeAlt instead") else if not relatedSafe(relBoundary, altBoundary, r) then Err("the related boundary is empty, equal to the alternative boundary, or present in a part, or a content-id contains CR/LF") else Ok(buildRelated(r, relBoundary, altBoundary))
 }
 
 export pure func safeRelatedRaw(r: Related, relBoundary: string, altBoundary: string) -> Result[string, string] {

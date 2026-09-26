@@ -23,7 +23,6 @@
 -- limit nobody enforces. Put them in one place at the boundary you control.
 
 module sunholo/gmail/api
-
 import std/net (httpRequest)
 import std/json (decode, getString)
 import std/option (Option, Some, None)
@@ -31,24 +30,18 @@ import std/result (Result, Ok, Err)
 import pkg/sunholo/gmail/message (Message, safeRaw, Alt, safeAltRaw, Related, safeRelatedRaw)
 
 func post(url: string, token: string, payload: string) -> Result[string, string] ! {Net @limit=1} {
-  let hdrs = [
-    { name: "Authorization", value: "Bearer ${token}" },
-    { name: "Content-Type", value: "application/json" }
-  ];
+  let hdrs = [{ name: "Authorization", value: "Bearer ${token}" }, { name: "Content-Type", value: "application/json" }]
   -- httpRequest is (METHOD, URL, headers, body). Both leading parameters are
   -- `string`, so swapping them type-checks and fails at runtime as InvalidMethod
   -- in about a millisecond, reading exactly like a dead network.
   match httpRequest("POST", url, hdrs, payload) {
-    Ok(resp) =>
-      if resp.ok then
-        match decode(resp.body) {
-          Ok(doc) => match getString(doc, "id") {
-            Some(id) => Ok(id),
-            None => Err("Gmail accepted the request but returned no id: ${resp.body}")
-          },
-          Err(e) => Err("could not parse Gmail's response: ${e}")
-        }
-      else Err("Gmail returned ${show(resp.status)}: ${resp.body}"),
+    Ok(resp) => if resp.ok then match decode(resp.body) {
+      Ok(doc) => match getString(doc, "id") {
+        Some(id) => Ok(id),
+        None => Err("Gmail accepted the request but returned no id: ${resp.body}")
+      },
+      Err(e) => Err("could not parse Gmail's response: ${e}")
+    } else Err("Gmail returned ${show(resp.status)}: ${resp.body}"),
     -- `show` rather than an exhaustive match: NetError carries variants the docs
     -- do not list, and matching only the documented ones turns a bad error into
     -- "no pattern matched".
@@ -59,8 +52,7 @@ func post(url: string, token: string, payload: string) -> Result[string, string]
 -- Leave a draft in the mailbox. Reversible: a human reads it and decides.
 export func createDraft(token: string, m: Message) -> Result[string, string] ! {Net @limit=1} {
   match safeRaw(m) {
-    Ok(raw) => post("https://gmail.googleapis.com/gmail/v1/users/me/drafts", token,
-                    "{\"message\":{\"raw\":\"${raw}\"}}"),
+    Ok(raw) => post("https://gmail.googleapis.com/gmail/v1/users/me/drafts", token, "{\"message\":{\"raw\":\"${raw}\"}}"),
     Err(e) => Err(e)
   }
 }
@@ -68,31 +60,26 @@ export func createDraft(token: string, m: Message) -> Result[string, string] ! {
 -- Send. There is no recall.
 export func sendMessage(token: string, m: Message) -> Result[string, string] ! {Net @limit=1} {
   match safeRaw(m) {
-    Ok(raw) => post("https://gmail.googleapis.com/gmail/v1/users/me/messages/send", token,
-                    "{\"raw\":\"${raw}\"}"),
+    Ok(raw) => post("https://gmail.googleapis.com/gmail/v1/users/me/messages/send", token, "{\"raw\":\"${raw}\"}"),
     Err(e) => Err(e)
   }
 }
-
 
 -- Send a multipart/alternative message. Same shape as sendMessage: compose,
 -- refuse if unsafe, post. The caller supplies the boundary so it can be checked
 -- against the parts by safeAlt rather than assumed unique here.
 export func sendAlt(token: string, m: Alt, boundary: string) -> Result[string, string] ! {Net @limit=1} {
   match safeAltRaw(m, boundary) {
-    Ok(raw) => post("https://gmail.googleapis.com/gmail/v1/users/me/messages/send", token,
-                    "{\"raw\":\"${raw}\"}"),
+    Ok(raw) => post("https://gmail.googleapis.com/gmail/v1/users/me/messages/send", token, "{\"raw\":\"${raw}\"}"),
     Err(e) => Err(e)
   }
 }
-
 
 -- Send an HTML message carrying an inline image. Same shape as sendAlt: compose,
 -- refuse if unsafe, post.
 export func sendRelated(token: string, r: Related, relBoundary: string, altBoundary: string) -> Result[string, string] ! {Net @limit=1} {
   match safeRelatedRaw(r, relBoundary, altBoundary) {
-    Ok(raw) => post("https://gmail.googleapis.com/gmail/v1/users/me/messages/send", token,
-                    "{\"raw\":\"${raw}\"}"),
+    Ok(raw) => post("https://gmail.googleapis.com/gmail/v1/users/me/messages/send", token, "{\"raw\":\"${raw}\"}"),
     Err(e) => Err(e)
   }
 }
