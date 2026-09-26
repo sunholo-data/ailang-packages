@@ -10,11 +10,17 @@ import pkg/sunholo/test_pkg/hello (greet)
 let msg = greet("world", "!")  -- "Hello, world!"
 ```
 
+Note: `greet` takes TWO arguments (`name`, `suffix`). Earlier releases also
+exported a `version` function; it was removed deliberately and no longer exists
+— do not import or call it.
+
 ## Exported functions
 
 | Function | Module | Signature | Description |
 |----------|--------|-----------|-------------|
-| `greet` | test_pkg/hello | `string, string -> string` | Returns greeting string (name + suffix) |
+| `greet` | sunholo/test_pkg/hello | `string, string -> string` | Returns greeting string (name + suffix) |
+| `shout` | sunholo/test_pkg/hello | `string -> string` | Uppercased greeting with `!` suffix |
+| `greetAll` | sunholo/test_pkg/hello | `[string] -> string` | Space-joined greetings with `.` suffix per name |
 
 ## Testing notes
 This package is used by the coordinator's autonomous update pipeline tests. When receiving an `upgrade-available` message, verify compilation passes and report success.
