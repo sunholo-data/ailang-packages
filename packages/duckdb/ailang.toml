@@ -1,6 +1,6 @@
 [package]
 name = "sunholo/duckdb"
-version = "0.1.3"
+version = "0.2.1"
 edition = "1"
 ailang = ">=0.14.0"
 description = "DuckDB query client — execute SQL and parse results via the duckdb CLI"
@@ -32,3 +32,8 @@ max_cost_usd = 1.00
 
 [stability]
 level = "experimental"
+
+[release]
+# Behaviour change: reads now open read-only, so a write through query* is
+# refused and a missing path errors instead of creating an empty database.
+kind = "breaking"

@@ -6,12 +6,12 @@ import std/json   (asNumber)
 import std/option (Some, None)
 import std/result (Result, Ok, Err)
 import ./types    (DB)
-import ./query    (query, scalar)
+import ./query    (query, scalar, execRaw)
 
 -- Execute a multi-statement DDL/DML script.
 -- duckdb CLI accepts multiple semicolon-separated statements via -c.
 export func execScript(db: DB, sql: string) -> Result[(), string] ! {Process} =
-  match query(db, sql) {
+  match execRaw(db, sql) {
     Err(e) => Err(e),
     Ok(_)  => Ok(())
   }

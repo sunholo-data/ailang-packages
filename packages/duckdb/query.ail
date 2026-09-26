@@ -11,14 +11,51 @@ import ./types     (DB, QueryResult)
 
 -- Execute SQL and return full QueryResult.
 -- Row values are Json — use std/json helpers (get, asString, asNumber, etc.) to extract fields.
+--
+-- Opens the database READ-ONLY. DuckDB allows either many readers or one
+-- writer, so opening read-write for a SELECT took the exclusive lock and two
+-- simultaneous reads of the same file collided — measured 26 Sept 2026 against
+-- an 83k-message archive, 3 of 4 concurrent `eparse query` calls failed with
+-- "Conflicting lock is held". DuckDB's own error names -readonly as the fix.
+-- Anything serving reads concurrently (an MCP server, several shells) hit it.
+--
+-- Two consequences worth stating, because both change behaviour:
+--
+--   * A write sent through this READ half is refused by DuckDB rather than
+--     performed. Writes belong in ./schema execScript, which still opens
+--     read-write.
+--   * Querying a path that does not exist is now an error ("Cannot open
+--     database ... in read-only mode: database does not exist") instead of
+--     silently CREATING an empty database and returning no rows. A caller
+--     that meant to create one wants execScript; a caller with a typo wants
+--     the error.
+--
+-- ":memory:" keeps the read-write form — DuckDB refuses to launch an
+-- in-memory database read-only, and it has no second process to race.
 export func query(db: DB, sql: string) -> Result[QueryResult, string] ! {Process} =
-  match exec("duckdb", [db.path, "-json", "-c", sql]) {
+  runDuckdb(readArgs(db.path, sql))
+
+-- The WRITE form: opens read-write, because it has to create and change
+-- things. ./schema execScript is the only caller, and routing IT through
+-- `query` is what made this split a naming convention rather than a fact —
+-- turning `query` read-only briefly turned every write read-only too, and
+-- `eparse index` could not create a fresh database at all.
+export func execRaw(db: DB, sql: string) -> Result[QueryResult, string] ! {Process} =
+  runDuckdb([db.path, "-json", "-c", sql])
+
+func runDuckdb(args: [string]) -> Result[QueryResult, string] ! {Process} =
+  match exec("duckdb", args) {
     Err(e)  => Err("duckdb process error: ${show(e)}"),
     Ok(out) =>
       if out.exitCode != 0
       then Err("duckdb error (exit ${show(out.exitCode)}): ${trim(toString(out.stderr))}")
       else parseResult(trim(toString(out.stdout)))
   }
+
+pure func readArgs(path: string, sql: string) -> [string] =
+  if path == "" || path == ":memory:"
+  then [path, "-json", "-c", sql]
+  else ["-readonly", path, "-json", "-c", sql]
 
 -- Execute SQL and return all rows. Each row is a Json (JObject).
 export func queryAll(db: DB, sql: string) -> Result[[Json], string] ! {Process} =
