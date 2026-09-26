@@ -1,0 +1,154 @@
+-- Native tests for sunholo/gemini_live 0.5.0.
+--
+-- Offline only. The fixtures are shapes captured from Vertex AI on 25 Sept 2026
+-- (base64 payloads shortened; project scrubbed). What each builder sends was checked
+-- against the live API the same day — the tests pin the shapes Vertex accepted.
+
+module sunholo/gemini_live/live_test
+
+import std/json (decode, get, getObject, getString, getArray, getInt, has, jo, asString, Json)
+import std/option (Some, None, getOrElse)
+import std/result (Ok, Err)
+import std/list (length, nth)
+import std/string (startsWith)
+import pkg/sunholo/gemini_live/endpoints (vertexHost, vertexAiUrl, vertexModelPath, vertexGenerateContentUrl)
+import pkg/sunholo/gemini_live/messages (buildSetupWithFeatures, buildSpeechSetup, buildAvatarSetup, buildAudioStreamEnd)
+import pkg/sunholo/gemini_live/parsers (usageOf, mediaPartsOf, inputTranscriptOf, outputTranscriptOf, turnCompleteOf)
+import pkg/sunholo/gemini_live/tts (buildTtsRequest, ttsAudioOf, ttsMimeOf, finishReasonOf, outputTokensOf, completeOk, pcmSeconds)
+import pkg/sunholo/gemini_live/voices (isVertexLiveModel, isTtsModel, supportsAvatar, britishEnglish)
+
+pure func obj(s: string) -> Json = match decode(s) { Ok(j) => j, Err(_) => jo([]) }
+
+pure func setupOf(s: string) -> Json = getOrElse(getObject(obj(s), "setup"), obj("{}"))
+pure func genOf(s: string) -> Json = getOrElse(getObject(setupOf(s), "generationConfig"), obj("{}"))
+pure func speechOf(s: string) -> Json = getOrElse(getObject(genOf(s), "speechConfig"), obj("{}"))
+
+-- ── endpoints ─────────────────────────────────────────────
+
+test "global has no region prefix; other regions do" {
+  vertexHost("global") == "aiplatform.googleapis.com" &&
+  vertexHost("us-central1") == "us-central1-aiplatform.googleapis.com" &&
+  vertexAiUrl("global", "v1") == "wss://aiplatform.googleapis.com/ws/google.cloud.aiplatform.v1.LlmBidiService/BidiGenerateContent"
+}
+
+test "model path and generateContent URL" {
+  vertexModelPath("p", "us-central1", "gemini-3.8-live") == "projects/p/locations/us-central1/publishers/google/models/gemini-3.8-live" &&
+  vertexGenerateContentUrl("p", "us-central1", "gemini-2.5-flash-tts") ==
+    "https://us-central1-aiplatform.googleapis.com/v1/projects/p/locations/us-central1/publishers/google/models/gemini-2.5-flash-tts:generateContent"
+}
+
+-- ── setup messages ────────────────────────────────────────
+
+test "thinking goes inside generationConfig, never at setup level (the 0.4.1 bug)" {
+  let s = buildSetupWithFeatures("m", "Charon", "i", false, false, 0);
+  has(genOf(s), "thinkingConfig") && not has(setupOf(s), "thinkingConfig")
+}
+
+test "thinking budget -1 leaves thinkingConfig out" {
+  not has(genOf(buildSpeechSetup("m", "Charon", "", "i", -1)), "thinkingConfig")
+}
+
+test "speech setup carries en-GB when asked, and no languageCode when not" {
+  getOrElse(getString(speechOf(buildSpeechSetup("m", "Charon", britishEnglish(), "i", 0)), "languageCode"), "") == "en-GB" &&
+  not has(speechOf(buildSpeechSetup("m", "Charon", "", "i", 0)), "languageCode")
+}
+
+test "avatar setup: VIDEO modality and a prebuilt avatar at setup level" {
+  let s = buildAvatarSetup("m", "Charon", "en-GB", "Ben", "i", 0);
+  let mods = getOrElse(getArray(genOf(s), "responseModalities"), []);
+  getOrElse(getString(getOrElse(getObject(setupOf(s), "avatarConfig"), obj("{}")), "avatarName"), "") == "Ben" &&
+  length(mods) == 1 &&
+  (match nth(mods, 0) { Some(m) => (match asString(m) { Some(v) => v == "VIDEO", None => false }), None => false })
+}
+
+test "audioStreamEnd" {
+  match getObject(obj(buildAudioStreamEnd()), "realtimeInput") {
+    Some(r) => has(r, "audioStreamEnd"),
+    None => false
+  }
+}
+
+-- ── parsers (fixtures: gemini-3.8-live avatar session, 25 Sept 2026) ──
+
+pure func usageFixture() -> string {
+  "{\"usageMetadata\":{\"promptTokenCount\":53,\"candidatesTokenCount\":38338,\"totalTokenCount\":38391,\"promptTokensDetails\":[{\"modality\":\"TEXT\",\"tokenCount\":53}],\"candidatesTokensDetails\":[{\"modality\":\"VIDEO\",\"tokenCount\":38184},{\"modality\":\"TEXT\",\"tokenCount\":16},{\"modality\":\"AUDIO\",\"tokenCount\":138}]}}"
+}
+
+pure func thinkingFixture() -> string {
+  "{\"usageMetadata\":{\"promptTokenCount\":53,\"candidatesTokenCount\":147,\"totalTokenCount\":278,\"candidatesTokensDetails\":[{\"modality\":\"TEXT\",\"tokenCount\":16},{\"modality\":\"AUDIO\",\"tokenCount\":131}],\"thoughtsTokenCount\":78}}"
+}
+
+pure func mediaFixture() -> string {
+  "{\"serverContent\":{\"modelTurn\":{\"parts\":[{\"inlineData\":{\"mimeType\":\"video/mp4\",\"data\":\"AAAAHGZ0eXA=\"}},{\"inlineData\":{\"mimeType\":\"audio/pcm;rate=24000\",\"data\":\"AAEC\"}},{\"text\":\"ignored\"}]},\"outputTranscription\":{\"text\":\"Good evening\"},\"inputTranscription\":{\"text\":\"Danielle, is there anything\"}}}"
+}
+
+test "usage by modality, avatar session" {
+  let u = usageOf(obj(usageFixture()));
+  u.prompt == 53 && u.output == 38338 && u.videoOut == 38184 && u.audioOut == 138 && u.textOut == 16 && u.thoughts == 0
+}
+
+test "thinking tokens are read (gemini-3.8-live thinks by default)" {
+  usageOf(obj(thinkingFixture())).thoughts == 78 && usageOf(obj(thinkingFixture())).total == 278
+}
+
+test "no usageMetadata is all zeros" {
+  let u = usageOf(obj("{\"serverContent\":{}}"));
+  u.total == 0 && u.videoOut == 0
+}
+
+test "media parts keep order and mime type; non-inline parts are skipped" {
+  let ps = mediaPartsOf(obj(mediaFixture()));
+  length(ps) == 2 &&
+  (match nth(ps, 0) { Some(p) => startsWith(p.mimeType, "video/mp4") && p.data == "AAAAHGZ0eXA=", None => false }) &&
+  (match nth(ps, 1) { Some(p) => startsWith(p.mimeType, "audio/pcm"), None => false })
+}
+
+test "both transcripts are read from one message that also carries media" {
+  outputTranscriptOf(obj(mediaFixture())) == "Good evening" &&
+  inputTranscriptOf(obj(mediaFixture())) == "Danielle, is there anything" &&
+  not turnCompleteOf(obj(mediaFixture())) &&
+  turnCompleteOf(obj("{\"serverContent\":{\"turnComplete\":true}}"))
+}
+
+-- ── batch TTS ─────────────────────────────────────────────
+
+pure func ttsFixture() -> string {
+  "{\"candidates\":[{\"content\":{\"role\":\"model\",\"parts\":[{\"inlineData\":{\"mimeType\":\"audio/L16;codec=pcm;rate=24000\",\"data\":\"AAEC\"}}]},\"finishReason\":\"STOP\"}],\"usageMetadata\":{\"promptTokenCount\":74,\"candidatesTokenCount\":292,\"totalTokenCount\":366}}"
+}
+
+test "tts request: AUDIO, en-GB, style prepended, cap present only when asked" {
+  let r = obj(buildTtsRequest("Hello", "Charon", "en-GB", "Calmly: ", 300));
+  let g = getOrElse(getObject(r, "generationConfig"), obj("{}"));
+  getOrElse(getInt(g, "maxOutputTokens"), 0) == 300 &&
+  getOrElse(getString(getOrElse(getObject(g, "speechConfig"), obj("{}")), "languageCode"), "") == "en-GB" &&
+  not has(getOrElse(getObject(obj(buildTtsRequest("Hello", "Charon", "", "", 0)), "generationConfig"), obj("{}")), "maxOutputTokens")
+}
+
+test "tts response: audio, mime, finish reason, output tokens" {
+  (match ttsAudioOf(ttsFixture()) { Some(a) => a == "AAEC", None => false }) &&
+  ttsMimeOf(ttsFixture()) == "audio/L16;codec=pcm;rate=24000" &&
+  finishReasonOf(ttsFixture()) == "STOP" &&
+  outputTokensOf(ttsFixture()) == 292 &&
+  (match ttsAudioOf("not json") { Some(_) => false, None => true })
+}
+
+test "completeOk: the capped run said STOP and is still truncated" {
+  not completeOk(292, 300, "STOP") &&
+  completeOk(577, 5000, "STOP") &&
+  completeOk(1222, 0, "STOP") &&
+  not completeOk(-1, 300, "STOP") &&
+  not completeOk(10, 5000, "MAX_TOKENS")
+}
+
+test "pcmSeconds: 24 kHz 16-bit mono" {
+  pcmSeconds(2380800, 24000) == 49 && pcmSeconds(0, 24000) == 0
+}
+
+-- ── closed sets ───────────────────────────────────────────
+
+test "model sets" {
+  isVertexLiveModel("gemini-3.8-live") && isVertexLiveModel("gemini-live-2.5-flash-native-audio") &&
+  not isVertexLiveModel("gemini-3.1-flash-live-preview") &&
+  isTtsModel("gemini-2.5-flash-tts") && not isTtsModel("gemini-3.8-live") &&
+  supportsAvatar("gemini-3.8-live") && not supportsAvatar("gemini-live-2.5-flash-native-audio")
+}

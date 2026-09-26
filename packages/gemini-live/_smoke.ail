@@ -1,0 +1,35 @@
+-- Boot smoke for sunholo/gemini_live — offline: no network, no credential.
+-- Builds each setup this version adds and reads it back; parses a captured avatar
+-- usage record; checks the truncation rule on the capped run measured 25 Sept 2026.
+
+module _smoke
+
+import std/io (println)
+import std/json (decode, getObject, has)
+import std/option (Some, None)
+import std/result (Ok, Err)
+import pkg/sunholo/gemini_live/endpoints (vertexHost)
+import pkg/sunholo/gemini_live/messages (buildSetupWithFeatures, buildAvatarSetup)
+import pkg/sunholo/gemini_live/parsers (usageOf)
+import pkg/sunholo/gemini_live/tts (completeOk)
+
+func check(name: string, ok: bool) -> int ! {IO} {
+  if ok then { println("  ✓ ${name}"); 1 } else { println("  ✗ ${name}"); 0 }
+}
+
+pure func setupHas(s: string, key: string) -> bool =
+  match decode(s) { Ok(j) => match getObject(j, "setup") { Some(st) => has(st, key), None => false }, Err(_) => false }
+
+export func main() -> () ! {IO} {
+  println("sunholo/gemini_live smoke");
+  let usage = match decode("{\"usageMetadata\":{\"candidatesTokenCount\":38338,\"totalTokenCount\":38391,\"candidatesTokensDetails\":[{\"modality\":\"VIDEO\",\"tokenCount\":38184},{\"modality\":\"AUDIO\",\"tokenCount\":138}]}}") {
+    Ok(j) => usageOf(j).videoOut == 38184,
+    Err(_) => false
+  };
+  let n = check("global host has no prefix", vertexHost("global") == "aiplatform.googleapis.com")
+        + check("thinking is not at setup level", not setupHas(buildSetupWithFeatures("m", "Charon", "i", false, false, 0), "thinkingConfig"))
+        + check("avatar setup carries avatarConfig", setupHas(buildAvatarSetup("m", "Charon", "en-GB", "Ben", "i", 0), "avatarConfig"))
+        + check("usage reads video tokens", usage)
+        + check("a capped TTS run that said STOP is truncated", not completeOk(292, 300, "STOP"));
+  if n == 5 then println("ok 5/5") else println("FAILED ${show(n)}/5")
+}

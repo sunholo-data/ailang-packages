@@ -104,3 +104,30 @@ export pure func mergeThinkingIntoGenConfig(genConfigKvs: [{key: string, value: 
                                             thinkingKvs: [{key: string, value: Json}])
   -> [{key: string, value: Json}] =
   concat(genConfigKvs, thinkingKvs)
+
+-- ============================================================
+-- Speech and avatar config (0.5.0)
+-- ============================================================
+
+-- speechConfig: a prebuilt voice and, when non-empty, a languageCode
+-- ("en-GB" for British English — the voices carry no accent of their own).
+export pure func buildSpeechConfig(voice: string, languageCode: string) -> Json =
+  jo(concat(
+    [kv("voiceConfig", jo([kv("prebuiltVoiceConfig", jo([kv("voiceName", js(voice))]))]))],
+    if languageCode == "" then [] else [kv("languageCode", js(languageCode))]))
+
+-- generationConfig for a Live session: one response modality ("AUDIO", or
+-- "VIDEO" for a live avatar on gemini-3.8-live), the speech config, and —
+-- when thinkingBudget >= 0 — thinkingConfig INSIDE generationConfig, which is
+-- where Vertex accepts it (at setup level it closes 1007, measured 25 Sept 2026).
+export pure func buildGenerationConfig(modality: string, voice: string, languageCode: string, thinkingBudget: int)
+  -> [{key: string, value: Json}] =
+  [kv("generationConfig", jo(concat(
+    [kv("responseModalities", ja([js(modality)])),
+     kv("speechConfig", buildSpeechConfig(voice, languageCode))],
+    buildThinkingConfig(thinkingBudget, false))))]
+
+-- avatarConfig for a prebuilt avatar (setup level). Custom (own-face) avatars
+-- are allowlisted by Google and not built here.
+export pure func buildAvatarConfig(avatarName: string) -> [{key: string, value: Json}] =
+  [kv("avatarConfig", jo([kv("avatarName", js(avatarName))]))]

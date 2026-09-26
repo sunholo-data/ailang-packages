@@ -7,9 +7,10 @@
 
 module sunholo/gemini_live/parsers
 
-import std/json (encode, decode, jo, kv, js, ja, jb, jnum, Json,
+import std/json (encode, decode, jo, kv, js, ja, jb, jnum, Json, getString, getInt, getArray,
                  get, has, asString, asBool, getObject, getBool)
 import std/string (length)
+import std/list (foldl, concat)
 import std/option (Some, None, getOrElse)
 import std/result (Ok, Err)
 
@@ -89,3 +90,66 @@ export pure func checkModelTurn(sc: Json) -> string =
     },
     None => encode(jo([kv("type", js("unknown"))]))
   }
+
+-- ══════════════════════════════════════════════════════
+-- 0.5.0 — usage and media, from a decoded server message
+-- ══════════════════════════════════════════════════════
+
+-- Token usage of a message that carries usageMetadata; zeros when absent.
+-- audioOut / videoOut / textOut come from candidatesTokensDetails by modality;
+-- thoughts is thoughtsTokenCount (gemini-3.8-live thinks by default — 78 thought
+-- tokens on one sentence, measured 25 Sept 2026; billed as text output).
+-- Avatar video is 6,192 tokens a second while speaking; audio 25 a second.
+export pure func usageOf(json: Json) -> {prompt: int, output: int, thoughts: int, total: int,
+                                          audioOut: int, videoOut: int, textOut: int} =
+  match getObject(json, "usageMetadata") {
+    None => {prompt: 0, output: 0, thoughts: 0, total: 0, audioOut: 0, videoOut: 0, textOut: 0},
+    Some(u) => {
+      let details = getOrElse(getArray(u, "candidatesTokensDetails"), []);
+      let byModality = \m. foldl(\acc. \d.
+        if getOrElse(getString(d, "modality"), "") == m then acc + getOrElse(getInt(d, "tokenCount"), 0) else acc,
+        0, details);
+      {prompt: getOrElse(getInt(u, "promptTokenCount"), 0),
+       output: getOrElse(getInt(u, "candidatesTokenCount"), 0),
+       thoughts: getOrElse(getInt(u, "thoughtsTokenCount"), 0),
+       total: getOrElse(getInt(u, "totalTokenCount"), 0),
+       audioOut: byModality("AUDIO"), videoOut: byModality("VIDEO"), textOut: byModality("TEXT")}
+    }
+  }
+
+-- The inlineData parts of serverContent.modelTurn, in order: audio arrives as
+-- audio/pcm (24 kHz), a live avatar as video/mp4 fragments (~16 KB each, whose
+-- concatenation is a playable fragmented MP4). Empty when the message has none.
+export pure func mediaPartsOf(json: Json) -> [{mimeType: string, data: string}] =
+  match getObject(json, "serverContent") {
+    None => [],
+    Some(sc) => match getObject(sc, "modelTurn") {
+      None => [],
+      Some(mt) => foldl(\acc. \p. match getObject(p, "inlineData") {
+          Some(d) => match getString(d, "data") {
+            Some(b64) => concat(acc, [{mimeType: getOrElse(getString(d, "mimeType"), ""), data: b64}]),
+            None => acc
+          },
+          None => acc
+        }, [], getOrElse(getArray(mt, "parts"), []))
+    }
+  }
+
+-- The input / output transcription text of a message, or "". A message can carry
+-- a transcription together with media parts, so read both rather than choosing one
+-- (parseMessage returns one event per message and is kept for compatibility).
+export pure func inputTranscriptOf(json: Json) -> string =
+  match getObject(json, "serverContent") {
+    Some(sc) => match getObject(sc, "inputTranscription") { Some(t) => getOrElse(getString(t, "text"), ""), None => "" },
+    None => ""
+  }
+
+export pure func outputTranscriptOf(json: Json) -> string =
+  match getObject(json, "serverContent") {
+    Some(sc) => match getObject(sc, "outputTranscription") { Some(t) => getOrElse(getString(t, "text"), ""), None => "" },
+    None => ""
+  }
+
+-- serverContent.turnComplete is true.
+export pure func turnCompleteOf(json: Json) -> bool =
+  match getObject(json, "serverContent") { Some(sc) => getOrElse(getBool(sc, "turnComplete"), false), None => false }
