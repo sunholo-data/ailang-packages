@@ -1,0 +1,68 @@
+-- Main-sequence photometry checks against Mamajek 2022.04.16, Gaia DR3,
+-- Hipparcos-derived colours, Riello et al. 2021, and magnitude definitions.
+module sunholo/relativity/photometry_test
+
+import ./hyper (absf)
+import ./photometry (teffFromBpRp, gMinusV, bpRpInTable, vFromG, illuminanceFromV, fluxRatioFromMags)
+
+pure func relative(got: float, want: float, tol: float) -> bool = absf(got - want) <= tol * want
+pure func close(got: float, want: float, tol: float) -> bool = absf(got - want) <= tol
+
+-- Sun: Mamajek G2V Bp-Rp; Barnard's and Proxima: Gaia DR3 source
+-- 4472832130942575872 and 5853498713190525696. Sirius A and alpha Cen B
+-- are too bright for Gaia DR3; their Hipparcos B-V colours (0.009, 0.900)
+-- were transformed to Bp-Rp through the same Mamajek dwarf table.
+pure func check01() -> bool {
+  relative(teffFromBpRp(0.823), 5770.0, 0.05) &&
+  relative(teffFromBpRp(2.8336968), 3200.0, 0.05) &&
+  relative(teffFromBpRp(3.8045802), 3000.0, 0.05) &&
+  relative(teffFromBpRp(-0.0262), 9940.0, 0.05) &&
+  relative(teffFromBpRp(1.1166), 5260.0, 0.05)
+}
+test "five literature stellar temperatures within 5 percent" { check01() }
+
+pure func check02() -> bool {
+  close(teffFromBpRp(0.823), 5770.0, 0.000000001) &&
+  close(teffFromBpRp(2.94), 3210.0, 0.000000001)
+}
+test "interpolation hits G2V and M4V nodes" { check02() }
+
+pure func sweepTeff(x: float, stop: float, previous: float) -> bool {
+  if x > stop then true
+  else {
+    let now = teffFromBpRp(x);
+    now < previous && sweepTeff(x + 0.01, stop, now)
+  }
+}
+pure func check03() -> bool = sweepTeff(-0.1, 5.09, teffFromBpRp(-0.11))
+test "temperature falls throughout the colour range" { check03() }
+
+pure func check04() -> bool {
+  close(teffFromBpRp(-1.0), 10700.0, 0.000000001) &&
+  close(teffFromBpRp(6.0), 2420.0, 0.000000001) &&
+  not bpRpInTable(-1.0) && not bpRpInTable(6.0) &&
+  bpRpInTable(-0.12) && bpRpInTable(5.1) && bpRpInTable(0.823)
+}
+test "out-of-range colours clamp and report range" { check04() }
+
+pure func riello(x: float) -> float = -0.02704 + 0.01424 * x - 0.2156 * x * x + 0.01426 * x * x * x
+pure func sweepRiello(x: float, stop: float, tol: float) -> bool =
+  if x > stop then true
+  else close(gMinusV(x), riello(x), tol) && sweepRiello(x + 0.05, stop, tol)
+
+-- The two relations are independent empirical fits, so this is a
+-- transcription guard, not a physics bound. Measured divergence: 0.086 mag at
+-- the M4V node and 0.1015 mag at BP-RP 3.0 (between M4V and M4.5V), so the
+-- full range uses 0.11 mag. Across F-K (0.4-1.3) the maximum is 0.034 mag, so
+-- 0.05 mag there still catches a mis-transcribed row.
+pure func check05() -> bool = sweepRiello(0.4, 3.001, 0.11)
+test "Mamajek G-V agrees with Riello over 0.4 to 3.0 within 0.11 mag" { check05() }
+pure func check06() -> bool = sweepRiello(0.4, 1.301, 0.05)
+test "F-K G-V agrees with Riello within 0.05 mag" { check06() }
+
+pure func check07() -> bool {
+  relative(illuminanceFromV(0.0), 0.00000256, 0.005) &&
+  relative(fluxRatioFromMags(0.0, 5.0), 100.0, 0.000000001) &&
+  close(vFromG(8.0, 0.823), 8.0 - gMinusV(0.823), 0.000000001)
+}
+test "magnitude, illuminance, and V conversion conventions" { check07() }

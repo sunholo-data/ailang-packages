@@ -43,6 +43,7 @@ import pkg/sunholo/relativity/kinematics (Motion, rest, accelerate, standardGrav
 import pkg/sunholo/relativity/journey (flipAndBurn, burnCoastBurn)
 import pkg/sunholo/relativity/optics (Vec3, aberrate, doppler)
 import pkg/sunholo/relativity/blackbody (pointFluxRatio, rgbUnitLuminance)
+import pkg/sunholo/relativity/photometry (teffFromBpRp, vFromG, illuminanceFromV)
 import pkg/sunholo/relativity/schwarzschild (shadowAngularRadius)
 
 -- Sol to alpha Centauri at 1 g, flip at the midpoint:
@@ -67,7 +68,25 @@ let colour = rgbUnitLuminance(5700.0 * d);          -- linear sRGB, Y = 1
 | `journey` | `Trip {distance, shipTime, galaxyTime, peakBeta, peakGamma}`, `flipAndBurn(d, a)`, `burnCoastBurn(d, a, maxBeta)`, `coastAt(d, beta)` |
 | `optics` | `Vec3`, `aberrate`, `deaberrate`, `doppler`, `dopplerApparent`, `gammaOnePlusBetaCos`, `cosSeen`, `dot`, `norm`, `normalize` |
 | `blackbody` | `XYZ`, `RGB`, `cmf`, `planck`, `xyz`, `luminance`, `chromaticity`, `rgbUnitLuminance`, `pointFluxRatio`, `surfaceBrightnessRatio` |
+| `photometry` | `teffFromBpRp`, `gMinusV`, `bpRpInTable`, `vFromG`, `illuminanceFromV`, `fluxRatioFromMags` |
+| `photometry_table` | Generated Gaia BP-RP, Teff, G-V and spectral-type node lists |
 | `schwarzschild` | `photonSphere` (1.5), `criticalImpact` (3√3/2), `shadowAngularRadius(r)`, `weakDeflection(b)`, `staticObserverBlueshift(r)`, `staticClockRate(r)`, `pi` |
+
+## Photometry
+
+Use `photometry` to estimate a **main-sequence dwarf** temperature in Kelvin
+from Gaia BP-RP colour, infer Johnson V magnitude from Gaia G, or convert
+visual magnitudes to lux and dimensionless flux ratios. Magnitudes and colours
+are dimensionless logarithmic quantities; illuminance is in lux. The source
+is Pecaut & Mamajek's dwarf sequence, version 2022.04.16:
+https://www.pas.rochester.edu/~emamajek/EEM_dwarf_UBVIJHK_colors_Teff.txt
+
+The source's complete Gaia colour rows cover B9V–M9.5V. To keep BP-RP
+strictly increasing and temperature decreasing, the generated interpolation
+table drops M9V and M9.5V and covers B9V–M8.5V (BP-RP -0.12–5.10).
+`teffFromBpRp` and `gMinusV` clamp outside this range; use `bpRpInTable`
+to detect extrapolation. The relation is for main-sequence dwarfs only, not
+white dwarfs or giants.
 
 ## Physics notes that trip people up
 
@@ -87,7 +106,7 @@ let colour = rgbUnitLuminance(5700.0 * d);          -- linear sRGB, Y = 1
 
 - Floats are outside Z3's decidable fragment. The `requires`/`ensures` here
   are runtime assertions (`ailang run --verify-contracts`), not proofs.
-- The 40 tests check against closed-form or published reference values: the
+- The 47 tests check against closed-form or published reference values: the
   CIE Planckian locus, the relativistic rocket equations and the Schwarzschild
   metric.
 - Colours use the Wyman–Sloan–Shirley (2013) fit to the CIE 1931 colour
