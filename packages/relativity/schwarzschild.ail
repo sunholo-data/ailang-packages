@@ -1,0 +1,53 @@
+-- sunholo/relativity/schwarzschild — non-rotating black holes, closed forms.
+--
+-- Radii and impact parameters are in units of the Schwarzschild radius
+-- r_s = 2GM/c^2 (so the horizon is r = 1). Angles are radians.
+
+module sunholo/relativity/schwarzschild
+
+import std/math (sqrt, asin)
+
+export pure func pi() -> float = 3.141592653589793
+
+-- Photon sphere: circular light orbits.
+export pure func photonSphere() -> float = 1.5
+
+-- Critical impact parameter b_c = (3 sqrt 3 / 2) r_s: rays with b < b_c are
+-- captured, so this is the radius of the shadow seen from far away.
+export pure func criticalImpact() -> float = 2.598076211353316
+
+-- Angular radius of the shadow for a static observer at radius r (Synge):
+--   sin alpha = (b_c / r) sqrt(1 - 1/r),  alpha > pi/2 inside the photon sphere.
+export pure func shadowAngularRadius(r: float) -> float
+  requires { r > 1.0 }
+  ensures { result >= 0.0 && result <= 3.141592653589794 }
+{
+  let s = criticalImpact() / r * sqrt(1.0 - 1.0 / r);
+  let a = asin(if s > 1.0 then 1.0 else s);
+  if r < photonSphere() then pi() - a else a
+}
+
+-- Weak-field light deflection 2 r_s / b (valid for b >> r_s).
+export pure func weakDeflection(b: float) -> float
+  requires { b > 0.0 }
+  ensures { result > 0.0 }
+{
+  2.0 / b
+}
+
+-- Frequency ratio seen by a static observer at r for light arriving from
+-- infinity (blueshift, > 1): 1 / sqrt(1 - 1/r).
+export pure func staticObserverBlueshift(r: float) -> float
+  requires { r > 1.0 }
+  ensures { result >= 1.0 }
+{
+  1.0 / sqrt(1.0 - 1.0 / r)
+}
+
+-- Proper time of a static clock at r per unit far-away time: sqrt(1 - 1/r).
+export pure func staticClockRate(r: float) -> float
+  requires { r > 1.0 }
+  ensures { result > 0.0 && result <= 1.0 }
+{
+  sqrt(1.0 - 1.0 / r)
+}

@@ -1,0 +1,80 @@
+-- sunholo/relativity/kinematics — straight-line relativistic motion.
+--
+-- Units: c = 1, light-years and Julian years (so 1 g ~ 1.0323 c/yr). Any
+-- consistent unit system works if you supply your own acceleration.
+-- Motion is integrated in rapidity phi (beta = tanh phi): constant proper
+-- acceleration a is exactly phi' = phi + a * dtau, and time/distance follow in
+-- closed form, so stepping is exact for any step size — no drift, and a
+-- symmetric burn returns to rest to rounding.
+
+module sunholo/relativity/kinematics
+
+import std/math (sqrt, exp)
+import ./hyper (sinh, cosh, tanh, atanh, sinhc)
+
+-- Rapidity, proper (ship) time, coordinate (galaxy) time, distance along the
+-- line of motion. Negative phi means moving backward along the line.
+export type Motion = { phi: float, tau: float, t: float, x: float }
+
+-- Standard gravity 9.80665 m/s^2 in c per Julian year.
+export pure func standardGravity() -> float = 1.032295275553596
+
+export pure func rest() -> Motion = { phi: 0.0, tau: 0.0, t: 0.0, x: 0.0 }
+
+export pure func gammaOfBeta(b: float) -> float
+  requires { b > -1.0 && b < 1.0 }
+  ensures { result >= 1.0 }
+{
+  1.0 / sqrt((1.0 - b) * (1.0 + b))
+}
+
+export pure func rapidityOfBeta(b: float) -> float
+  requires { b > -1.0 && b < 1.0 }
+{
+  atanh(b)
+}
+
+export pure func betaOf(phi: float) -> float
+  ensures { result >= -1.0 && result <= 1.0 }
+{
+  tanh(phi)
+}
+
+export pure func gammaOf(phi: float) -> float
+  ensures { result >= 1.0 }
+{
+  cosh(phi)
+}
+
+-- 1 - |beta|, exact even when beta rounds to 1.0 (= 2 / (e^(2|phi|) + 1)).
+-- Use this, not 1.0 - betaOf(phi), wherever 1 - beta appears near c.
+export pure func oneMinusBeta(phi: float) -> float
+  ensures { result >= 0.0 && result <= 1.0 }
+{
+  let a = if phi < 0.0 then 0.0 - phi else phi;
+  let e = exp(0.0 - 2.0 * a);
+  2.0 * e / (1.0 + e)
+}
+
+-- Advance by dtau of proper time under constant proper acceleration a
+-- (signed; negative decelerates). Exact:
+--   dt = cosh(mid) * dtau * sinhc(h/2),  dx = sinh(mid) * dtau * sinhc(h/2)
+-- where h = a * dtau and mid is the mean rapidity over the step.
+export pure func accelerate(m: Motion, a: float, dtau: float) -> Motion
+  requires { dtau >= 0.0 }
+  ensures { result.tau >= m.tau && result.t >= m.t }
+{
+  let h = a * dtau;
+  let phi1 = m.phi + h;
+  let mid = m.phi + h / 2.0;
+  let k = dtau * sinhc(h / 2.0);
+  { phi: phi1, tau: m.tau + dtau, t: m.t + cosh(mid) * k, x: m.x + sinh(mid) * k }
+}
+
+-- Coast at constant rapidity for dtau of proper time.
+export pure func coast(m: Motion, dtau: float) -> Motion
+  requires { dtau >= 0.0 }
+  ensures { result.tau >= m.tau && result.t >= m.t }
+{
+  accelerate(m, 0.0, dtau)
+}

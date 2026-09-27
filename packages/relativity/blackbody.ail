@@ -1,0 +1,113 @@
+-- sunholo/relativity/blackbody — colour and brightness of thermal sources,
+-- and how Doppler shifts change them.
+--
+-- Planck spectrum x CIE 1931 2-degree colour-matching functions (multi-lobe
+-- Gaussian fit, Wyman, Sloan & Shirley 2013, JCGT 2(2)) -> XYZ -> linear sRGB
+-- (D65 white, so ~6500 K renders white). Integrated 360-830 nm at 1 nm.
+-- Absolute scale is arbitrary but consistent across temperatures, which is
+-- all ratios need.
+
+module sunholo/relativity/blackbody
+
+import std/math (exp, pow)
+
+export type XYZ = { x: float, y: float, z: float }
+export type RGB = { r: float, g: float, b: float }
+
+-- second radiation constant hc/k in nm*K
+pure func c2() -> float = 14387769.0
+
+pure func lobe(l: float, mu: float, s1: float, s2: float) -> float {
+  let s = if l < mu then s1 else s2;
+  let t = (l - mu) / s;
+  exp(-0.5 * t * t)
+}
+
+-- CIE 1931 2-degree colour-matching functions at wavelength l (nm).
+export pure func cmf(l: float) -> XYZ = {
+  x: 1.056 * lobe(l, 599.8, 37.9, 31.0) + 0.362 * lobe(l, 442.0, 16.0, 26.7) - 0.065 * lobe(l, 501.1, 20.4, 26.2),
+  y: 0.821 * lobe(l, 568.8, 46.9, 40.5) + 0.286 * lobe(l, 530.9, 16.3, 31.1),
+  z: 1.217 * lobe(l, 437.0, 11.8, 36.0) + 0.681 * lobe(l, 459.0, 26.0, 13.8)
+}
+
+-- Spectral radiance up to a constant; wavelength enters in micrometres so
+-- cool sources stay far from float underflow.
+export pure func planck(lNm: float, kelvin: float) -> float
+  requires { lNm > 0.0 && kelvin > 0.0 }
+  ensures { result >= 0.0 }
+{
+  let e = c2() / (lNm * kelvin);
+  if e > 700.0 then 0.0 else pow(lNm / 1000.0, -5.0) / (exp(e) - 1.0)
+}
+
+func integrate(kelvin: float, l: float, acc: XYZ) -> XYZ {
+  if l > 830.0 then acc
+  else {
+    let p = planck(l, kelvin);
+    let c = cmf(l);
+    integrate(kelvin, l + 1.0, { x: acc.x + c.x * p, y: acc.y + c.y * p, z: acc.z + c.z * p })
+  }
+}
+
+-- CIE XYZ tristimulus of a blackbody (arbitrary but T-consistent scale).
+export pure func xyz(kelvin: float) -> XYZ
+  requires { kelvin > 0.0 }
+{
+  integrate(kelvin, 360.0, { x: 0.0, y: 0.0, z: 0.0 })
+}
+
+-- Visual-band (CIE Y) radiance.
+export pure func luminance(kelvin: float) -> float
+  requires { kelvin > 0.0 }
+  ensures { result >= 0.0 }
+{
+  xyz(kelvin).y
+}
+
+-- CIE 1931 chromaticity (x, y) returned as { x, y, z = 1 - x - y }.
+export pure func chromaticity(kelvin: float) -> XYZ
+  requires { kelvin > 0.0 }
+{
+  let v = xyz(kelvin);
+  let s = v.x + v.y + v.z;
+  { x: v.x / s, y: v.y / s, z: v.z / s }
+}
+
+-- Linear sRGB (D65) colour with luminance Y = 1. Out-of-gamut colours are
+-- desaturated toward white at constant luminance.
+export pure func rgbUnitLuminance(kelvin: float) -> RGB
+  requires { kelvin > 0.0 }
+{
+  let v = xyz(kelvin);
+  let x = v.x / v.y;
+  let z = v.z / v.y;
+  let r = 3.2404542 * x - 1.5371385 - 0.4985314 * z;
+  let g = -0.9692660 * x + 1.8760108 + 0.0415560 * z;
+  let b = 0.0556434 * x - 0.2040259 + 1.0572252 * z;
+  let m = if r < g then (if r < b then r else b) else (if g < b then g else b);
+  if m < 0.0 then {
+    let k = (0.0 - m) / (1.0 - m);
+    { r: r * (1.0 - k) + k, g: g * (1.0 - k) + k, b: b * (1.0 - k) + k }
+  } else { r: r, g: g, b: b }
+}
+
+-- Seen/rest flux ratio of a thermal POINT source (a star) in the visual band.
+-- I_nu / nu^3 is invariant, so a blackbody at T is seen as one at D*T whose
+-- solid angle shrinks by 1/D^2:   (Y(D T) / Y(T)) / D^2.
+-- (Bolometrically this is D^2.)
+export pure func pointFluxRatio(kelvin: float, d: float) -> float
+  requires { kelvin > 0.0 && d > 0.0 }
+  ensures { result >= 0.0 }
+{
+  luminance(kelvin * d) / luminance(kelvin) / (d * d)
+}
+
+-- Seen/rest radiance ratio of a thermal EXTENDED source (nebula, sky) in the
+-- visual band: surface brightness is the blackbody at D*T, Y(D T) / Y(T).
+-- (Bolometrically this is D^4.)
+export pure func surfaceBrightnessRatio(kelvin: float, d: float) -> float
+  requires { kelvin > 0.0 && d > 0.0 }
+  ensures { result >= 0.0 }
+{
+  luminance(kelvin * d) / luminance(kelvin)
+}

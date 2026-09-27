@@ -1,0 +1,277 @@
+-- Check values for sunholo/relativity. Every expected number is closed-form
+-- or published reference data, independent of the code under test:
+-- aberration and Doppler from the Lorentz transformation, trips from the
+-- relativistic rocket equations, colours from the CIE Planckian locus,
+-- black-hole values from the Schwarzschild metric. Reference numbers
+-- computed separately in float64 Python.
+--
+-- Each test calls a named pure check function: under ailang v0.45.0, a
+-- whole-number float literal (4.0) written directly inside a test block
+-- evaluates as an int (reported upstream), but literals in functions are fine.
+
+module sunholo/relativity/relativity_test
+
+import std/math (sqrt, acos)
+import ./hyper (sinh, cosh, tanh, atanh, acosh, expm1, log1p, absf)
+import ./kinematics (Motion, rest, accelerate, standardGravity, betaOf, gammaOf, oneMinusBeta, gammaOfBeta)
+import ./journey (flipAndBurn, burnCoastBurn, coastAt)
+import ./optics (Vec3, aberrate, deaberrate, doppler, dopplerApparent, cosSeen, dot, norm)
+import ./blackbody (chromaticity, rgbUnitLuminance, pointFluxRatio, luminance)
+import ./schwarzschild (shadowAngularRadius, criticalImpact, weakDeflection, staticObserverBlueshift, pi)
+
+pure func near(got: float, want: float, rel: float) -> bool {
+  let scale = if absf(want) > 1.0 then absf(want) else 1.0;
+  absf(got - want) <= rel * scale
+}
+
+-- Strictly relative: for values far below 1 (1 - beta near c, deep redshift).
+pure func rel(got: float, want: float, tol: float) -> bool = absf(got - want) <= tol * absf(want)
+
+pure func deg(r: float) -> float = r * 180.0 / 3.141592653589793
+
+pure func fwd() -> Vec3 = { x: 0.0, y: 0.0, z: -1.0 }
+pure func side() -> Vec3 = { x: 1.0, y: 0.0, z: 0.0 }
+pure func back() -> Vec3 = { x: 0.0, y: 0.0, z: 1.0 }
+
+pure func angleFromFwd(v: Vec3) -> float = deg(acos(dot(v, fwd())))
+
+-- ---------- hyperbolic helpers ----------
+
+pure func check01() -> bool {
+  rel(expm1(0.000000000001), 0.0000000000010000000000005, 0.000000000000001)}
+
+test "expm1 keeps full precision for tiny arguments" { check01() }
+
+pure func check02() -> bool {
+  rel(log1p(0.000000000001), 0.0000000000009999999999995, 0.000000000000001)}
+
+test "log1p keeps full precision for tiny arguments" { check02() }
+
+pure func check03() -> bool {
+  near(tanh(atanh(0.999999)), 0.999999, 0.000000000001)}
+
+test "tanh(atanh(0.999999)) round-trips" { check03() }
+
+pure func check04() -> bool {
+  near(cosh(2.5) * cosh(2.5) - sinh(2.5) * sinh(2.5), 1.0, 0.000000000001)}
+
+test "cosh^2 - sinh^2 = 1" { check04() }
+
+pure func check05() -> bool {
+  near(acosh(cosh(1.7)), 1.7, 0.000000000001)}
+
+test "acosh inverts cosh" { check05() }
+
+-- ---------- kinematics ----------
+
+pure func check06() -> bool {
+  near(standardGravity(), 1.032295275553596, 0.000000000000001)}
+
+test "1 g in c per Julian year" { check06() }
+
+pure func check07() -> bool {
+  near(gammaOfBeta(0.9), 1.0 / sqrt(0.19), 0.000000000001)}
+
+test "gamma at 0.9c = 1/sqrt(0.19)" { check07() }
+
+pure func check08() -> bool {
+  rel(oneMinusBeta(20.0), 0.000000000000000008496708510583178, 0.000000000001)}
+
+test "1 - beta stays exact where beta rounds to 1 (phi = 20)" { check08() }
+
+pure func burn(m: Motion, a: float, dtau: float, n: int) -> Motion {
+  if n <= 0 then m else burn(accelerate(m, a, dtau), a, dtau, n - 1)
+}
+
+pure func check09() -> bool {
+  near(betaOf(burn(rest(), standardGravity(), 0.01, 100).phi), 0.774827262642545, 0.000000000001)}
+
+test "1 ship-year at 1 g: beta = tanh(g)" { check09() }
+
+pure func check10() -> bool {
+  let a = standardGravity();
+  let small = burn(rest(), a, 0.01, 100);
+  let big = accelerate(rest(), a, 1.0);
+  near(small.t, big.t, 0.000000000001) && near(small.x, big.x, 0.000000000001)}
+
+test "stepping is exact: 100 small steps equal 1 big step" { check10() }
+
+pure func check11() -> bool {
+  let m = accelerate(rest(), standardGravity(), 1.0);
+  near(m.t, 1.187312401712, 0.000000000001) && near(m.x, 0.563642465079, 0.000000000001)}
+
+test "1 ship-year at 1 g: galaxy time = sinh(g)/g, distance = (cosh(g)-1)/g" { check11() }
+
+pure func check12() -> bool {
+  let a = standardGravity();
+  let m = burn(burn(rest(), a, 0.01, 200), 0.0 - a, 0.01, 200);
+  absf(m.phi) < 0.000000000001}
+
+test "symmetric burn returns to rest" { check12() }
+
+pure func check13() -> bool {
+  let m = accelerate(rest(), 0.0, 3.0);
+  near(m.t, 3.0, 0.000000000001) && near(m.x, 0.0, 0.000000000001)}
+
+test "coasting at rest: galaxy clock runs 1:1" { check13() }
+
+-- ---------- journeys ----------
+
+pure func check14() -> bool {
+  let trip = flipAndBurn(4.37, standardGravity());
+  near(trip.shipTime, 3.582393722748, 0.000000001) &&
+  near(trip.galaxyTime, 6.002502777252, 0.000000001) &&
+  near(trip.peakBeta, 0.951655844901, 0.000000001)}
+
+test "Sol to alpha Centauri (4.37 ly), flip-and-burn at 1 g" { check14() }
+
+pure func check15() -> bool {
+  let trip = burnCoastBurn(10.0, standardGravity(), 0.5);
+  near(trip.shipTime, 17.865617519791, 0.000000001) && near(trip.galaxyTime, 20.519132846534, 0.000000001)}
+
+test "burn-coast-burn to 0.5c over 10 ly at 1 g" { check15() }
+
+pure func check16() -> bool {
+  let a = standardGravity();
+  near(burnCoastBurn(0.1, a, 0.99).shipTime, flipAndBurn(0.1, a).shipTime, 0.000000000001)}
+
+test "short trip that cannot reach cruise speed falls back to flip-and-burn" { check16() }
+
+pure func check17() -> bool {
+  let trip = coastAt(10.0, 0.6);
+  near(trip.galaxyTime, 16.666666666667, 0.000000001) && near(trip.shipTime, 13.333333333333, 0.000000001)}
+
+test "coast 10 ly at 0.6c: 16.667 galaxy-yr, 13.333 ship-yr" { check17() }
+
+-- ---------- aberration and Doppler ----------
+
+pure func check18() -> bool {
+  near(angleFromFwd(aberrate(side(), fwd(), atanh(0.9))), 25.841932763167, 0.000000001)}
+
+test "a source at 90 deg appears at acos(0.9) = 25.842 deg at 0.9c" { check18() }
+
+pure func check19() -> bool {
+  near(angleFromFwd(aberrate(side(), fwd(), atanh(0.5))), 60.0, 0.000000001)}
+
+test "a source at 90 deg appears at 60 deg at 0.5c" { check19() }
+
+pure func check20() -> bool {
+  near(angleFromFwd(aberrate(fwd(), fwd(), 3.0)), 0.0, 0.0000001) &&
+  near(angleFromFwd(aberrate(back(), fwd(), 3.0)), 180.0, 0.0000001)}
+
+test "sources dead ahead and dead astern do not move" { check20() }
+
+pure func check21() -> bool {
+  near(norm(aberrate({ x: 0.3, y: 0.4, z: -0.866 }, fwd(), 2.1)), 1.0, 0.000000000001)}
+
+test "aberrated direction is a unit vector" { check21() }
+
+pure func check22() -> bool {
+  let n = { x: 0.3244428422615251, y: -0.8111071056538127, z: 0.4866642633922876 };
+  let r = deaberrate(aberrate(n, fwd(), atanh(0.99)), fwd(), atanh(0.99));
+  near(r.x, n.x, 0.000000001) && near(r.y, n.y, 0.000000001) && near(r.z, n.z, 0.000000001)}
+
+test "deaberrate inverts aberrate" { check22() }
+
+pure func check23() -> bool {
+  near(cosSeen(-0.5, 0.8), 0.5, 0.000000000001)}
+
+test "scalar form: cos theta' = (cos theta + b)/(1 + b cos theta) at 120 deg, 0.8c" { check23() }
+
+pure func check24() -> bool {
+  let phi = atanh(0.9);
+  near(doppler(fwd(), fwd(), phi), sqrt(19.0), 0.000000000001) &&
+  near(doppler(back(), fwd(), phi), sqrt(1.0 / 19.0), 0.000000000001) &&
+  near(doppler(side(), fwd(), phi), 1.0 / sqrt(0.19), 0.000000000001)}
+
+test "Doppler ahead / astern / transverse at 0.9c" { check24() }
+
+pure func check25() -> bool {
+  near(dopplerApparent(side(), fwd(), atanh(0.9)), sqrt(0.19), 0.000000000001)}
+
+test "a source that APPEARS at 90 deg is redshifted by 1/gamma" { check25() }
+
+pure func check26() -> bool {
+  let n = { x: 0.3244428422615251, y: -0.8111071056538127, z: 0.4866642633922876 };
+  let phi = atanh(0.9);
+  near(dopplerApparent(aberrate(n, fwd(), phi), fwd(), phi), doppler(n, fwd(), phi), 0.000000001)}
+
+test "apparent-frame and rest-frame Doppler agree" { check26() }
+
+pure func check27() -> bool {
+  rel(doppler(back(), fwd(), 19.0), 0.000000005602796437537268, 0.000000000001)}
+
+test "Doppler astern at gamma ~ 1e8 is positive and exact (e^-phi)" { check27() }
+
+-- ---------- blackbody ----------
+
+pure func check28() -> bool {
+  let c = chromaticity(2856.0);
+  near(c.x, 0.4476, 0.002) && near(c.y, 0.4074, 0.002)}
+
+test "2856 K matches CIE illuminant A chromaticity (0.4476, 0.4074)" { check28() }
+
+pure func check29() -> bool {
+  let c = chromaticity(6500.0);
+  near(c.x, 0.3135, 0.002) && near(c.y, 0.3236, 0.002)}
+
+test "6500 K lies on the Planckian locus at (0.3135, 0.3236)" { check29() }
+
+pure func check30() -> bool {
+  let warm = rgbUnitLuminance(3000.0);
+  let hot = rgbUnitLuminance(20000.0);
+  warm.r > warm.g && warm.g > warm.b && hot.b > hot.g && hot.g > hot.r}
+
+test "3000 K is orange and 20000 K is blue" { check30() }
+
+pure func check31() -> bool {
+  luminance(300.0) > 0.0}
+
+test "cool sources do not underflow: 300 K luminance is positive" { check31() }
+
+pure func check32() -> bool {
+  near(pointFluxRatio(5700.0, 1.0), 1.0, 0.000000000001)}
+
+test "D = 1 leaves a star's flux unchanged" { check32() }
+
+pure func check33() -> bool {
+  pointFluxRatio(3300.0, sqrt(19.0)) > 19.0}
+
+test "a red dwarf ahead at 0.9c brightens by more than D^2" { check33() }
+
+pure func check34() -> bool {
+  pointFluxRatio(5700.0, sqrt(1.0 / 19.0)) < 0.01}
+
+test "a Sun-like star astern at 0.9c fades by more than 100x" { check34() }
+
+-- ---------- Schwarzschild ----------
+
+pure func check35() -> bool {
+  near(criticalImpact(), 3.0 * sqrt(3.0) / 2.0, 0.000000000000001)}
+
+test "critical impact parameter is 3 sqrt(3)/2" { check35() }
+
+pure func check36() -> bool {
+  near(shadowAngularRadius(3.0), pi() / 4.0, 0.000000000001)}
+
+test "shadow seen from r = 3 r_s is exactly pi/4" { check36() }
+
+pure func check37() -> bool {
+  near(shadowAngularRadius(10.0), 0.249041507929, 0.000000001)}
+
+test "shadow from r = 10 r_s" { check37() }
+
+pure func check38() -> bool {
+  near(shadowAngularRadius(1.2), 2.057491281870, 0.000000001)}
+
+test "inside the photon sphere the shadow covers more than half the sky" { check38() }
+
+pure func check39() -> bool {
+  near(weakDeflection(100.0), 0.02, 0.000000000001)}
+
+test "weak-field deflection 2 r_s / b" { check39() }
+
+pure func check40() -> bool {
+  near(staticObserverBlueshift(4.0), 2.0 / sqrt(3.0), 0.000000000001)}
+
+test "static observer at 4 r_s sees starlight blueshifted by 2/sqrt(3)" { check40() }
