@@ -1,0 +1,67 @@
+-- sunholo/relativity/journey — how long a trip takes, aboard and at home.
+--
+-- Closed-form relativistic rocket profiles (flat spacetime, start and end at
+-- rest relative to the galaxy). Same units as kinematics: c = 1, ly, years.
+
+module sunholo/relativity/journey
+
+import ./hyper (sinh, cosh, tanh, atanh, acosh)
+
+export type Trip = {
+  distance: float,    -- ly
+  shipTime: float,    -- proper years aboard
+  galaxyTime: float,  -- coordinate years at origin and destination
+  peakBeta: float,
+  peakGamma: float
+}
+
+-- Accelerate at a to the midpoint, flip, decelerate at a to rest.
+export pure func flipAndBurn(distance: float, a: float) -> Trip
+  requires { distance >= 0.0 && a > 0.0 }
+  ensures { result.galaxyTime >= result.shipTime && result.peakGamma >= 1.0 }
+{
+  let phiPeak = acosh(1.0 + a * distance / 2.0);
+  {
+    distance: distance,
+    shipTime: 2.0 * phiPeak / a,
+    galaxyTime: 2.0 * sinh(phiPeak) / a,
+    peakBeta: tanh(phiPeak),
+    peakGamma: cosh(phiPeak)
+  }
+}
+
+-- Accelerate at a up to cruise speed maxBeta, coast, decelerate at a.
+-- Falls back to flipAndBurn when the trip is too short to reach maxBeta.
+export pure func burnCoastBurn(distance: float, a: float, maxBeta: float) -> Trip
+  requires { distance >= 0.0 && a > 0.0 && maxBeta > 0.0 && maxBeta < 1.0 }
+  ensures { result.galaxyTime >= result.shipTime && result.peakBeta <= maxBeta + 0.000000001 }
+{
+  let phiCruise = atanh(maxBeta);
+  let dBurn = (cosh(phiCruise) - 1.0) / a;
+  if 2.0 * dBurn >= distance then flipAndBurn(distance, a)
+  else {
+    let dCoast = distance - 2.0 * dBurn;
+    {
+      distance: distance,
+      shipTime: 2.0 * phiCruise / a + dCoast / sinh(phiCruise),
+      galaxyTime: 2.0 * sinh(phiCruise) / a + dCoast / tanh(phiCruise),
+      peakBeta: maxBeta,
+      peakGamma: cosh(phiCruise)
+    }
+  }
+}
+
+-- Pure coast at constant beta (instant acceleration idealisation).
+export pure func coastAt(distance: float, beta: float) -> Trip
+  requires { distance >= 0.0 && beta > 0.0 && beta < 1.0 }
+  ensures { result.galaxyTime >= result.shipTime }
+{
+  let phi = atanh(beta);
+  {
+    distance: distance,
+    shipTime: distance / sinh(phi),
+    galaxyTime: distance / beta,
+    peakBeta: beta,
+    peakGamma: cosh(phi)
+  }
+}

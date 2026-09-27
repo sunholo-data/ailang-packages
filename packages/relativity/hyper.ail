@@ -1,0 +1,82 @@
+-- sunholo/relativity/hyper — hyperbolic functions that stay accurate near 0.
+--
+-- std/math has exp/log but no sinh/cosh/tanh/expm1/log1p. Relativity lives in
+-- rapidity (beta = tanh phi, gamma = cosh phi), and the naive (e^u - e^-u)/2
+-- loses every significant digit as u -> 0, i.e. at low speed. These use
+-- Kahan's expm1/log1p constructions so small arguments keep full precision.
+--
+-- Floats are outside Z3's decidable fragment: the contracts below are
+-- runtime-checked assertions (ailang run --verify-contracts), not proofs.
+
+module sunholo/relativity/hyper
+
+import std/math (exp, log, sqrt)
+
+export pure func absf(u: float) -> float
+  ensures { result >= 0.0 }
+{
+  if u < 0.0 then 0.0 - u else u
+}
+
+-- e^u - 1, accurate to a few ulps for tiny |u| (Kahan).
+export pure func expm1(u: float) -> float
+  ensures { result > -1.0 || result == -1.0 }
+{
+  let y = exp(u);
+  if y == 1.0 then u
+  else if y - 1.0 == -1.0 then -1.0
+  else (y - 1.0) * u / log(y)
+}
+
+-- ln(1 + x), accurate for tiny |x| (Kahan).
+export pure func log1p(x: float) -> float
+  requires { x > -1.0 }
+{
+  let y = 1.0 + x;
+  if y == 1.0 then x else log(y) * x / (y - 1.0)
+}
+
+export pure func sinh(u: float) -> float {
+  let a = absf(u);
+  let e = expm1(a);
+  let s = e * (e + 2.0) / (2.0 * (e + 1.0));
+  if u < 0.0 then 0.0 - s else s
+}
+
+export pure func cosh(u: float) -> float
+  ensures { result >= 1.0 }
+{
+  let e = exp(absf(u));
+  (e + 1.0 / e) / 2.0
+}
+
+export pure func tanh(u: float) -> float
+  ensures { result >= -1.0 && result <= 1.0 }
+{
+  let e = expm1(2.0 * absf(u));
+  let t = e / (e + 2.0);
+  if u < 0.0 then 0.0 - t else t
+}
+
+export pure func atanh(b: float) -> float
+  requires { b > -1.0 && b < 1.0 }
+{
+  let a = absf(b);
+  let r = 0.5 * log1p(2.0 * a / (1.0 - a));
+  if b < 0.0 then 0.0 - r else r
+}
+
+export pure func acosh(x: float) -> float
+  requires { x >= 1.0 }
+  ensures { result >= 0.0 }
+{
+  let t = x - 1.0;
+  log1p(t + sqrt(t * (x + 1.0)))
+}
+
+-- sinh(u)/u with the removable singularity filled in (1 at u = 0).
+export pure func sinhc(u: float) -> float
+  ensures { result >= 1.0 }
+{
+  if absf(u) < 0.0001 then 1.0 + u * u / 6.0 else sinh(u) / u
+}

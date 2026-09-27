@@ -1,0 +1,86 @@
+-- sunholo/relativity/optics — what a moving observer sees.
+--
+-- Conventions:
+--   n    unit vector from the observer TOWARD the source, rest frame
+--   n'   unit vector toward where the source APPEARS to the moving observer
+--   bh   unit direction of the observer's velocity (rest frame)
+--   phi  observer rapidity (>= 0), beta = tanh phi
+--   D    Doppler factor nu_seen / nu_emitted (> 1 is blueshift)
+-- Everything is written in rapidity with the cancellations removed, so it
+-- stays accurate at gamma in the millions.
+
+module sunholo/relativity/optics
+
+import std/math (sqrt, exp)
+import ./hyper (sinh, cosh, absf)
+
+export type Vec3 = { x: float, y: float, z: float }
+
+export pure func dot(a: Vec3, b: Vec3) -> float = a.x * b.x + a.y * b.y + a.z * b.z
+
+export pure func norm(a: Vec3) -> float
+  ensures { result >= 0.0 }
+{
+  sqrt(dot(a, a))
+}
+
+export pure func normalize(a: Vec3) -> Vec3 {
+  let l = norm(a);
+  { x: a.x / l, y: a.y / l, z: a.z / l }
+}
+
+-- gamma (1 + beta c) = cosh phi + sinh phi c, rewritten as
+-- e^-phi + sinh phi (1 + c) when c < 0 so it does not cancel near c = -1.
+export pure func gammaOnePlusBetaCos(phi: float, c: float) -> float
+  requires { phi >= 0.0 && c >= -1.0 && c <= 1.0 }
+  ensures { result > 0.0 }
+{
+  if c < 0.0 then exp(0.0 - phi) + sinh(phi) * (1.0 + c)
+  else cosh(phi) + sinh(phi) * c
+}
+
+-- Doppler factor from the rest-frame source direction: D = gamma (1 + beta cos theta).
+export pure func doppler(n: Vec3, bh: Vec3, phi: float) -> float
+  requires { phi >= 0.0 }
+  ensures { result > 0.0 }
+{
+  gammaOnePlusBetaCos(phi, dot(n, bh))
+}
+
+-- Doppler factor from the apparent direction: D = 1 / (gamma (1 - beta cos theta')).
+export pure func dopplerApparent(nSeen: Vec3, bh: Vec3, phi: float) -> float
+  requires { phi >= 0.0 }
+  ensures { result > 0.0 }
+{
+  1.0 / gammaOnePlusBetaCos(phi, 0.0 - dot(nSeen, bh))
+}
+
+-- Aberration: where a source at rest-frame direction n appears.
+--   n' = (n + ((gamma - 1) c + gamma beta) bh) / (gamma (1 + beta c))
+-- with gamma - 1 = 2 sinh^2(phi/2). Sources crowd toward bh.
+export pure func aberrate(n: Vec3, bh: Vec3, phi: float) -> Vec3
+  requires { phi >= 0.0 }
+{
+  let c = dot(n, bh);
+  let s = sinh(phi / 2.0);
+  let d = gammaOnePlusBetaCos(phi, c);
+  let k = (2.0 * s * s * c + sinh(phi)) / d;
+  normalize({ x: n.x / d + k * bh.x, y: n.y / d + k * bh.y, z: n.z / d + k * bh.z })
+}
+
+-- Inverse aberration: the rest-frame direction a seen ray came from
+-- (use for sampling sky textures per pixel).
+export pure func deaberrate(nSeen: Vec3, bh: Vec3, phi: float) -> Vec3
+  requires { phi >= 0.0 }
+{
+  aberrate(nSeen, { x: 0.0 - bh.x, y: 0.0 - bh.y, z: 0.0 - bh.z }, phi)
+}
+
+-- Scalar aberration: cos theta' = (cos theta + beta) / (1 + beta cos theta).
+export pure func cosSeen(cosTheta: float, beta: float) -> float
+  requires { cosTheta >= -1.0 && cosTheta <= 1.0 && beta >= 0.0 && beta < 1.0 }
+  ensures { result >= -1.0 && result <= 1.0 }
+{
+  let r = (cosTheta + beta) / (1.0 + beta * cosTheta);
+  if r > 1.0 then 1.0 else if r < -1.0 then -1.0 else r
+}
