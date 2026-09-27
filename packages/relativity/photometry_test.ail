@@ -53,8 +53,9 @@ pure func sweepRiello(x: float, stop: float, tol: float) -> bool =
 -- The two relations are independent empirical fits, so this is a
 -- transcription guard, not a physics bound. Measured divergence: 0.086 mag at
 -- the M4V node and 0.1015 mag at BP-RP 3.0 (between M4V and M4.5V), so the
--- full range uses 0.11 mag. Across F-K (0.4-1.3) the maximum is 0.034 mag, so
--- 0.05 mag there still catches a mis-transcribed row.
+-- full range uses 0.11 mag. Across F-K (0.4-1.3) the maximum is 0.034 mag at
+-- the table nodes but 0.048 mag on this 0.05-step sweep (at 1.3, between K3V
+-- and K4V), so the 0.05 mag guard there has little headroom by design.
 pure func check05() -> bool = sweepRiello(0.4, 3.001, 0.11)
 test "Mamajek G-V agrees with Riello over 0.4 to 3.0 within 0.11 mag" { check05() }
 pure func check06() -> bool = sweepRiello(0.4, 1.301, 0.05)

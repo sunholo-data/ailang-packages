@@ -8,9 +8,9 @@
   with both Gaia colours span B9V–M9.5V; the strictly increasing table used
   for interpolation spans B9V–M8.5V (M9V and M9.5V are dropped because their
   BP-RP colours reverse). Values clamp at the retained endpoints.
-- The Riello et al. 2021 Gaia EDR3 cubic differs from the source table by up
-  to 0.086 mag across BP-RP 0.4–3.0. Tests use 0.10 mag there and 0.05 mag
-  across the F-K interval 0.4–1.3.
+- The Riello et al. 2021 Gaia EDR3 cubic differs from the interpolated table
+  by up to 0.10 mag across BP-RP 0.4–3.0 (0.1015 at 3.0, in the M dwarfs), so
+  that cross-check uses 0.11 mag; across F–K (0.4–1.3) it uses 0.05 mag.
 
 ## 0.1.0
 
