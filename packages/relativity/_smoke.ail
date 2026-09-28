@@ -1,6 +1,7 @@
--- Boot probe for publish: prints "OK: ..." iff three independent checks hold
+-- Boot probe for publish: prints "OK: ..." iff four independent checks hold
 -- in a clean workdir — a trip time (rocket equation), an apparent star
--- position (aberration) and a black-hole shadow size (Schwarzschild).
+-- position (aberration), a black-hole shadow size (Schwarzschild), and a
+-- G2V temperature (photometry).
 module sunholo/relativity/_smoke
 
 import std/io (println)
@@ -10,6 +11,7 @@ import ./hyper (atanh, absf)
 import ./journey (flipAndBurn)
 import ./optics (aberrate, dot)
 import ./schwarzschild (shadowAngularRadius, pi)
+import ./photometry (teffFromBpRp)
 
 export func main() -> () ! {IO} {
   let trip = flipAndBurn(4.37, standardGravity());
@@ -20,7 +22,8 @@ export func main() -> () ! {IO} {
   let tripOk = absf(trip.shipTime - 3.582393722748) < 0.000000001 && absf(trip.galaxyTime - 6.002502777252) < 0.000000001;
   let angleOk = absf(angle - 25.841932763167) < 0.000000001;
   let shadowOk = absf(shadow - pi() / 4.0) < 0.000000000001;
-  if tripOk && angleOk && shadowOk
-  then println("OK: relativity alpha-Cen trip 3.5824 ship-yr / 6.0025 yr, 90deg star seen at 25.842deg at 0.9c, shadow at 3 r_s = pi/4")
-  else println("FAIL: trip ${show(trip.shipTime)} / ${show(trip.galaxyTime)}, angle ${show(angle)}, shadow ${show(shadow)}")
+  let photometryOk = absf(teffFromBpRp(0.823) - 5770.0) < 0.000000001;
+  if tripOk && angleOk && shadowOk && photometryOk
+  then println("OK: relativity alpha-Cen trip 3.5824 ship-yr / 6.0025 yr, 90deg star seen at 25.842deg at 0.9c, shadow at 3 r_s = pi/4, G2V = 5770 K")
+  else println("FAIL: trip ${show(trip.shipTime)} / ${show(trip.galaxyTime)}, angle ${show(angle)}, shadow ${show(shadow)}, G2V ${show(teffFromBpRp(0.823))}")
 }

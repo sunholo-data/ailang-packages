@@ -11,3 +11,5 @@ ailang pkg-docs sunholo/relativity   # AGENT.md: usage, units, pitfalls
 
 It was built as the physics core of the Stapledon's Voyage rebuild, where the
 visuals have to be physically right. It is general-purpose and has no effects.
+
+`photometry` converts Gaia dwarf colours to temperature, Johnson V, lux and flux ratios.

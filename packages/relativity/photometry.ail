@@ -1,0 +1,67 @@
+-- sunholo/relativity/photometry — main-sequence dwarf colour and magnitude
+-- relations. Source: Pecaut & Mamajek dwarf sequence, version 2022.04.16,
+-- https://www.pas.rochester.edu/~emamajek/EEM_dwarf_UBVIJHK_colors_Teff.txt
+module sunholo/relativity/photometry
+
+import std/math (pow)
+import std/list (length, nth_or)
+import ./photometry_table (bpRpNodes, teffNodes, gMinusVNodes)
+
+-- Interpolate between adjacent colour nodes. The generator guarantees
+-- strictly increasing colours; endpoints are handled by the caller.
+pure func interpolate(x: float, xs: [float], ys: [float], i: int) -> float {
+  let left = nth_or(xs, i, 0.0);
+  let right = nth_or(xs, i + 1, left);
+  let yLeft = nth_or(ys, i, 0.0);
+  let yRight = nth_or(ys, i + 1, yLeft);
+  if x <= right || i + 2 >= length(xs)
+  then yLeft + (x - left) * (yRight - yLeft) / (right - left)
+  else interpolate(x, xs, ys, i + 1)
+}
+
+pure func fromTable(x: float, ys: [float]) -> float {
+  let xs = bpRpNodes();
+  let last = length(xs) - 1;
+  if x <= nth_or(xs, 0, 0.0) then nth_or(ys, 0, 0.0)
+  else if x >= nth_or(xs, last, 0.0) then nth_or(ys, last, 0.0)
+  else interpolate(x, xs, ys, 0)
+}
+
+-- Kelvin from Gaia BP-RP; clamped to the dwarf table endpoints.
+export pure func teffFromBpRp(bpRp: float) -> float
+  ensures { result >= 2420.0 && result <= 10700.0 }
+{
+  fromTable(bpRp, teffNodes())
+}
+
+-- Gaia G minus Johnson V, magnitudes, on the same clamped colour span.
+export pure func gMinusV(bpRp: float) -> float {
+  fromTable(bpRp, gMinusVNodes())
+}
+
+-- True precisely within the retained B9V–M8.5V colour span.
+export pure func bpRpInTable(bpRp: float) -> bool
+  ensures { result == (bpRp >= -0.12 && bpRp <= 5.1) }
+{
+  bpRp >= -0.12 && bpRp <= 5.1
+}
+
+-- Johnson V magnitude inferred from Gaia G and BP-RP.
+export pure func vFromG(g: float, bpRp: float) -> float = g - gMinusV(bpRp)
+
+-- Visual illuminance in lux. V=0 gives 2.56e-6 lux, using the
+-- standard visual-magnitude illuminance zero point (V=-13.98 at 1 lux).
+export pure func illuminanceFromV(v: float) -> float
+  requires { v > -100.0 && v < 100.0 }
+  ensures { result > 0.0 }
+{
+  pow(10.0, -0.4 * (v + 13.98))
+}
+
+-- Dimensionless flux ratio for visual magnitudes m1 and m2.
+export pure func fluxRatioFromMags(m1: float, m2: float) -> float
+  requires { m1 > -100.0 && m1 < 100.0 && m2 > -100.0 && m2 < 100.0 }
+  ensures { result > 0.0 }
+{
+  pow(10.0, -0.4 * (m1 - m2))
+}
