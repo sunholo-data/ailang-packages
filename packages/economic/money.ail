@@ -1,0 +1,242 @@
+-- sunholo/economic/money — amounts as integer minor units.
+--
+-- e-conomic sends amounts as JSON numbers (87.50) and std/json hands them back
+-- as float. Floats are where money goes wrong, and Z3 cannot reason about them,
+-- so the float exists for exactly one call: `toMinor`, at the decoder edge.
+-- Everything after that is `int` øre/cents, and the arithmetic on it carries
+-- contracts that `ailang verify` proves for every input.
+--
+-- TWO LIMITS ON WHAT THE PROOFS COVER, stated rather than implied:
+--
+-- 1. `toMinor` / `toRateMicro` take a float, which puts them outside the
+--    decidable fragment. They are checked by `_smoke.ail` over a table of edge
+--    amounts instead. (Float assertions live there, not in `test` blocks:
+--    on ailang v0.47.0 float operations fail inside `test` blocks while
+--    working under `ailang run` — reported upstream.)
+--
+-- 2. Z3 reasons over UNBOUNDED integers; the runtime is int64 and wraps
+--    silently. A contract proved over ℤ says nothing about a product that
+--    overflowed. So every multiplication below sits behind a `requires` that
+--    bounds it inside int64, and the bound is part of what is proved.
+--    Found the hard way: the first draft's `toBase(10^15, 10^8)` passed Z3 and
+--    returned garbage at runtime.
+
+module sunholo/economic/money
+
+import std/math (round, floatToInt, isNaN)
+import std/string (length, substring, stringToInt, startsWith)
+import std/list (foldl, map)
+import std/result (Result, Ok, Err)
+import std/option (Option, Some, None)
+
+-- An amount with its currency. Adding two amounts in different currencies is
+-- refused, not converted: a silent sum across currencies is the bug this type
+-- exists to make impossible.
+export type Money = { minor: int, currency: string }
+
+-- ------------------------------------------------------------- bounds --
+
+-- 10^15 minor units. Doubles hold every integer below 2^53 ≈ 9.007 × 10^15
+-- exactly, so a decoded amount inside this bound converts without loss.
+export pure func maxMinor() -> int
+  ensures { result > 0 }
+{
+  1000000000000000
+}
+
+export pure func inRange(m: int) -> bool
+  ensures { result == (m <= maxMinor() && m >= 0 - maxMinor()) }
+{
+  m <= maxMinor() && m >= 0 - maxMinor()
+}
+
+-- Currency conversion multiplies amount × rate, so it needs a tighter bound
+-- to stay inside int64 (±9.22 × 10^18): amounts up to 10^10 minor units
+-- (100 million in major units) and rates up to 900 per 100 units, held ×10^6.
+-- 10^10 × 9 × 10^8 = 9 × 10^18. Outside that, `toBaseChecked` refuses.
+export pure func maxConvertible() -> int
+  ensures { result > 0 }
+{
+  10000000000
+}
+
+export pure func maxRateMicro() -> int
+  ensures { result > 0 }
+{
+  900000000
+}
+
+export pure func convertible(amountMinor: int, rateMicro: int) -> bool
+  ensures { result == (rateMicro > 0 && rateMicro <= maxRateMicro() && amountMinor <= maxConvertible() && amountMinor >= 0 - maxConvertible()) }
+{
+  rateMicro > 0 && rateMicro <= maxRateMicro() && amountMinor <= maxConvertible() && amountMinor >= 0 - maxConvertible()
+}
+
+-- ------------------------------------------------------------- edges --
+
+-- The one float→int crossing for amounts. `round` is half away from zero, and
+-- x * 100 of a two-decimal amount lands within 1e-9 of an integer (0.29 * 100
+-- = 28.999999999999996), so rounding recovers it.
+export pure func toMinor(x: float) -> Result[int, string] {
+  if isNaN(x) then Err("amount is NaN")
+  else if x > 10000000000000.0 || x < -10000000000000.0 then Err("amount out of range: ${show(x)}")
+  else Ok(floatToInt(round(x * 100.0)))
+}
+
+-- Exchange rates arrive as floats too (e-conomic: 746.000000 = DKK per 100
+-- EUR, 100.000000 for the base currency). Held as millionths.
+export pure func toRateMicro(x: float) -> Result[int, string] {
+  if isNaN(x) then Err("exchange rate is NaN")
+  else if x <= 0.0 || x > 900.0 then Err("exchange rate out of range: ${show(x)}")
+  else Ok(floatToInt(round(x * 1000000.0)))
+}
+
+-- ------------------------------------------------------ verified core --
+
+-- Integer division by 10^8, rounding half away from zero — the rounding
+-- e-conomic's own base-currency amounts show. Written as quotient + remainder
+-- rather than (2n + d) / 2d so that nothing doubles n: that form overflowed
+-- int64 inside the very bound toBase allows.
+export pure func roundDiv1e8(n: int) -> int
+  requires { n <= 9000000000000000000, n >= 0 - 9000000000000000000 }
+  ensures {
+    2 * (result * 100000000 - n) <= 100000000,
+    2 * (n - result * 100000000) <= 100000000
+  }
+{
+  if n >= 0 then
+    let q = n / 100000000 in
+    let r = n - q * 100000000 in
+    if 2 * r >= 100000000 then q + 1 else q
+  else
+    let m = 0 - n in
+    let q = m / 100000000 in
+    let r = m - q * 100000000 in
+    if 2 * r >= 100000000 then 0 - (q + 1) else 0 - q
+}
+
+-- Convert an amount to base currency. e-conomic's rate is per 100 units and
+-- we hold it ×10^6, so the divisor is 10^8. Proved: the result is the exact
+-- product rounded to the nearest minor unit, and the bounds keep the product
+-- inside int64.
+--
+-- The first `ensures` restates roundDiv1e8's precondition on purpose.
+-- `ailang verify` (v0.47.0) inlines a callee's body but does NOT check its
+-- `requires` at the call site — measured by widening maxRateMicro until the
+-- product could reach 9 × 10^19: verify still passed. Stating the int64 bound
+-- as a postcondition here makes Z3 prove it from `convertible`, so that same
+-- mutation is now a VIOLATION. Reported upstream.
+export pure func toBase(amountMinor: int, rateMicro: int) -> int
+  requires { convertible(amountMinor, rateMicro) }
+  ensures {
+    amountMinor * rateMicro <= 9000000000000000000,
+    amountMinor * rateMicro >= 0 - 9000000000000000000,
+    2 * (result * 100000000 - amountMinor * rateMicro) <= 100000000,
+    2 * (amountMinor * rateMicro - result * 100000000) <= 100000000
+  }
+{
+  roundDiv1e8(amountMinor * rateMicro)
+}
+
+export pure func toBaseChecked(amountMinor: int, rateMicro: int) -> Result[int, string] {
+  if convertible(amountMinor, rateMicro) then Ok(toBase(amountMinor, rateMicro))
+  else Err("amount ${show(amountMinor)} at rate ${show(rateMicro)} is outside the convertible range")
+}
+
+-- Does e-conomic's reported base amount agree with the amount and rate it sent
+-- alongside? One minor unit of slack, because e-conomic may round the rate it
+-- displays. Disagreement is reported by the caller, never corrected.
+export pure func baseAgrees(amountMinor: int, rateMicro: int, reportedBase: int) -> bool
+  requires { convertible(amountMinor, rateMicro), inRange(reportedBase) }
+  ensures { result == (toBase(amountMinor, rateMicro) - reportedBase <= 1 && reportedBase - toBase(amountMinor, rateMicro) <= 1) }
+{
+  let d = toBase(amountMinor, rateMicro) - reportedBase;
+  d <= 1 && d >= 0 - 1
+}
+
+-- An invoice's own totals must add up: net + VAT + rounding = gross. Checked
+-- on every decoded invoice; a mismatch means the decode is wrong or the data
+-- is, and either way nothing downstream should trust the numbers.
+export pure func totalsAddUp(net: int, vat: int, rounding: int, gross: int) -> bool
+  requires { inRange(net), inRange(vat), inRange(rounding), inRange(gross) }
+  ensures { result == (net + vat + rounding == gross) }
+{
+  net + vat + rounding == gross
+}
+
+-- The paid part of an invoice (or of a credit note, whose gross and remainder
+-- are both ≤ 0). Proved: paid and remainder partition the gross, and neither
+-- leaves the interval between zero and the gross.
+export pure func paidPart(gross: int, remainder: int) -> int
+  requires { inRange(gross), (gross >= 0 && remainder >= 0 && remainder <= gross) || (gross <= 0 && remainder <= 0 && remainder >= gross) }
+  ensures {
+    result + remainder == gross,
+    (gross >= 0 && result >= 0 && result <= gross) || (gross <= 0 && result <= 0 && result >= gross)
+  }
+{
+  gross - remainder
+}
+
+-- Settlement state of one invoice.
+export type PayState = Settled | Partial | Open | Overpaid deriving (Eq)
+
+-- Proved: Settled exactly when nothing remains; Open exactly when nothing has
+-- been paid on a non-zero invoice. A remainder beyond the gross, or of the
+-- wrong sign, is Overpaid — the books say more came in than was owed.
+export pure func payState(gross: int, remainder: int) -> PayState
+  ensures {
+    (result == Settled) == (remainder == 0),
+    (result == Open) == (remainder != 0 && remainder == gross),
+    (result == Partial) == (remainder != 0 && remainder != gross && ((gross > 0 && remainder > 0 && remainder < gross) || (gross < 0 && remainder < 0 && remainder > gross)))
+  }
+{
+  if remainder == 0 then Settled
+  else if remainder == gross then Open
+  else if gross > 0 && remainder > 0 && remainder < gross then Partial
+  else if gross < 0 && remainder < 0 && remainder > gross then Partial
+  else Overpaid
+}
+
+-- ------------------------------------------------------------ helpers --
+
+-- Same-currency sum; different currencies are refused by name.
+export pure func addMoney(a: Money, b: Money) -> Result[Money, string] {
+  if a.currency != b.currency then Err("currency mismatch: ${a.currency} + ${b.currency}")
+  else Ok({ minor: a.minor + b.minor, currency: a.currency })
+}
+
+export pure func sumMinor(xs: [int]) -> int {
+  foldl(\acc x. acc + x, 0, xs)
+}
+
+-- Render minor units as a decimal string: 875050 → "8750.50", -5 → "-0.05".
+-- No thousands separator: this is for machine-checked output, and the inverse
+-- below must be exact.
+export pure func showMinor(m: int) -> string {
+  let neg = m < 0;
+  let a = if neg then 0 - m else m;
+  let whole = a / 100;
+  let frac = a - whole * 100;
+  let fracS = if frac < 10 then "0${show(frac)}" else show(frac);
+  if neg then "-${show(whole)}.${fracS}" else "${show(whole)}.${fracS}"
+}
+
+-- Parse exactly the form `showMinor` produces. Anything else is None.
+export pure func parseMinor(s: string) -> Option[int] {
+  let neg = startsWith(s, "-");
+  let body = if neg then substring(s, 1, length(s)) else s;
+  let n = length(body);
+  if n < 4 then None
+  else if substring(body, n - 3, n - 2) != "." then None
+  else if startsWith(body, "-") || startsWith(body, "+") then None
+  else match stringToInt(substring(body, 0, n - 3)) {
+    None => None,
+    Some(w) => match stringToInt(substring(body, n - 2, n)) {
+      None => None,
+      Some(f) => if w < 0 || f < 0 then None
+                 else if neg then Some(0 - (w * 100 + f))
+                 else Some(w * 100 + f)
+    }
+  }
+}
+

@@ -1,0 +1,144 @@
+-- Boot probe for sunholo/economic. Prints one line per check and ends with
+-- "OK: sunholo/economic <n> checks" — or "FAIL: …" and exit 1. Assert on
+-- the message, not the exit code: a panic also exits non-zero.
+--
+-- Three groups:
+--   FLOAT   the float→minor-unit edge (cannot run in `test` blocks on ailang
+--           v0.47.0 — reported upstream)
+--   OFFLINE decode the captured demo responses in assets/fixtures/, and require
+--           every invoice to be internally consistent
+--   LIVE    e-conomic's public demo agreement (read-only, no credentials):
+--           identity check, full walks at small page sizes so the walker
+--           really pages, the filter-injection attack with and without
+--           escaping, and the local refusals (wrong agreement, unsafe path,
+--           page budget)
+--
+-- LIVE needs network. Offline, those checks fail naming "transport".
+
+module sunholo/economic/_smoke
+
+import std/io (println, exit)
+import std/fs (readFile)
+import std/list (length, foldl, map, filter as keep)
+import std/string (contains)
+import std/result (Result, Ok, Err)
+import std/option (Option, Some, None)
+import std/math (intToFloat)
+import ./money (toMinor, toRateMicro, sumMinor)
+import ./decode (page, invoice, customer, account, accountingYear, entry, allInvoiceIssues)
+import ./filter (Filter, Pred, Eq, render)
+import ./types (Booked, Paid, Unpaid)
+import ./client (demoCreds, getAllWith, get, showError, Creds, ApiError, Refused)
+import ./api (agreement, requireAgreement, invoices, invoicesChecked, customers, accounts, accountingYears, accountEntries)
+
+pure func check(name: string, ok: bool, detail: string) -> { name: string, ok: bool, detail: string } {
+  { name: name, ok: ok, detail: detail }
+}
+
+pure func edgeInts() -> [int] {
+  [0, 1, 0 - 1, 5, 29, 99, 100, 101, 8750, 0 - 81250, 461250, 123456789, 0 - 123456789,
+   999999999999, 99999999999999, 999999999999999, 0 - 999999999999999]
+}
+
+func floatChecks() -> [{ name: string, ok: bool, detail: string }] {
+  let rt = foldl(\acc n. acc && toMinor(intToFloat(n) / 100.0) == Ok(n), true, edgeInts());
+  [
+    check("float: every edge amount survives float → minor units", rt, ""),
+    check("float: 0.29 → 29 (28.999999999999996 rounds back)", toMinor(0.29) == Ok(29), show(toMinor(0.29))),
+    check("float: 87.50 → 8750", toMinor(87.5) == Ok(8750), ""),
+    check("float: out-of-range refused", match toMinor(100000000000000.0) { Ok(_) => false, Err(_) => true }, ""),
+    check("float: rate 746.0 → 746000000 micro", toRateMicro(746.0) == Ok(746000000), show(toRateMicro(746.0))),
+    check("float: rate 0 refused", match toRateMicro(0.0) { Ok(_) => false, Err(_) => true }, "")
+  ]
+}
+
+func fixtureCount(file: string, decodeCount: string -> Result[int, string], want: int) -> { name: string, ok: bool, detail: string } ! {FS} {
+  match decodeCount(readFile("assets/fixtures/${file}")) {
+    Ok(n) => check("offline: ${file} decodes ${show(want)} rows", n == want, "got ${show(n)}"),
+    Err(e) => check("offline: ${file} decodes", false, e)
+  }
+}
+
+func offlineChecks() -> [{ name: string, ok: bool, detail: string }] ! {FS} {
+  let invs = page(readFile("assets/fixtures/invoices-booked.json"), invoice);
+  let invOk = match invs {
+    Ok(p) => check("offline: 6 demo invoices, all internally consistent, gross 8512.50",
+                   length(p.items) == 6 && allInvoiceIssues(p.items) == [] && sumMinor(map(\i. i.gross, p.items)) == 851250,
+                   "n=${show(length(p.items))} issues=${show(allInvoiceIssues(p.items))} gross=${show(sumMinor(map(\i. i.gross, p.items)))}"),
+    Err(e) => check("offline: invoices decode", false, e)
+  };
+  [
+    invOk,
+    fixtureCount("customers.json", \b. match page(b, customer) { Ok(p) => Ok(length(p.items)), Err(e) => Err(e) }, 5),
+    fixtureCount("accounts.json", \b. match page(b, account) { Ok(p) => Ok(length(p.items)), Err(e) => Err(e) }, 200),
+    fixtureCount("accounting-years.json", \b. match page(b, accountingYear) { Ok(p) => Ok(length(p.items)), Err(e) => Err(e) }, 5),
+    fixtureCount("entries-5820-2022.json", \b. match page(b, entry) { Ok(p) => Ok(length(p.items)), Err(e) => Err(e) }, 13)
+  ]
+}
+
+func liveChecks() -> [{ name: string, ok: bool, detail: string }] ! {Net} {
+  let c = demoCreds();
+  let who = match agreement(c) {
+    Ok(a) => check("live: /self is the demo agreement 1583064, base DKK", a.agreementNumber == 1583064 && a.baseCurrency == "DKK", "${show(a.agreementNumber)} ${a.baseCurrency}"),
+    Err(e) => check("live: /self", false, showError(e))
+  };
+  let wrong = match requireAgreement(c, 1234567) {
+    Ok(_) => check("live: wrong agreement number is refused", false, "accepted"),
+    Err(e) => check("live: wrong agreement number is refused", contains(showError(e), "expected 1234567"), showError(e))
+  };
+  let booked = match invoicesChecked(c, Booked, None, 5) {
+    Ok(r) => check("live: booked invoices decode and are consistent", length(r.items) >= 1 && r.issues == [], "n=${show(length(r.items))} issues=${show(r.issues)}"),
+    Err(e) => check("live: booked invoices", false, showError(e))
+  };
+  let split = match (invoices(c, Booked, None, 5), invoices(c, Paid, None, 5), invoices(c, Unpaid, None, 5)) {
+    (Ok(b), Ok(p), Ok(u)) => check("live: paid + unpaid partition booked, and paid ones have remainder 0",
+                                   length(p) + length(u) == length(b) && foldl(\acc i. acc && i.remainder == 0, true, p) && foldl(\acc i. acc && i.remainder != 0, true, u),
+                                   "booked=${show(length(b))} paid=${show(length(p))} unpaid=${show(length(u))}"),
+    _ => check("live: paid/unpaid partition", false, "a request failed")
+  };
+  let walked = match getAllWith(c, "/customers", None, 1, 50, customer) {
+    Ok(xs) => check("live: customers walked one row per page, count matches e-conomic's", length(xs) >= 2, "n=${show(length(xs))}"),
+    Err(e) => check("live: customers walk", false, showError(e))
+  };
+  let bank = match getAllWith(c, "/accounts/5820/accounting-years/2022/entries", None, 3, 50, entry) {
+    Ok(xs) => check("live: bank account 5820 entries walked 3 per page", length(xs) >= 3 && foldl(\acc e. acc && e.accountNumber == 5820, true, xs), "n=${show(length(xs))}"),
+    Err(e) => check("live: bank entries walk", false, showError(e))
+  };
+  let budget = match getAllWith(c, "/accounts", None, 20, 2, account) {
+    Ok(xs) => check("live: collection over the page budget is refused up front", false, "returned ${show(length(xs))} rows"),
+    Err(e) => check("live: collection over the page budget is refused up front", contains(showError(e), "raise maxPages"), showError(e))
+  };
+  -- The attack, unescaped, straight through `get`: returns rows it should not.
+  let raw = match get(c, "/invoices/booked", [{ name: "filter", value: "recipient.name$eq:x$or:currency$eq:DKK" }]) {
+    Ok(body) => match page(body, invoice) {
+      Ok(p) => check("live: UNESCAPED injection really widens the query (control)", length(p.items) >= 1, "n=${show(length(p.items))}"),
+      Err(e) => check("live: injection control decode", false, e)
+    },
+    Err(e) => check("live: injection control", false, showError(e))
+  };
+  -- The same value through the filter builder: one predicate, no rows.
+  let safe = match invoices(c, Booked, Some(Pred("recipient.name", Eq, "x$or:currency$eq:DKK")), 5) {
+    Ok(xs) => check("live: ESCAPED injection matches nothing", length(xs) == 0, "n=${show(length(xs))}"),
+    Err(e) => check("live: escaped injection", false, showError(e))
+  };
+  let unsafePath = match get(c, "//evil.example/steal", []) {
+    Ok(_) => check("live: unsafe path refused before any request", false, "request sent"),
+    Err(e) => check("live: unsafe path refused before any request", contains(showError(e), "refused"), showError(e))
+  };
+  let badTok = match agreement({ appSecret: "demo\r\nX-Evil: 1", grant: "demo" }) {
+    Ok(_) => check("live: token with CR/LF refused", false, "accepted"),
+    Err(e) => check("live: token with CR/LF refused", contains(showError(e), "CR/LF"), showError(e))
+  };
+  [who, wrong, booked, split, walked, bank, budget, raw, safe, unsafePath, badTok]
+}
+
+export func main() -> () ! {IO, FS, Net} {
+  let all = floatChecks() ++ offlineChecks() ++ liveChecks();
+  let failed = keep(\r. not r.ok, all);
+  foldl(\u r. println(if r.ok then "  ok   ${r.name}" else "  FAIL ${r.name}: ${r.detail}"), (), all);
+  if length(failed) == 0 then println("OK: sunholo/economic ${show(length(all))} checks")
+  else {
+    println("FAIL: sunholo/economic ${show(length(failed))} of ${show(length(all))} checks failed");
+    exit(1)
+  }
+}

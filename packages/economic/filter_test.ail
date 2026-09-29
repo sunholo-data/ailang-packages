@@ -1,0 +1,51 @@
+-- Tests for sunholo/economic/filter.
+
+module sunholo/economic/filter_test
+
+import std/list (foldl, map)
+import std/result (Result, Ok, Err)
+import ./filter (Filter, Pred, StartsWith, And, Or, Eq, escapeValue, unescapeValue, wellEscaped, render, dateBetween, allOf)
+
+
+pure func nasty() -> [string] {
+  ["", "plain", "$", "$$", "(", ")", "*", ",", "[", "]", "$or:currency$eq:DKK",
+   "x)$or:(1$eq:1", "a$,b", "Ærø & Søn, ApS (DK)", "[1,3]", "50% * 2", "$null:", "end$"]
+}
+
+pure func allTrue(xs: [bool]) -> bool {
+  foldl(\acc x. acc && x, true, xs)
+}
+
+test "escape round-trips every special" {
+  allTrue(map(\v. unescapeValue(escapeValue(v)) == v, nasty()))
+}
+
+test "escaped output is well-formed" {
+  allTrue(map(\v. wellEscaped(escapeValue(v)), nasty()))
+}
+
+test "wellEscaped rejects bare specials" {
+  not wellEscaped("a,b") && not wellEscaped("$") && not wellEscaped("x$or:y") && wellEscaped("a$,b") && wellEscaped("plain")
+}
+
+test "injection attempt stays one predicate" {
+  render(Pred("recipient.name", Eq, "x$or:currency$eq:DKK")) == Ok("recipient.name$eq:x$$or:currency$$eq:DKK")
+}
+
+test "unsafe field refused" {
+  match render(Pred("name$or:currency", Eq, "DKK")) { Ok(_) => false, Err(_) => true }
+}
+
+test "compound grouping" {
+  render(And(Pred("currency", Eq, "DKK"), Or(Pred("bookedInvoiceNumber", Eq, "1"), Pred("bookedInvoiceNumber", Eq, "3"))))
+    == Ok("currency$eq:DKK$and:(bookedInvoiceNumber$eq:1$or:bookedInvoiceNumber$eq:3)")
+}
+
+test "date range and prefix" {
+  render(dateBetween("date", "2026-01-01", "2026-12-31")) == Ok("date$gte:2026-01-01$and:date$lte:2026-12-31")
+    && render(StartsWith("recipient.name", "Inter")) == Ok("recipient.name$like:Inter*")
+}
+
+test "allOf refuses empty" {
+  match allOf([]) { Ok(_) => false, Err(_) => true }
+}

@@ -1,0 +1,186 @@
+-- sunholo/economic/client — authenticated GETs and the page walker.
+--
+-- READ-ONLY BY CONSTRUCTION. There is exactly one call to std/net here, and
+-- its method is the literal "GET". No exported function takes a method, a
+-- body, or a URL: callers pass a path, which must start with "/" and cannot
+-- carry a scheme or host, and the base URL is fixed. So a caller holding
+-- SuperUser tokens still cannot change the books through this package.
+--
+-- Pair it with `--net-allow-domains restapi.e-conomic.com` so the process
+-- cannot talk to anything else either.
+
+module sunholo/economic/client
+
+import std/net (httpRequest, urlEncodeForm)
+import std/json (Json, decode, getString, getNumber, getArray)
+import std/string (contains, startsWith, length)
+import std/list (length as listLength, foldl)
+import std/result (Result, Ok, Err)
+import std/option (Option, Some, None)
+import ./page (clampPageSize, nextSkip, fitsBudget, pageParams, maxPageSize)
+import ./filter (Filter, render)
+import ./decode (page, single)
+
+-- The two e-conomic tokens. `appSecret` identifies the integration (the
+-- developer's app); `grant` is what the agreement owner issued when they
+-- installed it. Both are secrets: resolve them with std/secret, not env files.
+export type Creds = { appSecret: string, grant: string }
+
+-- e-conomic's public, read-only demo agreement. Needs no account.
+export pure func demoCreds() -> Creds {
+  { appSecret: "demo", grant: "demo" }
+}
+
+export pure func baseUrl() -> string {
+  "https://restapi.e-conomic.com"
+}
+
+export type ApiError =
+  | Transport(string)
+  | Http(int, string, string)   -- status, e-conomic's message (+ errors), logId
+  | Decode(string)
+  | Refused(string)             -- refused locally before any request was sent
+
+export pure func showError(e: ApiError) -> string {
+  match e {
+    Transport(m) => "transport: ${m}",
+    Http(s, m, logId) => if logId == "" then "HTTP ${show(s)}: ${m}" else "HTTP ${show(s)}: ${m} (logId ${logId})",
+    Decode(m) => "decode: ${m}",
+    Refused(m) => "refused: ${m}"
+  }
+}
+
+-- CR/LF in a header value ends the header block: a token carrying one could
+-- add headers of its choosing. Tokens come from a secret store, not a user,
+-- but the check costs nothing and a pasted token with a trailing newline is
+-- a common, confusing failure.
+export pure func headerSafe(v: string) -> bool
+  ensures { not result || (not contains(v, "\r") && not contains(v, "\n")) }
+{
+  length(v) > 0 && not contains(v, "\r") && not contains(v, "\n")
+}
+
+export pure func headers(c: Creds) -> Result[[{ name: string, value: string }], string] {
+  if not headerSafe(c.appSecret) then Err("app secret token is empty or contains CR/LF")
+  else if not headerSafe(c.grant) then Err("agreement grant token is empty or contains CR/LF")
+  else Ok([{ name: "X-AppSecretToken", value: c.appSecret },
+           { name: "X-AgreementGrantToken", value: c.grant },
+           { name: "Accept", value: "application/json" }])
+}
+
+-- A path is relative to the fixed base URL. Proved: an accepted path starts
+-- with "/" and can carry neither a scheme, a host switch (`//`, `@`), nor its
+-- own query string (query parameters go through `params`, encoded).
+export pure func pathSafe(p: string) -> bool
+  ensures { not result || (startsWith(p, "/") && not contains(p, "//") && not contains(p, "@") && not contains(p, "?") && not contains(p, "#") && not contains(p, "..")) }
+{
+  startsWith(p, "/") && not contains(p, "//") && not contains(p, "@") && not contains(p, "?") && not contains(p, "#") && not contains(p, "..") && not contains(p, " ")
+}
+
+-- e-conomic errors are JSON: {message, errors?, logId, httpStatusCode}. Keep
+-- the logId — it is what e-conomic support asks for.
+export pure func parseError(status: int, body: string) -> ApiError {
+  match decode(body) {
+    Err(_) => Http(status, if body == "" then "(empty body)" else body, ""),
+    Ok(j) => {
+      let msg = match getString(j, "message") { Some(m) => m, None => "(no message)" };
+      let detail = match getArray(j, "errors") {
+        Some(es) => foldl(\acc e. match e { _ => "${acc} ${show(e)}" }, "", es),
+        None => ""
+      };
+      let logId = match getString(j, "logId") { Some(l) => l, None => "" };
+      Http(status, if detail == "" then msg else "${msg} —${detail}", logId)
+    }
+  }
+}
+
+-- One GET. Returns the body of a 2xx, or a structured error.
+export func get(c: Creds, path: string, params: [{ name: string, value: string }]) -> Result[string, ApiError] ! {Net} {
+  if not pathSafe(path) then Err(Refused("unsafe path: ${path}"))
+  else match headers(c) {
+    Err(e) => Err(Refused(e)),
+    Ok(hs) => {
+      let q = if listLength(params) == 0 then "" else "?${urlEncodeForm(params)}";
+      match httpRequest("GET", "${baseUrl()}${path}${q}", hs, "") {
+        Err(e) => Err(Transport(show(e))),
+        Ok(resp) => if resp.ok then Ok(resp.body) else Err(parseError(resp.status, resp.body))
+      }
+    }
+  }
+}
+
+-- GET one resource and decode it.
+export func getOne(c: Creds, path: string, item: Json -> Result[a, string]) -> Result[a, ApiError] ! {Net} {
+  match get(c, path, []) {
+    Err(e) => Err(e),
+    Ok(body) => match single(body, item) { Ok(x) => Ok(x), Err(m) => Err(Decode(m)) }
+  }
+}
+
+@allow_empty_ok("no filter means no filter parameter; the empty list is the correct encoding, not a failure")
+pure func filterParams(f: Option[Filter]) -> Result[[{ name: string, value: string }], string] {
+  match f {
+    None => Ok([]),
+    Some(flt) => match render(flt) {
+      Ok(s) => Ok([{ name: "filter", value: s }]),
+      Err(e) => Err(e)
+    }
+  }
+}
+
+-- Walk a whole collection.
+--
+-- Three checks make the result trustworthy rather than merely plausible:
+--   1. BUDGET — from the first page's row count, refuse up front if the walk
+--      would need more than `maxPages` pages. A truncated list that looks
+--      complete is worse than an error.
+--   2. PROGRESS — the next page comes from page.nextSkip, proved to advance by
+--      exactly one and to stop at the last row, and every step spends one unit
+--      of `pagesLeft`, so the recursion terminates even if the server lies.
+--   3. COUNT — at the end, the number of rows collected must equal the count
+--      e-conomic reported. If the collection changed mid-walk, or a page came
+--      back short, that is an error, not a shrug.
+export func getAll(c: Creds, path: string, flt: Option[Filter], maxPages: int, item: Json -> Result[a, string]) -> Result[[a], ApiError] ! {Net} {
+  getAllWith(c, path, flt, maxPageSize(), maxPages, item)
+}
+
+-- As getAll, with an explicit page size (clamped to 1..1000). Small pages are
+-- for exercising the walker against small collections; real reads want 1000.
+export func getAllWith(c: Creds, path: string, flt: Option[Filter], pageSize: int, maxPages: int, item: Json -> Result[a, string]) -> Result[[a], ApiError] ! {Net} {
+  match filterParams(flt) {
+    Err(e) => Err(Refused("filter: ${e}")),
+    Ok(fp) => {
+      let size = clampPageSize(pageSize);
+      match fetchPage(c, path, fp, 0, size, item) {
+        Err(e) => Err(e),
+        Ok(first) =>
+          if first.results < 0 || first.results > 1000000000 then Err(Decode("implausible row count ${show(first.results)}"))
+          else if maxPages < 1 then Err(Refused("maxPages must be at least 1"))
+          else if not fitsBudget(first.results, size, maxPages) then
+            Err(Refused("${path} has ${show(first.results)} rows: more than ${show(maxPages)} pages of ${show(size)}; raise maxPages or narrow the filter"))
+          else match walk(c, path, fp, 0, size, first.results, maxPages - 1, first.items, item) {
+            Err(e) => Err(e),
+            Ok(rows) => if listLength(rows) == first.results then Ok(rows)
+                        else Err(Decode("${path}: collected ${show(listLength(rows))} rows but e-conomic reported ${show(first.results)}"))
+          }
+      }
+    }
+  }
+}
+
+func fetchPage(c: Creds, path: string, fp: [{ name: string, value: string }], skip: int, size: int, item: Json -> Result[a, string]) -> Result[{ items: [a], results: int }, ApiError] ! {Net} {
+  match get(c, path, fp ++ pageParams(skip, size)) {
+    Err(e) => Err(e),
+    Ok(body) => match page(body, item) { Ok(p) => Ok(p), Err(m) => Err(Decode("${path} page ${show(skip)}: ${m}")) }
+  }
+}
+
+func walk(c: Creds, path: string, fp: [{ name: string, value: string }], skip: int, size: int, results: int, pagesLeft: int, acc: [a], item: Json -> Result[a, string]) -> Result[[a], ApiError] ! {Net} {
+  let next = nextSkip(skip, size, results);
+  if next == 0 - 1 then Ok(acc)
+  else if pagesLeft <= 0 then Err(Refused("${path}: page budget exhausted mid-walk"))
+  else match fetchPage(c, path, fp, next, size, item) {
+    Err(e) => Err(e),
+    Ok(p) => walk(c, path, fp, next, size, results, pagesLeft - 1, acc ++ p.items, item)
+  }
+}
