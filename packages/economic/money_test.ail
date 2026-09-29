@@ -1,0 +1,76 @@
+-- Tests for sunholo/economic/money. Integer-only: float edges are in _smoke.ail.
+
+module sunholo/economic/money_test
+
+import std/list (foldl, map)
+import std/result (Result, Ok, Err)
+import std/option (Option, Some, None)
+import ./money (toBase, toBaseChecked, roundDiv1e8, totalsAddUp, payState, PayState, Open, Settled, Partial, Overpaid, addMoney, showMinor, parseMinor)
+
+--
+-- Integer-only. Float edges (toMinor, toRateMicro) are asserted in _smoke.ail.
+--
+-- `property "…" { forall(…) => … }` declarations also fail at runtime on
+-- v0.47.0 (the generated harness does not parse — reported upstream), so the
+-- universally-quantified claims are table-driven over edge cases. The
+-- `ensures` clauses above ARE exercised as generated properties by
+-- `ailang test`, in addition to being proved by `ailang verify`.
+
+pure func edgeInts() -> [int] {
+  [0, 1, 0 - 1, 5, 0 - 5, 9, 10, 99, 100, 101, 0 - 100, 875050, 0 - 81250, 461250,
+   123456789, 0 - 123456789, 999999999999, 1000000000000, 0 - 1000000000000,
+   99999999999999, 0 - 99999999999999, 999999999999999, 0 - 999999999999999]
+}
+
+pure func convertibleInts() -> [int] {
+  [0, 1, 0 - 1, 5, 0 - 5, 99, 100, 875050, 0 - 81250, 461250, 123456789,
+   0 - 123456789, 9999999999, 10000000000, 0 - 10000000000]
+}
+
+pure func allTrue(xs: [bool]) -> bool {
+  foldl(\acc x. acc && x, true, xs)
+}
+
+test "EUR at 746 per 100" {
+  toBase(160000, 746000000) == 1193600
+}
+
+test "base currency at rate 100 is identity across the whole convertible range" {
+  allTrue(map(\n. toBase(n, 100000000) == n, convertibleInts()))
+}
+
+test "the int64 edge: largest amount at the largest rate does not wrap" {
+  toBase(10000000000, 900000000) == 90000000000 && toBase(0 - 10000000000, 900000000) == 0 - 90000000000
+}
+
+test "outside the convertible range is refused, not wrapped" {
+  match toBaseChecked(1000000000000000, 100000000) { Ok(_) => false, Err(_) => true }
+}
+
+test "half away from zero" {
+  roundDiv1e8(50000000) == 1 && roundDiv1e8(0 - 50000000) == 0 - 1 && roundDiv1e8(49999999) == 0 && roundDiv1e8(0 - 49999999) == 0
+}
+
+test "demo invoice 3 adds up" {
+  totalsAddUp(369000, 92250, 0, 461250)
+}
+
+test "pay states" {
+  payState(461250, 461250) == Open && payState(461250, 0) == Settled && payState(461250, 100) == Partial && payState(461250, 0 - 5) == Overpaid && payState(0 - 100, 0 - 40) == Partial && payState(0 - 100, 40) == Overpaid
+}
+
+test "currency mismatch refused" {
+  match addMoney({ minor: 1, currency: "DKK" }, { minor: 1, currency: "EUR" }) { Ok(_) => false, Err(_) => true }
+}
+
+test "showMinor" {
+  showMinor(875050) == "8750.50" && showMinor(0 - 5) == "-0.05" && showMinor(0) == "0.00" && showMinor(100) == "1.00"
+}
+
+test "showMinor / parseMinor round trip over edge amounts" {
+  allTrue(map(\n. parseMinor(showMinor(n)) == Some(n), edgeInts()))
+}
+
+test "parseMinor rejects malformed" {
+  parseMinor("1.5") == None && parseMinor("abc") == None && parseMinor("1,00") == None && parseMinor("") == None && parseMinor("--1.00") == None
+}

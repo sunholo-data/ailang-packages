@@ -1,0 +1,39 @@
+[package]
+name = "sunholo/economic"
+version = "0.1.0"
+edition = "1"
+ailang = ">=0.47.0"
+description = "Read-only client for the Visma e-conomic REST API — booked/paid/unpaid invoices, customers, accounts, accounting years and account entries — with integer minor-unit money, Z3-proved conversion and settlement arithmetic, an injection-safe filter builder and bounded pagination"
+license = "Apache-2.0"
+
+[release]
+kind = "feature"
+
+[exports]
+modules = [
+  "sunholo/economic/money",
+  "sunholo/economic/filter",
+  "sunholo/economic/page",
+  "sunholo/economic/types",
+  "sunholo/economic/decode",
+  "sunholo/economic/client",
+  "sunholo/economic/api"
+]
+
+[effects]
+# Library functions use Net only. IO and FS are for _smoke.ail (it prints, and
+# reads assets/fixtures/ — only assets/** is staged for the smoke run).
+max = ["Net", "IO", "FS"]
+
+[metadata]
+tags = ["e-conomic", "economic", "visma", "accounting", "bookkeeping", "invoices", "denmark", "money", "z3", "rest"]
+ai_summary = "Read a Visma e-conomic agreement over REST: booked, paid, unpaid and overdue invoices, customers, chart of accounts, accounting years and the entries on any account (e.g. the bank account). Amounts are decoded once into integer minor units; base-currency conversion, invoice totals and paid/remainder partitioning are Z3-proved. Filters are escaped per e-conomic's rules so values cannot change a query's meaning. Read-only by design; works against e-conomic's public demo agreement with no credentials"
+repository = "https://github.com/sunholo-data/ailang-packages/tree/main/packages/economic"
+homepage = "https://ailang.sunholo.com/docs/packages/sunholo/economic"
+license_url = "https://github.com/sunholo-data/ailang-packages/blob/main/LICENSE"
+
+[cascade]
+max_cost_usd = 1.00
+
+[stability]
+level = "experimental"

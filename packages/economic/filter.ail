@@ -1,0 +1,157 @@
+-- sunholo/economic/filter — e-conomic filter expressions, injection-safe.
+--
+-- e-conomic filters are text: `date$gte:2026-01-01$and:(currency$eq:EUR)`.
+-- A VALUE that contains `$or:` or `)` does not look odd — it rewrites the
+-- query. `recipient.name$eq:x$or:currency$eq:DKK` returns every DKK invoice
+-- (checked live against the demo agreement in _smoke.ail). If a value comes
+-- from a customer name, an invoice text or a model, that is a live path to
+-- reading rows the caller did not ask for.
+--
+-- Two guards, with different strengths:
+--
+-- * FIELD names are checked by `fieldSafe`, and `renderPred` carries a
+--   contract, proved by Z3, that the first `$` in the output sits exactly at
+--   the end of the field name: a field cannot smuggle in an operator.
+--
+-- * VALUES are escaped per e-conomic's published table ($ → $$, ( → $(, …),
+--   in one pass so an escape is never re-escaped. `escapeValue` goes through
+--   std/string.replaceMany, which Z3 cannot encode, so that half is NOT
+--   proved. It is covered by a round-trip test over every special character,
+--   by `wellEscaped` (every `$` in the output starts a valid escape), and by
+--   the live injection check in _smoke.ail.
+
+module sunholo/economic/filter
+
+import std/string (length, contains, substring, startsWith, endsWith, replaceMany, foldChars)
+import std/list (foldl, map)
+import std/result (Result, Ok, Err)
+
+export type Op = Eq | Ne | Gt | Gte | Lt | Lte | Like deriving (Eq)
+
+-- A filter tree. Values are RAW — escaping happens at render, once, so a
+-- caller can never double-escape or forget to.
+--   Pred(field, op, value)
+--   StartsWith(field, prefix)   renders as `field$like:<escaped>*`
+--   IsNull(field)               renders as `field$eq:$null:`
+export type Filter =
+  | Pred(string, Op, string)
+  | StartsWith(string, string)
+  | IsNull(string)
+  | And(Filter, Filter)
+  | Or(Filter, Filter)
+
+-- Proved: every operator token is `$…:`, so a rendered predicate always has
+-- the operator where the parser expects one.
+export pure func opToken(op: Op) -> string
+  ensures { startsWith(result, "$"), endsWith(result, ":"), length(result) >= 4 }
+{
+  match op {
+    Eq => "$eq:",
+    Ne => "$ne:",
+    Gt => "$gt:",
+    Gte => "$gte:",
+    Lt => "$lt:",
+    Lte => "$lte:",
+    Like => "$like:"
+  }
+}
+
+-- A field name may contain letters, digits and dots (`customer.customerNumber`).
+-- Stated as the absence of everything with meaning to the filter grammar or
+-- the query string, because that is the form Z3 can reason about.
+export pure func fieldSafe(f: string) -> bool
+  ensures { not result || (length(f) > 0 && not contains(f, "$")) }
+{
+  length(f) > 0 && not contains(f, "$") && not contains(f, ":") && not contains(f, "(") && not contains(f, ")") && not contains(f, "*") && not contains(f, ",") && not contains(f, "[") && not contains(f, "]") && not contains(f, " ") && not contains(f, "&") && not contains(f, "=") && not contains(f, "#") && not contains(f, "?")
+}
+
+-- Proved: the rendered predicate starts with the field, the character right
+-- after it is the operator's `$`, and (by the precondition) the field holds no
+-- `$` — so the FIRST `$` is the operator's, whatever the value contains.
+-- (Stated this way because the equivalent `find(result, "$") == length(field)`
+-- times out in Z3's string solver; this form proves in ~5 ms.) `fieldSafe`
+-- is proved to imply the precondition.
+export pure func renderPred(field: string, op: Op, escapedValue: string) -> string
+  requires { length(field) > 0, not contains(field, "$") }
+  ensures { startsWith(result, field), not contains(substring(result, 0, length(field)), "$"), substring(result, length(field), length(field) + 1) == "$" }
+{
+  "${field}${opToken(op)}${escapedValue}"
+}
+
+-- e-conomic's escape table, applied in a single pass.
+export pure func escapeValue(v: string) -> string {
+  replaceMany(v, [("$", "$$"), ("(", "$("), (")", "$)"), ("*", "$*"), (",", "$,"), ("[", "$["), ("]", "$]")])
+}
+
+pure func isSpecial(c: string) -> bool {
+  c == "$" || c == "(" || c == ")" || c == "*" || c == "," || c == "[" || c == "]"
+}
+
+-- True when every special character is escaped: scanning left to right, each
+-- `$` is followed by a special, and no special appears bare.
+export pure func wellEscaped(s: string) -> bool {
+  let st = foldChars(\acc c.
+    if not acc.ok then acc
+    else if acc.pending then (if isSpecial(c) then { ok: true, pending: false } else { ok: false, pending: false })
+    else if c == "$" then { ok: true, pending: true }
+    else if isSpecial(c) then { ok: false, pending: false }
+    else acc,
+    { ok: true, pending: false }, s);
+  st.ok && not st.pending
+}
+
+-- Inverse of escapeValue, for tests: drop each escaping `$`.
+export pure func unescapeValue(s: string) -> string {
+  let st = foldChars(\acc c.
+    if acc.pending then { out: "${acc.out}${c}", pending: false }
+    else if c == "$" then { out: acc.out, pending: true }
+    else { out: "${acc.out}${c}", pending: false },
+    { out: "", pending: false }, s);
+  st.out
+}
+
+-- Render a whole tree. Compound children are parenthesised so precedence is
+-- always explicit; e-conomic accepts parentheses around any sub-expression.
+export pure func render(f: Filter) -> Result[string, string] {
+  match f {
+    Pred(field, op, v) => if fieldSafe(field) then Ok(renderPred(field, op, escapeValue(v))) else Err("unsafe field name: ${field}"),
+    StartsWith(field, p) => if fieldSafe(field) then Ok(renderPred(field, Like, "${escapeValue(p)}*")) else Err("unsafe field name: ${field}"),
+    IsNull(field) => if fieldSafe(field) then Ok(renderPred(field, Eq, "$null:")) else Err("unsafe field name: ${field}"),
+    And(a, b) => join2(a, b, "$and:"),
+    Or(a, b) => join2(a, b, "$or:")
+  }
+}
+
+pure func join2(a: Filter, b: Filter, token: string) -> Result[string, string] {
+  match render(a) {
+    Err(e) => Err(e),
+    Ok(ra) => match render(b) {
+      Err(e) => Err(e),
+      Ok(rb) => Ok("${group(a, ra)}${token}${group(b, rb)}")
+    }
+  }
+}
+
+pure func group(f: Filter, rendered: string) -> string {
+  match f {
+    And(_, _) => "(${rendered})",
+    Or(_, _) => "(${rendered})",
+    _ => rendered
+  }
+}
+
+-- Convenience: all of these must hold. [] is refused — "no filter" is a
+-- different request, and an accidental empty list should not fetch everything.
+export pure func allOf(fs: [Filter]) -> Result[Filter, string] {
+  match fs {
+    [] => Err("allOf: empty filter list"),
+    h :: t => Ok(foldl(\acc x. And(acc, x), h, t))
+  }
+}
+
+-- Date range on a `date` field, inclusive both ends. Dates are ISO-8601
+-- (YYYY-MM-DD), which e-conomic compares correctly as text.
+export pure func dateBetween(field: string, from: string, to: string) -> Filter {
+  And(Pred(field, Gte, from), Pred(field, Lte, to))
+}
+

@@ -1,0 +1,122 @@
+-- sunholo/economic/types — the records this package decodes into.
+--
+-- Every amount is integer minor units (see money.ail). Every date is the
+-- ISO-8601 `YYYY-MM-DD` string e-conomic sends, checked by `isIsoDate` at
+-- decode time, which is why string comparison on dates is safe downstream.
+-- Fields e-conomic may omit are "" or None, never a made-up default number.
+
+module sunholo/economic/types
+
+import std/string (length, substring, stringToInt)
+import std/option (Option, Some, None)
+
+-- `/self`: which agreement the tokens opened. Check `agreementNumber` before
+-- trusting anything else — the public demo tokens return a plausible company.
+export type Agreement = {
+  agreementNumber: int,
+  companyName: string,
+  companyId: string,
+  baseCurrency: string
+}
+
+-- A booked invoice (or credit note: gross < 0). `rateMicro` is DKK-style
+-- "base per 100 units" ×10^6; the *Base fields are e-conomic's own
+-- base-currency figures, checked against the rate by `invoiceIssues`.
+export type Invoice = {
+  number: int,
+  date: string,
+  dueDate: string,
+  currency: string,
+  rateMicro: int,
+  net: int,
+  vat: int,
+  rounding: int,
+  gross: int,
+  remainder: int,
+  netBase: int,
+  grossBase: int,
+  remainderBase: int,
+  customerNumber: int,
+  recipientName: string,
+  heading: string,
+  otherRef: string
+}
+
+export type Customer = {
+  number: int,
+  name: string,
+  currency: string,
+  email: string,
+  vatNumber: string,
+  balance: int,
+  dueAmount: int
+}
+
+export type Account = {
+  number: int,
+  name: string,
+  accountType: string,
+  debitCredit: string,
+  balance: int
+}
+
+-- `year` is e-conomic's own identifier ("2026", or e.g. "2025/2026" for a
+-- broken financial year) and must be URL-encoded as a path segment.
+export type AccountingYear = {
+  year: string,
+  fromDate: string,
+  toDate: string
+}
+
+-- A posted entry on an account. On a bank account, a customer payment is the
+-- cash landing; `invoiceNumber` links an entry to the booked invoice it
+-- concerns, when e-conomic records one.
+export type Entry = {
+  entryNumber: int,
+  date: string,
+  accountNumber: int,
+  amount: int,
+  amountBase: int,
+  currency: string,
+  text: string,
+  entryType: string,
+  voucherNumber: int,
+  customerNumber: Option[int],
+  invoiceNumber: Option[int]
+}
+
+-- Which invoice collection to read. These are e-conomic's own views; `Paid`
+-- means remainder = 0 as e-conomic computes it.
+export type InvoiceSet = Booked | Paid | Unpaid | Overdue | NotDue deriving (Eq)
+
+export pure func invoiceSetPath(s: InvoiceSet) -> string
+  ensures { length(result) > 10 }
+{
+  match s {
+    Booked => "/invoices/booked",
+    Paid => "/invoices/paid",
+    Unpaid => "/invoices/unpaid",
+    Overdue => "/invoices/overdue",
+    NotDue => "/invoices/not-due"
+  }
+}
+
+-- The shape of an ISO date: ten characters, dashes at 4 and 7. Proved to
+-- imply exactly that, so code downstream may slice year/month/day by index.
+export pure func isoShape(s: string) -> bool
+  ensures { not result || (length(s) == 10 && substring(s, 4, 5) == "-" && substring(s, 7, 8) == "-") }
+{
+  length(s) == 10 && substring(s, 4, 5) == "-" && substring(s, 7, 8) == "-"
+}
+
+-- Shape plus numeric parts in range. Not a calendar check (2026-02-31
+-- passes): e-conomic generates these, and the point is to catch a decoder
+-- reading the wrong field, not to validate a calendar.
+export pure func isIsoDate(s: string) -> bool {
+  if not isoShape(s) then false
+  else match (stringToInt(substring(s, 0, 4)), stringToInt(substring(s, 5, 7)), stringToInt(substring(s, 8, 10))) {
+    (Some(y), Some(m), Some(d)) => y >= 1900 && y <= 2999 && m >= 1 && m <= 12 && d >= 1 && d <= 31,
+    _ => false
+  }
+}
+

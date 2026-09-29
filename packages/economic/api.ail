@@ -1,0 +1,75 @@
+-- sunholo/economic/api — typed reads of one e-conomic agreement.
+--
+-- Every function is a GET (see client.ail) and returns decoded records in
+-- integer minor units. Collections are walked completely or not at all:
+-- `maxPages` pages of 1000 rows is the budget, and a collection bigger than
+-- that is refused up front rather than silently truncated.
+--
+-- Start with `agreement` and check the number before anything else. The demo
+-- tokens, a stale grant, or the wrong 1Password item all return a perfectly
+-- plausible company — the agreement number is the only thing that tells them
+-- apart.
+
+module sunholo/economic/api
+
+import std/net (urlEncode)
+import std/list (foldl)
+import std/result (Result, Ok, Err)
+import std/option (Option, Some, None)
+import ./types (Agreement, Invoice, Customer, Account, AccountingYear, Entry, InvoiceSet, invoiceSetPath)
+import ./filter (Filter)
+import ./decode (agreement as decodeAgreement, invoice, customer, account, accountingYear, entry, allInvoiceIssues)
+import ./client (Creds, ApiError, Refused, getOne, getAll)
+
+export func agreement(c: Creds) -> Result[Agreement, ApiError] ! {Net} {
+  getOne(c, "/self", decodeAgreement)
+}
+
+-- Fetch the agreement and refuse unless it is the one expected. Use this, not
+-- `agreement`, at the top of any program that acts on real books.
+export func requireAgreement(c: Creds, expected: int) -> Result[Agreement, ApiError] ! {Net} {
+  match agreement(c) {
+    Err(e) => Err(e),
+    Ok(a) => if a.agreementNumber == expected then Ok(a)
+             else Err(Refused("connected to agreement ${show(a.agreementNumber)} (${a.companyName}), expected ${show(expected)}"))
+  }
+}
+
+export func invoices(c: Creds, which: InvoiceSet, flt: Option[Filter], maxPages: int) -> Result[[Invoice], ApiError] ! {Net} {
+  getAll(c, invoiceSetPath(which), flt, maxPages, invoice)
+}
+
+-- Invoices plus every internal inconsistency found in them (see
+-- decode.invoiceIssues). Callers that report money should use this and show
+-- the issues, not drop them.
+export func invoicesChecked(c: Creds, which: InvoiceSet, flt: Option[Filter], maxPages: int) -> Result[{ items: [Invoice], issues: [string] }, ApiError] ! {Net} {
+  match invoices(c, which, flt, maxPages) {
+    Err(e) => Err(e),
+    Ok(xs) => Ok({ items: xs, issues: allInvoiceIssues(xs) })
+  }
+}
+
+export func customers(c: Creds, flt: Option[Filter], maxPages: int) -> Result[[Customer], ApiError] ! {Net} {
+  getAll(c, "/customers", flt, maxPages, customer)
+}
+
+export func accounts(c: Creds, flt: Option[Filter], maxPages: int) -> Result[[Account], ApiError] ! {Net} {
+  getAll(c, "/accounts", flt, maxPages, account)
+}
+
+export func accountingYears(c: Creds, maxPages: int) -> Result[[AccountingYear], ApiError] ! {Net} {
+  getAll(c, "/accounting-years", None, maxPages, accountingYear)
+}
+
+-- Every entry posted in one accounting year, all accounts.
+export func yearEntries(c: Creds, year: string, flt: Option[Filter], maxPages: int) -> Result[[Entry], ApiError] ! {Net} {
+  getAll(c, "/accounting-years/${urlEncode(year)}/entries", flt, maxPages, entry)
+}
+
+-- The entries on ONE account in one year — e.g. the bank account, which is
+-- where a reconciled payment shows up. (The year-wide endpoint cannot filter
+-- by account: e-conomic answers "Filtering is not allowed on property
+-- 'account.accountNumber'".)
+export func accountEntries(c: Creds, accountNumber: int, year: string, flt: Option[Filter], maxPages: int) -> Result[[Entry], ApiError] ! {Net} {
+  getAll(c, "/accounts/${show(accountNumber)}/accounting-years/${urlEncode(year)}/entries", flt, maxPages, entry)
+}

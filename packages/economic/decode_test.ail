@@ -1,0 +1,106 @@
+-- Decoder tests on rows copied from e-conomic's public demo agreement.
+-- The full captured responses are in assets/fixtures/ and are decoded end to end by
+-- _smoke.ail, which also re-fetches them live.
+
+module sunholo/economic/decode_test
+
+import std/json (decode)
+import std/list (length)
+import std/string (contains)
+import std/result (Result, Ok, Err)
+import std/option (Option, Some, None)
+import ./decode (invoice, entry, customer, account, agreement, page, single, invoiceIssues)
+import ./types (Invoice)
+
+-- Demo invoice 3, verbatim apart from dropped hypermedia.
+pure func inv3() -> string {
+  "{\"bookedInvoiceNumber\":3,\"date\":\"2022-06-03\",\"currency\":\"DKK\",\"exchangeRate\":100.000000,\"netAmount\":3690.00,\"netAmountInBaseCurrency\":3690.00,\"grossAmount\":4612.50,\"grossAmountInBaseCurrency\":4612.50,\"vatAmount\":922.50,\"roundingAmount\":0.00,\"remainder\":4612.50,\"remainderInBaseCurrency\":4612.50,\"dueDate\":\"2022-06-11\",\"customer\":{\"customerNumber\":2},\"recipient\":{\"name\":\"Intersport\"},\"notes\":{\"heading\":\"Heading text\"}}"
+}
+
+pure func decodeInv(s: string) -> Result[Invoice, string] {
+  single(s, invoice)
+}
+
+test "demo invoice 3 decodes to minor units" {
+  match decodeInv(inv3()) {
+    Ok(i) => i.number == 3 && i.gross == 461250 && i.vat == 92250 && i.net == 369000 && i.remainder == 461250 && i.rateMicro == 100000000 && i.customerNumber == 2 && i.recipientName == "Intersport" && i.otherRef == "",
+    Err(_) => false
+  }
+}
+
+test "demo invoice 3 is internally consistent" {
+  match decodeInv(inv3()) { Ok(i) => invoiceIssues(i) == [], Err(_) => false }
+}
+
+test "a gross that does not add up is reported" {
+  match decodeInv(inv3()) {
+    Ok(i) => length(invoiceIssues({ i | gross: 461251 })) >= 1,
+    Err(_) => false
+  }
+}
+
+test "an overpayment is reported" {
+  match decodeInv(inv3()) {
+    Ok(i) => length(invoiceIssues({ i | remainder: 0 - 100, remainderBase: 0 - 100 })) == 1,
+    Err(_) => false
+  }
+}
+
+test "EUR at 746: base figures checked against the rate" {
+  match decodeInv(inv3()) {
+    Ok(i) => invoiceIssues({ i | currency: "EUR", rateMicro: 746000000, gross: 160000, net: 128000, vat: 32000, rounding: 0, remainder: 0,
+                                 grossBase: 1193600, netBase: 954880, remainderBase: 0 }) == []
+          && length(invoiceIssues({ i | currency: "EUR", rateMicro: 746000000, gross: 160000, net: 128000, vat: 32000, rounding: 0, remainder: 0,
+                                 grossBase: 1600000, netBase: 954880, remainderBase: 0 })) == 1,
+    Err(_) => false
+  }
+}
+
+test "missing fields are all named, not just the first" {
+  match decodeInv("{\"bookedInvoiceNumber\":9,\"currency\":\"DKK\"}") {
+    Ok(_) => false,
+    Err(e) => contains(e, "date") && contains(e, "grossAmount") && contains(e, "remainder") && contains(e, "customer") && contains(e, "invoice 9")
+  }
+}
+
+test "a fractional identifier is refused, not truncated" {
+  match decodeInv("{\"bookedInvoiceNumber\":3.5,\"date\":\"2022-06-03\",\"currency\":\"DKK\",\"exchangeRate\":100.0,\"netAmount\":0,\"netAmountInBaseCurrency\":0,\"grossAmount\":0,\"grossAmountInBaseCurrency\":0,\"vatAmount\":0,\"roundingAmount\":0,\"remainder\":0,\"remainderInBaseCurrency\":0,\"dueDate\":\"2022-06-11\",\"customer\":{\"customerNumber\":2}}") {
+    Ok(_) => false,
+    Err(_) => true
+  }
+}
+
+test "a non-ISO date is refused" {
+  match decodeInv("{\"bookedInvoiceNumber\":3,\"date\":\"03-06-2022\",\"currency\":\"DKK\",\"exchangeRate\":100.0,\"netAmount\":0,\"netAmountInBaseCurrency\":0,\"grossAmount\":0,\"grossAmountInBaseCurrency\":0,\"vatAmount\":0,\"roundingAmount\":0,\"remainder\":0,\"remainderInBaseCurrency\":0,\"dueDate\":\"2022-06-11\",\"customer\":{\"customerNumber\":2}}") {
+    Ok(_) => false,
+    Err(_) => true
+  }
+}
+
+test "bank entry: customer payment on 5820" {
+  match single("{\"account\":{\"accountNumber\":5820},\"amount\":-2000.00,\"amountInBaseCurrency\":-2000.00,\"currency\":\"DKK\",\"date\":\"2022-06-06\",\"entryNumber\":44,\"text\":\"Entry 13\",\"entryType\":\"customerPayment\",\"voucherNumber\":13,\"customer\":{\"customerNumber\":4}}", entry) {
+    Ok(e) => e.entryNumber == 44 && e.accountNumber == 5820 && e.amount == 0 - 200000 && e.customerNumber == Some(4) && e.invoiceNumber == None && e.entryType == "customerPayment",
+    Err(_) => false
+  }
+}
+
+test "page: items and e-conomic's row count" {
+  match page("{\"collection\":[{\"accountNumber\":5820,\"accountType\":\"status\",\"balance\":5935.50,\"debitCredit\":\"debit\",\"name\":\"Bankkonto\"}],\"pagination\":{\"results\":1}}", account) {
+    Ok(p) => p.results == 1 && length(p.items) == 1,
+    Err(_) => false
+  }
+}
+
+test "page: one bad row fails the page" {
+  match page("{\"collection\":[{\"accountNumber\":5820,\"accountType\":\"status\",\"balance\":5935.50,\"name\":\"Bankkonto\"},{\"accountNumber\":1}],\"pagination\":{\"results\":2}}", account) {
+    Ok(_) => false,
+    Err(_) => true
+  }
+}
+
+test "agreement from /self" {
+  match single("{\"agreementNumber\":1583064,\"company\":{\"name\":\"Demo Company\",\"companyIdentificationNumber\":\"00052507\"},\"settings\":{\"baseCurrency\":\"DKK\"}}", agreement) {
+    Ok(a) => a.agreementNumber == 1583064 && a.companyName == "Demo Company" && a.baseCurrency == "DKK",
+    Err(_) => false
+  }
+}

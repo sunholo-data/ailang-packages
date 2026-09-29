@@ -1,0 +1,13 @@
+-- Tests for sunholo/economic/types.
+
+module sunholo/economic/types_test
+
+import ./types (isIsoDate, invoiceSetPath, NotDue, Paid)
+
+test "iso dates" {
+  isIsoDate("2026-09-29") && not isIsoDate("2026-9-29") && not isIsoDate("29-09-2026") && not isIsoDate("2026-13-01") && not isIsoDate("") && not isIsoDate("2026-09-29T14:07:13")
+}
+
+test "invoice set paths" {
+  invoiceSetPath(NotDue) == "/invoices/not-due" && invoiceSetPath(Paid) == "/invoices/paid"
+}

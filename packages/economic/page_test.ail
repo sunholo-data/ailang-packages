@@ -1,0 +1,32 @@
+-- Tests for sunholo/economic/page.
+
+module sunholo/economic/page_test
+
+import ./page (clampPageSize, pagesNeeded, nextSkip, fitsBudget, pageQuery)
+
+
+test "clamp" {
+  clampPageSize(0) == 1 && clampPageSize(5000) == 1000 && clampPageSize(20) == 20
+}
+
+test "pages needed" {
+  pagesNeeded(0, 1000) == 0 && pagesNeeded(1, 1000) == 1 && pagesNeeded(1000, 1000) == 1 && pagesNeeded(1001, 1000) == 2 && pagesNeeded(138, 20) == 7
+}
+
+test "demo customers: 5 rows, page size 1 — walk 0..4 then stop" {
+  nextSkip(0, 1, 5) == 1 && nextSkip(3, 1, 5) == 4 && nextSkip(4, 1, 5) == 0 - 1
+}
+
+test "empty collection stops after the first page" {
+  nextSkip(0, 1000, 0) == 0 - 1
+}
+
+test "budget" {
+  fitsBudget(138, 20, 7) && not fitsBudget(138, 20, 6)
+}
+
+-- std/net.urlEncodeForm sorts by key (Go url.Values.Encode), whatever order
+-- the records are given in.
+test "query" {
+  pageQuery(2, 20) == "pagesize=20&skippages=2"
+}

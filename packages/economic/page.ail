@@ -1,0 +1,75 @@
+-- sunholo/economic/page — pagination planning, proved.
+--
+-- e-conomic pages with `skippages` / `pagesize` (max 1000) and reports the
+-- collection size in `pagination.results`. The walker in client.ail uses these
+-- functions to decide whether to fetch another page, so the properties that
+-- matter — it always makes progress, it never asks for an empty page, it stops
+-- — are stated here and proved by Z3 rather than hoped for in a recursive loop.
+
+module sunholo/economic/page
+
+import std/net (urlEncodeForm)
+
+export pure func maxPageSize() -> int
+  ensures { result == 1000 }
+{
+  1000
+}
+
+-- Any requested size becomes a legal one; a legal one is left alone.
+export pure func clampPageSize(n: int) -> int
+  ensures {
+    result >= 1,
+    result <= maxPageSize(),
+    n < 1 || n > maxPageSize() || result == n
+  }
+{
+  if n < 1 then 1 else if n > maxPageSize() then maxPageSize() else n
+}
+
+-- Pages needed for `results` rows: ceiling division. Proved both ways — enough
+-- pages to hold every row, and not one page more than that.
+export pure func pagesNeeded(results: int, size: int) -> int
+  requires { results >= 0, size >= 1, size <= 1000, results <= 1000000000 }
+  ensures {
+    result >= 0,
+    result * size >= results,
+    results == 0 || (result - 1) * size < results
+  }
+{
+  (results + size - 1) / size
+}
+
+-- After fetching page `skip`, the next page to fetch, or -1 when done. Proved:
+-- it only ever moves forward by one, and it never asks for a page that would
+-- start past the last row.
+export pure func nextSkip(skip: int, size: int, results: int) -> int
+  requires { skip >= 0, size >= 1, size <= 1000, results >= 0, results <= 1000000000, skip <= 1000000 }
+  ensures {
+    result == 0 - 1 || result == skip + 1,
+    result == 0 - 1 || result * size < results,
+    result != 0 - 1 || (skip + 1) * size >= results
+  }
+{
+  if (skip + 1) * size < results then skip + 1 else 0 - 1
+}
+
+-- Would walking this collection exceed a page budget? Checked BEFORE the walk
+-- begins, from the first page's `results`, so a caller learns it would be
+-- truncated instead of receiving a partial list that looks complete.
+export pure func fitsBudget(results: int, size: int, maxPages: int) -> bool
+  requires { results >= 0, size >= 1, size <= 1000, results <= 1000000000, maxPages >= 1 }
+  ensures { result == (pagesNeeded(results, size) <= maxPages) }
+{
+  pagesNeeded(results, size) <= maxPages
+}
+
+-- The query parameters for one page.
+export pure func pageParams(skip: int, size: int) -> [{ name: string, value: string }] {
+  [{ name: "skippages", value: show(skip) }, { name: "pagesize", value: show(clampPageSize(size)) }]
+}
+
+export pure func pageQuery(skip: int, size: int) -> string {
+  urlEncodeForm(pageParams(skip, size))
+}
+

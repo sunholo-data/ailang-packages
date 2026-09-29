@@ -1,0 +1,267 @@
+-- sunholo/economic/decode — JSON → records, with every failure named.
+--
+-- Decoders are pure: a response body in, a record or a list of problems out.
+-- They never invent a value. A missing required field is an error naming the
+-- field; a missing optional field is "" or None.
+--
+-- Two traps this module exists to avoid:
+--
+-- * std/json.getInt TRUNCATES a non-integral number — getInt on 1187.50 is
+--   Some(1187) (ailang v0.47.0, reported upstream). Money therefore always
+--   goes through getNumber → money.toMinor, and identifiers through
+--   `wholeNumber`, which refuses a fraction instead of dropping it.
+--
+-- * A response that decodes cleanly can still be wrong. `invoiceIssues`
+--   re-checks each invoice against the verified arithmetic in money.ail
+--   (totals add up, base-currency figures agree with the rate, the remainder
+--   is not an overpayment) and returns what disagrees. The caller decides
+--   what to do; nothing here "fixes" a figure.
+
+module sunholo/economic/decode
+
+import std/json (Json, decode, getNumber, getString, getObject, getArray)
+import std/math (floatToInt, intToFloat, isNaN)
+import std/list (map, foldl, length)
+import std/string (length as strLength)
+import std/result (Result, Ok, Err)
+import std/option (Option, Some, None)
+import ./money (toMinor, toRateMicro, totalsAddUp, payState, PayState, Overpaid, baseAgrees, convertible, inRange, showMinor)
+import ./types (Agreement, Invoice, Customer, Account, AccountingYear, Entry, isIsoDate)
+
+-- ------------------------------------------------------ field readers --
+
+pure func present(j: Json, key: string) -> Result[float, string] {
+  match getNumber(j, key) {
+    Some(x) => Ok(x),
+    None => Err("missing or non-numeric field: ${key}")
+  }
+}
+
+-- An integer field that must BE an integer: 3.5 is refused, not truncated.
+export pure func wholeNumber(j: Json, key: string) -> Result[int, string] {
+  match present(j, key) {
+    Err(e) => Err(e),
+    Ok(x) => if isNaN(x) then Err("NaN in field: ${key}")
+             else if x > 9000000000000000.0 || x < -9000000000000000.0 then Err("out of range: ${key}")
+             else if intToFloat(floatToInt(x)) == x then Ok(floatToInt(x))
+             else Err("non-integral value in integer field: ${key}")
+  }
+}
+
+export pure func amount(j: Json, key: string) -> Result[int, string] {
+  match present(j, key) {
+    Err(e) => Err(e),
+    Ok(x) => match toMinor(x) {
+      Ok(m) => if inRange(m) then Ok(m) else Err("amount out of range: ${key}"),
+      Err(e) => Err("${key}: ${e}")
+    }
+  }
+}
+
+pure func rate(j: Json, key: string) -> Result[int, string] {
+  match present(j, key) {
+    Err(e) => Err(e),
+    Ok(x) => match toRateMicro(x) { Ok(r) => Ok(r), Err(e) => Err("${key}: ${e}") }
+  }
+}
+
+pure func text(j: Json, key: string) -> Result[string, string] {
+  match getString(j, key) {
+    Some(s) => Ok(s),
+    None => Err("missing or non-string field: ${key}")
+  }
+}
+
+pure func optText(j: Json, key: string) -> string {
+  match getString(j, key) { Some(s) => s, None => "" }
+}
+
+pure func date(j: Json, key: string) -> Result[string, string] {
+  match text(j, key) {
+    Err(e) => Err(e),
+    Ok(s) => if isIsoDate(s) then Ok(s) else Err("not an ISO date in ${key}: ${s}")
+  }
+}
+
+-- `{"customer": {"customerNumber": 4, …}}` → 4
+pure func nestedWhole(j: Json, obj: string, key: string) -> Result[int, string] {
+  match getObject(j, obj) {
+    Some(o) => match wholeNumber(o, key) { Ok(n) => Ok(n), Err(e) => Err("${obj}.${e}") },
+    None => Err("missing object: ${obj}")
+  }
+}
+
+pure func optNestedWhole(j: Json, obj: string, key: string) -> Option[int] {
+  match nestedWhole(j, obj, key) { Ok(n) => Some(n), Err(_) => None }
+}
+
+pure func optNestedText(j: Json, obj: string, key: string) -> string {
+  match getObject(j, obj) { Some(o) => optText(o, key), None => "" }
+}
+
+-- Collecting instead of short-circuiting: a record with three bad fields
+-- reports all three, so a decoder bug is fixed in one pass, not three.
+pure func errs(r: Result[a, string]) -> [string] {
+  match r { Ok(_) => [], Err(e) => [e] }
+}
+
+pure func orZero(r: Result[int, string]) -> int {
+  match r { Ok(n) => n, Err(_) => 0 }
+}
+
+pure func orEmpty(r: Result[string, string]) -> string {
+  match r { Ok(s) => s, Err(_) => "" }
+}
+
+pure func finish(label: string, problems: [string], build: () -> a) -> Result[a, string] {
+  match problems {
+    [] => Ok(build()),
+    _ => Err("${label}: ${foldl(\acc e. if acc == "" then e else "${acc}; ${e}", "", problems)}")
+  }
+}
+
+-- ---------------------------------------------------------- records --
+
+export pure func agreement(j: Json) -> Result[Agreement, string] {
+  let n = wholeNumber(j, "agreementNumber");
+  let name = match getObject(j, "company") { Some(c) => text(c, "name"), None => Err("missing object: company") };
+  let cur = match getObject(j, "settings") { Some(s) => text(s, "baseCurrency"), None => Err("missing object: settings") };
+  finish("agreement", errs(n) ++ errs(name) ++ errs(cur), \u.
+    { agreementNumber: orZero(n), companyName: orEmpty(name),
+      companyId: optNestedText(j, "company", "companyIdentificationNumber"), baseCurrency: orEmpty(cur) })
+}
+
+export pure func invoice(j: Json) -> Result[Invoice, string] {
+  let num = wholeNumber(j, "bookedInvoiceNumber");
+  let dt = date(j, "date");
+  let due = date(j, "dueDate");
+  let cur = text(j, "currency");
+  let rt = rate(j, "exchangeRate");
+  let net = amount(j, "netAmount");
+  let vat = amount(j, "vatAmount");
+  let rnd = amount(j, "roundingAmount");
+  let gross = amount(j, "grossAmount");
+  let rem = amount(j, "remainder");
+  let netB = amount(j, "netAmountInBaseCurrency");
+  let grossB = amount(j, "grossAmountInBaseCurrency");
+  let remB = amount(j, "remainderInBaseCurrency");
+  let cust = nestedWhole(j, "customer", "customerNumber");
+  let label = match num { Ok(n) => "invoice ${show(n)}", Err(_) => "invoice ?" };
+  finish(label,
+    errs(num) ++ errs(dt) ++ errs(due) ++ errs(cur) ++ errs(rt) ++ errs(net) ++ errs(vat) ++ errs(rnd)
+      ++ errs(gross) ++ errs(rem) ++ errs(netB) ++ errs(grossB) ++ errs(remB) ++ errs(cust),
+    \u. { number: orZero(num), date: orEmpty(dt), dueDate: orEmpty(due), currency: orEmpty(cur),
+          rateMicro: orZero(rt), net: orZero(net), vat: orZero(vat), rounding: orZero(rnd),
+          gross: orZero(gross), remainder: orZero(rem), netBase: orZero(netB),
+          grossBase: orZero(grossB), remainderBase: orZero(remB), customerNumber: orZero(cust),
+          recipientName: optNestedText(j, "recipient", "name"),
+          heading: optNestedText(j, "notes", "heading"),
+          otherRef: optNestedText(j, "references", "other") })
+}
+
+export pure func customer(j: Json) -> Result[Customer, string] {
+  let num = wholeNumber(j, "customerNumber");
+  let name = text(j, "name");
+  let cur = text(j, "currency");
+  let bal = amount(j, "balance");
+  let due = amount(j, "dueAmount");
+  let label = match num { Ok(n) => "customer ${show(n)}", Err(_) => "customer ?" };
+  finish(label, errs(num) ++ errs(name) ++ errs(cur) ++ errs(bal) ++ errs(due),
+    \u. { number: orZero(num), name: orEmpty(name), currency: orEmpty(cur),
+          email: optText(j, "email"), vatNumber: optText(j, "corporateIdentificationNumber"),
+          balance: orZero(bal), dueAmount: orZero(due) })
+}
+
+export pure func account(j: Json) -> Result[Account, string] {
+  let num = wholeNumber(j, "accountNumber");
+  let name = text(j, "name");
+  let ty = text(j, "accountType");
+  let bal = amount(j, "balance");
+  let label = match num { Ok(n) => "account ${show(n)}", Err(_) => "account ?" };
+  finish(label, errs(num) ++ errs(name) ++ errs(ty) ++ errs(bal),
+    \u. { number: orZero(num), name: orEmpty(name), accountType: orEmpty(ty),
+          debitCredit: optText(j, "debitCredit"), balance: orZero(bal) })
+}
+
+export pure func accountingYear(j: Json) -> Result[AccountingYear, string] {
+  let y = text(j, "year");
+  let f = date(j, "fromDate");
+  let t = date(j, "toDate");
+  finish("accounting year", errs(y) ++ errs(f) ++ errs(t),
+    \u. { year: orEmpty(y), fromDate: orEmpty(f), toDate: orEmpty(t) })
+}
+
+export pure func entry(j: Json) -> Result[Entry, string] {
+  let num = wholeNumber(j, "entryNumber");
+  let dt = date(j, "date");
+  let acct = nestedWhole(j, "account", "accountNumber");
+  let amt = amount(j, "amount");
+  let amtB = amount(j, "amountInBaseCurrency");
+  let cur = text(j, "currency");
+  let vch = wholeNumber(j, "voucherNumber");
+  let ty = text(j, "entryType");
+  let label = match num { Ok(n) => "entry ${show(n)}", Err(_) => "entry ?" };
+  finish(label, errs(num) ++ errs(dt) ++ errs(acct) ++ errs(amt) ++ errs(amtB) ++ errs(cur) ++ errs(vch) ++ errs(ty),
+    \u. { entryNumber: orZero(num), date: orEmpty(dt), accountNumber: orZero(acct),
+          amount: orZero(amt), amountBase: orZero(amtB), currency: orEmpty(cur),
+          text: optText(j, "text"), entryType: orEmpty(ty), voucherNumber: orZero(vch),
+          customerNumber: optNestedWhole(j, "customer", "customerNumber"),
+          invoiceNumber: optNestedWhole(j, "bookedInvoice", "bookedInvoiceNumber") })
+}
+
+-- ------------------------------------------------------------ pages --
+
+-- One collection page: the decoded items and e-conomic's own row count.
+-- Any item that fails to decode fails the page, naming every failing item —
+-- a list that silently skipped a bad row would under-report money.
+export pure func page(body: string, item: Json -> Result[a, string]) -> Result[{ items: [a], results: int }, string] {
+  match decode(body) {
+    Err(e) => Err("response is not JSON: ${e}"),
+    Ok(j) => match getArray(j, "collection") {
+      None => Err("response has no collection"),
+      Some(rows) => match getObject(j, "pagination") {
+        None => Err("response has no pagination"),
+        Some(p) => match wholeNumber(p, "results") {
+          Err(e) => Err("pagination.${e}"),
+          Ok(total) => {
+            let decoded = map(item, rows);
+            let problems = foldl(\acc r. acc ++ errs(r), [], decoded);
+            match problems {
+              [] => Ok({ items: foldl(\acc r. match r { Ok(x) => acc ++ [x], Err(_) => acc }, [], decoded), results: total }),
+              _ => Err(foldl(\acc e. if acc == "" then e else "${acc}; ${e}", "", problems))
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
+export pure func single(body: string, item: Json -> Result[a, string]) -> Result[a, string] {
+  match decode(body) {
+    Err(e) => Err("response is not JSON: ${e}"),
+    Ok(j) => item(j)
+  }
+}
+
+-- ----------------------------------------------------- consistency --
+
+-- Everything about one invoice that the verified arithmetic says cannot be
+-- right. Empty means consistent. Each line names the invoice and the figures.
+export pure func invoiceIssues(inv: Invoice) -> [string] {
+  let tag = "invoice ${show(inv.number)}";
+  let totals = if totalsAddUp(inv.net, inv.vat, inv.rounding, inv.gross) then []
+    else ["${tag}: net ${showMinor(inv.net)} + VAT ${showMinor(inv.vat)} + rounding ${showMinor(inv.rounding)} != gross ${showMinor(inv.gross)}"];
+  let pay = if payState(inv.gross, inv.remainder) == Overpaid
+    then ["${tag}: remainder ${showMinor(inv.remainder)} is outside 0..gross ${showMinor(inv.gross)}"] else [];
+  let base = if not convertible(inv.gross, inv.rateMicro) then ["${tag}: amount/rate outside the convertible range; base figures not checked"]
+    else (if baseAgrees(inv.gross, inv.rateMicro, inv.grossBase) then [] else ["${tag}: gross ${showMinor(inv.gross)} ${inv.currency} at rate ${show(inv.rateMicro)}e-6 does not give base ${showMinor(inv.grossBase)}"])
+      ++ (if baseAgrees(inv.net, inv.rateMicro, inv.netBase) then [] else ["${tag}: net base-currency figure disagrees with rate"])
+      ++ (if baseAgrees(inv.remainder, inv.rateMicro, inv.remainderBase) then [] else ["${tag}: remainder base-currency figure disagrees with rate"]);
+  let cur = if strLength(inv.currency) == 3 then [] else ["${tag}: currency code '${inv.currency}' is not three letters"];
+  totals ++ pay ++ base ++ cur
+}
+
+export pure func allInvoiceIssues(invs: [Invoice]) -> [string] {
+  foldl(\acc i. acc ++ invoiceIssues(i), [], invs)
+}
