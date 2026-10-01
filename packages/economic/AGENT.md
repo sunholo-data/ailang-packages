@@ -67,7 +67,12 @@ above; Basis is limited. `/self` reports the plan as
      | Project employee | projects and products | none |
      | SuperUser | everything except other users' logins | all, but more than this package needs |
 
-   - Require **Accounting + Sales** rather than SuperUser. No role is
+   - Leave every **Required modules** box unticked (Dimension, Subscription,
+     Inventory, Project Accounting, Scanning). The package reads no
+     module-only entity, and a required module the agreement lacks would
+     stop the app from installing.
+   - Require **Accounting + Sales** rather than SuperUser. The form lets you
+     tick more than one role. No role is
      read-only, so the tokens could write through some other client; this
      package cannot, because its only request is a `GET`.
    - The **App Secret Token** is shown once. Store it straight away; **reset**
