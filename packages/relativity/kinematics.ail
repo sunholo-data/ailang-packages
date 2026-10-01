@@ -9,7 +9,7 @@
 
 module sunholo/relativity/kinematics
 
-import std/math (sqrt, exp)
+import std/math (sqrt, exp, log)
 import ./hyper (sinh, cosh, tanh, atanh, sinhc)
 
 -- Rapidity, proper (ship) time, coordinate (galaxy) time, distance along the
@@ -77,4 +77,14 @@ export pure func coast(m: Motion, dtau: float) -> Motion
   ensures { result.tau >= m.tau && result.t >= m.t }
 {
   accelerate(m, 0.0, dtau)
+}
+
+-- Rapidity from e = 1 - beta, without ever forming beta = 1 - e:
+--   phi = atanh(1 - e) = (log(2 - e) - log(e)) / 2.
+-- Use it to state a speed as its distance from c (the gamma cap is
+-- 1 - beta = 1e-6). e in (0, 2); e > 1 is a negative beta.
+export pure func rapidityOfOneMinusBeta(e: float) -> float
+  requires { e > 0.0 && e < 2.0 }
+{
+  0.5 * (log(2.0 - e) - log(e))
 }

@@ -13,6 +13,7 @@ module sunholo/relativity/optics
 
 import std/math (sqrt, exp)
 import ./hyper (sinh, cosh, absf)
+import ./medium (cmbTemperatureK)
 
 export type Vec3 = { x: float, y: float, z: float }
 
@@ -84,3 +85,11 @@ export pure func cosSeen(cosTheta: float, beta: float) -> float
   let r = (cosTheta + beta) / (1.0 + beta * cosTheta);
   if r > 1.0 then 1.0 else if r < -1.0 then -1.0 else r
 }
+
+-- Doppler factor straight ahead: gamma (1 + beta) = e^phi (> 1, blueshift).
+export pure func forwardDoppler(phi: float) -> float = exp(phi)
+
+-- Temperature of the cosmic microwave background straight ahead of an
+-- observer at rapidity phi: T_CMB e^phi (K). Off-axis it halves at 1/gamma
+-- rad from the pole. 38.44 K at 0.99c, 3,853.7 K at 1 - beta = 1e-6.
+export pure func cmbForwardTemperature(phi: float) -> float = cmbTemperatureK() * forwardDoppler(phi)

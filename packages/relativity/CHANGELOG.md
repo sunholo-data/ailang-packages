@@ -1,5 +1,42 @@
 # Changelog
 
+## 0.4.0
+
+Additive: `Trip`, `flipAndBurn`, `burnCoastBurn` and `coastAt` keep their
+signatures. Check values: tools/journey_ref.py (stdlib Python, float64 closed
+forms cross-checked against 50-digit Decimal; output in tools/journey_ref.out)
+and the canon IDs HB-n of stapledons-design physics/higgs-bubble.md.
+
+- **journey**: `TripPlan` (trip totals plus `a`, `phiPeak`, `tauBurn`,
+  `tauCoast`, `tauTotal`, `dBurn`, `dCoast`, `fellBack`),
+  `planBurnCoastBurn(d, a, phiCruise)` (cruise speed as a rapidity; falls back
+  to flip-and-burn with `fellBack` when 2 dBurn >= d), `planFlipAndBurn(d, a)`,
+  `TripPhase` (`Accelerating | Coasting | Decelerating | Arrived`),
+  `phaseAt(p, tau)` (left-closed boundaries) and `motionAt(p, tau)` (closed
+  form per phase, clamped to [0, tauTotal]; exact at the boundaries and at
+  arrival). `flipAndBurn` and `burnCoastBurn` are now `planX(...).trip`.
+- **hyper**: `acosh1p(u)` = acosh(1 + u) without forming 1 + u.
+  `flipAndBurn` uses it, so short trips keep their low bits.
+- **kinematics**: `rapidityOfOneMinusBeta(e)`: the rapidity of a speed given
+  as 1 - beta, never forming 1 - e.
+- **medium** (new, SI): constants `cSI`, `protonMassKg` (CODATA 2018),
+  `lightYearM` (IAU), `julianYearS`, `astronomicalUnitM`, `cmbTemperatureK`
+  (2.725 K, HB-5); `accelSI` (c/yr to m/s^2); `photonDriveEnergy`,
+  `loadScale`, `kineticFlux`, `mirrorDragForce` (specular sphere, half a flat
+  mirror), `mirrorDragPower`, `cruiseDragEnergy`, `glowInwardFlux`,
+  `TripEnergy`, `tripEnergy` (boost = brake = m_eff c^2 phi, drag over
+  dCoast), `brakeHoldsAgainstDrag`.
+- **optics**: `forwardDoppler(phi)` = e^phi, `cmbForwardTemperature(phi)`.
+- Behaviour change within rounding: `burnCoastBurn`'s burn distance is now
+  2 sinh^2(phi/2)/a instead of (cosh(phi) - 1)/a (same value, no cancellation
+  at low speed), and `flipAndBurn` forms acosh via `acosh1p`.
+- NaN: `brakeHoldsAgainstDrag` is false for NaN; `planBurnCoastBurn` with a
+  NaN input takes the fallback branch on both the VM and the interpreter
+  (ailang#1419: the interpreter answers NaN >= x with true); `phaseAt` and
+  `motionAt` treat a NaN tau as 0.
+- `_smoke.ail`: `journeyDigest(n)` (strict VM = interpreter, bit for bit) and
+  a cruise-trip check.
+
 ## 0.3.0
 
 - **blackbody_photometry**: blackbody white-dwarf temperature and V from Gaia

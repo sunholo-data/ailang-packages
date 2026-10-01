@@ -1,0 +1,114 @@
+-- sunholo/relativity/medium — Higgs-bubble energetics: photon drive, ISM drag,
+-- glow, and the trip energy ledger.
+--
+-- Model (stapledons-design physics/higgs-bubble.md §4-6): a spherical pocket
+-- of radius R whose wall reflects every massive particle elastically and lets
+-- light through. Only light leaves, so the drive is a photon drive
+-- (E = m_eff c^2 phi per boost or brake), and the interstellar medium, a
+-- proton beam of density n, is mirrored off a specular sphere (half the drag
+-- of a flat face-on mirror of the same projected area).
+--
+-- Units: SI in and out. n in m^-3, R in m, m_eff in kg, accelerations in
+-- m/s^2 (accelSI converts the c/yr of kinematics and journey), distances in
+-- light-years (the journey unit; converted with lightYearM). Results in J, N,
+-- W, W/m^2. Every formula is in rapidity form (gamma beta = sinh phi,
+-- gamma - 1 = 2 sinh^2(phi/2)), so nothing forms 1 - beta.
+
+module sunholo/relativity/medium
+
+import ./hyper (sinh)
+import ./journey (TripPlan)
+
+-- Speed of light, m/s (exact).
+export pure func cSI() -> float = 299792458.0
+
+-- Proton mass, kg (CODATA 2018; m_p c^2 = 938.272 MeV = 1.50328e-10 J).
+export pure func protonMassKg() -> float = 0.00000000000000000000000000167262192369
+
+-- Light-year, m (IAU: Julian year times c).
+export pure func lightYearM() -> float = 9460730472580800.0
+
+-- Julian year, s.
+export pure func julianYearS() -> float = 31557600.0
+
+-- Astronomical unit, m (IAU 2012, exact).
+export pure func astronomicalUnitM() -> float = 149597870700.0
+
+-- CMB temperature, K (higgs-bubble HB-5; 2.7255 K would raise every CMB
+-- temperature by 0.02%).
+export pure func cmbTemperatureK() -> float = 2.725
+
+pure func pi() -> float = 3.141592653589793
+
+-- Acceleration in c per Julian year (kinematics/journey units) to m/s^2.
+-- accelSI(standardGravity()) = 9.80665.
+export pure func accelSI(aCPerYear: float) -> float = aCPerYear * cSI() / julianYearS()
+
+-- Photon energy radiated by one boost (or one brake) from rest to rapidity
+-- phi, ship frame: m_eff c^2 phi (J). Grows only as ln(2 gamma).
+export pure func photonDriveEnergy(mEff: float, phi: float) -> float = mEff * cSI() * cSI() * phi
+
+-- Momentum flux times c on a face-on surface, ship frame:
+-- n gamma^2 beta^2 m_p c^3 = n sinh^2(phi) m_p c^3 (W/m^2). The drag follows it.
+export pure func loadScale(n: float, phi: float) -> float {
+  let s = sinh(phi);
+  let c = cSI();
+  n * s * s * protonMassKg() * c * c * c
+}
+
+-- Kinetic-energy flux that would be deposited if impacts were thermalised:
+-- n gamma beta (gamma - 1) m_p c^3 = n sinh(phi) 2 sinh^2(phi/2) m_p c^3 (W/m^2).
+export pure func kineticFlux(n: float, phi: float) -> float {
+  let h = sinh(phi / 2.0);
+  let c = cSI();
+  n * sinh(phi) * 2.0 * h * h * protonMassKg() * c * c * c
+}
+
+-- Drag on the specular sphere of radius r: n sinh^2(phi) m_p c^2 pi r^2 (N).
+-- (A flat face-on mirror of the same area would be twice this.) The same in
+-- the ship and galaxy frames.
+export pure func mirrorDragForce(n: float, phi: float, r: float) -> float {
+  let s = sinh(phi);
+  let c = cSI();
+  n * s * s * protonMassKg() * c * c * pi() * r * r
+}
+
+-- Photon-drive power that holds cruise against the drag, ship frame: F c (W).
+export pure func mirrorDragPower(n: float, phi: float, r: float) -> float = mirrorDragForce(n, phi, r) * cSI()
+
+-- Ship-frame energy radiated to hold cruise over dCoast light-years:
+-- F c tau = n sinh(phi) m_p c^2 pi r^2 dCoast (J). Grows about as gamma d.
+export pure func cruiseDragEnergy(n: float, phi: float, r: float, dCoast: float) -> float {
+  let c = cSI();
+  n * sinh(phi) * protonMassKg() * c * c * pi() * r * r * dCoast * lightYearM()
+}
+
+-- Mean inward glow over the inner wall: a fraction eps of the kinetic flux
+-- becomes light at the wall, fIn of it shines inward, spread over 4 pi R^2:
+-- eps fIn K / 4 (W/m^2).
+export pure func glowInwardFlux(n: float, phi: float, eps: float, fIn: float) -> float =
+  eps * fIn * kineticFlux(n, phi) / 4.0
+
+-- Energy ledger of a planned trip, ship frame (J).
+export type TripEnergy = { boost: float, brake: float, drag: float, total: float }
+
+-- boost = brake = m_eff c^2 phiPeak; drag = cruiseDragEnergy over p.dCoast;
+-- total = boost + brake + drag. The drag work during the boost (drive
+-- supplies m_eff a + F) and the brake (m_eff a - F) cancels over the pair, so
+-- it is absent; this is exact when brakeHoldsAgainstDrag holds. With
+-- dCoast (not d) the ledger closes at arrival.
+export pure func tripEnergy(p: TripPlan, mEff: float, n: float, r: float) -> TripEnergy {
+  let b = photonDriveEnergy(mEff, p.phiPeak);
+  let d = cruiseDragEnergy(n, p.phiPeak, r, p.dCoast);
+  { boost: b, brake: b, drag: d, total: 2.0 * b + d }
+}
+
+-- Precondition of tripEnergy: the brake's photon thrust m_eff a (a in m/s^2)
+-- is at least the drag at phi, so the brake can still decelerate. False for
+-- NaN inputs (tested first: ailang#1419, the interpreter answers NaN >= x
+-- with true).
+export pure func brakeHoldsAgainstDrag(mEff: float, a: float, n: float, phi: float, r: float) -> bool {
+  let thrust = mEff * a;
+  let drag = mirrorDragForce(n, phi, r);
+  if thrust == thrust && drag == drag then thrust >= drag else false
+}

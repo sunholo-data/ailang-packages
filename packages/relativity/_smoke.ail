@@ -1,14 +1,18 @@
--- Boot probe for publish: prints "OK: ..." iff four independent checks hold
+-- Boot probe for publish: prints "OK: ..." iff six independent checks hold
 -- in a clean workdir — a trip time (rocket equation), an apparent star
--- position (aberration), a black-hole shadow size (Schwarzschild), and a
--- G2V temperature (photometry).
+-- position (aberration), a black-hole shadow size (Schwarzschild), a
+-- G2V temperature (photometry), a white-dwarf temperature, and a cruise
+-- trip with its energy ledger (journey plans, medium).
 module sunholo/relativity/_smoke
 
 import std/io (println)
 import std/math (acos, intToFloat)
-import ./kinematics (standardGravity)
+import ./kinematics (standardGravity, rapidityOfOneMinusBeta)
 import ./hyper (atanh, absf)
-import ./journey (flipAndBurn)
+import ./journey (TripPlan, TripPhase, Accelerating, Coasting, Decelerating, Arrived, flipAndBurn, planBurnCoastBurn, planFlipAndBurn, phaseAt, motionAt)
+import ./hyper (acosh1p)
+import ./optics (cmbForwardTemperature)
+import ./medium (tripEnergy, mirrorDragPower, loadScale, glowInwardFlux, brakeHoldsAgainstDrag, accelSI)
 import ./optics (aberrate, dot)
 import ./schwarzschild (shadowAngularRadius, pi)
 import ./photometry (teffFromBpRp)
@@ -25,6 +29,63 @@ pure func wdSweep(i: int, n: int, acc: float) -> float =
 export pure func wdDigest(n: int) -> float =
   wdSweep(0, n, 0.0) + bbTeffFromBpRp(wdNaN()) + bbTeffFromBpRp(wdInf()) + bbTeffFromBpRp(-wdInf())
 
+pure func phaseNum(ph: TripPhase) -> float =
+  match ph {
+    Accelerating => 1.0,
+    Coasting => 2.0,
+    Decelerating => 3.0,
+    Arrived => 4.0
+  }
+
+-- One plan's contribution: totals, boundaries, motion and phase at k
+-- evenly spaced proper times (and the boundaries themselves), and the
+-- energy readouts.
+pure func planSum(p: TripPlan, k: int, i: int, acc: float) -> float =
+  if i > k then acc
+  else {
+    let tau = p.tauTotal * intToFloat(i) / intToFloat(k);
+    let m = motionAt(p, tau);
+    planSum(p, k, i + 1, acc + m.phi + m.t + m.x + m.tau + phaseNum(phaseAt(p, tau)))
+  }
+
+pure func planDigest(p: TripPlan, k: int) -> float {
+  let e = tripEnergy(p, 1.0, 100000.0, 100.0);
+  let b1 = motionAt(p, p.tauBurn);
+  let b2 = motionAt(p, p.tauBurn + p.tauCoast);
+  let fb = if p.fellBack then 1.0 else 0.0;
+  let holds = if brakeHoldsAgainstDrag(1.0, accelSI(p.a), 100000.0, p.phiPeak, 100.0) then 1.0 else 0.0;
+  planSum(p, k, 0, 0.0) + p.trip.shipTime + p.trip.galaxyTime + p.trip.peakBeta + p.trip.peakGamma
+    + p.tauBurn + p.tauCoast + p.dBurn + p.dCoast + fb + holds
+    + b1.x + b1.t + b2.x + b2.t + b2.phi
+    + (e.total + mirrorDragPower(100000.0, p.phiPeak, 100.0) + loadScale(100000.0, p.phiPeak)) / 1.0e15
+    + glowInwardFlux(100000.0, p.phiPeak, 0.000000001, 0.5) + cmbForwardTemperature(p.phiPeak)
+}
+
+-- Sweep cruise rapidity over [0.9c, the cap] for alpha Cen at 7.5e5 g, plus
+-- the flip, fallback, short-trip and NaN paths.
+pure func journeySweep(i: int, n: int, acc: float) -> float =
+  if i > n then acc
+  else {
+    let lo = 1.4722194895832204;
+    let phi = lo + (rapidityOfOneMinusBeta(0.000001) - lo) * intToFloat(i) / intToFloat(n);
+    journeySweep(i + 1, n, acc + planDigest(planBurnCoastBurn(4.37, 774221.4566651969, phi), 8))
+  }
+
+-- Pure digest of the 0.4.0 journey and medium paths; interpreter and strict
+-- VM must print the same bits.
+export pure func journeyDigest(n: int) -> float {
+  let nanPlan = planBurnCoastBurn(4.37, 774221.4566651969, wdNaN());
+  let p = planBurnCoastBurn(4.37, 774221.4566651969, 2.6466524123622457);
+  journeySweep(0, n, 0.0)
+    + planDigest(planFlipAndBurn(4.37, standardGravity()), 16)
+    + planDigest(planBurnCoastBurn(0.001, 774221.4566651969, rapidityOfOneMinusBeta(0.000001)), 16)
+    + planDigest(planFlipAndBurn(0.000000001, standardGravity()), 16)
+    + acosh1p(0.0000000001) * 1000000.0
+    + phaseNum(phaseAt(p, wdNaN())) + motionAt(p, wdNaN()).x
+    + (if nanPlan.fellBack then 1.0 else 0.0)
+    + (if brakeHoldsAgainstDrag(wdNaN(), 1.0, 1.0, 1.0, 1.0) then 1.0 else 0.0)
+}
+
 export func main() -> () ! {IO} {
   let trip = flipAndBurn(4.37, standardGravity());
   let fwd = { x: 0.0, y: 0.0, z: -1.0 };
@@ -36,7 +97,9 @@ export func main() -> () ! {IO} {
   let shadowOk = absf(shadow - pi() / 4.0) < 0.000000000001;
   let photometryOk = absf(teffFromBpRp(0.823) - 5770.0) < 0.000000001;
   let photometryWdOk = absf(bbTeffFromBpRp(0.30) - 8941.61808557) < 0.000001;
-  if tripOk && angleOk && shadowOk && photometryOk && photometryWdOk
-  then println("OK: relativity alpha-Cen trip 3.5824 ship-yr / 6.0025 yr, 90deg star seen at 25.842deg at 0.9c, shadow at 3 r_s = pi/4, G2V = 5770 K, WD BP-RP 0.30 = 8941.6 K")
-  else println("FAIL: trip ${show(trip.shipTime)} / ${show(trip.galaxyTime)}, angle ${show(angle)}, shadow ${show(shadow)}, G2V ${show(teffFromBpRp(0.823))}, WD ${show(bbTeffFromBpRp(0.30))}")
+  let cruise = planBurnCoastBurn(4.37, 774221.4566651969, rapidityOfOneMinusBeta(0.000001));
+  let cruiseOk = absf(cruise.trip.shipTime - 0.006196277986522) < 0.000000000001 && absf(tripEnergy(cruise, 1.0, 100000.0, 100.0).total / 1.0e19 - 1.5104591056870126) < 0.000000001;
+  if tripOk && angleOk && shadowOk && photometryOk && photometryWdOk && cruiseOk
+  then println("OK: relativity alpha-Cen trip 3.5824 ship-yr / 6.0025 yr, 90deg star seen at 25.842deg at 0.9c, shadow at 3 r_s = pi/4, G2V = 5770 K, WD BP-RP 0.30 = 8941.6 K, alpha Cen at 1-beta = 1e-6 2.263 ship-days / 1.510e19 J")
+  else println("FAIL: trip ${show(trip.shipTime)} / ${show(trip.galaxyTime)}, angle ${show(angle)}, shadow ${show(shadow)}, G2V ${show(teffFromBpRp(0.823))}, WD ${show(bbTeffFromBpRp(0.30))}, cruise ${show(cruise.trip.shipTime)}")
 }

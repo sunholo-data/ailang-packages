@@ -1,0 +1,206 @@
+-- Check values for the 0.4.0 Higgs-bubble energetics (medium) and the
+-- forward CMB (optics.forwardDoppler, optics.cmbForwardTemperature).
+--
+-- Expected numbers come from tools/journey_ref.py (output committed as
+-- tools/journey_ref.out), never from the code under test. The readout table
+-- is the M2 design's (alpha Cen; n = 1e5 m^-3, R = 100 m, m_eff = 1 kg,
+-- eps = 1e-9, f_in = 1/2), to 1e-12 relative. HB-n are the canon IDs of
+-- stapledons-design physics/higgs-bubble.md, to their printed digits.
+--
+-- Named check functions: whole-number float literals inside test blocks are
+-- misread as ints (ailang#1456).
+
+module sunholo/relativity/medium_test
+
+import std/math (intToFloat)
+import ./hyper (atanh, absf)
+import ./kinematics (standardGravity, rapidityOfOneMinusBeta)
+import ./journey (TripPlan, planBurnCoastBurn)
+import ./optics (forwardDoppler, cmbForwardTemperature)
+import ./medium (cSI, protonMassKg, lightYearM, julianYearS, astronomicalUnitM, cmbTemperatureK, accelSI, photonDriveEnergy, mirrorDragForce, mirrorDragPower, cruiseDragEnergy, loadScale, kineticFlux, glowInwardFlux, tripEnergy, brakeHoldsAgainstDrag)
+
+pure func rel(got: float, want: float, tol: float) -> bool = absf(got - want) <= tol * absf(want)
+pure func r12(got: float, want: float) -> bool = rel(got, want, 0.000000000001)
+pure func printed(got: float, want: float, halfUnit: float) -> bool = absf(got - want) <= halfUnit
+
+pure func aBoost() -> float = 774221.4566651969   -- 7.5e5 g in c/yr
+pure func dAcen() -> float = 4.37
+pure func nIsm() -> float = 100000.0              -- 0.1 cm^-3 (HB-3)
+pure func rBub() -> float = 100.0                 -- HB-1
+pure func phi05() -> float = atanh(0.5)
+pure func phi09() -> float = 1.4722194895832204
+pure func phi099() -> float = 2.6466524123622457
+pure func phiCap() -> float = rapidityOfOneMinusBeta(0.000001)
+pure func c2() -> float = cSI() * cSI()
+
+-- ---------- constants ----------
+
+pure func checkConstants() -> bool =
+  cSI() == 299792458.0
+    && printed(protonMassKg() * c2(), 0.000000000150328, 0.0000000000000005)   -- m_p c^2 = 1.50328e-10 J
+    && lightYearM() == 9460730472580800.0
+    && julianYearS() == 31557600.0
+    && astronomicalUnitM() == 149597870700.0
+    && cmbTemperatureK() == 2.725                                              -- HB-5
+    && r12(accelSI(standardGravity()), 9.80665)
+
+test "constants: c, m_p c^2 = 1.50328e-10 J, ly, Julian year, AU, T_CMB (HB-5), 1 g = 9.80665 m/s^2" { checkConstants() }
+
+-- ---------- readout table (design), 1e-12 ----------
+
+pure func readoutsOk(phi: float, boost: float, drag: float, total: float, totalKg: float, load: float, glow: float, force: float, power: float, tfwd: float) -> bool {
+  let p = planBurnCoastBurn(dAcen(), aBoost(), phi);
+  let e = tripEnergy(p, 1.0, nIsm(), rBub());
+  r12(photonDriveEnergy(1.0, phi), boost)
+    && r12(e.boost, boost) && r12(e.brake, boost) && r12(e.drag, drag) && r12(e.total, total)
+    && r12(e.total / c2(), totalKg)
+    && r12(cruiseDragEnergy(nIsm(), phi, rBub(), p.dCoast), drag)
+    && r12(loadScale(nIsm(), phi), load)
+    && r12(glowInwardFlux(nIsm(), phi, 0.000000001, 0.5), glow)
+    && r12(mirrorDragForce(nIsm(), phi, rBub()), force)
+    && r12(mirrorDragPower(nIsm(), phi, rBub()), power)
+    && r12(cmbForwardTemperature(phi), tfwd)
+}
+
+pure func checkReadout09() -> bool =
+  readoutsOk(phi09(), 132316489050019360.0, 40314432176987310.0, 304947410277026050.0, 3.392997531381388,
+    19212.82874513549, 0.0000015052987296077217, 2.0133555741551197, 603588816.4039646, 11.877999621148337)
+
+test "readouts at 0.9c: boost 1.323e17 J, drag 4.031e16 J, total 3.049e17 J (3.393 kg)" { checkReadout09() }
+
+pure func checkReadout099() -> bool =
+  readoutsOk(phi099(), 237869256192685950.0, 137025773945911980.0, 612764286331283800.0, 6.817922175341585,
+    221961.27278927868, 0.000024071942179266308, 23.25982143207345, 6973119039.76238, 38.44085554458952)
+
+test "readouts at 0.99c: boost 2.379e17 J, drag 1.370e17 J, total 6.128e17 J (6.818 kg)" { checkReadout099() }
+
+pure func checkReadoutCap() -> bool =
+  readoutsOk(phiCap(), 651986541482047200.0, 13800617973906030000.0, 15104591056870126000.0, 168.0612408609353,
+    2253353077.7286806, 0.2812710757763286, 236133.9415328578, 70791174749363.73, 3853.730994033574)
+
+test "readouts at the cap: boost 6.520e17 J, drag 1.380e19 J, total 1.510e19 J (168.06 kg)" { checkReadoutCap() }
+
+-- ---------- canon HB values, printed digits ----------
+
+pure func checkHbPhotonDrive() -> bool =
+  printed(photonDriveEnergy(1.0, phi099()), 237900000000000000.0, 50000000000000.0)     -- HB-35 2.379e17
+    && printed(photonDriveEnergy(1.0, phiCap()), 652000000000000000.0, 50000000000000.0) -- HB-36 6.520e17
+    && printed(photonDriveEnergy(1.0, phiCap()) / photonDriveEnergy(1.0, phi099()), 2.741, 0.0005) -- HB-37
+
+test "canon HB-35..37: photon-drive energy 2.379e17 / 6.520e17 J/kg, ratio 2.741" { checkHbPhotonDrive() }
+
+pure func checkHbLoad() -> bool =
+  printed(loadScale(nIsm(), phi05()), 1500.0, 5.0)                       -- HB-38 1.50e3
+    && printed(loadScale(nIsm(), phi09()), 19200.0, 50.0)                -- HB-39 1.92e4
+    && printed(loadScale(nIsm(), phi099()), 222000.0, 500.0)             -- HB-40 2.22e5
+    && printed(loadScale(nIsm(), phi099()) / 1361.0, 163.0, 0.5)         -- HB-41 suns
+    && printed(loadScale(nIsm(), phiCap()), 2250000000.0, 5000000.0)     -- HB-42 2.25e9
+    && printed(loadScale(nIsm(), phiCap()) / 1361.0, 1660000.0, 5000.0)  -- HB-43 suns
+
+test "canon HB-38..43: ISM load scale" { checkHbLoad() }
+
+pure func checkHbKinetic() -> bool =
+  printed(kineticFlux(nIsm(), phi05()), 403.0, 0.5)                      -- HB-44
+    && printed(kineticFlux(nIsm(), phi099()), 193000.0, 500.0)           -- HB-45 1.93e5
+    && printed(kineticFlux(nIsm(), phiCap()), 2250000000.0, 5000000.0)   -- HB-46 2.25e9
+
+test "canon HB-44..46: kinetic-energy flux if thermalised" { checkHbKinetic() }
+
+pure func checkHbDragForce() -> bool =
+  printed(mirrorDragForce(nIsm(), phi05(), rBub()), 0.157, 0.0005)            -- HB-47
+    && printed(mirrorDragForce(nIsm(), phi09(), rBub()), 2.01, 0.005)         -- HB-48
+    && printed(mirrorDragForce(nIsm(), phi099(), rBub()), 23.3, 0.05)         -- HB-49
+    && printed(mirrorDragForce(nIsm(), phiCap(), rBub()), 236000.0, 500.0)    -- HB-50 2.36e5
+
+test "canon HB-47..50: drag force on the specular sphere (flat mirror would be 2x)" { checkHbDragForce() }
+
+pure func checkHbDragEnergy() -> bool =
+  printed(cruiseDragEnergy(nIsm(), phi05(), rBub(), dAcen()), 11300000000000000.0, 50000000000000.0)       -- HB-51 1.13e16
+    && printed(cruiseDragEnergy(nIsm(), phi09(), rBub(), dAcen()), 40300000000000000.0, 50000000000000.0)  -- HB-52 4.03e16
+    && printed(cruiseDragEnergy(nIsm(), phi099(), rBub(), dAcen()), 137000000000000000.0, 500000000000000.0) -- HB-53 1.37e17
+    && printed(cruiseDragEnergy(nIsm(), phi099(), rBub(), dAcen()) / c2(), 1.52, 0.005)                     -- HB-54 kg
+    && printed(cruiseDragEnergy(nIsm(), phiCap(), rBub(), dAcen()), 13800000000000000000.0, 50000000000000000.0) -- HB-55 1.38e19
+    && printed(cruiseDragEnergy(nIsm(), phiCap(), rBub(), dAcen()) / c2(), 154.0, 0.5)                      -- HB-56 kg
+
+test "canon HB-51..56: ship-frame drag energy over the full d" { checkHbDragEnergy() }
+
+pure func checkHbGlow() -> bool =
+  printed(1.0 / glowInwardFlux(nIsm(), phiCap(), 1.0, 0.5), 0.0000000036, 0.00000000005)   -- HB-61 3.6e-9
+
+test "canon HB-61: largest eps for a 1 W/m^2 inward glow at 0.999999c is 3.6e-9" { checkHbGlow() }
+
+pure func checkHbCmb() -> bool =
+  printed(cmbForwardTemperature(phi099()), 38.44, 0.005)                 -- HB-62
+    && printed(cmbForwardTemperature(phiCap()), 3853.7, 0.05)            -- HB-63
+    && r12(forwardDoppler(phi099()) * cmbTemperatureK(), cmbForwardTemperature(phi099()))
+
+test "canon HB-62, HB-63: forward CMB 38.44 K at 0.99c, 3,853.7 K at the cap" { checkHbCmb() }
+
+pure func checkHbExampleAccel() -> bool {
+  let a = 139203.33028060468;   -- phi(0.99c) / 600 s in c/yr
+  printed(accelSI(a), 1320000.0, 5000.0)                       -- HB-31 1.32e6 m/s^2
+    && printed(a / standardGravity(), 135000.0, 500.0)         -- HB-32 1.35e5 g
+}
+
+test "canon HB-31, HB-32: example boost acceleration 1.32e6 m/s^2 = 1.35e5 g" { checkHbExampleAccel() }
+
+-- ---------- tripEnergy structure and the brake precondition ----------
+
+pure func checkTripEnergyUsesDCoast() -> bool {
+  let p = planBurnCoastBurn(dAcen(), aBoost(), phiCap());
+  let e = tripEnergy(p, 1.0, nIsm(), rBub());
+  let full = cruiseDragEnergy(nIsm(), phiCap(), rBub(), dAcen());
+  e.drag < full && r12(e.total, 2.0 * e.boost + e.drag)
+}
+
+test "tripEnergy drag is over dCoast, not d (ledger closes at arrival)" { checkTripEnergyUsesDCoast() }
+
+pure func checkFallbackEnergy() -> bool {
+  let p = planBurnCoastBurn(0.001, aBoost(), phiCap());
+  let e = tripEnergy(p, 1.0, nIsm(), rBub());
+  e.drag == 0.0 && r12(e.boost, c2() * 6.654436202069182)
+}
+
+test "fallen-back trip: no cruise drag, boost at the rapidity reached" { checkFallbackEnergy() }
+
+-- V12: minimum m_eff for the brake to hold at the cap is 0.0321 kg at 7.5e5 g.
+pure func checkBrakeHolds() -> bool {
+  let a = accelSI(aBoost());
+  brakeHoldsAgainstDrag(1.0, a, nIsm(), phiCap(), rBub())
+    && not brakeHoldsAgainstDrag(0.032, a, nIsm(), phiCap(), rBub())
+    && brakeHoldsAgainstDrag(0.0322, a, nIsm(), phiCap(), rBub())
+    && not brakeHoldsAgainstDrag(0.0 / 0.0, a, nIsm(), phiCap(), rBub())
+}
+
+test "brakeHoldsAgainstDrag: m_eff a >= F; threshold 0.0321 kg at the cap; NaN is false" { checkBrakeHolds() }
+
+-- ---------- finite over a 10^4-point sweep of [0, phiCap] ----------
+
+pure func inf() -> float = 1.0e308 * 10.0
+pure func finite(x: float) -> bool = x == x && x < inf() && x > 0.0 - inf()
+
+pure func allFiniteAt(phi: float) -> bool {
+  let p = planBurnCoastBurn(dAcen(), aBoost(), phi);
+  let e = tripEnergy(p, 1.0, nIsm(), rBub());
+  finite(photonDriveEnergy(1.0, phi)) && finite(mirrorDragForce(nIsm(), phi, rBub()))
+    && finite(mirrorDragPower(nIsm(), phi, rBub())) && finite(cruiseDragEnergy(nIsm(), phi, rBub(), dAcen()))
+    && finite(loadScale(nIsm(), phi)) && finite(kineticFlux(nIsm(), phi))
+    && finite(glowInwardFlux(nIsm(), phi, 0.000000001, 0.5))
+    && finite(e.boost) && finite(e.brake) && finite(e.drag) && finite(e.total)
+    && finite(forwardDoppler(phi)) && finite(cmbForwardTemperature(phi))
+}
+
+-- Two levels (100 x 100 + the end point) to stay under the recursion limit.
+pure func sweepInner(i: int, j: int) -> bool =
+  if j >= 100 then true
+  else if allFiniteAt(phiCap() * intToFloat(i * 100 + j) / 10000.0) then sweepInner(i, j + 1)
+  else false
+
+pure func sweepOuter(i: int) -> bool =
+  if i >= 100 then allFiniteAt(phiCap())
+  else if sweepInner(i, 0) then sweepOuter(i + 1)
+  else false
+
+pure func checkFiniteSweep() -> bool = sweepOuter(0)
+
+test "every medium function finite over 10^4 points of [0, phiCap]" { checkFiniteSweep() }
