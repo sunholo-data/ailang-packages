@@ -70,6 +70,8 @@ let colour = rgbUnitLuminance(5700.0 * d);          -- linear sRGB, Y = 1
 | `blackbody` | `XYZ`, `RGB`, `cmf`, `planck`, `xyz`, `luminance`, `chromaticity`, `rgbUnitLuminance`, `pointFluxRatio`, `surfaceBrightnessRatio` |
 | `photometry` | `teffFromBpRp`, `gMinusV`, `bpRpInTable`, `vFromG`, `illuminanceFromV`, `fluxRatioFromMags` |
 | `photometry_table` | Generated Gaia BP-RP, Teff, G-V and spectral-type node lists |
+| `blackbody_photometry` | `bbTeffMin`, `bbTeffMax`, `bbBpRp`, `bbGMinusV`, `bbBpRpInvertible`, `bbClampTeff`, `bbTeffFromBpRp`, `bbTeffFromBpRpExact`, `bbGMinusVFromBpRp`, `bbVFromG` |
+| `blackbody_photometry_table` | Generated Gaia G/BP/RP and Bessell-Murphy V response samples, zero points and the 61-node colour table |
 | `schwarzschild` | `photonSphere` (1.5), `criticalImpact` (3√3/2), `shadowAngularRadius(r)`, `weakDeflection(b)`, `staticObserverBlueshift(r)`, `staticClockRate(r)`, `pi` |
 
 ## Photometry
@@ -87,6 +89,25 @@ table drops M9V and M9.5V and covers B9V–M8.5V (BP-RP -0.12–5.10).
 `teffFromBpRp` and `gMinusV` clamp outside this range; use `bpRpInTable`
 to detect extrapolation. The relation is for main-sequence dwarfs only, not
 white dwarfs or giants.
+
+## White-dwarf (blackbody) photometry
+
+Use `blackbody_photometry` for the Gaia BP-RP of a **white dwarf**, or of any
+source you choose to approximate as a blackbody: `bbTeffFromBpRp(bpRp)` gives
+a blackbody temperature in K and `bbVFromG(g, bpRp)` gives Johnson V. Do not
+use it for main-sequence stars (use `photometry`) or for physical white-dwarf
+temperatures. Accuracy against 1,780 real white dwarfs within 50 pc: T_eff is
+typically about 4% too hot, up to about +17% above 25 kK (99.2% within 10%);
+V is good to about +-0.1 mag. Treat results as approximate.
+
+- Bracket 3,000-100,000 K. `bbTeffFromBpRp` clamps to it (exactly 3000.0 or
+  100000.0, also for NaN and +-infinity) and `bbBpRpInvertible` says whether
+  the colour was inside it; `bbClampTeff` carries the proved range contract.
+- `bbGMinusVFromBpRp` clamps to the end nodes; NaN gives the 3000 K end node.
+- `bbTeffFromBpRp` is a 61-node table (interpolation error at most 5e-4
+  relative in T). `bbTeffFromBpRpExact` (48 bisections, about 9,000 `planck`
+  calls per call) is for tests and tools only.
+- Convention: Gaia EDR3 Vega-mag, photon counting, published zero points.
 
 ## Physics notes that trip people up
 

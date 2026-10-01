@@ -5,13 +5,25 @@
 module sunholo/relativity/_smoke
 
 import std/io (println)
-import std/math (acos)
+import std/math (acos, intToFloat)
 import ./kinematics (standardGravity)
 import ./hyper (atanh, absf)
 import ./journey (flipAndBurn)
 import ./optics (aberrate, dot)
 import ./schwarzschild (shadowAngularRadius, pi)
 import ./photometry (teffFromBpRp)
+import ./blackbody_photometry (bbTeffFromBpRp)
+
+pure func wdNaN() -> float = 0.0 / 0.0
+pure func wdInf() -> float = 1.0e308 * 10.0
+pure func wdSweep(i: int, n: int, acc: float) -> float =
+  if i > n then acc
+  else wdSweep(i + 1, n, acc + bbTeffFromBpRp(-0.6 + 2.9 * intToFloat(i) / intToFloat(n)))
+
+-- Pure digest of the white-dwarf path (both clamps, interior, NaN, +-inf);
+-- interpreter and strict VM must print the same bits.
+export pure func wdDigest(n: int) -> float =
+  wdSweep(0, n, 0.0) + bbTeffFromBpRp(wdNaN()) + bbTeffFromBpRp(wdInf()) + bbTeffFromBpRp(-wdInf())
 
 export func main() -> () ! {IO} {
   let trip = flipAndBurn(4.37, standardGravity());
@@ -23,7 +35,8 @@ export func main() -> () ! {IO} {
   let angleOk = absf(angle - 25.841932763167) < 0.000000001;
   let shadowOk = absf(shadow - pi() / 4.0) < 0.000000000001;
   let photometryOk = absf(teffFromBpRp(0.823) - 5770.0) < 0.000000001;
-  if tripOk && angleOk && shadowOk && photometryOk
-  then println("OK: relativity alpha-Cen trip 3.5824 ship-yr / 6.0025 yr, 90deg star seen at 25.842deg at 0.9c, shadow at 3 r_s = pi/4, G2V = 5770 K")
-  else println("FAIL: trip ${show(trip.shipTime)} / ${show(trip.galaxyTime)}, angle ${show(angle)}, shadow ${show(shadow)}, G2V ${show(teffFromBpRp(0.823))}")
+  let photometryWdOk = absf(bbTeffFromBpRp(0.30) - 8941.61808557) < 0.000001;
+  if tripOk && angleOk && shadowOk && photometryOk && photometryWdOk
+  then println("OK: relativity alpha-Cen trip 3.5824 ship-yr / 6.0025 yr, 90deg star seen at 25.842deg at 0.9c, shadow at 3 r_s = pi/4, G2V = 5770 K, WD BP-RP 0.30 = 8941.6 K")
+  else println("FAIL: trip ${show(trip.shipTime)} / ${show(trip.galaxyTime)}, angle ${show(angle)}, shadow ${show(shadow)}, G2V ${show(teffFromBpRp(0.823))}, WD ${show(bbTeffFromBpRp(0.30))}")
 }

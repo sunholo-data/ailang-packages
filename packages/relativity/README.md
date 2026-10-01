@@ -13,3 +13,5 @@ It was built as the physics core of the Stapledon's Voyage rebuild, where the
 visuals have to be physically right. It is general-purpose and has no effects.
 
 `photometry` converts Gaia dwarf colours to temperature, Johnson V, lux and flux ratios.
+
+`blackbody_photometry` approximates white dwarfs as blackbodies: Gaia BP-RP to temperature (about 4% hot, 10% band) and to Johnson V (about 0.1 mag).
