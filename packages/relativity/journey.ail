@@ -5,7 +5,8 @@
 
 module sunholo/relativity/journey
 
-import ./hyper (sinh, cosh, tanh, atanh, acosh)
+import ./hyper (sinh, cosh, tanh, atanh, acosh1p)
+import ./kinematics (Motion)
 
 export type Trip = {
   distance: float,    -- ly
@@ -15,40 +16,152 @@ export type Trip = {
   peakGamma: float
 }
 
+-- Phase boundaries of a trip, in proper time (years) and distance (ly).
+-- Accelerate for tauBurn to rapidity phiPeak, coast for tauCoast, then
+-- decelerate for tauBurn to rest. tauTotal = 2 tauBurn + tauCoast and
+-- 2 dBurn + dCoast = trip.distance. A flip-and-burn trip has
+-- tauCoast = dCoast = 0. fellBack is true when a burn-coast-burn plan could
+-- not reach its cruise rapidity and became flip-and-burn.
+export type TripPlan = {
+  trip: Trip,
+  a: float,           -- proper acceleration of both burns, c/yr
+  phiPeak: float,     -- cruise (or peak) rapidity
+  tauBurn: float,     -- proper time of one burn
+  tauCoast: float,    -- proper time coasting
+  tauTotal: float,
+  dBurn: float,       -- distance covered by one burn, ly
+  dCoast: float,      -- distance coasted, ly
+  fellBack: bool
+}
+
+export type TripPhase = Accelerating | Coasting | Decelerating | Arrived
+
+-- Accelerate at a to the midpoint, flip, decelerate at a to rest.
+-- phiPeak = acosh(1 + a d / 2), formed with acosh1p so short trips keep
+-- their low bits.
+export pure func planFlipAndBurn(distance: float, a: float) -> TripPlan
+  requires { distance >= 0.0 && a > 0.0 }
+{
+  let phiPeak = acosh1p(a * distance / 2.0);
+  let tauBurn = phiPeak / a;
+  {
+    trip: {
+      distance: distance,
+      shipTime: 2.0 * tauBurn,
+      galaxyTime: 2.0 * sinh(phiPeak) / a,
+      peakBeta: tanh(phiPeak),
+      peakGamma: cosh(phiPeak)
+    },
+    a: a,
+    phiPeak: phiPeak,
+    tauBurn: tauBurn,
+    tauCoast: 0.0,
+    tauTotal: 2.0 * tauBurn,
+    dBurn: distance / 2.0,
+    dCoast: 0.0,
+    fellBack: false
+  }
+}
+
+-- Accelerate at a to cruise rapidity phiCruise, coast, decelerate at a.
+-- Cruise speed is a rapidity (never beta: beta rounds badly near c; use
+-- kinematics.rapidityOfOneMinusBeta for a speed stated as 1 - beta).
+-- dBurn = 2 sinh^2(phi/2) / a (= (cosh phi - 1) / a without cancellation).
+-- Falls back to planFlipAndBurn (fellBack = true) when 2 dBurn >= distance.
+export pure func planBurnCoastBurn(distance: float, a: float, phiCruise: float) -> TripPlan
+  requires { distance >= 0.0 && a > 0.0 && phiCruise > 0.0 }
+{
+  let s = sinh(phiCruise / 2.0);
+  let dBurn = 2.0 * s * s / a;
+  -- Written as `<` so NaN takes the same branch on the VM and the
+  -- interpreter (ailang#1419: the interpreter answers NaN >= x with true).
+  if not (2.0 * dBurn < distance) then { planFlipAndBurn(distance, a) | fellBack: true }
+  else {
+    let dCoast = distance - 2.0 * dBurn;
+    let tauBurn = phiCruise / a;
+    let sh = sinh(phiCruise);
+    let tauCoast = dCoast / sh;
+    {
+      trip: {
+        distance: distance,
+        shipTime: 2.0 * tauBurn + tauCoast,
+        galaxyTime: 2.0 * sh / a + dCoast / tanh(phiCruise),
+        peakBeta: tanh(phiCruise),
+        peakGamma: cosh(phiCruise)
+      },
+      a: a,
+      phiPeak: phiCruise,
+      tauBurn: tauBurn,
+      tauCoast: tauCoast,
+      tauTotal: 2.0 * tauBurn + tauCoast,
+      dBurn: dBurn,
+      dCoast: dCoast,
+      fellBack: false
+    }
+  }
+}
+
+-- Proper time clamped to [0, tauTotal]; NaN counts as the start.
+pure func clampTau(p: TripPlan, tau: float) -> float =
+  if tau == tau then (if tau < 0.0 then 0.0 else if tau > p.tauTotal then p.tauTotal else tau)
+  else 0.0
+
+-- Phase at proper time tau. Boundaries tauBurn, tauBurn + tauCoast and
+-- tauTotal are left-closed: exactly at tauBurn the ship is Coasting.
+export pure func phaseAt(p: TripPlan, tau: float) -> TripPhase {
+  let t = clampTau(p, tau);
+  if t < p.tauBurn then Accelerating
+  else if t < p.tauBurn + p.tauCoast then Coasting
+  else if t < p.tauTotal then Decelerating
+  else Arrived
+}
+
+-- Closed-form motion at proper time tau (clamped to [0, tauTotal]):
+--   accelerating  phi = a tau,  t = sinh(phi)/a,  x = 2 sinh^2(phi/2)/a
+--   coasting      phi = phiPeak, t and x linear in tau from the first boundary
+--   decelerating  phi = phiPeak - a (tau - tau2) (tau2 = tauBurn + tauCoast,
+--                 floored at 0), t = galaxyTime - sinh(phi)/a,
+--                 x = d - 2 sinh^2(phi/2)/a
+--   arrived       exactly phi = 0, x = d, t = galaxyTime
+-- Each phase is measured from its own start, so the state at a boundary
+-- equals the reference values bit for bit (dBurn, d - dBurn, phiPeak).
+-- Inside the brake, tau is only known to an ulp of tauTotal, so phi there
+-- carries an absolute error of about a * ulp(tauTotal) (3e-11 relative at
+-- the 0.99c default); this is the input's precision, not the formula's.
+export pure func motionAt(p: TripPlan, tau: float) -> Motion {
+  let t = clampTau(p, tau);
+  let tau2 = p.tauBurn + p.tauCoast;
+  if t < p.tauBurn then {
+    let phi = p.a * t;
+    let s = sinh(phi / 2.0);
+    { phi: phi, tau: t, t: sinh(phi) / p.a, x: 2.0 * s * s / p.a }
+  } else if t < tau2 then {
+    let dt = t - p.tauBurn;
+    { phi: p.phiPeak, tau: t, t: sinh(p.phiPeak) / p.a + dt * cosh(p.phiPeak), x: p.dBurn + dt * sinh(p.phiPeak) }
+  } else if t < p.tauTotal then {
+    let left = p.phiPeak - p.a * (t - tau2);
+    let phi = if left < 0.0 then 0.0 else left;
+    let s = sinh(phi / 2.0);
+    { phi: phi, tau: t, t: p.trip.galaxyTime - sinh(phi) / p.a, x: p.trip.distance - 2.0 * s * s / p.a }
+  } else { phi: 0.0, tau: p.tauTotal, t: p.trip.galaxyTime, x: p.trip.distance }
+}
+
 -- Accelerate at a to the midpoint, flip, decelerate at a to rest.
 export pure func flipAndBurn(distance: float, a: float) -> Trip
   requires { distance >= 0.0 && a > 0.0 }
   ensures { result.galaxyTime >= result.shipTime && result.peakGamma >= 1.0 }
 {
-  let phiPeak = acosh(1.0 + a * distance / 2.0);
-  {
-    distance: distance,
-    shipTime: 2.0 * phiPeak / a,
-    galaxyTime: 2.0 * sinh(phiPeak) / a,
-    peakBeta: tanh(phiPeak),
-    peakGamma: cosh(phiPeak)
-  }
+  planFlipAndBurn(distance, a).trip
 }
 
 -- Accelerate at a up to cruise speed maxBeta, coast, decelerate at a.
 -- Falls back to flipAndBurn when the trip is too short to reach maxBeta.
+-- Near c prefer planBurnCoastBurn with a rapidity.
 export pure func burnCoastBurn(distance: float, a: float, maxBeta: float) -> Trip
   requires { distance >= 0.0 && a > 0.0 && maxBeta > 0.0 && maxBeta < 1.0 }
   ensures { result.galaxyTime >= result.shipTime && result.peakBeta <= maxBeta + 0.000000001 }
 {
-  let phiCruise = atanh(maxBeta);
-  let dBurn = (cosh(phiCruise) - 1.0) / a;
-  if 2.0 * dBurn >= distance then flipAndBurn(distance, a)
-  else {
-    let dCoast = distance - 2.0 * dBurn;
-    {
-      distance: distance,
-      shipTime: 2.0 * phiCruise / a + dCoast / sinh(phiCruise),
-      galaxyTime: 2.0 * sinh(phiCruise) / a + dCoast / tanh(phiCruise),
-      peakBeta: maxBeta,
-      peakGamma: cosh(phiCruise)
-    }
-  }
+  planBurnCoastBurn(distance, a, atanh(maxBeta)).trip
 }
 
 -- Pure coast at constant beta (instant acceleration idealisation).

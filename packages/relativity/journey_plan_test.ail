@@ -1,0 +1,304 @@
+-- Check values for the 0.4.0 trip plans (journey: TripPlan, planBurnCoastBurn,
+-- planFlipAndBurn, phaseAt, motionAt; hyper.acosh1p;
+-- kinematics.rapidityOfOneMinusBeta).
+--
+-- Every expected number comes from tools/journey_ref.py (float64 closed
+-- forms, cross-checked against 50-digit Decimal; output committed as
+-- tools/journey_ref.out), never from the code under test. Rows 1-9 are the
+-- M2 design's trip table (stapledons-godot m2-journey-core.md); HB-n are the
+-- canon IDs of stapledons-design physics/higgs-bubble.md. Tolerance 1e-12
+-- relative unless a canon value is checked to its printed digits.
+--
+-- Named check functions: whole-number float literals inside test blocks are
+-- misread as ints (ailang#1456).
+
+module sunholo/relativity/journey_plan_test
+
+import ./hyper (acosh, acosh1p, absf)
+import ./kinematics (Motion, standardGravity, gammaOf, betaOf, rapidityOfOneMinusBeta, rapidityOfBeta)
+import ./journey (Trip, TripPlan, TripPhase, Accelerating, Coasting, Decelerating, Arrived, flipAndBurn, burnCoastBurn, planBurnCoastBurn, planFlipAndBurn, phaseAt, motionAt)
+
+pure func rel(got: float, want: float, tol: float) -> bool = absf(got - want) <= tol * absf(want)
+pure func r12(got: float, want: float) -> bool = rel(got, want, 0.000000000001)
+-- Canon values: |got - printed| <= half a unit in the last printed digit.
+pure func printed(got: float, want: float, halfUnit: float) -> bool = absf(got - want) <= halfUnit
+
+pure func aBoost() -> float = 774221.4566651969   -- 7.5e5 g in c/yr
+pure func aRow5() -> float = 139203.33028060468   -- phi(0.99c) / 600 s, HB-30
+pure func dAcen() -> float = 4.37
+pure func phi09() -> float = 1.4722194895832204
+pure func phi099() -> float = 2.6466524123622457
+pure func phiCap() -> float = rapidityOfOneMinusBeta(0.000001)
+
+pure func phaseCode(ph: TripPhase) -> int =
+  match ph {
+    Accelerating => 0,
+    Coasting => 1,
+    Decelerating => 2,
+    Arrived => 3
+  }
+
+pure func tripIs(t: Trip, ship: float, earth: float) -> bool = r12(t.shipTime, ship) && r12(t.galaxyTime, earth)
+
+-- ---------- helpers ----------
+
+pure func checkAcosh1pTiny() -> bool = r12(acosh1p(0.0000000001), 0.0000141421356236131)
+
+test "acosh1p(1e-10) keeps full precision (acosh(1 + u) would not)" { checkAcosh1pTiny() }
+
+pure func checkAcosh1pMatchesAcosh() -> bool = r12(acosh1p(706.106957963309), acosh(707.106957963309))
+
+test "acosh1p(u) = acosh(1 + u) where 1 + u is exact enough" { checkAcosh1pMatchesAcosh() }
+
+pure func checkCapRapidity() -> bool =
+  r12(phiCap(), 7.254328619262047) && r12(gammaOf(phiCap()), 707.106957963309)
+
+test "rapidityOfOneMinusBeta(1e-6) = 7.254328619262047, gamma 707.106957963309 (row 3)" { checkCapRapidity() }
+
+pure func checkOneMinusBetaSymmetric() -> bool =
+  r12(rapidityOfOneMinusBeta(0.1), rapidityOfBeta(0.9)) && r12(rapidityOfOneMinusBeta(1.9), 0.0 - rapidityOfBeta(0.9))
+
+test "rapidityOfOneMinusBeta agrees with atanh away from c, both signs" { checkOneMinusBetaSymmetric() }
+
+-- ---------- trip rows 1-9 (design), HB trip side ----------
+
+pure func checkRow1() -> bool {
+  let p = planBurnCoastBurn(dAcen(), aBoost(), phi09());
+  tripIs(p.trip, 2.116489782091437, 4.8555571747021204) && p.phiPeak == phi09() && not p.fellBack
+    && r12(p.tauBurn, 0.000001901548293332646) && r12(p.tauCoast, 2.1164859789948505)
+    && r12(p.dBurn, 0.0000016715596391243663) && r12(p.dCoast, 4.369996656880722)
+}
+
+test "row 1: alpha Cen cruise 0.9c, 2.1165 ship-yr / 4.8556 yr" { checkRow1() }
+
+pure func checkRow2() -> bool {
+  let p = planBurnCoastBurn(dAcen(), aBoost(), phi099());
+  tripIs(p.trip, 0.6226958707592057, 4.414143655383168) && not p.fellBack
+    && r12(p.tauBurn, 0.000003418469469655579) && r12(p.tauCoast, 0.6226890338202664)
+    && r12(p.dBurn, 0.000007864432066129617) && r12(p.dCoast, 4.369984271135868)
+    && r12(p.tauTotal, 0.6226958707592057) && r12(p.a, aBoost())
+}
+
+test "row 2: alpha Cen cruise 0.99c (slice default), 0.6227 ship-yr / 4.414 yr" { checkRow2() }
+
+pure func checkRow3() -> bool {
+  let p = planBurnCoastBurn(dAcen(), aBoost(), phiCap());
+  tripIs(p.trip, 0.006196277986522204, 4.370006949593909) && not p.fellBack
+    && r12(p.tauBurn, 0.000009369836700869292) && r12(p.tauCoast, 0.006177538313120466)
+    && r12(p.dBurn, 0.0009120219439599654) && r12(p.dCoast, 4.36817595611208)
+    && r12(p.trip.peakGamma, 707.106957963309)
+}
+
+test "row 3: alpha Cen at the cap 1-beta = 1e-6, 2.263 ship-days / 4.370 yr" { checkRow3() }
+
+pure func checkRow4() -> bool {
+  let p = planBurnCoastBurn(0.001, aBoost(), phiCap());
+  tripIs(p.trip, 0.000017190007186656455, 0.001002579912238613) && p.fellBack
+    && r12(p.phiPeak, 6.654436202069182) && p.tauCoast == 0.0 && p.dCoast == 0.0
+    && r12(p.dBurn, 0.0005)
+}
+
+test "row 4: 0.001 ly at the cap falls back to flip-and-burn, phi 6.6544" { checkRow4() }
+
+pure func checkRow5() -> bool {
+  let p = planBurnCoastBurn(dAcen(), aRow5(), phi099());
+  tripIs(p.trip, 0.6227168354229866, 4.414153879485825) && r12(p.tauBurn, 0.00001901285268841737)
+}
+
+test "row 5: alpha Cen 0.99c with a = phi/(600 s)" { checkRow5() }
+
+pure func checkRow6() -> bool {
+  let p = planFlipAndBurn(dAcen(), standardGravity());
+  tripIs(p.trip, 3.5823937227478337, 6.00250277725247) && not p.fellBack
+    && r12(p.trip.peakBeta, 0.9516558449006334) && r12(p.trip.peakGamma, 3.2555651770846072)
+    && r12(p.tauBurn, 1.7911968613739169) && p.tauCoast == 0.0 && r12(p.dBurn, 2.185)
+}
+
+test "row 6: alpha Cen flip at 1 g, 3.5824 ship-yr / 6.0025 yr / 0.95166c" { checkRow6() }
+
+pure func checkRow7() -> bool {
+  let p = planFlipAndBurn(4.35667304258651, standardGravity());
+  tripIs(p.trip, 3.5780871495240905, 5.988497264963769) && r12(p.trip.peakBeta, 0.9514456743125428)
+}
+
+test "row 7: Gl 559 catalogue position, flip at 1 g" { checkRow7() }
+
+pure func checkRow8() -> bool {
+  let p = planBurnCoastBurn(100.0, standardGravity(), phi099());
+  tripIs(p.trip, 17.696001151818983, 102.69103232505418) && not p.fellBack
+    && r12(p.trip.peakGamma, 7.088812050083355) && r12(p.dCoast, 88.20335190080557)
+}
+
+test "row 8: 100 ly at 1 g, cruise 0.99c" { checkRow8() }
+
+pure func checkRow9() -> bool {
+  let p = planBurnCoastBurn(1000.0, standardGravity(), acosh(707.1));
+  tripIs(p.trip, 13.448622327743177, 1001.9355569687548) && p.fellBack
+    && r12(p.trip.peakGamma, 517.147637776798)
+}
+
+test "row 9: 1000 ly at 1 g cannot reach gamma 707.1, falls back" { checkRow9() }
+
+pure func checkShortFlip() -> bool {
+  let p = planFlipAndBurn(0.000000001 / standardGravity(), standardGravity());
+  tripIs(p.trip, 0.00006126692110144091, 0.00006126692111165206) && r12(p.phiPeak, 0.00003162277660036618)
+}
+
+test "short flip (a d / 2 = 5e-10) keeps its digits (acosh1p)" { checkShortFlip() }
+
+pure func checkOldApiIsPlan() -> bool {
+  let old = burnCoastBurn(dAcen(), aBoost(), 0.99);
+  let fb = flipAndBurn(dAcen(), standardGravity());
+  tripIs(old, 0.6226958707592057, 4.414143655383168) && tripIs(fb, 3.5823937227478337, 6.00250277725247)
+}
+
+test "flipAndBurn and burnCoastBurn are the plans' trips (one formula)" { checkOldApiIsPlan() }
+
+pure func checkHbTrip() -> bool {
+  let p2 = planBurnCoastBurn(dAcen(), aBoost(), phi099());
+  let p3 = planBurnCoastBurn(dAcen(), aBoost(), phiCap());
+  let p6 = planFlipAndBurn(dAcen(), standardGravity());
+  printed(gammaOf(phi099()), 7.0888, 0.00005)                      -- HB-16
+    && printed(phi099(), 2.6467, 0.00005)                          -- HB-17
+    && printed(p3.trip.peakGamma, 707.107, 0.0005)                 -- HB-18
+    && printed(p3.phiPeak, 7.2543, 0.00005)                        -- HB-19
+    && printed(p2.trip.galaxyTime, 4.414, 0.0005)                  -- HB-20
+    && printed(p2.trip.shipTime, 0.6227, 0.00005)                  -- HB-21
+    && printed(p2.trip.shipTime * 365.25, 227.4, 0.05)             -- HB-22
+    && printed(p3.trip.galaxyTime, 4.370, 0.0005)                  -- HB-25
+    && printed(p3.trip.shipTime * 365.25, 2.26, 0.005)             -- HB-26
+    && printed(p6.trip.shipTime, 3.582, 0.0005)                    -- HB-27
+    && printed(p6.trip.galaxyTime, 6.003, 0.0005)                  -- HB-28
+    && printed(p6.trip.peakBeta, 0.9517, 0.00005)                  -- HB-29
+}
+
+test "canon HB-16..22, HB-25..29 (trip side) to printed digits" { checkHbTrip() }
+
+-- Felt 1 g to cruise speed: the boost of a long trip planned at a = 1 g.
+pure func checkHbFelt() -> bool {
+  let p99 = planBurnCoastBurn(1000000.0, standardGravity(), phi099());
+  let pcap = planBurnCoastBurn(1000000.0, standardGravity(), phiCap());
+  printed(p99.tauBurn, 2.56, 0.005) && printed(pcap.tauBurn, 7.03, 0.005)   -- HB-23, HB-24
+}
+
+test "canon HB-23, HB-24: felt 1 g takes 2.56 / 7.03 ship-yr" { checkHbFelt() }
+
+-- HB-30..34: example boost, 10 ship-minutes to 0.99c.
+pure func checkHbExampleBoost() -> bool {
+  let p = planBurnCoastBurn(dAcen(), aRow5(), phi099());
+  let atBoostEnd = motionAt(p, p.tauBurn);
+  printed(p.tauBurn * 365.25 * 24.0 * 60.0, 10.0, 0.5)                       -- HB-30
+    && printed(atBoostEnd.t * 365.25 * 24.0 * 60.0, 26.5, 0.05)               -- HB-33
+    && printed(p.dBurn * 9460730472580800.0 / 149597870700.0, 2.77, 0.005)     -- HB-34
+}
+
+test "canon HB-30, HB-33, HB-34: example boost 10 min, 26.5 galaxy-min, 2.77 AU" { checkHbExampleBoost() }
+
+-- ---------- motionAt and phaseAt ----------
+
+pure func arrives(p: TripPlan, d: float) -> bool {
+  let m = motionAt(p, p.tauTotal);
+  absf(m.phi) <= 0.000000000001 && r12(m.x, d) && r12(m.t, p.trip.galaxyTime) && m.tau == p.tauTotal
+}
+
+pure func checkArrival() -> bool =
+  arrives(planBurnCoastBurn(dAcen(), aBoost(), phi099()), dAcen())
+    && arrives(planBurnCoastBurn(dAcen(), aBoost(), phiCap()), dAcen())
+    && arrives(planFlipAndBurn(dAcen(), standardGravity()), dAcen())
+    && arrives(planBurnCoastBurn(0.001, aBoost(), phiCap()), 0.001)
+
+test "motionAt(p, tauTotal): phi = 0, x = d, t = galaxyTime (cruise, cap, flip, fallback)" { checkArrival() }
+
+pure func checkClamp() -> bool {
+  let p = planBurnCoastBurn(dAcen(), aBoost(), phi099());
+  let early = motionAt(p, 0.0 - 1.0);
+  let late = motionAt(p, p.tauTotal + 1.0);
+  early.phi == 0.0 && early.x == 0.0 && early.t == 0.0 && early.tau == 0.0
+    && late.phi == 0.0 && r12(late.x, dAcen()) && late.tau == p.tauTotal
+}
+
+test "motionAt clamps proper time to [0, tauTotal]" { checkClamp() }
+
+-- Value at each boundary equals the reference, and the value a hair to the
+-- left (delta = 1e-13 tau earlier, i.e. still in the previous phase) differs
+-- from it by no more than the motion over delta, plus rounding: a jump at a
+-- boundary would show up as a larger difference.
+pure func within(at: float, left: float, rate: float, delta: float, tol: float) -> bool =
+  absf(at - left) <= absf(rate) * delta * 2.0 + tol
+
+pure func continuousAt(p: TripPlan, tau: float) -> bool {
+  let delta = tau * 0.0000000000001;
+  let at = motionAt(p, tau);
+  let left = motionAt(p, tau - delta);
+  let ch = gammaOf(p.phiPeak);
+  within(at.x, left.x, ch, delta, 0.000000000001 * p.trip.distance)
+    && within(at.t, left.t, ch, delta, 0.000000000001 * p.trip.galaxyTime)
+    && within(at.phi, left.phi, p.a, delta, 0.0000000001 * p.phiPeak)
+}
+
+pure func boundariesOk(p: TripPlan, d: float, tBurn: float) -> bool {
+  let b1 = motionAt(p, p.tauBurn);
+  let b2 = motionAt(p, p.tauBurn + p.tauCoast);
+  r12(b1.x, p.dBurn) && r12(b1.t, tBurn) && r12(b1.phi, p.phiPeak)
+    && r12(b2.x, d - p.dBurn) && r12(b2.t, p.trip.galaxyTime - tBurn) && r12(b2.phi, p.phiPeak)
+    && continuousAt(p, p.tauBurn) && continuousAt(p, p.tauBurn + p.tauCoast) && continuousAt(p, p.tauTotal)
+}
+
+pure func checkBoundaries() -> bool =
+  boundariesOk(planBurnCoastBurn(dAcen(), aBoost(), phi099()), dAcen(), 0.000009064491650503741)
+    && boundariesOk(planBurnCoastBurn(dAcen(), aBoost(), phiCap()), dAcen(), 0.0009133126507524977)
+    && boundariesOk(planFlipAndBurn(dAcen(), standardGravity()), dAcen(), 3.001251388626235)
+
+test "t, x and phi continuous across each phase boundary, equal to the reference" { checkBoundaries() }
+
+pure func checkPhaseLeftClosed() -> bool {
+  let p = planBurnCoastBurn(dAcen(), aBoost(), phi099());
+  let t1 = p.tauBurn;
+  let t2 = p.tauBurn + p.tauCoast;
+  phaseCode(phaseAt(p, 0.0)) == 0
+    && phaseCode(phaseAt(p, t1 * (1.0 - 0.000000000001))) == 0
+    && phaseCode(phaseAt(p, t1)) == 1
+    && phaseCode(phaseAt(p, t2 * (1.0 - 0.000000000001))) == 1
+    && phaseCode(phaseAt(p, t2)) == 2
+    && phaseCode(phaseAt(p, p.tauTotal * (1.0 - 0.000000000001))) == 2
+    && phaseCode(phaseAt(p, p.tauTotal)) == 3
+    && phaseCode(phaseAt(p, p.tauTotal + 1.0)) == 3
+}
+
+test "phaseAt is left-closed at every boundary (cruise)" { checkPhaseLeftClosed() }
+
+pure func checkPhaseFlip() -> bool {
+  let p = planFlipAndBurn(dAcen(), standardGravity());
+  phaseCode(phaseAt(p, p.tauBurn * 0.5)) == 0 && phaseCode(phaseAt(p, p.tauBurn)) == 2
+    && phaseCode(phaseAt(p, p.tauTotal)) == 3
+}
+
+test "phaseAt on a flip trip goes straight from Accelerating to Decelerating" { checkPhaseFlip() }
+
+pure func nan() -> float = 0.0 / 0.0
+
+pure func checkNaNTau() -> bool {
+  let p = planBurnCoastBurn(dAcen(), aBoost(), phi099());
+  let m = motionAt(p, nan());
+  phaseCode(phaseAt(p, nan())) == 0 && m.tau == 0.0 && m.x == 0.0
+}
+
+test "NaN proper time is treated as the start of the trip" { checkNaNTau() }
+
+-- Coasting stretch matches kinematics.coast-style motion: beta = tanh(phi).
+pure func checkCoastBeta() -> bool {
+  let p = planBurnCoastBurn(dAcen(), aBoost(), phi099());
+  let m = motionAt(p, p.tauBurn + p.tauCoast * 0.5);
+  r12(betaOf(m.phi), 0.99) && r12(m.x, p.dBurn + p.dCoast * 0.5)
+}
+
+test "mid-cruise: beta 0.99 and halfway along the coast" { checkCoastBeta() }
+
+-- Low-speed cruise (phi = 1e-6): (cosh(phi) - 1)/a would keep ~4 digits of
+-- dBurn here; 2 sinh^2(phi/2)/a keeps them all.
+pure func checkLowSpeedCruise() -> bool {
+  let p = planBurnCoastBurn(1.0, 1.0, 0.000001);
+  r12(p.dBurn, 0.0000000000005000000000000417) && r12(p.trip.shipTime, 1000000.0000008334) && r12(p.trip.galaxyTime, 1000000.0000013334) && not p.fellBack
+}
+
+test "low-speed cruise phi = 1e-6 keeps dBurn to 1e-12 (no cosh - 1)" { checkLowSpeedCruise() }

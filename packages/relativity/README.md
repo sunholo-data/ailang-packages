@@ -1,7 +1,8 @@
 # sunholo/relativity
 
-Pure special- and general-relativity maths for AILANG: trip times, exact
-relativistic motion, what a fast observer sees (aberration, Doppler colour and
+Pure special- and general-relativity maths for AILANG: trip times and
+phase-by-phase trip plans, exact relativistic motion, Higgs-bubble energetics
+(photon drive, interstellar-medium drag and glow, forward CMB), what a fast observer sees (aberration, Doppler colour and
 brightness), and closed-form Schwarzschild black-hole quantities.
 
 ```sh
@@ -15,3 +16,5 @@ visuals have to be physically right. It is general-purpose and has no effects.
 `photometry` converts Gaia dwarf colours to temperature, Johnson V, lux and flux ratios.
 
 `blackbody_photometry` approximates white dwarfs as blackbodies: Gaia BP-RP to temperature (about 4% hot, 10% band) and to Johnson V (about 0.1 mag).
+
+`journey` plans boost-cruise-brake and flip-and-burn trips with their phase boundaries (`planBurnCoastBurn`, `planFlipAndBurn`, `phaseAt`, `motionAt`). `medium` gives the Higgs-bubble energetics in SI: photon-drive energy, elastic-mirror ISM drag, load, glow and the trip energy ledger.

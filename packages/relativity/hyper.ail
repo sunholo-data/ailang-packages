@@ -80,3 +80,13 @@ export pure func sinhc(u: float) -> float
 {
   if absf(u) < 0.0001 then 1.0 + u * u / 6.0 else sinh(u) / u
 }
+
+-- acosh(1 + u) without forming 1 + u: log1p(u + sqrt(u (2 + u))). Use it
+-- wherever the argument is naturally "1 + something small" (a short trip's
+-- a d / 2), where acosh(1.0 + u) would round the low bits of u away.
+export pure func acosh1p(u: float) -> float
+  requires { u >= 0.0 }
+  ensures { result >= 0.0 }
+{
+  log1p(u + sqrt(u * (2.0 + u)))
+}
