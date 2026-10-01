@@ -57,15 +57,26 @@ above; Basis is limited. `/self` reports the plan as
    holding the books.
 2. **Create the app.** Log in to the *developer* agreement and open the
    **Apps** tab (top left). Click **New app**, name it, and pick a role.
-   - This package only ever reads, so choose the narrowest role that can
-     read invoices, customers and entries. e-conomic's guide suggests
-     SuperUser for tests.
+   - Roles are e-conomic's, not read/write levels. The installing user must
+     hold every role the app requires. What each package call needs:
+
+     | Role | Covers | Package calls |
+     |---|---|---|
+     | **Accounting** | journals, entries, accounts, departments, scanned documents | `accounts`, `accountingYears`, `yearEntries`, `accountEntries` |
+     | **Sales** | invoices, orders, quotes, customers, employees, inventory, subscriptions | `invoices`, `invoicesChecked`, `customers` |
+     | Project employee | projects and products | none |
+     | SuperUser | everything except other users' logins | all, but more than this package needs |
+
+   - Require **Accounting + Sales** rather than SuperUser. No role is
+     read-only, so the tokens could write through some other client; this
+     package cannot, because its only request is a `GET`.
    - The **App Secret Token** is shown once. Store it straight away; **reset**
      issues a new one.
 3. **Get the installation URL.** Click the app's **Tokens** button.
 4. **Install the app on the books.** A user of the agreement that holds the
    books logs in to *that* agreement and opens the installation URL.
-   Approving it shows the **Agreement Grant Token**.
+   Approving it shows the **Agreement Grant Token**. That user must hold
+   the roles the app requires.
 5. **Store both tokens in 1Password** and refer to them as `op://` references.
    `std/secret` resolves them by shelling `op read`. It needs the
    [1Password CLI](https://developer.1password.com/docs/cli/), either signed
@@ -86,7 +97,7 @@ above; Basis is limited. `/self` reports the plan as
 |---|---|
 | `agreementNumber` | Which books the tokens opened. Pin it in your config. |
 | `agreementType.subscriptionPlanLevel` | The plan. |
-| `application.requiredRoles` | The role the app was granted. |
+| `application.requiredRoles` | The roles the app requires. |
 | `modules` | Enabled modules. "Smart Bank" is the bank feed. Payments show up as entries only once they are reconciled. |
 
 ```ailang
