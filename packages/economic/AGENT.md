@@ -37,11 +37,78 @@ export func main() -> () ! {IO, Net} {
 
 Run with `--caps Net,IO --net-allow-domains restapi.e-conomic.com`.
 
-For a real agreement, build `{ appSecret, grant }` from your developer app's
-App Secret Token and the Agreement Grant Token issued when the agreement owner
-installs the app. Resolve both with `std/secret`, not from env files. Note
-that `std/secret` values are written verbatim to execution traces
-(M-TRACE-LABEL-AWARE), so run with tracing off.
+For a real agreement, build `{ appSecret, grant }` from two tokens; see
+[Connecting to a real agreement](#connecting-to-a-real-agreement).
+
+## Connecting to a real agreement
+
+e-conomic needs two tokens. The **App Secret Token** identifies your app.
+The **Agreement Grant Token** is issued when the owner of the books installs
+that app. e-conomic's own guide is at
+<https://www.e-conomic.com/developer/connect>.
+
+**Before you start:** e-conomic gives API access on the Plus package and
+above; Basis is limited. `/self` reports the plan as
+`agreementType.subscriptionPlanLevel`.
+
+1. **Create a developer agreement.** It is free: sign up at
+   <https://www.e-conomic.com/developer>. You get a separate agreement,
+   emailed to you, that exists only to own apps. It is not the agreement
+   holding the books.
+2. **Create the app.** Log in to the *developer* agreement and open the
+   **Apps** tab (top left). Click **New app**, name it, and pick a role.
+   - This package only ever reads, so choose the narrowest role that can
+     read invoices, customers and entries. e-conomic's guide suggests
+     SuperUser for tests.
+   - The **App Secret Token** is shown once. Store it straight away; **reset**
+     issues a new one.
+3. **Get the installation URL.** Click the app's **Tokens** button.
+4. **Install the app on the books.** A user of the agreement that holds the
+   books logs in to *that* agreement and opens the installation URL.
+   Approving it shows the **Agreement Grant Token**.
+5. **Store both tokens in 1Password** and refer to them as `op://` references.
+   `std/secret` resolves them by shelling `op read`. It needs the
+   [1Password CLI](https://developer.1password.com/docs/cli/), either signed
+   in or with `OP_SERVICE_ACCOUNT_TOKEN` set:
+   - `brew install 1password-cli`;
+   - in the 1Password app, turn on **Settings → Developer → Integrate with
+     1Password CLI**;
+   - check with `op vault list`.
+
+   If `op` is missing or fails, `secret()` errors with `E_SECRET_UNAVAILABLE`.
+   There is no fallback to a blank token.
+6. **Check the connection** before reading anything else. Call
+   `requireAgreement(c, n)` with your agreement number. To find the number
+   the first time, call `agreement(c)` or `GET /self`. The rest of the `/self`
+   response is worth reading once:
+
+| `/self` field | Tells you |
+|---|---|
+| `agreementNumber` | Which books the tokens opened. Pin it in your config. |
+| `agreementType.subscriptionPlanLevel` | The plan. |
+| `application.requiredRoles` | The role the app was granted. |
+| `modules` | Enabled modules. "Smart Bank" is the bank feed. Payments show up as entries only once they are reconciled. |
+
+```ailang
+import std/io (println)
+import std/secret (secret)
+import pkg/sunholo/economic/client (Creds, showError)
+import pkg/sunholo/economic/api (requireAgreement)
+
+export func main() -> () ! {Net, IO, Secret} {
+  let c = { appSecret: secret("op://Vault/e-conomic/app-secret-token", "e-conomic app token"),
+            grant: secret("op://Vault/e-conomic/agreement-grant-token", "e-conomic grant") };
+  match requireAgreement(c, 1234567) {
+    Err(e) => println(showError(e)),
+    Ok(a) => println("connected to ${a.companyName}")
+  }
+}
+```
+
+Run with `--caps Net,IO,Secret --net-allow-domains restapi.e-conomic.com`,
+with **tracing off**. `std/secret` values are written verbatim to execution
+traces (M-TRACE-LABEL-AWARE), so never pass `-emit-trace` and keep
+`AILANG_TRACE` unset or `off` when secrets resolve.
 
 ## What is proved, and what is only tested
 
