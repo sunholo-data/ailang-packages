@@ -1,11 +1,13 @@
 -- sunholo/relativity/photometry — main-sequence dwarf colour and magnitude
--- relations. Source: Pecaut & Mamajek dwarf sequence, version 2022.04.16,
+-- relations, surface brightness, and the naked-eye point-source threshold.
+-- Source of the colour tables: Pecaut & Mamajek dwarf sequence, version
+-- 2022.04.16,
 -- https://www.pas.rochester.edu/~emamajek/EEM_dwarf_UBVIJHK_colors_Teff.txt
 module sunholo/relativity/photometry
 
-import std/math (pow)
+import std/math (pow, sqrt, log10)
 import std/list (length, nth_or)
-import ./photometry_table (bpRpNodes, teffNodes, gMinusVNodes)
+import ./photometry_table (bpRpNodes, teffNodes, gMinusVNodes, bvNodes, bvTeffNodes)
 
 -- Interpolate between adjacent colour nodes. The generator guarantees
 -- strictly increasing colours; endpoints are handled by the caller.
@@ -19,13 +21,18 @@ pure func interpolate(x: float, xs: [float], ys: [float], i: int) -> float {
   else interpolate(x, xs, ys, i + 1)
 }
 
-pure func fromTable(x: float, ys: [float]) -> float {
-  let xs = bpRpNodes();
+-- Clamped table lookup. NaN is tested first (x == x is false only for NaN;
+-- the interpreter answers NaN >= x with true, ailang#1419) and maps to the
+-- last, coolest node on both engines.
+pure func lookup(x: float, xs: [float], ys: [float]) -> float {
   let last = length(xs) - 1;
-  if x <= nth_or(xs, 0, 0.0) then nth_or(ys, 0, 0.0)
+  if not (x == x) then nth_or(ys, last, 0.0)
+  else if x <= nth_or(xs, 0, 0.0) then nth_or(ys, 0, 0.0)
   else if x >= nth_or(xs, last, 0.0) then nth_or(ys, last, 0.0)
   else interpolate(x, xs, ys, 0)
 }
+
+pure func fromTable(x: float, ys: [float]) -> float = lookup(x, bpRpNodes(), ys)
 
 -- Kelvin from Gaia BP-RP; clamped to the dwarf table endpoints.
 export pure func teffFromBpRp(bpRp: float) -> float
@@ -64,4 +71,89 @@ export pure func fluxRatioFromMags(m1: float, m2: float) -> float
   ensures { result > 0.0 }
 {
   pow(10.0, -0.4 * (m1 - m2))
+}
+
+-- Kelvin from Johnson B-V, for main-sequence dwarfs: linear interpolation in
+-- the same Pecaut & Mamajek table (its B-V column, O3V-M9V, B-V -0.33-2.17),
+-- clamped to the end nodes; NaN gives the cool end (2380 K). Use bvInTable
+-- to detect clamping. The dwarf relation is only approximate for giants
+-- (a K giant's B-V reads several hundred K off), and B-V barely moves for
+-- O stars (-0.33 to -0.30 spans 45-31 kK) and saturates for late M dwarfs,
+-- so treat those ends as rough.
+export pure func teffFromBV(bv: float) -> float
+  ensures { result >= 2380.0 && result <= 44900.0 }
+{
+  lookup(bv, bvNodes(), bvTeffNodes())
+}
+
+-- True precisely within the B-V table span O3V-M9V; false for NaN.
+export pure func bvInTable(bv: float) -> bool
+  ensures { result == (bv >= -0.33 && bv <= 2.17) }
+{
+  bv == bv && bv >= -0.33 && bv <= 2.17
+}
+
+-- Johnson V magnitude of an illuminance in lux, the inverse of
+-- illuminanceFromV (same zero point, V = -13.98 at 1 lux).
+export pure func vFromIlluminance(lux: float) -> float
+  requires { lux > 0.0 }
+{
+  -13.98 - 2.5 * log10(lux)
+}
+
+-- One square arcsecond in steradians, (pi / 648000)^2.
+pure func arcsec2Sr() -> float {
+  let a = 3.141592653589793 / 648000.0;
+  a * a
+}
+
+-- Luminance in cd/m^2 of a surface brightness mu in V mag/arcsec^2, with the
+-- package's V zero point: illuminanceFromV(mu) spread over one arcsec^2.
+-- mu = 22 gives 1.7252e-4 cd/m^2; mu = 0 gives 1.0886e5 cd/m^2.
+export pure func luminanceFromSurfaceMag(mu: float) -> float
+  requires { mu > -100.0 && mu < 100.0 }
+  ensures { result > 0.0 }
+{
+  pow(10.0, -0.4 * (mu + 13.98)) / arcsec2Sr()
+}
+
+-- Surface brightness in V mag/arcsec^2 of a luminance in cd/m^2 (inverse of
+-- luminanceFromSurfaceMag).
+export pure func surfaceMagFromLuminance(cdm2: float) -> float
+  requires { cdm2 > 0.0 }
+{
+  vFromIlluminance(cdm2 * arcsec2Sr())
+}
+
+-- Naked-eye threshold illuminance (lux) of a point source against a
+-- background of luminance lb (cd/m^2), for field factor F = 1. Crumey (2014),
+-- "Human contrast threshold and astronomical visibility", MNRAS 442, 2600,
+-- arXiv:1405.4209, fitted to Blackwell (1946):
+--   lb <= 7.08e-2: dI = (r1 lb^1/4 + r2 lb^1/2)^2, r1 6.505e-4, r2 -8.461e-4
+--                  (Eq. 53, i.e. Eq. 32 with the constants of Eq. 26);
+--   lb >  7.08e-2: dI = (r3 lb^1/4 + r4 lb^1/2)^2, r3 1.772e-4, r4 7.167e-5
+--                  (Eq. 33 with Eq. 27; the branches meet within 0.11%);
+--   lb <  1e-5:    the zero-background cut-off, dI(1e-5) = 1.1495e-9 lx
+--                  (Crumey's zeta). NaN and negative lb count as dark.
+-- dI is the star's illuminance at the eye. Multiply by a field factor for
+-- real observing: Crumey finds F of about 1.4-2.4 and takes F = 2 as typical.
+export pure func pointThresholdIlluminance(lb: float) -> float
+  ensures { result > 0.0 }
+{
+  let b = if lb == lb && lb > 0.00001 then lb else 0.00001;
+  let q = sqrt(sqrt(b));
+  let h = sqrt(b);
+  let s = if b <= 0.0708 then 0.0006505 * q - 0.0008461 * h else 0.0001772 * q + 0.00007167 * h;
+  s * s
+}
+
+-- Faintest V magnitude visible against background luminance lb (cd/m^2) at
+-- field factor f (> 0): vFromIlluminance(f * pointThresholdIlluminance(lb)).
+-- lb = 2e-4 cd/m^2 (21.83 mag/arcsec^2): 6.942 at f = 1 (Crumey prints 6.93
+-- with his zero point 2.54e-6 lx, 0.008 mag fainter than this package's),
+-- 6.190 at f = 2.
+export pure func limitingMagnitude(lb: float, f: float) -> float
+  requires { f > 0.0 }
+{
+  vFromIlluminance(f * pointThresholdIlluminance(lb))
 }

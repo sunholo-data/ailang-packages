@@ -111,3 +111,22 @@ export pure func surfaceBrightnessRatio(kelvin: float, d: float) -> float
 {
   luminance(kelvin * d) / luminance(kelvin)
 }
+
+-- Absolute photopic luminance of a blackbody in cd/m^2:
+--   Km * integral B_lambda(T) ybar(lambda) dlambda,  Km = 683 lm/W,
+-- on this module's ybar (360-830 nm, 1 nm). 2 h c^2 = 1.1910429723971884e-16
+-- W m^2 sr^-1 (exact SI); with lambda in um in `planck` that is
+-- 1.1910429723971884e5 W m^-2 sr^-1 nm^-1 per unit of `luminance`.
+-- Checks (tools/photometry_ref.py): 2856 K 1.978e7, 5772 K 1.845e9, Pt point
+-- 2041.4 K 5.98e5 (the pre-1979 candela defined it as 6.0e5). The ybar fit
+-- is within 0.5% of the CIE table for 1,900-6,000 K, 1% at 800 K; its red
+-- tail falls off too fast, so below about 700 K the value is too low (still
+-- far below any visible luminance). Finite and >= 0 for every finite T:
+-- T <= 0 and NaN give 0, and the CMB's 2.725 K underflows to exactly 0.
+export pure func photopicRadiance(kelvin: float) -> float
+  ensures { result >= 0.0 }
+{
+  if kelvin == kelvin && kelvin > 0.0
+  then 683.0 * 119104.29723971884 * luminance(kelvin)
+  else 0.0
+}
