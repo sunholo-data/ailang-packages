@@ -13,8 +13,8 @@
 module sunholo/mcp_oauth/core
 
 import std/crypto (sha256Hex, constantTimeEqual)
-import std/bytes (fromInts, toBase64URL)
-import std/string (length, substring, find, startsWith, endsWith, contains as strContains, chars, toLower)
+import std/bytes (fromInts, toInts, fromString, toString, toBase64URL)
+import std/string (length, substring, find, startsWith, endsWith, contains as strContains, chars, toLower, split)
 import std/list (contains, any)
 import std/json (encode, jo, kv, js, ja, jb)
 
@@ -188,3 +188,43 @@ export pure func asMetadata(issuer: string) -> string =
     kv("token_endpoint_auth_methods_supported", ja([js("none")])),
     kv("client_id_metadata_document_supported", jb(true))
   ]))
+
+-- ============================================================
+-- application/x-www-form-urlencoded (token endpoint bodies)
+-- ============================================================
+-- std/net has urlEncodeForm but no decoder; both directory clients POST the
+-- token request form-encoded. Works on bytes so %-encoded UTF-8 survives.
+
+pure func hexDigit(b: int) -> int =
+  if b >= 48 && b <= 57 then b - 48
+  else if b >= 65 && b <= 70 then b - 55
+  else if b >= 97 && b <= 102 then b - 87
+  else 0 - 1
+
+pure func pctDecodeBytes(bs: [int]) -> [int] =
+  match bs {
+    [] => [],
+    [37, h1, h2, ...rest] =>
+      if hexDigit(h1) >= 0 && hexDigit(h2) >= 0 then (hexDigit(h1) * 16 + hexDigit(h2)) :: pctDecodeBytes(rest)
+      else 37 :: pctDecodeBytes([h1, h2] ++ rest),
+    [43, ...rest] => 32 :: pctDecodeBytes(rest),
+    [b, ...rest] => b :: pctDecodeBytes(rest)
+  }
+
+-- Decode one form-encoded component ('+' = space, %XX = byte).
+export pure func formUnescape(s: string) -> string = toString(fromInts(pctDecodeBytes(toInts(fromString(s)))))
+
+-- Value of `key` in a form-encoded body ("" when absent). First match wins.
+export pure func formGet(body: string, key: string) -> string =
+  formGetIn(split(body, "&"), key)
+
+pure func formGetIn(pairs: [string], key: string) -> string =
+  match pairs {
+    [] => "",
+    [p, ...rest] => {
+      let eq = find(p, "=");
+      let k = if eq < 0 then p else substring(p, 0, eq);
+      if formUnescape(k) == key then (if eq < 0 then "" else formUnescape(substring(p, eq + 1, length(p))))
+      else formGetIn(rest, key)
+    }
+  }

@@ -34,12 +34,20 @@ import ./core (challengeMethodOk, pkceOk, redirectOk, codeExpiresAt, isExpired, 
 -- Hook fields:
 --   authenticate(idToken)        -> account id (from the service's login page)
 --   mint(account, clientId)      -> a fresh access token the service's
---                                   @mcp_token_verifier accepts (Parse: a dp_ key)
+--                                   @mcp_token_verifier accepts (Parse: a dp_ key).
+--                                   Crypto is guaranteed by the MODE STACK, not the
+--                                   hook type: issueTokens declares Rand[mode=crypto],
+--                                   so a bare-Rand mint draws crypto/rand at runtime
+--                                   (verified 2026-10-02 via a seeded-mode probe through
+--                                   a record-held function). The checker accepts a
+--                                   bare-Rand function in this slot; a mint that
+--                                   itself declares another explicit mode would
+--                                   override the stack (AGENT.md #3: don't).
 --   put(key, json, expiresAtSec) / get(key) / del(key) -> storage
 --   revoke(tokenDigest)          -> invalidate the access token with that sha256Hex
 export type Hooks = {
   authenticate: (string) -> Result[string, string] ! {IO, FS, Env, Net, Clock, SharedMem},
-  mint: (string, string) -> Result[string, string] ! {IO, FS, Env, Net, Clock, SharedMem},
+  mint: (string, string) -> Result[string, string] ! {IO, FS, Env, Net, Clock, SharedMem, Rand[mode=crypto]},
   put: (string, string, int) -> bool ! {IO, FS, Env, Net, Clock, SharedMem},
   get: (string) -> Option[string] ! {IO, FS, Env, Net, Clock, SharedMem},
   del: (string) -> bool ! {IO, FS, Env, Net, Clock, SharedMem},

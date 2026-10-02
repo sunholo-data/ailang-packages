@@ -22,7 +22,7 @@ import pkg/sunholo/mcp_oauth/flow (Hooks, beginAuthorize, completeLogin, exchang
 func tAuthenticate(idToken: string) -> Result[string, string] ! {IO, FS, Env, Net, Clock, SharedMem} =
   if idToken == "good-id-token" then Ok("acct-1") else Err("bad id token")
 
-func tMint(account: string, clientId: string) -> Result[string, string] ! {IO, FS, Env, Net, Clock, SharedMem} =
+func tMint(account: string, clientId: string) -> Result[string, string] ! {IO, FS, Env, Net, Clock, SharedMem, Rand[mode=crypto]} =
   Ok("dp_${account}_${clientId}_${show(length(clientId))}_${smCount()}")
 
 -- a counter so every minted token differs

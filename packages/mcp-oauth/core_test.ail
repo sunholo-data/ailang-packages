@@ -3,7 +3,7 @@
 
 module sunholo/mcp_oauth/core_test
 
-import ./core (s256, pkceOk, verifierOk, verifierLengthOk, challengeMethodOk,
+import ./core (formGet, formUnescape, s256, pkceOk, verifierOk, verifierLengthOk, challengeMethodOk,
   redirectAllowed, loopbackRedirectOk, redirectOk, stripLoopbackPort, cimdUrlOk,
   httpsHost, codeExpiresAt, isExpired, asMetadata)
 import std/string (repeat, contains)
@@ -58,3 +58,14 @@ test "metadata advertises s256 cimd and no registration" {
   contains(m, "\"S256\"") && contains(m, "client_id_metadata_document_supported\":true")
     && contains(m, "registration_endpoint") == false && contains(m, "\"plain\"") == false
 }
+
+-- ---------------- Form decoding (token endpoint) ----------------
+test "form decodes plus and percent" { formUnescape("a+b%20c%2Fd") == "a b c/d" }
+test "form decodes utf8" { formUnescape("caf%C3%A9") == "café" }
+test "form bad percent kept" { formUnescape("100%zz") == "100%zz" }
+test "form get finds key" {
+  formGet("grant_type=authorization_code&code=abc123&redirect_uri=https%3A%2F%2Fclaude.ai%2Fapi%2Fmcp%2Fauth_callback", "redirect_uri")
+    == "https://claude.ai/api/mcp/auth_callback"
+}
+test "form get missing key empty" { formGet("a=1&b=2", "c") == "" }
+test "form get first match wins" { formGet("code=first&code=second", "code") == "first" }

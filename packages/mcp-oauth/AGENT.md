@@ -31,7 +31,7 @@ Copy `routes_template.ail` into your service and fill in a `Hooks` record:
 ## Adopter security checklist
 1. Run serve-api with **`AILANG_TRACE_VALUES=off`**. Traces render arguments verbatim.
 2. **Never log** request bodies, query strings, or the values the flow returns: they carry codes and tokens.
-3. `mint` must use `! {Rand[mode=crypto]}`, or draw from a crypto source in another way.
+3. Let `mint` draw randomness under plain `Rand` or `Rand[mode=crypto]`. The flow calls it from a `Rand[mode=crypto]` function, so the mode stack makes those draws crypto. **Never** declare another explicit mode (such as `seeded`) on `mint`: an explicit mode overrides the stack.
 4. Store keys and tokens **hashed** (`sha256Hex`), so `revoke(digest)` can find them.
 5. Fetch CIMD documents only with `core.cimdUrlOk` **and** `Net[scope=public]` (ailang ≥ the S0 release, #1522).
 6. Use `nowSec()` (seconds). `std/clock.now()` is milliseconds.
