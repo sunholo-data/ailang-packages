@@ -18,5 +18,8 @@ OpenAI directories. Design: ailang `design_docs/planned/v0_52_0/m-mcp-oauth-pack
   - secrets are `string<secret>` and stored as digests;
   - single-use codes; a replay revokes what the code issued;
   - refresh tokens rotate, and reuse revokes the whole family.
-- Known gap: the CIMD fetch module waits for ailang `Net[scope=public]` (#1522). Until then,
-  adopters must pre-register clients or fetch CIMD documents themselves under the checklist.
+- `cimd`: fetches and validates a client's metadata document. It first checks the URL with
+  `core.cimdUrlOk`, then fetches once under `Net[scope=public]` (ailang ≥ 0.52.0, #1522), so
+  loopback, metadata and private addresses are refused at connect time, including a hostname that
+  resolves to 127.0.0.1. The document size is bounded, its `client_id` must equal the URL it was
+  fetched from, and every redirect URI must be https or loopback http.

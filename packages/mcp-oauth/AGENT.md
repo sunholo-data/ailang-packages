@@ -33,7 +33,7 @@ Copy `routes_template.ail` into your service and fill in a `Hooks` record:
 2. **Never log** request bodies, query strings, or the values the flow returns: they carry codes and tokens.
 3. Let `mint` draw randomness under plain `Rand` or `Rand[mode=crypto]`. The flow calls it from a `Rand[mode=crypto]` function, so the mode stack makes those draws crypto. **Never** declare another explicit mode (such as `seeded`) on `mint`: an explicit mode overrides the stack.
 4. Store keys and tokens **hashed** (`sha256Hex`), so `revoke(digest)` can find them.
-5. Fetch CIMD documents only with `core.cimdUrlOk` **and** `Net[scope=public]` (ailang ≥ the S0 release, #1522).
+5. Fetch CIMD documents with `cimd.fetchClient`, which runs `core.cimdUrlOk` and then `Net[scope=public]` (ailang ≥ 0.52.0, #1522). Never fetch a `client_id` URL under plain `Net`.
 6. Use `nowSec()` (seconds). `std/clock.now()` is milliseconds.
 
 ## How the guarantees are checked
@@ -44,6 +44,7 @@ Copy `routes_template.ail` into your service and fill in a `Hooks` record:
 | `ailang test --package .` | Pure-core tests, including the RFC 7636 App. B vector |
 | `tests/flow_check.sh` | Effectful flow: single use, replay revocation, binding, expiry, rotation, family revocation |
 | `tests/ifc_leaks.sh` | Leaks injected into the real `flow.ail` must fail to compile |
+| `tests/cimd_check.sh` | CIMD fetch: the string layer refuses http and metadata IPs; `Net[scope=public]` refuses a name that resolves to 127.0.0.1, with permissive Net flags on |
 | `tests/lint.sh` | No declared record holds a secret (ailang #1523); crypto minting; no `==` on raw secrets |
 
 ## Design

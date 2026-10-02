@@ -1,0 +1,26 @@
+-- Pure tests for sunholo/mcp_oauth/cimd document validation.
+module sunholo/mcp_oauth/cimd_test
+
+import ./cimd (validateClientDoc)
+import std/result (Ok, Err)
+import std/string (repeat)
+
+pure func cid() -> string = "https://claude.ai/oauth/claude-code-client-metadata"
+pure func isOk(r: Result[[string], string]) -> bool = match r { Ok(_) => true, Err(_) => false }
+
+test "cimd doc accepted" {
+  isOk(validateClientDoc(cid(), "{\"client_id\":\"https://claude.ai/oauth/claude-code-client-metadata\",\"redirect_uris\":[\"https://claude.ai/api/mcp/auth_callback\",\"http://localhost/callback\"]}"))
+}
+test "cimd doc client_id mismatch rejected" {
+  isOk(validateClientDoc(cid(), "{\"client_id\":\"https://evil.example/c\",\"redirect_uris\":[\"https://evil.example/cb\"]}")) == false
+}
+test "cimd doc without redirect_uris rejected" {
+  isOk(validateClientDoc(cid(), "{\"client_id\":\"https://claude.ai/oauth/claude-code-client-metadata\",\"redirect_uris\":[]}")) == false
+}
+test "cimd doc plain http redirect rejected" {
+  isOk(validateClientDoc(cid(), "{\"client_id\":\"https://claude.ai/oauth/claude-code-client-metadata\",\"redirect_uris\":[\"http://evil.example/cb\"]}")) == false
+}
+test "cimd doc too large rejected" {
+  isOk(validateClientDoc(cid(), repeat("x", 65537))) == false
+}
+test "cimd doc not json rejected" { isOk(validateClientDoc(cid(), "not json")) == false }
