@@ -1,0 +1,178 @@
+-- Integration checks for sunholo/mcp_oauth/flow (effectful, so run with
+-- `ailang run`, not `ailang test`; the duckdb/decisions pattern).
+-- Each case prints "PASS <name>" or "FAIL <name>: <why>"; tests/flow_check.sh
+-- fails on any FAIL or a missing PASS. Names match the sprint plan (P2).
+--
+--   ailang run --caps IO,SharedMem,Rand,Clock --entry main flow_integration_test.ail
+
+module sunholo/mcp_oauth/flow_integration_test
+import std/io (println)
+import std/sharedmem (get as smGet, put as smPut, delete as smDelete, has_key)
+import std/bytes (fromString, toString)
+import std/option (Option, Some, None)
+import std/result (Result, Ok, Err)
+import std/json (decode, getString)
+import std/string (find, substring, length, startsWith, contains)
+import std/crypto (sha256Hex)
+import std/rand (uuid4)
+import pkg/sunholo/mcp_oauth/flow (Hooks, beginAuthorize, completeLogin, exchangeCode, refreshTokens)
+
+-- ---------------- test hooks: SharedMem store, stub IdP ----------------
+
+func tAuthenticate(idToken: string) -> Result[string, string] ! {IO, FS, Env, Net, Clock, SharedMem} =
+  if idToken == "good-id-token" then Ok("acct-1") else Err("bad id token")
+
+func tMint(account: string, clientId: string) -> Result[string, string] ! {IO, FS, Env, Net, Clock, SharedMem} =
+  Ok("dp_${account}_${clientId}_${show(length(clientId))}_${smCount()}")
+
+-- a counter so every minted token differs
+func smCount() -> string ! {SharedMem} {
+  let prev = match smGet("t:counter") { Some(b) => toString(b), None => "" };
+  let next = "${prev}x";
+  smPut("t:counter", fromString(next));
+  show(length(next))
+}
+
+func tPut(k: string, v: string, exp: int) -> bool ! {IO, FS, Env, Net, Clock, SharedMem} {
+  smPut("s:${k}", fromString(v));
+  true
+}
+
+func tGet(k: string) -> Option[string] ! {IO, FS, Env, Net, Clock, SharedMem} = match smGet("s:${k}") {
+  Some(b) => Some(toString(b)),
+  None => None
+}
+
+func tDel(k: string) -> bool ! {IO, FS, Env, Net, Clock, SharedMem} {
+  smDelete("s:${k}");
+  true
+}
+
+func tRevoke(d: string) -> bool ! {IO, FS, Env, Net, Clock, SharedMem} {
+  smPut("revoked:${d}", fromString("1"));
+  true
+}
+
+func hooks() -> Hooks = { authenticate: tAuthenticate, mint: tMint, put: tPut, get: tGet, del: tDel, revoke: tRevoke }
+
+-- ---------------- fixtures ----------------
+
+pure func client() -> string = "https://claude.ai/oauth/claude-code-client-metadata"
+
+pure func cb() -> string = "https://claude.ai/api/mcp/auth_callback"
+
+pure func regs() -> [string] = [cb()]
+
+pure func verifier() -> string = "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"
+
+pure func challenge() -> string = "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM"
+
+pure func now() -> int = 1000000
+
+func check(name: string, ok: bool, why: string) -> unit ! {IO} =
+  if ok then println("PASS ${name}") else println("FAIL ${name}: ${why}")
+
+-- value of `key=` in a URL query ("" if absent)
+pure func param(url: string, key: string) -> string {
+  let i = find(url, "${key}=")
+  if i < 0 then "" else {
+    let rest = substring(url, i + length(key) + 1, length(url))
+    let amp = find(rest, "&")
+    if amp < 0 then rest else substring(rest, 0, amp)
+  }
+}
+
+-- authorize + login -> code (or "" on failure)
+func obtainCode(state: string, t: int) -> string ! {IO, FS, Env, Net, Clock, SharedMem, Rand[mode=crypto], Declassify} =
+  match beginAuthorize(hooks(), "https://svc.example/login", client(), regs(), cb(), "code", challenge(), "S256", state, t) {
+    Err(_) => "",
+    Ok(loginUrl) => match completeLogin(hooks(), param(loginUrl, "handle"), "good-id-token", t) {
+      Err(_) => "",
+      Ok(loc) => param(loc, "code")
+    }
+  }
+
+pure func field(body: string, k: string) -> string = match decode(body) {
+  Ok(j) => match getString(j, k) {
+    Some(s) => s,
+    None => ""
+  },
+  Err(_) => ""
+}
+
+func revoked(token: string) -> bool ! {SharedMem} = has_key("revoked:${sha256Hex(token)}")
+
+-- ---------------- cases ----------------
+
+export func main() -> unit ! {IO, FS, Env, Net, Clock, SharedMem, Rand[mode=crypto], Declassify} {
+  let h = hooks()
+  -- authorize rejects plain pkce
+  let plain = beginAuthorize(h, "https://svc.example/login", client(), regs(), cb(), "code", challenge(), "plain", "s", now())
+  check("authorize rejects plain pkce", match plain {
+    Err(e) => contains(e, "S256"),
+    Ok(_) => false
+  }, "plain accepted")
+  -- authorize rejects unregistered redirect
+  let bad = beginAuthorize(h, "https://svc.example/login", client(), regs(), "https://evil.example/cb", "code", challenge(), "S256", "s", now())
+  check("authorize rejects unregistered redirect", match bad {
+    Err(e) => contains(e, "redirect_uri"),
+    Ok(_) => false
+  }, "unregistered redirect accepted")
+  -- code is single use + code replay revokes
+  let code1 = obtainCode("st1", now())
+  let first = exchangeCode(h, code1, verifier(), client(), cb(), now() + 5)
+  let firstToken = match first {
+    Ok(body) => field(body, "access_token"),
+    Err(_) => ""
+  }
+  let second = exchangeCode(h, code1, verifier(), client(), cb(), now() + 6)
+  check("code is single use", firstToken != "" && (match second {
+    Err(e) => contains(e, "invalid_grant"),
+    Ok(_) => false
+  }), "first=${show(firstToken != "")}")
+  check("code replay revokes", revoked(firstToken), "first redemption's token not revoked")
+  -- expired code rejected
+  let code2 = obtainCode("st2", now())
+  let late = exchangeCode(h, code2, verifier(), client(), cb(), now() + 61)
+  check("expired code rejected", match late {
+    Err(e) => contains(e, "expired"),
+    Ok(_) => false
+  }, "expired code redeemed")
+  -- code bound to client and redirect (and verifier)
+  let code3 = obtainCode("st3", now())
+  let wrongClient = exchangeCode(h, code3, verifier(), "https://other.example/client", cb(), now() + 5)
+  let code4 = obtainCode("st4", now())
+  let wrongRedirect = exchangeCode(h, code4, verifier(), client(), "https://claude.ai/api/mcp/other", now() + 5)
+  let code5 = obtainCode("st5", now())
+  let wrongVerifier = exchangeCode(h, code5, "x${verifier()}", client(), cb(), now() + 5)
+  let isGrantErr = \r. match r {
+    Err(e) => contains(e, "invalid_grant"),
+    Ok(_) => false
+  }
+  check("code bound to client and redirect", isGrantErr(wrongClient) && isGrantErr(wrongRedirect) && isGrantErr(wrongVerifier), "a mismatched client, redirect or verifier was accepted")
+  -- refresh rotates
+  let code6 = obtainCode("st6", now())
+  let issued = exchangeCode(h, code6, verifier(), client(), cb(), now() + 5)
+  let rt1 = match issued {
+    Ok(b) => field(b, "refresh_token"),
+    Err(_) => ""
+  }
+  let at1 = match issued {
+    Ok(b) => field(b, "access_token"),
+    Err(_) => ""
+  }
+  let r1 = refreshTokens(h, rt1, client(), now() + 10)
+  let rt2 = match r1 {
+    Ok(b) => field(b, "refresh_token"),
+    Err(_) => ""
+  }
+  let at2 = match r1 {
+    Ok(b) => field(b, "access_token"),
+    Err(_) => ""
+  }
+  check("refresh rotates", rt1 != "" && rt2 != "" && rt2 != rt1 && at2 != "" && at2 != at1, "no rotation")
+  -- refresh reuse revokes family
+  let reuse = refreshTokens(h, rt1, client(), now() + 20)
+  let afterReuse = refreshTokens(h, rt2, client(), now() + 21)
+  check("refresh reuse revokes family", isGrantErr(reuse) && revoked(at1) && revoked(at2) && isGrantErr(afterReuse), "reuse=${show(isGrantErr(reuse))} at1=${show(revoked(at1))} at2=${show(revoked(at2))} newest=${show(isGrantErr(afterReuse))}")
+}
