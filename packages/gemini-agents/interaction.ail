@@ -15,7 +15,7 @@
 module sunholo/gemini_agents/interaction
 
 import std/net (httpRequest)
-import std/json (decode, get, getString, asArray)
+import std/json (decode, get as jsonGet, getString, asArray)
 import std/option (Some, None, getOrElse)
 import std/result (Ok, Err)
 import std/list (map)
@@ -64,7 +64,7 @@ export func list(project: string, pageToken: string) -> Result[Listing, string] 
     Err(e) => Err(e),
     Ok(raw) => match decode(raw) {
       Ok(j) => {
-        let metas = match get(j, "interaction_metadatas") { Some(a) => getOrElse(asArray(a), []), None => [] };
+        let metas = match jsonGet(j, "interaction_metadatas") { Some(a) => getOrElse(asArray(a), []), None => [] };
         Ok({ ids: map(\m. getOrElse(getString(m, "id"), ""), metas), next: getOrElse(getString(j, "next_page_token"), "") })
       },
       Err(e) => Err("gemini_agents: list: ${e}")
