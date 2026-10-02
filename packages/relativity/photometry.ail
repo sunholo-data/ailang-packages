@@ -24,7 +24,7 @@ pure func interpolate(x: float, xs: [float], ys: [float], i: int) -> float {
 -- Clamped table lookup. NaN is tested first (x == x is false only for NaN;
 -- the interpreter answers NaN >= x with true, ailang#1419) and maps to the
 -- last, coolest node on both engines.
-pure func lookup(x: float, xs: [float], ys: [float]) -> float {
+pure func tableLookup(x: float, xs: [float], ys: [float]) -> float {
   let last = length(xs) - 1;
   if not (x == x) then nth_or(ys, last, 0.0)
   else if x <= nth_or(xs, 0, 0.0) then nth_or(ys, 0, 0.0)
@@ -32,7 +32,7 @@ pure func lookup(x: float, xs: [float], ys: [float]) -> float {
   else interpolate(x, xs, ys, 0)
 }
 
-pure func fromTable(x: float, ys: [float]) -> float = lookup(x, bpRpNodes(), ys)
+pure func fromTable(x: float, ys: [float]) -> float = tableLookup(x, bpRpNodes(), ys)
 
 -- Kelvin from Gaia BP-RP; clamped to the dwarf table endpoints.
 export pure func teffFromBpRp(bpRp: float) -> float
@@ -83,7 +83,7 @@ export pure func fluxRatioFromMags(m1: float, m2: float) -> float
 export pure func teffFromBV(bv: float) -> float
   ensures { result >= 2380.0 && result <= 44900.0 }
 {
-  lookup(bv, bvNodes(), bvTeffNodes())
+  tableLookup(bv, bvNodes(), bvTeffNodes())
 }
 
 -- True precisely within the B-V table span O3V-M9V; false for NaN.

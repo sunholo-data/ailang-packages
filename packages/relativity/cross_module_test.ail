@@ -1,0 +1,16 @@
+-- Regression for ailang#1461 (the test runner mixes up same-named private
+-- functions across modules): photometry and blackbody_photometry are imported
+-- together, as downstream packages do. 0.5.0 shipped two private `lookup`s
+-- with different arity, and the stapledons-godot catalogue tests broke.
+module sunholo/relativity/cross_module_test
+
+import ./hyper (absf)
+import ./photometry (teffFromBpRp, teffFromBV)
+import ./blackbody_photometry (bbTeffFromBpRp)
+
+pure func checkBothTablesTogether() -> bool =
+  absf(teffFromBpRp(0.823) - 5770.0) < 0.000000001
+  && absf(bbTeffFromBpRp(0.30) - 8941.61808557) < 0.000001
+  && absf(teffFromBV(0.65) - 5770.0) < 1.0
+
+test "photometry and blackbody_photometry imported together (ailang#1461)" { checkBothTablesTogether() }
