@@ -1,12 +1,13 @@
 -- Boot probe for publish: prints "OK: ..." iff six independent checks hold
 -- in a clean workdir — a trip time (rocket equation), an apparent star
 -- position (aberration), a black-hole shadow size (Schwarzschild), a
--- G2V temperature (photometry), a white-dwarf temperature, and a cruise
--- trip with its energy ledger (journey plans, medium).
+-- G2V temperature (photometry), a white-dwarf temperature, a cruise
+-- trip with its energy ledger (journey plans, medium), and the sky
+-- photometry of 0.5.0 (forward CMB radiance, B-V temperature, threshold).
 module sunholo/relativity/_smoke
 
 import std/io (println)
-import std/math (acos, intToFloat)
+import std/math (acos, intToFloat, sin, cos, pow, log10)
 import ./kinematics (standardGravity, rapidityOfOneMinusBeta)
 import ./hyper (atanh, absf)
 import ./journey (TripPlan, TripPhase, Accelerating, Coasting, Decelerating, Arrived, flipAndBurn, planBurnCoastBurn, planFlipAndBurn, phaseAt, motionAt)
@@ -15,8 +16,10 @@ import ./optics (cmbForwardTemperature)
 import ./medium (tripEnergy, mirrorDragPower, loadScale, glowInwardFlux, brakeHoldsAgainstDrag, accelSI)
 import ./optics (aberrate, dot)
 import ./schwarzschild (shadowAngularRadius, pi)
-import ./photometry (teffFromBpRp)
+import ./photometry (teffFromBpRp, teffFromBV, bvInTable, luminanceFromSurfaceMag, surfaceMagFromLuminance, pointThresholdIlluminance, limitingMagnitude)
 import ./blackbody_photometry (bbTeffFromBpRp)
+import ./blackbody (photopicRadiance)
+import ./optics (cmbSeenTemperature, cmbSeenTemperatureApparent)
 
 pure func wdNaN() -> float = 0.0 / 0.0
 pure func wdInf() -> float = 1.0e308 * 10.0
@@ -86,6 +89,45 @@ export pure func journeyDigest(n: int) -> float {
     + (if brakeHoldsAgainstDrag(wdNaN(), 1.0, 1.0, 1.0, 1.0) then 1.0 else 0.0)
 }
 
+pure func skyPoint(i: int, n: int) -> float {
+  let u = intToFloat(i) / intToFloat(n);
+  let th = 3.141592653589793 * u;
+  let dir = { x: sin(th), y: 0.0, z: cos(th) };
+  let fwd = { x: 0.0, y: 0.0, z: 1.0 };
+  let phi = rapidityOfOneMinusBeta(0.000001) * u;
+  let tSeen = cmbSeenTemperatureApparent(dir, fwd, phi);
+  let lb = 0.00000001 * pow(1.0e14, u);
+  (teffFromBV(-1.0 + 4.0 * u) + teffFromBpRp(-0.5 + 6.0 * u)) / 1000.0
+    + (if bvInTable(-1.0 + 4.0 * u) then 1.0 else 0.0)
+    + log10(1.0 + photopicRadiance(tSeen)) + log10(1.0 + photopicRadiance(0.001 * pow(1.0e9, u)))
+    + cmbSeenTemperature(dir, fwd, phi) / 1000.0 + log10(tSeen)
+    + log10(luminanceFromSurfaceMag(-10.0 + 50.0 * u)) + surfaceMagFromLuminance(0.000001 * pow(1.0e10, u))
+    + log10(pointThresholdIlluminance(lb)) + limitingMagnitude(lb, 2.0)
+}
+
+pure func skySweep(i: int, n: int, acc: float) -> float =
+  if i > n then acc else skySweep(i + 1, n, acc + skyPoint(i, n))
+
+-- Pure digest of the 0.5.0 sky photometry (both clamps, NaN, the zero-T and
+-- dark-background cut-offs, the CMB from 0 to the cap); interpreter and
+-- strict VM must print the same bits.
+export pure func photometryDigest(n: int) -> float =
+  skySweep(0, n, 0.0) + teffFromBV(wdNaN()) + teffFromBV(wdInf()) + teffFromBV(-wdInf())
+    + teffFromBpRp(wdNaN()) + photopicRadiance(wdNaN()) + photopicRadiance(2.725)
+    + log10(pointThresholdIlluminance(wdNaN())) + (if bvInTable(wdNaN()) then 1.0 else 0.0)
+
+pure func photopicSweep(i: int, n: int) -> bool {
+  if i > n then true
+  else {
+    let v = photopicRadiance(0.001 * pow(1.0e9, intToFloat(i) / intToFloat(n)));
+    v == v && v >= 0.0 && v < 1.0e308 * 10.0 && photopicSweep(i + 1, n)
+  }
+}
+
+-- True when photopicRadiance is finite and >= 0 at n + 1 log-spaced
+-- temperatures from 1e-3 K to 1e6 K (the gate runs n = 9999 on the VM).
+export pure func photopicFinite(n: int) -> bool = photopicSweep(0, n)
+
 export func main() -> () ! {IO} {
   let trip = flipAndBurn(4.37, standardGravity());
   let fwd = { x: 0.0, y: 0.0, z: -1.0 };
@@ -99,7 +141,10 @@ export func main() -> () ! {IO} {
   let photometryWdOk = absf(bbTeffFromBpRp(0.30) - 8941.61808557) < 0.000001;
   let cruise = planBurnCoastBurn(4.37, 774221.4566651969, rapidityOfOneMinusBeta(0.000001));
   let cruiseOk = absf(cruise.trip.shipTime - 0.006196277986522) < 0.000000000001 && absf(tripEnergy(cruise, 1.0, 100000.0, 100.0).total / 1.0e19 - 1.5104591056870126) < 0.000000001;
-  if tripOk && angleOk && shadowOk && photometryOk && photometryWdOk && cruiseOk
-  then println("OK: relativity alpha-Cen trip 3.5824 ship-yr / 6.0025 yr, 90deg star seen at 25.842deg at 0.9c, shadow at 3 r_s = pi/4, G2V = 5770 K, WD BP-RP 0.30 = 8941.6 K, alpha Cen at 1-beta = 1e-6 2.263 ship-days / 1.510e19 J")
-  else println("FAIL: trip ${show(trip.shipTime)} / ${show(trip.galaxyTime)}, angle ${show(angle)}, shadow ${show(shadow)}, G2V ${show(teffFromBpRp(0.823))}, WD ${show(bbTeffFromBpRp(0.30))}, cruise ${show(cruise.trip.shipTime)}")
+  let pole = { x: 0.0, y: 0.0, z: 1.0 };
+  let cmbPole = cmbSeenTemperature(pole, pole, rapidityOfOneMinusBeta(0.000001));
+  let skyOk = absf(cmbPole - 3853.730994033574) < 0.000001 && absf(photopicRadiance(cmbPole) / 198426544.37850556 - 1.0) < 0.000001 && absf(teffFromBV(0.65) - 5770.0) < 0.000000001 && absf(limitingMagnitude(0.0002, 1.0) - 6.942368201939953) < 0.000000001;
+  if tripOk && angleOk && shadowOk && photometryOk && photometryWdOk && cruiseOk && skyOk
+  then println("OK: relativity alpha-Cen trip 3.5824 ship-yr / 6.0025 yr, 90deg star seen at 25.842deg at 0.9c, shadow at 3 r_s = pi/4, G2V = 5770 K, WD BP-RP 0.30 = 8941.6 K, alpha Cen at 1-beta = 1e-6 2.263 ship-days / 1.510e19 J, forward CMB at the cap 3853.7 K = 1.984e8 cd/m^2, Sun B-V 0.65 = 5770 K, naked-eye limit V 6.94 at 2e-4 cd/m^2")
+  else println("FAIL: trip ${show(trip.shipTime)} / ${show(trip.galaxyTime)}, angle ${show(angle)}, shadow ${show(shadow)}, G2V ${show(teffFromBpRp(0.823))}, WD ${show(bbTeffFromBpRp(0.30))}, cruise ${show(cruise.trip.shipTime)}, CMB ${show(cmbPole)} K ${show(photopicRadiance(cmbPole))} cd/m^2, B-V ${show(teffFromBV(0.65))}, limit ${show(limitingMagnitude(0.0002, 1.0))}")
 }

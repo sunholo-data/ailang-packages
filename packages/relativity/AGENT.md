@@ -12,7 +12,8 @@ near a black hole and the numbers must be physically right:
   the trip energy ledger, the forward CMB temperature.
 - Relativistic motion stepped in a simulation.
 - What a fast-moving observer sees: aberration, Doppler shift, the colour and
-  brightness of stars.
+  brightness of stars, the CMB in every direction, and absolute luminances
+  (cd/m^2) and the naked-eye threshold for exposing a rendered sky.
 - Closed-form Schwarzschild quantities: shadow size, deflection, gravitational
   shift.
 
@@ -49,9 +50,9 @@ Do NOT use it for:
 import pkg/sunholo/relativity/kinematics (Motion, rest, accelerate, standardGravity, betaOf, gammaOf, rapidityOfOneMinusBeta)
 import pkg/sunholo/relativity/journey (flipAndBurn, burnCoastBurn, planBurnCoastBurn, phaseAt, motionAt)
 import pkg/sunholo/relativity/medium (tripEnergy, mirrorDragForce, accelSI)
-import pkg/sunholo/relativity/optics (Vec3, aberrate, doppler)
-import pkg/sunholo/relativity/blackbody (pointFluxRatio, rgbUnitLuminance)
-import pkg/sunholo/relativity/photometry (teffFromBpRp, vFromG, illuminanceFromV)
+import pkg/sunholo/relativity/optics (Vec3, aberrate, doppler, cmbSeenTemperatureApparent)
+import pkg/sunholo/relativity/blackbody (pointFluxRatio, rgbUnitLuminance, photopicRadiance)
+import pkg/sunholo/relativity/photometry (teffFromBpRp, teffFromBV, vFromG, illuminanceFromV, luminanceFromSurfaceMag, pointThresholdIlluminance, limitingMagnitude)
 import pkg/sunholo/relativity/schwarzschild (shadowAngularRadius)
 
 -- Sol to alpha Centauri at 1 g, flip at the midpoint:
@@ -72,6 +73,12 @@ let seen = aberrate(n, heading, m2.phi);
 let d = doppler(n, heading, m2.phi);
 let brightness = pointFluxRatio(5700.0, d);         -- visual-band flux, seen / at rest
 let colour = rgbUnitLuminance(5700.0 * d);          -- linear sRGB, Y = 1
+
+-- The sky in absolute units, per pixel with apparent direction nSeen:
+let tCmb = cmbSeenTemperatureApparent(nSeen, heading, m2.phi);  -- 3853.7 K on the pole at the cap
+let cmbLum = photopicRadiance(tCmb);                -- cd/m^2 (0 at 2.725 K, 1.984e8 at 3853.7 K)
+let skyLum = luminanceFromSurfaceMag(22.0);         -- 1.725e-4 cd/m^2
+let vLim = limitingMagnitude(skyLum, 2.0);          -- faintest visible star, field factor 2
 ```
 
 ## Exported surface
@@ -82,10 +89,10 @@ let colour = rgbUnitLuminance(5700.0 * d);          -- linear sRGB, Y = 1
 | `kinematics` | `Motion {phi,tau,t,x}`, `rest`, `accelerate(m, a, dtau)`, `coast`, `standardGravity`, `betaOf`, `gammaOf`, `oneMinusBeta`, `gammaOfBeta`, `rapidityOfBeta`, `rapidityOfOneMinusBeta` |
 | `journey` | `Trip {distance, shipTime, galaxyTime, peakBeta, peakGamma}`, `flipAndBurn(d, a)`, `burnCoastBurn(d, a, maxBeta)`, `coastAt(d, beta)`, `TripPlan {trip, a, phiPeak, tauBurn, tauCoast, tauTotal, dBurn, dCoast, fellBack}`, `planBurnCoastBurn(d, a, phiCruise)`, `planFlipAndBurn(d, a)`, `TripPhase` (`Accelerating Coasting Decelerating Arrived`), `phaseAt(p, tau)`, `motionAt(p, tau)` |
 | `medium` | `cSI protonMassKg lightYearM julianYearS astronomicalUnitM cmbTemperatureK accelSI`, `photonDriveEnergy(mEff, phi)`, `loadScale(n, phi)`, `kineticFlux(n, phi)`, `mirrorDragForce(n, phi, r)`, `mirrorDragPower(n, phi, r)`, `cruiseDragEnergy(n, phi, r, dCoast)`, `glowInwardFlux(n, phi, eps, fIn)`, `TripEnergy {boost, brake, drag, total}`, `tripEnergy(p, mEff, n, r)`, `brakeHoldsAgainstDrag(mEff, a, n, phi, r)` |
-| `optics` | `Vec3`, `aberrate`, `deaberrate`, `doppler`, `dopplerApparent`, `gammaOnePlusBetaCos`, `cosSeen`, `dot`, `norm`, `normalize`, `forwardDoppler`, `cmbForwardTemperature` |
-| `blackbody` | `XYZ`, `RGB`, `cmf`, `planck`, `xyz`, `luminance`, `chromaticity`, `rgbUnitLuminance`, `pointFluxRatio`, `surfaceBrightnessRatio` |
-| `photometry` | `teffFromBpRp`, `gMinusV`, `bpRpInTable`, `vFromG`, `illuminanceFromV`, `fluxRatioFromMags` |
-| `photometry_table` | Generated Gaia BP-RP, Teff, G-V and spectral-type node lists |
+| `optics` | `Vec3`, `aberrate`, `deaberrate`, `doppler`, `dopplerApparent`, `gammaOnePlusBetaCos`, `cosSeen`, `dot`, `norm`, `normalize`, `forwardDoppler`, `cmbForwardTemperature`, `cmbSeenTemperature`, `cmbSeenTemperatureApparent` |
+| `blackbody` | `XYZ`, `RGB`, `cmf`, `planck`, `xyz`, `luminance`, `chromaticity`, `rgbUnitLuminance`, `pointFluxRatio`, `surfaceBrightnessRatio`, `photopicRadiance` |
+| `photometry` | `teffFromBpRp`, `gMinusV`, `bpRpInTable`, `teffFromBV`, `bvInTable`, `vFromG`, `illuminanceFromV`, `vFromIlluminance`, `fluxRatioFromMags`, `luminanceFromSurfaceMag`, `surfaceMagFromLuminance`, `pointThresholdIlluminance`, `limitingMagnitude` |
+| `photometry_table` | Generated Gaia BP-RP, Teff, G-V and spectral-type node lists, and the Johnson B-V and Teff node lists |
 | `blackbody_photometry` | `bbTeffMin`, `bbTeffMax`, `bbBpRp`, `bbGMinusV`, `bbBpRpInvertible`, `bbClampTeff`, `bbTeffFromBpRp`, `bbTeffFromBpRpExact`, `bbGMinusVFromBpRp`, `bbVFromG` |
 | `blackbody_photometry_table` | Generated Gaia G/BP/RP and Bessell-Murphy V response samples, zero points and the 61-node colour table |
 | `schwarzschild` | `photonSphere` (1.5), `criticalImpact` (3√3/2), `shadowAngularRadius(r)`, `weakDeflection(b)`, `staticObserverBlueshift(r)`, `staticClockRate(r)`, `pi` |
@@ -135,6 +142,39 @@ table drops M9V and M9.5V and covers B9V–M8.5V (BP-RP -0.12–5.10).
 to detect extrapolation. The relation is for main-sequence dwarfs only, not
 white dwarfs or giants.
 
+`teffFromBV` does the same from Johnson B-V (for bright stars Gaia
+saturates on): the same table's B-V column, O3V-M9V (B-V -0.33-2.17,
+44,900-2,380 K), clamped, NaN to the cool end, `bvInTable` for the range.
+It is a dwarf relation: approximate for giants, and B-V carries almost no
+temperature information for O stars or late M dwarfs.
+
+## Sky photometry in absolute units
+
+For exposing a rendered sky, every source needs a luminance in cd/m^2 (or an
+illuminance in lux for point sources), never a ratio against a rest value:
+- `blackbody.photopicRadiance(T)`: a blackbody's luminance, 683 lm/W x
+  integral B_lambda ybar (CIE 1931 fit, 360-830 nm). 0 for T <= 0, NaN and
+  the CMB's 2.725 K, so it never divides by ~0 (unlike
+  `surfaceBrightnessRatio(2.725, D)`).
+- `optics.cmbSeenTemperature(n, bh, phi)` takes the rest-frame direction (like
+  `doppler`); `cmbSeenTemperatureApparent(nSeen, ...)` takes the apparent
+  direction (like `dopplerApparent`): use it per pixel. The CMB's seen
+  luminance is `photopicRadiance(cmbSeenTemperatureApparent(...))`.
+- **Sideways is dark in the ship frame.** At apparent 90 deg, D = 1/gamma
+  (T_CMB / gamma, starlight redshifted). D = 1 at
+  cos theta' = (1 - 1/gamma)/beta, about 3 deg from the pole at gamma 707.
+  The "gamma at 90 deg" value (gamma T_CMB) is for the REST-frame 90 deg,
+  which appears asin(1/gamma) from the pole.
+- `photometry.luminanceFromSurfaceMag(mu)`: V mag/arcsec^2 to cd/m^2 on the
+  package zero point (V = -13.98 at 1 lux).
+- `photometry.pointThresholdIlluminance(lb)`: the naked-eye threshold (lux)
+  for a point source on a background of lb cd/m^2, field factor 1, from
+  Crumey (2014) MNRAS 442, 2600, Eqs. 53 (scotopic, lb <= 0.0708) and 33
+  (photopic), flat below 1e-5 cd/m^2. `limitingMagnitude(lb, f)` is the
+  faintest V; Crumey takes f = 2 as a typical observer (6.19 at 2e-4 cd/m^2).
+  lb is photopic luminance; Crumey's scotopic colour correction is not
+  applied.
+
 ## White-dwarf (blackbody) photometry
 
 Use `blackbody_photometry` for the Gaia BP-RP of a **white dwarf**, or of any
@@ -176,9 +216,14 @@ V is good to about +-0.1 mag. Treat results as approximate.
   CIE Planckian locus, the relativistic rocket equations and the Schwarzschild
   metric. The 0.4.0 plan and energetics values come from tools/journey_ref.py
   (float64 closed forms checked against 50-digit Decimal) to 1e-12 relative,
-  and the canon higgs-bubble HB-n values to their printed digits.
+  and the canon higgs-bubble HB-n values to their printed digits. The 0.5.0
+  sky photometry values come from tools/photometry_ref.py: a 0.05 nm Simpson
+  quadrature with exact SI constants, the official CIE 1931 ybar table, the
+  platinum-point candela, 50-digit Decimal CMB temperatures and Crumey's
+  printed limits.
 - NaN: the interpreter answers NaN >= x with true (ailang#1419), the VM with
   false. Functions here test NaN first or are written with `<` so both engines
-  agree; `_smoke.ail`'s `wdDigest` and `journeyDigest` check that bit for bit.
+  agree; `_smoke.ail`'s `wdDigest`, `journeyDigest` and `photometryDigest`
+  check that bit for bit.
 - Colours use the Wyman–Sloan–Shirley (2013) fit to the CIE 1931 colour
   matching functions, which is accurate to about 0.002 in chromaticity.

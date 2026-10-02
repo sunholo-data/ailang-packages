@@ -1,0 +1,200 @@
+-- 0.5.0 photometry for the relativistic sky. Every expected value comes from
+-- tools/photometry_ref.py (output in tools/photometry_ref.out), from the
+-- canon rows HB-n of stapledons-design physics/higgs-bubble.md, or from the
+-- cited literature; none from the code under test.
+module sunholo/relativity/photometry_sky_test
+
+import std/math (sin, cos, pow, intToFloat)
+import ./hyper (absf)
+import ./kinematics (rapidityOfOneMinusBeta, rapidityOfBeta, gammaOf)
+import ./optics (Vec3, cmbSeenTemperature, cmbSeenTemperatureApparent, cmbForwardTemperature)
+import ./blackbody (photopicRadiance)
+import ./photometry (teffFromBV, bvInTable, luminanceFromSurfaceMag, surfaceMagFromLuminance, vFromIlluminance, illuminanceFromV, pointThresholdIlluminance, limitingMagnitude)
+
+pure func relative(got: float, want: float, tol: float) -> bool = absf(got - want) <= tol * absf(want)
+pure func close(got: float, want: float, tol: float) -> bool = absf(got - want) <= tol
+pure func nan() -> float = 0.0 / 0.0
+pure func inf() -> float = 1.0e308 * 10.0
+pure func finiteNonNeg(x: float) -> bool = x == x && x >= 0.0 && x < inf()
+
+-- ---------------------------------------------------------------- teffFromBV
+-- B-V: Sun 0.65 (Mamajek G2V); Sirius A 0.009 and alpha Cen B 0.900
+-- (Hipparcos); Barnard's 1.729 (Koen et al. 2010, B 11.24, V 9.511);
+-- Proxima 1.82 (Jao et al. 2014, B 12.95, V 11.13).
+-- Teff: Sun 5772 K (IAU 2015 B3); Sirius A 9940 K; alpha Cen B 5260 K
+-- (Kervella et al. 2003, A&A 404, 1087); Barnard's 3224 K and Proxima
+-- 3054 K (Boyajian et al. 2012, ApJ 757, 112, interferometric).
+-- Measured: -0.03%, -3.45%, -3.82%, -3.97%, +0.31%. Proxima's colour is
+-- uncertain: Boyajian's own B-V 1.97 would read 2879 K (-5.7%); B-V
+-- saturates for late M dwarfs.
+pure func check01() -> bool {
+  relative(teffFromBV(0.65), 5772.0, 0.05) &&
+  relative(teffFromBV(0.009), 9940.0, 0.05) &&
+  relative(teffFromBV(0.900), 5260.0, 0.05) &&
+  relative(teffFromBV(1.729), 3224.0, 0.05) &&
+  relative(teffFromBV(1.82), 3054.0, 0.05)
+}
+test "B-V temperatures of five literature dwarfs within 5 percent" { check01() }
+
+-- Nodes and an interior point against the reference's own interpolation.
+pure func check02() -> bool {
+  close(teffFromBV(0.65), 5770.0, 0.000000001) &&
+  close(teffFromBV(-0.33), 44900.0, 0.000000001) &&
+  close(teffFromBV(2.17), 2380.0, 0.000000001) &&
+  close(teffFromBV(1.729), 3096.0714285714284, 0.000000001) &&
+  close(teffFromBV(0.0175), 9500.0, 0.000000001)
+}
+test "B-V interpolation hits nodes and the reference interior values" { check02() }
+
+pure func check03() -> bool {
+  close(teffFromBV(-1.0), 44900.0, 0.0) &&
+  close(teffFromBV(3.0), 2380.0, 0.0) &&
+  close(teffFromBV(nan()), 2380.0, 0.0) &&
+  close(teffFromBV(inf()), 2380.0, 0.0) &&
+  close(teffFromBV(0.0 - inf()), 44900.0, 0.0) &&
+  bvInTable(-0.33) && bvInTable(2.17) && bvInTable(0.65) &&
+  not bvInTable(-0.331) && not bvInTable(2.171) && not bvInTable(nan())
+}
+test "B-V clamps at both ends, NaN to the cool end, and reports range" { check03() }
+
+pure func sweepBV(x: float, stop: float, previous: float) -> bool {
+  if x > stop then true
+  else {
+    let now = teffFromBV(x);
+    now < previous && sweepBV(x + 0.0005, stop, now)
+  }
+}
+pure func check04() -> bool = sweepBV(-0.3295, 2.17, teffFromBV(-0.33))
+test "B-V temperature falls strictly across the whole table" { check04() }
+
+-- ---------------------------------------------------------- surface brightness
+-- mu = 22: 1.725242969719464e-4 cd/m^2 (reference); the design's 1.726e-4.
+pure func check05() -> bool {
+  relative(luminanceFromSurfaceMag(22.0), 0.0001725242969719464, 0.000000000001) &&
+  relative(luminanceFromSurfaceMag(22.0), 0.0001726, 0.0005) &&
+  relative(luminanceFromSurfaceMag(0.0), 108855.47227573219, 0.000000000001) &&
+  close(surfaceMagFromLuminance(luminanceFromSurfaceMag(21.83)), 21.83, 0.000000000001) &&
+  close(vFromIlluminance(illuminanceFromV(6.5)), 6.5, 0.000000000001)
+}
+test "surface brightness to cd/m^2 and back" { check05() }
+
+-- ------------------------------------------------------------ photopicRadiance
+-- Reference: exact SI Planck, the same ybar fit, Simpson at 0.05 nm. The
+-- package sums at 1 nm with c2 rounded to 14387769 nm K: agreement 2e-7.
+pure func check06() -> bool {
+  relative(photopicRadiance(2856.0), 19784364.704283137, 0.000001) &&
+  relative(photopicRadiance(5772.0), 1844561011.0530434, 0.000001) &&
+  relative(photopicRadiance(3853.7), 198415938.92835936, 0.000001) &&
+  relative(photopicRadiance(1926.9), 290818.89064946724, 0.000001)
+}
+test "photopic radiance matches the independent Simpson oracle to 1e-6" { check06() }
+
+-- Against the official CIE 1931 ybar (5 nm): the fit's own error, <= 0.33%
+-- from 1,900 to 6,000 K. Pt point 2041.4 K: the pre-1979 candela made it
+-- 6.0e5 cd/m^2 (1/60 cd per cm^2), which the 683 lm/W definition kept.
+pure func check07() -> bool {
+  relative(photopicRadiance(2856.0), 19749745.771347255, 0.005) &&
+  relative(photopicRadiance(5772.0), 1843710830.4403253, 0.005) &&
+  relative(photopicRadiance(3853.7), 198202243.87947527, 0.005) &&
+  relative(photopicRadiance(1926.9), 289890.01741253363, 0.005) &&
+  relative(photopicRadiance(2041.4), 600000.0, 0.01)
+}
+test "photopic radiance agrees with the CIE 1931 table and the platinum-point candela" { check07() }
+
+pure func check08() -> bool {
+  photopicRadiance(2.725) == 0.0 &&
+  photopicRadiance(0.0) == 0.0 &&
+  photopicRadiance(-5.0) == 0.0 &&
+  photopicRadiance(nan()) == 0.0 &&
+  photopicRadiance(0.000001) == 0.0 &&
+  finiteNonNeg(photopicRadiance(38.44)) &&
+  photopicRadiance(798.0) > 0.0
+}
+test "photopic radiance is 0 at the CMB's 2.725 K, at T <= 0 and for NaN" { check08() }
+
+-- -------------------------------------------------------------- CMB seen
+-- 50-digit Decimal reference; canon HB-62 38.44 K, HB-63 3,853.7 K, HB-68
+-- half the pole temperature 1/gamma rad from it.
+pure func ahead() -> Vec3 = { x: 0.0, y: 0.0, z: 1.0 }
+pure func atAngle(t: float) -> Vec3 = { x: sin(t), y: 0.0, z: cos(t) }
+pure func capPhi() -> float = rapidityOfOneMinusBeta(0.000001)
+
+pure func check09() -> bool {
+  let p = capPhi();
+  relative(cmbSeenTemperature(ahead(), ahead(), p), 3853.730994033574, 0.000000000001) &&
+  close(cmbSeenTemperature(ahead(), ahead(), p), 3853.7, 0.05) &&
+  relative(cmbSeenTemperature(ahead(), ahead(), rapidityOfBeta(0.99)), 38.440855544590, 0.000000000001) &&
+  close(cmbSeenTemperature(ahead(), ahead(), rapidityOfBeta(0.99)), 38.44, 0.005) &&
+  relative(cmbSeenTemperatureApparent(ahead(), ahead(), p), cmbForwardTemperature(p), 0.000000000001)
+}
+test "forward CMB at the cap and at 0.99c (HB-62, HB-63)" { check09() }
+
+pure func check10() -> bool {
+  let p = capPhi();
+  relative(cmbSeenTemperature(atAngle(1.5707963267948966), ahead(), p), 1926.866460450017, 0.000000000001) &&
+  relative(cmbSeenTemperatureApparent(atAngle(1.5707963267948966), ahead(), p), 0.003853730994, 0.00000000001) &&
+  relative(cmbSeenTemperatureApparent(atAngle(1.0 / gammaOf(p)), ahead(), p), 1926.867102770845, 0.000000001) &&
+  relative(cmbSeenTemperatureApparent({ x: 0.0, y: 0.0, z: -1.0 }, ahead(), p), 2.725 / 1414.2132088196603, 0.000000001)
+}
+test "CMB gamma T0 at rest-frame 90 deg, T0/gamma seen at 90 deg, half at 1/gamma rad (HB-68)" { check10() }
+
+-- ----------------------------------------------------- point-source threshold
+-- Crumey (2014) Eq. 53 / 33 / zeta. m0 at 2e-4 cd/m^2: 6.93 in Crumey's zero
+-- point (2.54e-6 lx), 6.18 at F = 2.
+pure func crumeyMag(lux: float) -> float = vFromIlluminance(lux) - vFromIlluminance(0.00000254)
+pure func check11() -> bool {
+  relative(pointThresholdIlluminance(0.0002), 0.000000004276147913741731, 0.000000000001) &&
+  relative(pointThresholdIlluminance(0.00001), 0.0000000011495286872003704, 0.000000000001) &&
+  relative(pointThresholdIlluminance(0.00001), 0.00000000115, 0.0005) &&
+  relative(pointThresholdIlluminance(1.0), 0.0000000619362769, 0.000000000001) &&
+  relative(pointThresholdIlluminance(100.0), 0.0000016308710090207247, 0.000000000001) &&
+  close(crumeyMag(pointThresholdIlluminance(0.0002)), 6.93, 0.005) &&
+  close(crumeyMag(2.0 * pointThresholdIlluminance(0.0002)), 6.18, 0.005) &&
+  relative(limitingMagnitude(0.0002, 1.0), 6.942368201939953, 0.000000000001)
+}
+test "Crumey 2014 point threshold and naked-eye limit (m0 6.93, 6.18 at F = 2)" { check11() }
+
+pure func check12() -> bool {
+  let z = pointThresholdIlluminance(0.00001);
+  pointThresholdIlluminance(0.0) == z && pointThresholdIlluminance(0.000001) == z &&
+  pointThresholdIlluminance(nan()) == z && pointThresholdIlluminance(-1.0) == z &&
+  relative(pointThresholdIlluminance(0.070801), pointThresholdIlluminance(0.0708), 0.0011) &&
+  limitingMagnitude(0.001, 2.0) < limitingMagnitude(0.0002, 2.0)
+}
+test "threshold is flat below 1e-5 cd/m^2, NaN counts as dark, branches meet" { check12() }
+
+-- ------------------------------------------------------------- finite sweeps
+-- 10,000 points of every new function across and beyond its range, except
+-- photopicRadiance (471-point quadrature per call, ~75 ms on the
+-- interpreter): 200 log-spaced points here, and 10,000 on the strict VM in
+-- _smoke.ail's photopicFinite (run by the publish gate).
+pure func logSpace(i: int, n: int, lo: float, hi: float) -> float = lo * pow(hi / lo, intToFloat(i) / intToFloat(n))
+pure func linSpace(i: int, n: int, lo: float, hi: float) -> float = lo + (hi - lo) * intToFloat(i) / intToFloat(n)
+
+pure func sweepAll(i: int, hi: int, n: int) -> bool {
+  if i > hi then true
+  else {
+    let bv = linSpace(i, n, -1.0, 3.0);
+    let b = logSpace(i, n, 0.00000001, 1000000.0);
+    let mu = linSpace(i, n, -10.0, 40.0);
+    let th = linSpace(i, n, 0.0, 3.141592653589793);
+    let ok = finiteNonNeg(teffFromBV(bv)) &&
+      finiteNonNeg(pointThresholdIlluminance(b)) && pointThresholdIlluminance(b) > 0.0 &&
+      finiteNonNeg(luminanceFromSurfaceMag(mu)) &&
+      limitingMagnitude(b, 2.0) == limitingMagnitude(b, 2.0) &&
+      finiteNonNeg(cmbSeenTemperature(atAngle(th), ahead(), capPhi())) &&
+      finiteNonNeg(cmbSeenTemperatureApparent(atAngle(th), ahead(), capPhi()));
+    ok && sweepAll(i + 1, hi, n)
+  }
+}
+-- 100 blocks of 100 points keeps the recursion depth at about 200.
+pure func sweepBlocks(b: int) -> bool =
+  if b > 99 then true else sweepAll(b * 100, b * 100 + 99, 9999) && sweepBlocks(b + 1)
+pure func check13() -> bool = sweepBlocks(0)
+test "every new function is finite and non-negative on a 10,000-point sweep" { check13() }
+
+pure func sweepPhotopic(i: int, n: int) -> bool =
+  if i > n then true
+  else finiteNonNeg(photopicRadiance(logSpace(i, n, 0.001, 1000000.0))) && sweepPhotopic(i + 1, n)
+pure func check14() -> bool = sweepPhotopic(0, 199)
+test "photopic radiance is finite and non-negative from 1e-3 K to 1e6 K" { check14() }

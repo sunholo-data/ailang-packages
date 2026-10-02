@@ -93,3 +93,28 @@ export pure func forwardDoppler(phi: float) -> float = exp(phi)
 -- observer at rapidity phi: T_CMB e^phi (K). Off-axis it halves at 1/gamma
 -- rad from the pole. 38.44 K at 0.99c, 3,853.7 K at 1 - beta = 1e-6.
 export pure func cmbForwardTemperature(phi: float) -> float = cmbTemperatureK() * forwardDoppler(phi)
+
+-- Temperature (K) of the CMB arriving from REST-FRAME direction n (toward the
+-- source) for an observer heading bh at rapidity phi: T_CMB D(n). The CMB is
+-- a blackbody at T_CMB D in every direction, so its seen radiance is
+-- blackbody.photopicRadiance(cmbSeenTemperature(...)), never a ratio against
+-- 2.725 K. At 1 - beta = 1e-6: 3,853.7 K on the pole (HB-63) and
+-- gamma T_CMB = 1,926.9 K for n at 90 deg, which APPEARS at asin(1/gamma)
+-- (0.081 deg) from the pole; 38.44 K ahead at 0.99c (HB-62).
+export pure func cmbSeenTemperature(n: Vec3, bh: Vec3, phi: float) -> float
+  requires { phi >= 0.0 }
+  ensures { result > 0.0 }
+{
+  cmbTemperatureK() * doppler(n, bh, phi)
+}
+
+-- The same from the APPARENT direction nSeen (per pixel of a rendered sky):
+-- T_CMB / (gamma (1 - beta cos theta')). Half the pole value near
+-- theta' = 1/gamma rad (HB-68); T_CMB / gamma at theta' = 90 deg; everything
+-- beyond cos theta' = (1 - 1/gamma) / beta is redshifted below 2.725 K.
+export pure func cmbSeenTemperatureApparent(nSeen: Vec3, bh: Vec3, phi: float) -> float
+  requires { phi >= 0.0 }
+  ensures { result > 0.0 }
+{
+  cmbTemperatureK() * dopplerApparent(nSeen, bh, phi)
+}
