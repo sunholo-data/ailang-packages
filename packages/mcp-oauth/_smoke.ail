@@ -1,0 +1,20 @@
+-- Boot probe for sunholo/mcp_oauth (offline, pure core only). `ailang pkg
+-- quality` executes this under `ailang run`; it prints OK: or FAIL: lines.
+-- The effectful flow is covered by tests/flow_check.sh (it needs SharedMem
+-- for its store hook, which the smoke run does not grant).
+module _smoke
+
+import std/io (println)
+import pkg/sunholo/mcp_oauth/core (pkceOk, redirectOk, cimdUrlOk, challengeMethodOk, isExpired, codeExpiresAt)
+
+func expect(name: string, ok: bool) -> () ! {IO} =
+  if ok then println("OK: ${name}") else println("FAIL: ${name}")
+
+export func main() -> () ! {IO} {
+  expect("pkce rfc7636 vector", pkceOk("dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk", "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM"));
+  expect("plain refused", challengeMethodOk("plain") == false);
+  expect("exact redirect only", redirectOk("https://claude.ai/api/mcp/auth_callback", ["https://claude.ai/api/mcp/auth_callback"])
+    && redirectOk("https://claude.ai/api/mcp/auth_callback/x", ["https://claude.ai/api/mcp/auth_callback"]) == false);
+  expect("cimd refuses metadata host", cimdUrlOk("https://metadata.google.internal/x") == false);
+  expect("code ttl", isExpired(codeExpiresAt(0), 60))
+}
