@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.5.1
+
+Fix: `photometry`'s private table helper is renamed `lookup` → `tableLookup`. In 0.5.0 it
+clashed with `blackbody_photometry`'s private `lookup` (different arity) under
+`ailang test` when a package imported both modules (ailang#1461, a test-runner
+scoping bug; `ailang run` was unaffected). No API change. New `cross_module_test.ail`
+imports both modules together as a regression guard.
+
 ## 0.5.0
 
 Additive: no signature changes. Photometry for a rendered relativistic sky in
