@@ -15,14 +15,14 @@ import std/json (decode, getString)
 import std/string (find, substring, length, startsWith, contains)
 import std/crypto (sha256Hex)
 import std/rand (uuid4)
-import pkg/sunholo/mcp_oauth/flow (Hooks, beginAuthorize, completeLogin, exchangeCode, refreshTokens)
+import pkg/sunholo/mcp_oauth/flow (Hooks, beginAuthorize, completeLogin, exchangeCode, refreshTokens, describeRequest)
 
 -- ---------------- test hooks: SharedMem store, stub IdP ----------------
 
 func tAuthenticate(idToken: string) -> Result[string, string] ! {IO, FS, Env, Net, Clock, SharedMem} =
   if idToken == "good-id-token" then Ok("acct-1") else Err("bad id token")
 
-func tMint(account: string, clientId: string) -> Result[string, string] ! {IO, FS, Env, Net, Clock, SharedMem, Rand[mode=crypto]} =
+func tMint(account: string, clientId: string) -> Result[string, string] ! {IO, FS, Env, Net, Clock, SharedMem, Rand[mode=crypto], Declassify} =
   Ok("dp_${account}_${clientId}_${show(length(clientId))}_${smCount()}")
 
 -- a counter so every minted token differs
@@ -53,7 +53,7 @@ func tRevoke(d: string) -> bool ! {IO, FS, Env, Net, Clock, SharedMem} {
   true
 }
 
-func hooks() -> Hooks = { authenticate: tAuthenticate, mint: tMint, put: tPut, get: tGet, del: tDel, revoke: tRevoke }
+func hooks() -> Hooks = { authenticate: tAuthenticate, mint: tMint, put: tPut, get: tGet, del: tDel, revoke: tRevoke, accessTtlSec: 3600 }
 
 -- ---------------- fixtures ----------------
 
@@ -171,6 +171,26 @@ export func main() -> unit ! {IO, FS, Env, Net, Clock, SharedMem, Rand[mode=cryp
     Err(_) => ""
   }
   check("refresh rotates", rt1 != "" && rt2 != "" && rt2 != rt1 && at2 != "" && at2 != at1, "no rotation")
+  -- login url with an existing query gets &handle=
+  let qUrl = beginAuthorize(h, "https://svc.example/login?lang=en", client(), regs(), cb(), "code", challenge(), "S256", "sq", now())
+  check("login url keeps its query", match qUrl {
+    Ok(u) => startsWith(u, "https://svc.example/login?lang=en&handle="),
+    Err(_) => false
+  }, "bad login url")
+  -- describeRequest shows client + redirect, and the handle still completes
+  let du = match qUrl { Ok(u) => u, Err(_) => "" }
+  let desc = describeRequest(h, param(du, "handle"))
+  check("describe request", match desc {
+    Ok(b) => field(b, "client_id") == client() && field(b, "redirect_uri") == cb(),
+    Err(_) => false
+  } && (match describeRequest(h, "nope") { Err(_) => true, Ok(_) => false }), "describe wrong")
+  -- token response carries expires_in
+  let code7 = obtainCode("st7", now())
+  let withTtl = exchangeCode(h, code7, verifier(), client(), cb(), now() + 5)
+  check("token response has expires_in", match withTtl {
+    Ok(b) => contains(b, "\"expires_in\":3600"),
+    Err(_) => false
+  }, "no expires_in")
   -- refresh reuse revokes family
   let reuse = refreshTokens(h, rt1, client(), now() + 20)
   let afterReuse = refreshTokens(h, rt2, client(), now() + 21)

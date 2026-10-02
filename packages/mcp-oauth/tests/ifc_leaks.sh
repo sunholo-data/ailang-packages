@@ -24,10 +24,10 @@ leak() {
   if grep -q "information-flow violation" <<<"$out"; then
     echo "ok: leak rejected: $name"
   else
-    echo "FAIL: leak compiled: $name"; rc=1
+    echo "FAIL: leak not rejected by IFC: $name"; grep -m2 -E "Error|error" <<<"$out"; rc=1
   fi
 }
 leak "log-classified-token" 'func leakToken(raw: string) -> unit ! {IO} = audit("t=${asSecret(raw)}")'
 leak "log-minted-code"      'func leakCode() -> unit ! {IO, Rand[mode=crypto]} = audit("c=${newSecret()}")'
-leak "log-token-body"       'func leakBody(a: string, b: string) -> unit ! {IO} = audit(tokenBody(asSecret(a), asSecret(b)))'
+leak "log-token-body"       'func leakBody(a: string, b: string) -> unit ! {IO} = audit(tokenBody(asSecret(a), asSecret(b), 3600))'
 exit $rc

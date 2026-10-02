@@ -45,13 +45,17 @@ import ./core (challengeMethodOk, pkceOk, redirectOk, codeExpiresAt, isExpired, 
 --                                   override the stack (AGENT.md #3: don't).
 --   put(key, json, expiresAtSec) / get(key) / del(key) -> storage
 --   revoke(tokenDigest)          -> invalidate the access token with that sha256Hex
+--   accessTtlSec                 -> lifetime of a minted access token (sent as expires_in)
+-- mint may use Declassify (e.g. to hash the key it stores); it must still return
+-- the raw token only as its result, never log or persist it unhashed.
 export type Hooks = {
   authenticate: (string) -> Result[string, string] ! {IO, FS, Env, Net, Clock, SharedMem},
-  mint: (string, string) -> Result[string, string] ! {IO, FS, Env, Net, Clock, SharedMem, Rand[mode=crypto]},
+  mint: (string, string) -> Result[string, string] ! {IO, FS, Env, Net, Clock, SharedMem, Rand[mode=crypto], Declassify},
   put: (string, string, int) -> bool ! {IO, FS, Env, Net, Clock, SharedMem},
   get: (string) -> Option[string] ! {IO, FS, Env, Net, Clock, SharedMem},
   del: (string) -> bool ! {IO, FS, Env, Net, Clock, SharedMem},
-  revoke: (string) -> bool ! {IO, FS, Env, Net, Clock, SharedMem}
+  revoke: (string) -> bool ! {IO, FS, Env, Net, Clock, SharedMem},
+  accessTtlSec: int
 }
 
 -- ============================================================
@@ -109,10 +113,24 @@ export func beginAuthorize(h: Hooks, loginUrl: string, clientId: string, registe
     let exp = codeExpiresAt(nowSec) + 540;  -- 10 minutes to sign in
     if h.put("req:${digestOf(handle)}", rec, exp) then {
       audit("authorize client=${clientId}");
-      Ok("${loginUrl}?handle=${handle}")
+      Ok("${loginUrl}${if strContains(loginUrl, "?") then "&" else "?"}handle=${handle}")
     } else Err(oauthError("server_error", "could not store the authorization request"))
   }
 }
+
+-- The pending request behind a sign-in handle, for the service's consent
+-- screen: Ok({"client_id","redirect_uri"} JSON) or Err(error JSON). Read-only;
+-- the handle stays valid for completeLogin.
+export func describeRequest(h: Hooks, handleRaw: string)
+  -> Result[string, string] ! {IO, FS, Env, Net, Clock, SharedMem, Declassify} =
+  match h.get("req:${digestOf(asSecret(handleRaw))}") {
+    None => Err(oauthError("invalid_request", "unknown or expired sign-in request")),
+    Some(raw) => match decode(raw) {
+      Err(_) => Err(oauthError("server_error", "corrupt sign-in request")),
+      Ok(req) => Ok(encode(jo([kv("client_id", js(getStringOr(req, "client_id"))),
+                               kv("redirect_uri", js(getStringOr(req, "redirect_uri")))])))
+    }
+  }
 
 -- ============================================================
 -- 2. login complete: the service's login page posts handle + ID token
@@ -160,9 +178,9 @@ pure func refreshTtlSec() -> int = 2592000  -- 30 days
 -- The token response (RFC 6749 §5.1). Built from <secret> values; the
 -- label propagates into the returned string (the caller writes it as the
 -- HTTP body and must not log it).
-func tokenBody(access: string<secret>, refreshTok: string<secret>) -> string =
+func tokenBody(access: string<secret>, refreshTok: string<secret>, ttlSec: int) -> string =
   encode(jo([kv("access_token", js(access)), kv("token_type", js("Bearer")),
-             kv("refresh_token", js(refreshTok))]))
+             kv("expires_in", jnum(intToFloat(ttlSec))), kv("refresh_token", js(refreshTok))]))
 
 -- Revoke every access token issued in a refresh family and close it.
 export func revokeFamily(h: Hooks, family: string, nowSec: int) -> bool ! {IO, FS, Env, Net, Clock, SharedMem} =
@@ -193,7 +211,7 @@ func issueTokens(h: Hooks, account: string, clientId: string, family: string, pr
       let famRec = encode(jo([kv("tokens", ja(map(js, priorDigests ++ [tokD]))), kv("closed", jb(false))]));
       let rtRec = encode(jo([kv("family", js(fam)), kv("account", js(account)), kv("client_id", js(clientId)), kv("used", jb(false))]));
       if h.put("fam:${fam}", famRec, nowSec + refreshTtlSec()) && h.put("rt:${digestOf(rt)}", rtRec, nowSec + refreshTtlSec())
-      then Ok((tokenBody(access, rt), tokD, fam))
+      then Ok((tokenBody(access, rt, h.accessTtlSec), tokD, fam))
       else Err(oauthError("server_error", "could not store the token family"))
     }
   }

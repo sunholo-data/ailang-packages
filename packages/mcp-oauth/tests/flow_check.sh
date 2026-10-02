@@ -9,7 +9,7 @@ rc=0
 grep -q '^FAIL' <<<"$OUT" && rc=1
 for name in "authorize rejects plain pkce" "authorize rejects unregistered redirect" "code is single use" \
             "code replay revokes" "expired code rejected" "code bound to client and redirect" \
-            "refresh rotates" "refresh reuse revokes family"; do
+            "refresh rotates" "refresh reuse revokes family" "login url keeps its query" "describe request" "token response has expires_in"; do
   grep -qxF "PASS $name" <<<"$OUT" || { echo "MISSING PASS: $name"; rc=1; }
 done
 [ $rc -eq 0 ] && echo "ok: all flow checks pass"
