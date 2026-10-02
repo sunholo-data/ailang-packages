@@ -1,5 +1,46 @@
 # Changelog
 
+## 0.5.2
+
+Fix: the 0.5.0 evaluation's follow-ups. No API change. Results are
+bit-identical to 0.5.1 for every blackbody temperature below ~1.7e9 K and for
+every photometry input; the only numeric changes are above that, listed here.
+
+- **blackbody**: `planck` (and so `xyz`, `luminance`, `chromaticity`,
+  `rgbUnitLuminance`, `pointFluxRatio`, `surfaceBrightnessRatio`,
+  `photopicRadiance`) is finite and accurate for every T > 0, +Inf included.
+  For e = c2 / (lambda T) < 1e-5 (T above ~1.7e9 K at 830 nm) the
+  denominator is `hyper.expm1(e)` instead of exp(e) - 1, and T is clamped at
+  the Planck temperature 1.416784e32 K (CODATA 2018); NaN is tested first and
+  never clamped. 0.5.1 lost digits there (relative error ~1e-16 / e) and was
+  +Inf above ~1.6e20 K, where exp(e) - 1 rounds to 0. Behaviour changes, all
+  above 1.7e9 K: `photopicRadiance(1e12)` 6.4955697458e18 -> 6.4955697453e18
+  (-6.5e-11), `(1e15)` 6.49557196e21 -> 6.49556983e21 (-3.3e-7), `(1e20)`
+  7.711e26 -> 6.4956e26 (0.5.1 was 19% high), +Inf -> 6.4956e31 at 1e25 K,
+  9.2028e38 flat from T_P up and at +Inf. New values match the expm1 Simpson
+  oracle to 9.8e-7 (the 1 nm sum's own offset; tested at 2e-6) and scale exactly as Rayleigh-Jeans (x10 per decade to
+  1e-12); photopicRadiance now rises strictly up to the clamp. The comment
+  claiming "finite for every finite T" is now true and tested.
+- **photometry**: `pointThresholdIlluminance` and `limitingMagnitude`
+  document that Crumey's fit is not monotone over 0.022-0.108 cd/m^2 (the
+  scotopic branch peaks at (-r1 / 2 r2)^4 = 0.02184 cd/m^2, dips 22% to the
+  0.0708 split; the photopic branch regains the peak at 0.1077). Code
+  unchanged; AGENT.md says the same.
+- Tests (`photometry_sky_test.ail`): the Crumey test is split into one named
+  test per regime (dark cut-off, scotopic branch, photopic branch, transition,
+  naked-eye limit) with values at 0.03 and 0.05 cd/m^2 that pin which branch
+  serves the split (the 0.0708 -> 0.03 mutation now fails 3 tests, it passed
+  all before); a non-monotone test pins the peak, the dip ratio 0.7799 and the
+  limiting magnitudes across it. Proxima has its own test: no check value in
+  stapledons-design physics/relativity-spec.md, so the reference is Boyajian
+  et al. 2012 (3054 K); asserted at both catalogue colours (B-V 1.82 Jao 2014,
+  1.97 Boyajian 2012) within 6%, the spread B-V saturation itself produces,
+  with the interpolation pinned to 1e-9 K. Two new tests cover the extreme
+  temperatures (oracle rows 1e9-1e25 K and T_P, Rayleigh-Jeans ratio, clamp,
+  a 1e6-1e308 K finite and rising sweep, +Inf).
+- tools/photometry_ref.py prints the new rows; tools/photometry_ref.out is
+  regenerated (additions only; every 0.5.0 row is byte-identical).
+
 ## 0.5.1
 
 Fix: `photometry`'s private table helper is renamed `lookup` → `tableLookup`. In 0.5.0 it

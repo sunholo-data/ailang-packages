@@ -155,7 +155,9 @@ illuminance in lux for point sources), never a ratio against a rest value:
 - `blackbody.photopicRadiance(T)`: a blackbody's luminance, 683 lm/W x
   integral B_lambda ybar (CIE 1931 fit, 360-830 nm). 0 for T <= 0, NaN and
   the CMB's 2.725 K, so it never divides by ~0 (unlike
-  `surfaceBrightnessRatio(2.725, D)`).
+  `surfaceBrightnessRatio(2.725, D)`). Finite for every input including
+  +Inf: Rayleigh-Jeans (linear in T) at very high T, flat above the Planck
+  temperature 1.416784e32 K, where `planck` clamps (0.5.2; +Inf before).
 - `optics.cmbSeenTemperature(n, bh, phi)` takes the rest-frame direction (like
   `doppler`); `cmbSeenTemperatureApparent(nSeen, ...)` takes the apparent
   direction (like `dopplerApparent`): use it per pixel. The CMB's seen
@@ -173,7 +175,12 @@ illuminance in lux for point sources), never a ratio against a rest value:
   (photopic), flat below 1e-5 cd/m^2. `limitingMagnitude(lb, f)` is the
   faintest V; Crumey takes f = 2 as a typical observer (6.19 at 2e-4 cd/m^2).
   lb is photopic luminance; Crumey's scotopic colour correction is not
-  applied.
+  applied. **Not monotone over 0.022-0.108 cd/m^2**: Crumey's scotopic fit
+  peaks at 0.02184 cd/m^2 and dips 22% to the 0.0708 split, and the photopic
+  branch regains the peak only at 0.1077, so there a brighter background can
+  give a fainter limit (4.78 at 0.0218, 4.90 at 0.05, F = 2). Dark skies
+  (1e-4-1e-3) and bright glow (>> 1 cd/m^2) are unaffected; do not invert
+  the threshold for lb across that window.
 
 ## White-dwarf (blackbody) photometry
 

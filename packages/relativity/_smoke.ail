@@ -128,6 +128,16 @@ pure func photopicSweep(i: int, n: int) -> bool {
 -- temperatures from 1e-3 K to 1e6 K (the gate runs n = 9999 on the VM).
 export pure func photopicFinite(n: int) -> bool = photopicSweep(0, n)
 
+pure func hotSweep(i: int, n: int, acc: float) -> float =
+  if i > n then acc
+  else hotSweep(i + 1, n, acc + log10(photopicRadiance(1.0e6 * pow(1.0e302, intToFloat(i) / intToFloat(n)))))
+
+-- 0.5.2: digest of photopicRadiance from 1e6 K to 1e308 K (the expm1 branch
+-- and the Planck-temperature clamp), plus +Inf and NaN; finite, and the
+-- interpreter and strict VM must print the same bits.
+export pure func photopicHotDigest(n: int) -> float =
+  hotSweep(0, n, 0.0) + log10(photopicRadiance(wdInf())) + photopicRadiance(wdNaN())
+
 export func main() -> () ! {IO} {
   let trip = flipAndBurn(4.37, standardGravity());
   let fwd = { x: 0.0, y: 0.0, z: -1.0 };

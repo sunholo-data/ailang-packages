@@ -1,4 +1,5 @@
--- 0.5.0 photometry for the relativistic sky. Every expected value comes from
+-- 0.5.0 photometry for the relativistic sky (0.5.2: Crumey regimes split,
+-- non-monotone window pinned, Proxima on its own, finite at absurd T). Every expected value comes from
 -- tools/photometry_ref.py (output in tools/photometry_ref.out), from the
 -- canon rows HB-n of stapledons-design physics/higgs-bubble.md, or from the
 -- cited literature; none from the code under test.
@@ -8,7 +9,7 @@ import std/math (sin, cos, pow, intToFloat)
 import ./hyper (absf)
 import ./kinematics (rapidityOfOneMinusBeta, rapidityOfBeta, gammaOf)
 import ./optics (Vec3, cmbSeenTemperature, cmbSeenTemperatureApparent, cmbForwardTemperature)
-import ./blackbody (photopicRadiance)
+import ./blackbody (photopicRadiance, luminance, rgbUnitLuminance, pointFluxRatio)
 import ./photometry (teffFromBV, bvInTable, luminanceFromSurfaceMag, surfaceMagFromLuminance, vFromIlluminance, illuminanceFromV, pointThresholdIlluminance, limitingMagnitude)
 
 pure func relative(got: float, want: float, tol: float) -> bool = absf(got - want) <= tol * absf(want)
@@ -19,22 +20,38 @@ pure func finiteNonNeg(x: float) -> bool = x == x && x >= 0.0 && x < inf()
 
 -- ---------------------------------------------------------------- teffFromBV
 -- B-V: Sun 0.65 (Mamajek G2V); Sirius A 0.009 and alpha Cen B 0.900
--- (Hipparcos); Barnard's 1.729 (Koen et al. 2010, B 11.24, V 9.511);
--- Proxima 1.82 (Jao et al. 2014, B 12.95, V 11.13).
+-- (Hipparcos); Barnard's 1.729 (Koen et al. 2010, B 11.24, V 9.511).
 -- Teff: Sun 5772 K (IAU 2015 B3); Sirius A 9940 K; alpha Cen B 5260 K
--- (Kervella et al. 2003, A&A 404, 1087); Barnard's 3224 K and Proxima
--- 3054 K (Boyajian et al. 2012, ApJ 757, 112, interferometric).
--- Measured: -0.03%, -3.45%, -3.82%, -3.97%, +0.31%. Proxima's colour is
--- uncertain: Boyajian's own B-V 1.97 would read 2879 K (-5.7%); B-V
--- saturates for late M dwarfs.
+-- (Kervella et al. 2003, A&A 404, 1087); Barnard's 3224 K (Boyajian et al.
+-- 2012, ApJ 757, 112, interferometric).
+-- Measured: -0.03%, -3.45%, -3.82%, -3.97%.
 pure func check01() -> bool {
   relative(teffFromBV(0.65), 5772.0, 0.05) &&
   relative(teffFromBV(0.009), 9940.0, 0.05) &&
   relative(teffFromBV(0.900), 5260.0, 0.05) &&
-  relative(teffFromBV(1.729), 3224.0, 0.05) &&
-  relative(teffFromBV(1.82), 3054.0, 0.05)
+  relative(teffFromBV(1.729), 3224.0, 0.05)
 }
-test "B-V temperatures of five literature dwarfs within 5 percent" { check01() }
+test "B-V temperatures of four literature dwarfs within 5 percent" { check01() }
+
+-- Proxima Centauri, on its own (0.5.2). stapledons-design
+-- physics/relativity-spec.md has no Proxima check value (its registry RS-1 to
+-- RS-23 is aberration, Doppler, colour and Schwarzschild only), so the
+-- literature is the reference: T_eff 3054 K (Boyajian et al. 2012,
+-- interferometric). Its B-V is uncertain by 0.15 mag between catalogues:
+-- 1.82 (Jao et al. 2014, B 12.95, V 11.13) and 1.97 (Boyajian 2012 Table 3,
+-- B 13.02, V 11.05). B-V saturates for late M dwarfs (M4.5V-M5V spans only
+-- 3110-3060 K in the table), so across that colour span the table reads
+-- 3063.6-2878.6 K, i.e. +0.31% to -5.74% of 3054 K. The tolerance is 6%:
+-- the spread the colour uncertainty itself produces, asserted at BOTH
+-- colours. The +0.31% at Jao's colour is partly luck and is not claimed as
+-- precision; the interpolation itself is pinned to the reference to 1e-9 K.
+pure func check01p() -> bool {
+  close(teffFromBV(1.82), 3063.5714285714284, 0.000000001) &&
+  close(teffFromBV(1.97), 2878.5714285714284, 0.000000001) &&
+  relative(teffFromBV(1.82), 3054.0, 0.06) &&
+  relative(teffFromBV(1.97), 3054.0, 0.06)
+}
+test "Proxima within 6 percent at both catalogue B-V colours (B-V saturates for late M)" { check01p() }
 
 -- Nodes and an interior point against the reference's own interpolation.
 pure func check02() -> bool {
@@ -139,29 +156,87 @@ pure func check10() -> bool {
 test "CMB gamma T0 at rest-frame 90 deg, T0/gamma seen at 90 deg, half at 1/gamma rad (HB-68)" { check10() }
 
 -- ----------------------------------------------------- point-source threshold
--- Crumey (2014) Eq. 53 / 33 / zeta. m0 at 2e-4 cd/m^2: 6.93 in Crumey's zero
--- point (2.54e-6 lx), 6.18 at F = 2.
+-- Crumey (2014) Eq. 53 / 33 / zeta; expected values from
+-- tools/photometry_ref.py, 1e-12 relative. One test per regime (0.5.2).
+pure func dI(b: float) -> float = pointThresholdIlluminance(b)
 pure func crumeyMag(lux: float) -> float = vFromIlluminance(lux) - vFromIlluminance(0.00000254)
+
+-- Dark cut-off: flat at zeta = dI(1e-5) below 1e-5 cd/m^2; NaN and negative
+-- count as dark. Crumey prints zeta = 1.150e-9 lx.
 pure func check11() -> bool {
-  relative(pointThresholdIlluminance(0.0002), 0.000000004276147913741731, 0.000000000001) &&
-  relative(pointThresholdIlluminance(0.00001), 0.0000000011495286872003704, 0.000000000001) &&
-  relative(pointThresholdIlluminance(0.00001), 0.00000000115, 0.0005) &&
-  relative(pointThresholdIlluminance(1.0), 0.0000000619362769, 0.000000000001) &&
-  relative(pointThresholdIlluminance(100.0), 0.0000016308710090207247, 0.000000000001) &&
-  close(crumeyMag(pointThresholdIlluminance(0.0002)), 6.93, 0.005) &&
-  close(crumeyMag(2.0 * pointThresholdIlluminance(0.0002)), 6.18, 0.005) &&
+  let z = dI(0.00001);
+  relative(z, 0.0000000011495286872003704, 0.000000000001) &&
+  relative(z, 0.00000000115, 0.0005) &&
+  dI(0.0) == z && dI(0.000001) == z && dI(nan()) == z && dI(-1.0) == z
+}
+test "Crumey dark cut-off: flat at zeta below 1e-5 cd/m^2, NaN counts as dark" { check11() }
+
+-- Scotopic branch, Eq. 53 (lb <= 0.0708), including 0.05 inside the dip and
+-- the split itself (the branch test is <=).
+pure func check12() -> bool {
+  relative(dI(0.0002), 0.000000004276147913741731, 0.000000000001) &&
+  relative(dI(0.001), 0.00000000790695212657801, 0.000000000001) &&
+  relative(dI(0.01), 0.000000014664280401227265, 0.000000000001) &&
+  relative(dI(0.03), 0.00000001541960819894505, 0.000000000001) &&
+  relative(dI(0.05), 0.000000014020631307385367, 0.000000000001) &&
+  relative(dI(0.0708), 0.000000012191731694248744, 0.000000000001)
+}
+test "Crumey scotopic branch (Eq. 53) at 2e-4 to 0.0708 cd/m^2" { check12() }
+
+-- Photopic branch, Eq. 33 (lb > 0.0708).
+pure func check12b() -> bool {
+  relative(dI(0.070801), 0.000000012204955782322345, 0.000000000001) &&
+  relative(dI(0.1), 0.00000001495996281813798, 0.000000000001) &&
+  relative(dI(1.0), 0.0000000619362769, 0.000000000001) &&
+  relative(dI(100.0), 0.0000016308710090207247, 0.000000000001) &&
+  relative(dI(10000.0), 0.00007990572099999998, 0.000000000001)
+}
+test "Crumey photopic branch (Eq. 33) above 0.0708 cd/m^2" { check12b() }
+
+-- Transition at the split 0.0708 cd/m^2: 0.03 and 0.05 are served by the
+-- scotopic branch, not the photopic one (a mis-set split such as 0.03 fails
+-- here), the split point itself is scotopic, and the branches meet with an
+-- upward step of 0.11% (1.0847e-3).
+pure func photopicForm(b: float) -> float {
+  let s = 0.0001772 * pow(b, 0.25) + 0.00007167 * pow(b, 0.5);
+  s * s
+}
+pure func check12c() -> bool {
+  not relative(dI(0.03), photopicForm(0.03), 0.001) &&
+  not relative(dI(0.05), photopicForm(0.05), 0.001) &&
+  relative(dI(0.0708), 0.000000012191731694248744, 0.000000000001) &&
+  dI(0.070801) > dI(0.0708) &&
+  relative(dI(0.070801), dI(0.0708), 0.0011)
+}
+test "Crumey transition: split at 0.0708 cd/m^2 inclusive, branches meet within 0.11 percent" { check12c() }
+
+-- Not monotone (Crumey's fit, documented on pointThresholdIlluminance): the
+-- scotopic branch peaks at lb* = (-r1 / 2 r2)^4 = 0.021836470372404465 and
+-- dips 22% to the split; the photopic branch regains the peak at 0.10769.
+pure func check12d() -> bool {
+  let peak = dI(0.021836470372404465);
+  relative(peak, 0.00000001563240617820755, 0.000000000001) &&
+  dI(0.02) < peak && dI(0.0235) < peak &&
+  dI(0.05) < dI(0.0218) && dI(0.0708) < dI(0.05) &&
+  relative(dI(0.0708) / peak, 0.779901158866042, 0.000000001) &&
+  dI(0.0708) > 0.75 * peak &&
+  dI(0.1) < peak && dI(0.11) > peak &&
+  relative(limitingMagnitude(0.0218, 2.0), 4.782360812803937, 0.000000000001) &&
+  relative(limitingMagnitude(0.05, 2.0), 4.900506088186209, 0.000000000001) &&
+  limitingMagnitude(0.05, 2.0) > limitingMagnitude(0.0218, 2.0) &&
+  limitingMagnitude(0.001, 2.0) < limitingMagnitude(0.0002, 2.0) &&
+  limitingMagnitude(1.0, 2.0) < limitingMagnitude(0.11, 2.0)
+}
+test "Crumey threshold is non-monotone on 0.022-0.108 cd/m^2 (peak 0.02184, 22 percent dip), monotone outside" { check12d() }
+
+-- Naked-eye limit at 2e-4 cd/m^2: m0 6.93 on Crumey's zero point (2.54e-6
+-- lx), 6.18 at F = 2; 6.942 on the package zero point.
+pure func check12e() -> bool {
+  close(crumeyMag(dI(0.0002)), 6.93, 0.005) &&
+  close(crumeyMag(2.0 * dI(0.0002)), 6.18, 0.005) &&
   relative(limitingMagnitude(0.0002, 1.0), 6.942368201939953, 0.000000000001)
 }
-test "Crumey 2014 point threshold and naked-eye limit (m0 6.93, 6.18 at F = 2)" { check11() }
-
-pure func check12() -> bool {
-  let z = pointThresholdIlluminance(0.00001);
-  pointThresholdIlluminance(0.0) == z && pointThresholdIlluminance(0.000001) == z &&
-  pointThresholdIlluminance(nan()) == z && pointThresholdIlluminance(-1.0) == z &&
-  relative(pointThresholdIlluminance(0.070801), pointThresholdIlluminance(0.0708), 0.0011) &&
-  limitingMagnitude(0.001, 2.0) < limitingMagnitude(0.0002, 2.0)
-}
-test "threshold is flat below 1e-5 cd/m^2, NaN counts as dark, branches meet" { check12() }
+test "Crumey naked-eye limit m0 6.93, 6.18 at F = 2" { check12e() }
 
 -- ------------------------------------------------------------- finite sweeps
 -- 10,000 points of every new function across and beyond its range, except
@@ -198,3 +273,39 @@ pure func sweepPhotopic(i: int, n: int) -> bool =
   else finiteNonNeg(photopicRadiance(logSpace(i, n, 0.001, 1000000.0))) && sweepPhotopic(i + 1, n)
 pure func check14() -> bool = sweepPhotopic(0, 199)
 test "photopic radiance is finite and non-negative from 1e-3 K to 1e6 K" { check14() }
+
+-- 0.5.2: finite and accurate at absurd temperatures. 0.5.1's exp(e) - 1 lost
+-- digits above ~1e10 K (19% high at 1e20 K) and was exactly 0 above ~1.6e20 K
+-- (+Inf); expm1 for e < 1e-5 fixes both. Rayleigh-Jeans at very high T,
+-- pinned to the expm1 Simpson oracle; clamped flat from the Planck
+-- temperature 1.416784e32 K. Tolerance 2e-6: in the lambda^-4 regime the
+-- package's 1 nm sum sits a constant 9.8e-7 above the oracle's 0.05 nm
+-- Simpson (measured at 1e9, 1e15, 1e20 K), so 1e-6 would be a coin toss.
+pure func check15() -> bool {
+  let tp = 1.416784e32;
+  relative(photopicRadiance(1.0e9), 6495477570012196.0, 0.000002) &&
+  relative(photopicRadiance(1.0e15), 6.495563445777266e21, 0.000002) &&
+  relative(photopicRadiance(1.0e20), 6.495563445863106e26, 0.000002) &&
+  relative(photopicRadiance(1.0e25), 6.495563445863114e31, 0.000002) &&
+  relative(photopicRadiance(tp), 9.202810361083741e38, 0.000002) &&
+  relative(photopicRadiance(1.0e25) / photopicRadiance(1.0e24), 10.0, 0.000000000001) &&
+  photopicRadiance(1.0e40) == photopicRadiance(tp) &&
+  photopicRadiance(1.0e308) == photopicRadiance(tp) &&
+  photopicRadiance(inf()) == photopicRadiance(tp) &&
+  finiteNonNeg(photopicRadiance(inf()))
+}
+test "photopic radiance is finite at absurd temperatures: Rayleigh-Jeans, then clamped at the Planck temperature" { check15() }
+
+-- Finite from 1e6 K to 1e308 K, and strictly rising up to the clamp (0.5.1
+-- was not monotone near 1e20 K); the other blackbody exports at +Inf.
+pure func sweepHot(i: int, n: int, previous: float) -> bool =
+  if i > n then true
+  else {
+    let now = photopicRadiance(logSpace(i, n, 1000000.0, 1.0e308));
+    let t = logSpace(i, n, 1000000.0, 1.0e308);
+    finiteNonNeg(now) && (if t < 1.0e32 then now > previous else now >= previous) && sweepHot(i + 1, n, now)
+  }
+pure func check16() -> bool = sweepHot(0, 60, 0.0) && finiteNonNeg(luminance(inf())) &&
+  finiteNonNeg(rgbUnitLuminance(1.0e30).r) && finiteNonNeg(rgbUnitLuminance(inf()).b) &&
+  finiteNonNeg(pointFluxRatio(5772.0, 1.0e30))
+test "blackbody functions are finite from 1e6 K to 1e308 K, rising to the clamp, and at +Inf" { check16() }

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Independent reference values for sunholo/relativity 0.5.0 (photometry for
-the relativistic sky). Standard library only.
+the relativistic sky) and its 0.5.2 follow-ups. Standard library only.
 
 Every expected number in photometry_sky_test.ail comes from here, never from
 the AILANG under test.
@@ -28,6 +28,13 @@ the AILANG under test.
     and the zero-background cut-off at B = 1e-5 cd/m^2 (Section 2, zeta =
     1.150e-9 lx). Crumey's checks: m0 = 6.93 at B = 2e-4 cd/m^2 with his
     zero point Z = 2.54e-6 lx (Section 3.1), 6.18 with F = 2.
+    0.5.2: rows either side of the split (which branch serves 0.0218-0.1),
+    the scotopic peak B* = (-r1 / 2 r2)^4 where the fit turns over, the
+    background where the photopic branch regains that peak, and limiting
+    magnitudes across the dip, all closed forms.
+  * 0.5.2, photopicRadiance at absurd temperatures: the same Simpson oracle
+    (math.expm1, so no cancellation) at 1e9 to 1e25 K and the Planck
+    temperature T_P = 1.416784e32 K (CODATA 2018), where the package clamps.
   * teffFromBV: linear interpolation in Pecaut & Mamajek 2022.04.16, parsed
     here by column name (not by the generator's indices), at the B-V of the
     literature check stars.
@@ -47,6 +54,7 @@ C = 299792458.0           # m/s (SI, exact)
 KB = 1.380649e-23         # J/K (SI, exact)
 KM = 683.0                # lm/W at 540 THz (SI, exact)
 T_CMB = 2.725             # K, higgs-bubble HB-5
+T_PLANCK = 1.416784e32    # K, CODATA 2018 Planck temperature (photopicRadiance clamp)
 V_ZERO = -13.98           # V magnitude giving 1 lux (package zero point)
 
 # Official CIE 1931 2-degree ybar, 360-830 nm every 5 nm (CVRL ciexyz31_1.csv).
@@ -234,6 +242,23 @@ def main():
     want("Crumey m0 6.93", m0, 6.93, 0.0008)
     want("Crumey m0 F=2 6.18", m0f2, 6.18, 0.0008)
     want("Crumey zeta", crumey_dI(1.0e-5), 1.150e-9, 0.0005)
+
+    print("\n# 0.5.2 Crumey transition and the scotopic dip (lux; mag at F = 2, package zero point)")
+    for b in (0.0218, 0.03, 0.05, 0.1, 0.11):
+        print(f"B={b!r:<10} dI={crumey_dI(b)!r}")
+    b_peak = (-R1 / (2.0 * R2)) ** 4
+    print(f"scotopic peak B* = (-r1/2r2)^4 = {b_peak!r}, dI(B*) = {crumey_dI(b_peak)!r}")
+    v_peak = math.sqrt(crumey_dI(b_peak))
+    x = (-R3 + math.sqrt(R3 * R3 + 4.0 * R4 * v_peak)) / (2.0 * R4)
+    print(f"photopic branch regains dI(B*) at B = {x ** 4!r}")
+    print(f"dip dI(0.0708) / dI(B*) = {crumey_dI(7.08e-2) / crumey_dI(b_peak)!r}")
+    for b in (0.0218, 0.05, 0.0708, 0.1):
+        print(f"limitingMagnitude({b!r}, 2) = {V_ZERO - 2.5 * math.log10(2.0 * crumey_dI(b))!r}")
+
+    print("\n# 0.5.2 photopicRadiance at absurd temperatures (cd/m^2), fit+Simpson")
+    for t in (1.0e9, 1.0e15, 1.0e20, 1.0e24, 1.0e25, T_PLANCK):
+        print(f"T={t!r:<12} {radiance_fit(t)!r}")
+    print(f"Rayleigh-Jeans: radiance(1e25) / radiance(1e24) = {radiance_fit(1.0e25) / radiance_fit(1.0e24)!r}")
 
     if args.mamajek:
         rows = mamajek_bv(args.mamajek)

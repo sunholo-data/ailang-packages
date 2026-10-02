@@ -137,6 +137,17 @@ export pure func surfaceMagFromLuminance(cdm2: float) -> float
 --                  (Crumey's zeta). NaN and negative lb count as dark.
 -- dI is the star's illuminance at the eye. Multiply by a field factor for
 -- real observing: Crumey finds F of about 1.4-2.4 and takes F = 2 as typical.
+-- NOT MONOTONE in lb (Crumey's published fit, reproduced on purpose): the
+-- scotopic branch has r2 < 0, so it peaks at lb* = (-r1 / 2 r2)^4 =
+-- 0.02184 cd/m^2 (dI 1.5632e-8 lx) and falls 22% to the split (dI(0.0708) =
+-- 0.780 dI(lb*)); the photopic branch rises again and regains the peak at
+-- 0.1077 cd/m^2. So over 0.022-0.108 cd/m^2 a brighter background can give a
+-- lower threshold, and limitingMagnitude inherits it (4.78 at 0.0218 but 4.90
+-- at 0.05, F = 2). Crumey's smooth Eq. 34 has the same dip; he takes the
+-- scotopic model as valid to about 0.1 cd/m^2. Monotone everywhere else:
+-- flat below 1e-5, rising on 1e-5-0.0218 and above 0.0708, with an upward
+-- step of 0.11% at the split. Do not invert it (bisect for lb from dI) across
+-- 0.022-0.108 cd/m^2. Pinned by photometry_sky_test's "non-monotone" test.
 export pure func pointThresholdIlluminance(lb: float) -> float
   ensures { result > 0.0 }
 {
@@ -151,7 +162,8 @@ export pure func pointThresholdIlluminance(lb: float) -> float
 -- field factor f (> 0): vFromIlluminance(f * pointThresholdIlluminance(lb)).
 -- lb = 2e-4 cd/m^2 (21.83 mag/arcsec^2): 6.942 at f = 1 (Crumey prints 6.93
 -- with his zero point 2.54e-6 lx, 0.008 mag fainter than this package's),
--- 6.190 at f = 2.
+-- 6.190 at f = 2. Not monotone in lb over 0.022-0.108 cd/m^2 (see
+-- pointThresholdIlluminance); fainter for brighter backgrounds elsewhere.
 export pure func limitingMagnitude(lb: float, f: float) -> float
   requires { f > 0.0 }
 {
