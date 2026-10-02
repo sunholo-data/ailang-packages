@@ -1,0 +1,60 @@
+-- Tests for sunholo/mcp_oauth/core. Names are referenced by the sprint
+-- plan's acceptance criteria (m-mcp-oauth-package-sprint-plan.md P1).
+
+module sunholo/mcp_oauth/core_test
+
+import ./core (s256, pkceOk, verifierOk, verifierLengthOk, challengeMethodOk,
+  redirectAllowed, loopbackRedirectOk, redirectOk, stripLoopbackPort, cimdUrlOk,
+  httpsHost, codeExpiresAt, isExpired, asMetadata)
+import std/string (repeat, contains)
+
+-- RFC 7636 Appendix B
+pure func rfcVerifier() -> string = "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"
+pure func rfcChallenge() -> string = "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM"
+
+-- ---------------- PKCE (T1) ----------------
+test "pkce rfc7636 vector" { pkceOk(rfcVerifier(), rfcChallenge()) }
+test "pkce rejects wrong verifier" { pkceOk(repeat("a", 43), rfcChallenge()) == false }
+test "pkce s256 matches appendix b" { s256(rfcVerifier()) == rfcChallenge() }
+test "verifier too short rejected" { verifierLengthOk(repeat("a", 42)) == false }
+test "verifier min and max length accepted" { verifierLengthOk(repeat("a", 43)) && verifierLengthOk(repeat("a", 128)) }
+test "verifier too long rejected" { verifierLengthOk(repeat("a", 129)) == false }
+test "verifier bad charset rejected" { verifierOk("${repeat("a", 43)}+") == false && verifierOk("${repeat("a", 43)} ") == false }
+test "verifier unreserved charset accepted" { verifierOk("abcXYZ019-._~${repeat("q", 30)}") }
+test "plain pkce method refused" { challengeMethodOk("plain") == false && challengeMethodOk("S256") }
+
+-- ---------------- Redirects (T4) ----------------
+pure func regs() -> [string] = ["https://claude.ai/api/mcp/auth_callback", "http://localhost/callback"]
+test "exact redirect accepted" { redirectOk("https://claude.ai/api/mcp/auth_callback", regs()) }
+test "prefix redirect rejected" { redirectOk("https://claude.ai/api/mcp/auth_callback/evil", regs()) == false }
+test "suffix host redirect rejected" { redirectOk("https://claude.ai.evil.com/api/mcp/auth_callback", regs()) == false }
+test "loopback any port accepted" { loopbackRedirectOk("http://localhost:53682/callback", regs()) }
+test "loopback 127 any port needs registration" { loopbackRedirectOk("http://127.0.0.1:9000/callback", regs()) == false }
+test "loopback path must match" { loopbackRedirectOk("http://localhost:53682/other", regs()) == false }
+test "loopback lookalike host rejected" { stripLoopbackPort("http://localhost.evil.com/callback") == "" }
+test "loopback non-numeric port rejected" { stripLoopbackPort("http://localhost:80a/callback") == "" }
+test "loopback https not loopback" { stripLoopbackPort("https://localhost:1/callback") == "" }
+
+-- ---------------- CIMD URL (T5) ----------------
+test "cimd accepts https client document" { cimdUrlOk("https://claude.ai/oauth/claude-code-client-metadata") }
+test "cimd rejects http" { cimdUrlOk("http://claude.ai/client.json") == false }
+test "cimd rejects ipv4" { cimdUrlOk("https://169.254.169.254/latest") == false }
+test "cimd rejects ipv6" { cimdUrlOk("https://[::1]/client.json") == false }
+test "cimd rejects localhost" { cimdUrlOk("https://localhost/client.json") == false }
+test "cimd rejects .internal" { cimdUrlOk("https://svc.internal/client.json") == false }
+test "cimd rejects metadata.google.internal" { cimdUrlOk("https://metadata.google.internal/computeMetadata/v1/") == false }
+test "cimd rejects userinfo" { cimdUrlOk("https://user@claude.ai/client.json") == false }
+test "cimd rejects fragment" { cimdUrlOk("https://claude.ai/client.json#x") == false }
+test "cimd host parsing strips port" { httpsHost("https://example.com:8443/x") == "example.com" }
+
+-- ---------------- Code lifetime (T2/T8) ----------------
+test "code expires after 60 seconds" { codeExpiresAt(1000) == 1060 }
+test "code valid before expiry" { isExpired(1059, 1060) == false }
+test "code expired at expiry" { isExpired(1060, 1060) }
+
+-- ---------------- Metadata ----------------
+test "metadata advertises s256 cimd and no registration" {
+  let m = asMetadata("https://auth.example.com");
+  contains(m, "\"S256\"") && contains(m, "client_id_metadata_document_supported\":true")
+    && contains(m, "registration_endpoint") == false && contains(m, "\"plain\"") == false
+}

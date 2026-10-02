@@ -1,0 +1,32 @@
+[package]
+name = "sunholo/mcp_oauth"
+version = "0.1.0"
+edition = "1"
+ailang = ">=0.51.0"
+description = "OAuth 2.1 authorization server for MCP services: PKCE S256, CIMD clients, single-use codes, refresh rotation"
+license = "Apache-2.0"
+
+[release]
+kind = "feature"
+
+[exports]
+modules = [
+  "sunholo/mcp_oauth/core"
+]
+
+# Ceiling for the whole package. core is pure; flow/cimd (P2) need these.
+[effects]
+max = ["Net", "Clock", "Rand", "IO", "FS", "Env", "Declassify"]
+
+[metadata]
+tags = ["oauth", "mcp", "security", "pkce", "authorization-server"]
+ai_summary = "OAuth 2.1 authorization server for MCP services (Claude/ChatGPT directory listings): PKCE S256 only, CIMD client documents, exact redirect matching, single-use digest-stored codes with replay revocation, rotating refresh families. Service plugs in authenticate/mint/store/revoke."
+repository = "https://github.com/sunholo-data/ailang-packages/tree/main/packages/mcp-oauth"
+homepage = "https://ailang.sunholo.com/docs/packages/sunholo/mcp_oauth"
+license_url = "https://github.com/sunholo-data/ailang-packages/blob/main/LICENSE"
+
+[cascade]
+max_cost_usd = 1.00
+
+[stability]
+level = "experimental"

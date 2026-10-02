@@ -1,0 +1,190 @@
+-- sunholo/mcp_oauth/core: the pure security predicates of the OAuth 2.1
+-- authorization server (design: ailang design_docs/planned/v0_52_0/
+-- m-mcp-oauth-package.md, threats T1 T4 T5 T2/T8).
+--
+-- Everything here is pure: no effects, so `ailang verify` can prove the
+-- contracts with Z3 and the flow module can rely on them. Secrets never
+-- appear here; comparisons that involve secrets use constantTimeEqual.
+--
+-- Usage:
+--   import pkg/sunholo/mcp_oauth/core (pkceOk, verifierOk, redirectAllowed,
+--     loopbackRedirectOk, cimdUrlOk, codeExpiresAt, isExpired, asMetadata)
+
+module sunholo/mcp_oauth/core
+
+import std/crypto (sha256Hex, constantTimeEqual)
+import std/bytes (fromInts, toBase64URL)
+import std/string (length, substring, find, startsWith, endsWith, contains as strContains, chars, toLower)
+import std/list (contains, any)
+import std/json (encode, jo, kv, js, ja, jb)
+
+-- ============================================================
+-- PKCE (RFC 7636), S256 only (T1)
+-- ============================================================
+
+pure func hexVal(c: string) -> int = find("0123456789abcdef", c)
+
+-- Decode lowercase hex (sha256Hex output) to byte values.
+pure func hexInts(h: string, i: int, n: int) -> [int] =
+  if i >= n then []
+  else (hexVal(substring(h, i, i + 1)) * 16 + hexVal(substring(h, i + 1, i + 2))) :: hexInts(h, i + 2, n)
+
+-- BASE64URL(SHA256(ASCII(code_verifier))) with no padding.
+export pure func s256(verifier: string) -> string
+  tests [("dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk", "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM")]
+{
+  let h = sha256Hex(verifier);
+  toBase64URL(fromInts(hexInts(h, 0, length(h))))
+}
+
+-- RFC 7636 §4.1: 43..128 characters.
+export pure func verifierLengthOk(verifier: string) -> bool
+  ensures { result == (length(verifier) >= 43 && length(verifier) <= 128) }
+{
+  length(verifier) >= 43 && length(verifier) <= 128
+}
+
+-- unreserved = ALPHA / DIGIT / "-" / "." / "_" / "~"
+pure func unreserved(c: string) -> bool =
+  find("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~", c) >= 0
+
+export pure func verifierCharsOk(verifier: string) -> bool =
+  not any(\c. not unreserved(c), chars(verifier))
+
+export pure func verifierOk(verifier: string) -> bool =
+  verifierLengthOk(verifier) && verifierCharsOk(verifier)
+
+-- The only accepted method. "plain" (or anything else) is refused.
+export pure func challengeMethodOk(method: string) -> bool
+  ensures { result == (method == "S256") }
+{
+  method == "S256"
+}
+
+-- Constant-time: the stored challenge is derived from a secret verifier.
+export pure func pkceOk(verifier: string, storedChallenge: string) -> bool =
+  verifierOk(verifier) && constantTimeEqual(s256(verifier), storedChallenge)
+
+-- ============================================================
+-- Redirect URIs (T4)
+-- ============================================================
+
+-- Exact match against the client's registered list. No prefix, no
+-- substring, no normalisation: the property Z3 proves is exactly this.
+export pure func redirectAllowed(presented: string, registered: [string]) -> bool
+  ensures { result == contains(registered, presented) }
+{
+  contains(registered, presented)
+}
+
+-- RFC 8252 §7.3 loopback: http://127.0.0.1 or http://localhost, ANY port,
+-- the path must equal the registered loopback URI's path exactly.
+-- Returns the presented URI with its port removed, or "" if it is not a
+-- loopback http URI.
+export pure func stripLoopbackPort(uri: string) -> string {
+  let host =
+    if startsWith(uri, "http://127.0.0.1") then "http://127.0.0.1"
+    else if startsWith(uri, "http://localhost") then "http://localhost"
+    else "";
+  if host == "" then ""
+  else {
+    let rest = substring(uri, length(host), length(uri));
+    if startsWith(rest, ":") then {
+      let slash = find(rest, "/");
+      let port = if slash < 0 then substring(rest, 1, length(rest)) else substring(rest, 1, slash);
+      let path = if slash < 0 then "" else substring(rest, slash, length(rest));
+      if length(port) == 0 || any(\c. find("0123456789", c) < 0, chars(port)) then ""
+      else "${host}${path}"
+    }
+    else if rest == "" || startsWith(rest, "/") then "${host}${rest}"
+    else ""   -- e.g. http://localhost.evil.com
+  }
+}
+
+export pure func loopbackRedirectOk(presented: string, registered: [string]) -> bool {
+  let canon = stripLoopbackPort(presented);
+  canon != "" && contains(registered, canon)
+}
+
+export pure func redirectOk(presented: string, registered: [string]) -> bool =
+  redirectAllowed(presented, registered) || loopbackRedirectOk(presented, registered)
+
+-- ============================================================
+-- CIMD client_id URL (T5, string layer; connect-time layer is S0)
+-- ============================================================
+
+-- host part of an https:// URL ("" when malformed).
+export pure func httpsHost(url: string) -> string {
+  if startsWith(url, "https://") == false then ""
+  else {
+    let rest = substring(url, 8, length(url));
+    let slash = find(rest, "/");
+    let authority = if slash < 0 then rest else substring(rest, 0, slash);
+    let colon = find(authority, ":");
+    if colon < 0 then authority else substring(authority, 0, colon)
+  }
+}
+
+pure func isIpLiteral(host: string) -> bool =
+  startsWith(host, "[") || not any(\c. find("0123456789.", c) < 0, chars(host))
+
+pure func isInternalHost(host: string) -> bool {
+  let h = toLower(host);
+  h == "localhost" || endsWith(h, ".localhost") || endsWith(h, ".internal")
+    || endsWith(h, ".local") || startsWith(h, "metadata")
+}
+
+-- The https-only invariant, proved by Z3. Kept separate from the shape
+-- checks below because those use higher-order helpers Z3 cannot encode;
+-- the shape checks are covered by the "cimd rejects ..." tests instead.
+export pure func cimdHttpsGate(url: string, shapeOk: bool) -> bool
+  ensures { result == (startsWith(url, "https://") && shapeOk) }
+{
+  startsWith(url, "https://") && shapeOk
+}
+
+pure func cimdShapeOk(url: string) -> bool {
+  let host = httpsHost(url);
+  host != ""
+    && strContains(url, "@") == false
+    && strContains(url, "#") == false
+    && isIpLiteral(host) == false
+    && isInternalHost(host) == false
+}
+
+-- A client_id document URL we are willing to fetch.
+export pure func cimdUrlOk(url: string) -> bool = cimdHttpsGate(url, cimdShapeOk(url))
+
+-- ============================================================
+-- Code lifetime (T2/T8)
+-- ============================================================
+
+export pure func codeTtlSeconds() -> int = 60
+
+export pure func codeExpiresAt(nowSec: int) -> int
+  ensures { result == nowSec + 60 }
+{
+  nowSec + 60
+}
+
+export pure func isExpired(nowSec: int, expiresAt: int) -> bool
+  ensures { result == (nowSec >= expiresAt) }
+{
+  nowSec >= expiresAt
+}
+
+-- ============================================================
+-- RFC 8414 authorization-server metadata
+-- ============================================================
+
+export pure func asMetadata(issuer: string) -> string =
+  encode(jo([
+    kv("issuer", js(issuer)),
+    kv("authorization_endpoint", js("${issuer}/oauth/authorize")),
+    kv("token_endpoint", js("${issuer}/oauth/token")),
+    kv("response_types_supported", ja([js("code")])),
+    kv("grant_types_supported", ja([js("authorization_code"), js("refresh_token")])),
+    kv("code_challenge_methods_supported", ja([js("S256")])),
+    kv("token_endpoint_auth_methods_supported", ja([js("none")])),
+    kv("client_id_metadata_document_supported", jb(true))
+  ]))
