@@ -1,5 +1,33 @@
 # Changelog
 
+## 0.8.1
+
+Fix: the glow-spectrum check values now carry the canon they are labelled with. Every
+function is unchanged, and so is every output for the same arguments: no code changed, only
+tests, the oracle and documentation. 0.8.0 asserted the first D-29 value, eps = 1e-11,
+under the HB-102..110 labels. The canon (stapledons-design physics/higgs-bubble.md §6,
+PR #7) moved to **eps = 1e-10** after Mark's D-29 follow-up of 2026-10-03, which chose it
+from a rendered comparison. So 0.8.0's labels pointed at rows that now hold different
+numbers.
+
+- `glow_spectrum_test.ail`: the luminance, radiance and canon rows are at eps 1e-10:
+  - HB-102 9.63e-6 W/m^2 and HB-103 0.1125 W/m^2;
+  - HB-104 7.14e-8 cd/m^2 and HB-105 1.65e-3 of the dark sky;
+  - HB-106 1.56 cd/m^2 and HB-107 3.61e4 of the dark sky;
+  - HB-108: the pole equals the dark sky at gamma 16.2;
+  - HB-109 2.41e-6 W/m^2 and HB-110 2.81e-2 W/m^2;
+  - new HB-112: the pole reaches 0.3 of the dark sky at gamma 13.5, bracketed.
+
+  The linear-in-eps check now compares eps 1e-9 with 10 x eps 1e-10. HB-95..101 do not
+  depend on eps and are unchanged.
+- `tools/glow_spectrum_ref.py`: EPS is 1e-10. It prints the rows at 1e-10, 1e-11 and 1e-9,
+  and `--check` asserts HB-102..112 at 1e-10, including HB-111 (eps) and HB-112.
+  `tools/glow_spectrum_ref.out` is regenerated.
+- `medium.glowLuminanceAt`'s doc comment, AGENT.md and the `_smoke` main check now quote the
+  eps 1e-10 values. `glowSpectrumDigest` is unchanged (it is a parity digest).
+- Correction to the 0.8.0 entry below: "eps 1e-9 -> 1e-11" should read "eps 1e-9 -> 1e-11,
+  then 1e-10 (HB-111)", and the canon range is HB-95 to HB-112.
+
 ## 0.8.0
 
 Feature: the wall glow's spectrum (stapledons ledger D-30, attended

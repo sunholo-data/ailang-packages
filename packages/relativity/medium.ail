@@ -155,9 +155,10 @@ export pure func glowEfficacyAt(n: float, phi: float, cosTheta: float) -> float 
   luminousEfficacy(glowTemperatureAt(n, phi, cosTheta))
 
 -- Glow luminance seen on the wall element (cd/m^2): glowRadianceAt x
--- glowEfficacyAt. With n = 0.1 cm^-3, eps = 1e-11 (D-29) and fIn = 1/2:
--- 7.144e-9 cd/m^2 on the pole at 0.99c (1.65e-4 of the 23.5 mag/arcsec^2
--- dark sky) and 0.1564 cd/m^2 at the cap (3.61e3 of it). NaN cosTheta or
+-- glowEfficacyAt. With n = 0.1 cm^-3, eps = 1e-10 (HB-111, the D-29
+-- follow-up) and fIn = 1/2: 7.144e-8 cd/m^2 on the pole at 0.99c (1.65e-3 of
+-- the 23.5 mag/arcsec^2 dark sky, HB-105) and 1.564 cd/m^2 at the cap (3.61e4
+-- of it, HB-107). NaN cosTheta or
 -- phi gives NaN.
 export pure func glowLuminanceAt(n: float, phi: float, eps: float, fIn: float, cosTheta: float) -> float =
   glowRadianceAt(n, phi, eps, fIn, cosTheta) * glowEfficacyAt(n, phi, cosTheta)
