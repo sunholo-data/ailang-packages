@@ -60,10 +60,12 @@ Part 2, light, gravity and rings:
   `discIlluminance` (e1AU p (R/d)^2 Phi / r^2). The star's 1 AU illuminance
   is a parameter: no dependency on sunholo/relativity.
 - **rings**: `ringLitIF`, `ringUnlitIF` (finite and continuous through
-  mu = mu0 via a stable (e^x - 1)/x), `ringLitRadiance`,
+  mu = mu0 via a series for (e^x - 1)/x when |x| < 1e-3, the bounded
+  difference of exponentials otherwise, so it stays finite with the Sun
+  grazing the rings; swept over mu0 1e-4..1, mu 0.01..1, tau 0..10), `ringLitRadiance`,
   `ringUnlitRadiance`, `ringTransmission`, `RingBand` and `bandAt`,
   `ringPlaneHit` and `ringShadowTransmission` for ring shadows.
-- Tests (49 more, 91 in all): light times to Jupiter (2023-11-03, 1987.3 s)
+- Tests (51 more, 93 in all): light times to Jupiter (2023-11-03, 1987.3 s)
   and Saturn (2023-08-27, 4372.8 s) against JPL Horizons; the closed-form
   uniform-motion lag; the iteration count pinned by its (v/c)^4 error; the
   design's idealised Jupiter lag 2095.8 s and 27,400 km displacement; g =
@@ -78,3 +80,9 @@ Part 2, light, gravity and rings:
   tau -> 0, the unlit face's finite mu -> mu0 limit, transmission limits,
   Saturn's NSSDC/Cassini ring bands and the solstice ring shadow, and precision at the removable singularities. All 32 hand mutations of the part-2 modules are killed.
   `tools/orbits_ref.py` re-derives each with independent methods.
+- Pre-release fixes from the independent evaluation (round 1, 89/100): the
+  unlit ring face no longer overflows to Inf for tau/mu0 ~ 710-745 (B1);
+  rings' phase-function parameter is `phaseP` and illuminance parameters are
+  `lux` (no clash with `reflect`'s albedo p or `kepler`'s e); `planetAt` and
+  `bondAlbedo` carry explicit warnings; the documented `_smoke.ail`
+  commands include `--relax-modules` and `--caps IO`.

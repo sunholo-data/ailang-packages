@@ -39,18 +39,22 @@ export pure func lambertPhase(alpha: float) -> float
   if p < 0.0 then 0.0 else p
 }
 
--- L = rho E cos i / pi (cd/m^2 for E in lux); zero where cos i <= 0.
-export pure func lambertRadiance(rho: float, e: float, cosI: float) -> float =
-  if cosI <= 0.0 then 0.0 else rho * e * cosI / pi()
+-- L = rho E cos i / pi (cd/m^2 for the illuminance E = lux in lux); zero
+-- where cos i <= 0.
+export pure func lambertRadiance(rho: float, lux: float, cosI: float) -> float =
+  if cosI <= 0.0 then 0.0 else rho * lux * cosI / pi()
 
 -- L = rho E cos^k i cos^(k-1) e / pi. Zero where unlit (cos i <= 0) or
 -- unseen (cos e < 0). At the limb (cos e = 0) k = 1 is Lambert's value,
 -- k > 1 is 0, and k < 1, where the law diverges on a zero-area ring, is 0.
-export pure func minnaertRadiance(rho: float, k: float, e: float, cosI: float, cosE: float) -> float =
+-- For k < 1 the law is unbounded just inside the limb (cos e -> 0+: 2x at
+-- cos e = 1e-3 for k = 0.9, runaway only at sub-pixel cos e); renderers
+-- should clamp cos e (e.g. >= 1e-3) when k < 1.
+export pure func minnaertRadiance(rho: float, k: float, lux: float, cosI: float, cosE: float) -> float =
   if cosI <= 0.0 || cosE < 0.0 then 0.0
-  else if k == 1.0 then rho * e * cosI / pi()
+  else if k == 1.0 then rho * lux * cosI / pi()
   else if cosE == 0.0 && k < 1.0 then 0.0
-  else rho * e * pow(cosI, k) * pow(cosE, k - 1.0) / pi()
+  else rho * lux * pow(cosI, k) * pow(cosE, k - 1.0) / pi()
 
 -- rho such that the Minnaert sphere's opposition disc integral equals the
 -- geometric albedo p: rho = p (2k + 1) / 2 (Lambert: 3p/2).
@@ -67,6 +71,8 @@ export pure func geometricAlbedoFromRho(rho: float, k: float) -> float
 }
 
 -- Bond (spherical) albedo of the Minnaert sphere: 4 rho / (k + 1)^2.
+-- WARNING: the MODEL's Bond albedo, not the planet's (Jupiter: model 0.81,
+-- measured 0.34); never feed it into an energy balance.
 export pure func bondAlbedo(rho: float, k: float) -> float
   requires { k > 0.0 }
 {

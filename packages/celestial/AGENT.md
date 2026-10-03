@@ -107,8 +107,8 @@ Inner planets (Mercury-Mars) have b = c = s = f = 0.
 | `ephemeris` | `MeanElements {a, e, incl, meanLong, longPeri, node}`, `ElementRates {a, e, incl, meanLong, longPeri, node, b, c, s, f}`, `Ephem {orbit, meanOrbit, drift}`, `elementsAt(el, rates, jd)`, `planetAt(el, rates, jd)`, `SatElements {a, e, argPeri, meanAnom, incl, node, epochJd, meanAnomRate, periRate, nodeRate, poleRa, poleDec}`, `satelliteElementsAt(s, jd)`, `satelliteAt(s, jd)`, `julianDate(y, m, d)`, `auKm`, `j2000`, `windowStartJd`, `windowEndJd` |
 | `lighttime` | `Retarded {time, pos, lagDays}`, `retarded(srcFn, obs, t)`, `retardedTime(srcFn, obs, t)`, `lightTimeDays(srcFn, obs, t)`, `cAuPerDay`, `secondsPerDay` |
 | `gravity` | `GravBody {gm, radius, posAt}`, `Gravity {acc, inside, body}`, `accelerationAt(bodies, x, jdTDB)`, `accelerationRelativeTo(bodies, x, ref, jdTDB)`, `pointAcceleration(gm, rKm)`, `gmSunNominal`, `gmEarthNominal`, `gmJupiterNominal`, `radiusSunNominal`, `radiusEarthNominal`, `radiusJupiterNominal` |
-| `reflect` | `starIlluminanceAt(e1AU, rAU)`, `lambertPhase(alpha)`, `lambertRadiance(rho, E, cosI)`, `minnaertRadiance(rho, k, E, cosI, cosE)`, `minnaertPhase(alpha, k)`, `phaseFunction(alpha, k)`, `rhoFromGeometricAlbedo(p, k)`, `geometricAlbedoFromRho(rho, k)`, `bondAlbedo(rho, k)`, `bondFromGeometricAlbedo(p, k)`, `discIlluminance(e1AU, p, R, rAU, d, alpha, k)` |
-| `rings` | `ringLitIF`, `ringUnlitIF`, `ringLitRadiance`, `ringUnlitRadiance` (all `(w0, P, tau, mu0, mu[, E])`), `ringTransmission(tau, mu)`, `RingBand {rIn, rOut, tau, w0}`, `bandAt(bands, r)`, `RingHit {hits, radius, mu}`, `ringPlaneHit(p, dir, pole)`, `ringShadowTransmission(bands, p, sunDir, pole)` |
+| `reflect` | `starIlluminanceAt(e1AU, rAU)`, `lambertPhase(alpha)`, `lambertRadiance(rho, lux, cosI)`, `minnaertRadiance(rho, k, lux, cosI, cosE)`, `minnaertPhase(alpha, k)`, `phaseFunction(alpha, k)`, `rhoFromGeometricAlbedo(p, k)`, `geometricAlbedoFromRho(rho, k)`, `bondAlbedo(rho, k)`, `bondFromGeometricAlbedo(p, k)`, `discIlluminance(e1AU, p, R, rAU, d, alpha, k)` |
+| `rings` | `ringLitIF`, `ringUnlitIF`, `ringLitRadiance`, `ringUnlitRadiance` (all `(w0, phaseP, tau, mu0, mu[, lux])`), `ringTransmission(tau, mu)`, `RingBand {rIn, rOut, tau, w0}`, `bandAt(bands, r)`, `RingHit {hits, radius, mu}`, `ringPlaneHit(p, dir, pole)`, `ringShadowTransmission(bands, p, sunDir, pole)` |
 | `frames` | `obliquityJ2000`, `eclipticToEquatorial`, `equatorialToEcliptic`, `equatorialToGalactic`, `eclipticToGalactic`, `unitFromAngles(lon, lat)`, `LonLat {lon, lat}`, `lonLat(v)`, `PoleTerm {phase0, rate, ra, dec, w}`, `PoleModel {ra0, ra1, dec0, dec1, w0, w1, w2, terms}`, `Spin {pole, ra, dec, w}`, `poleAndSpin(model, jd)`, `rotationPeriod(model)` |
 
 ## Kepler
@@ -136,6 +136,10 @@ Inner planets (Mercury-Mars) have b = c = s = f = 0.
   `Ephem.meanOrbit` = true. The planet still goes round on a fixed mean orbit,
   so phases advance and positions are continuous across the edge, but it is
   **not an ephemeris** any more: label it (the game shows "mean orbit").
+- **`planetAt` DOES NOT CARRY THE `meanOrbit` FLAG.** It returns a bare
+  `State`. Outside 3000 BC-3000 AD call `elementsAt(el, rates, jd).meanOrbit`
+  as well and label the result "mean orbit"; check the window with
+  `windowStartJd()` / `windowEndJd()`.
 - `planetAt` velocity is the exact time derivative of its position, including
   the element drifts and the Table 2b terms (checked by central differences to
   1e-7).
@@ -222,7 +226,10 @@ Inner planets (Mercury-Mars) have b = c = s = f = 0.
 - The surface law is Minnaert, L = rho E cos^k i cos^(k-1) e / pi; k = 1 is
   Lambert (and is computed by the Lambert expression, so it matches
   `lambertRadiance` bit for bit). Unlit (cos i <= 0) and unseen (cos e < 0)
-  give 0; at the exact limb (cos e = 0) k < 1 gives 0, not infinity.
+  give 0; at the exact limb (cos e = 0) k < 1 gives 0, not infinity. Just
+  inside the limb k < 1 is unbounded (2x Lambert at cos e = 1e-3 for
+  k = 0.9, runaway only at sub-pixel cos e): clamp cos e >= 1e-3 in a
+  renderer when k < 1.
 - **rho is not an albedo you look up.** Convert from the measured
   geometric albedo: `rhoFromGeometricAlbedo(p, k)` = p (2k + 1) / 2 (the
   Minnaert sphere's opposition disc integral equals p). The model's Bond
@@ -246,17 +253,22 @@ Inner planets (Mercury-Mars) have b = c = s = f = 0.
 ## Rings (`rings`)
 
 - Classical single scattering in a thin layer (Chandrasekhar 1960; Cuzzi et
-  al. 1984). Inputs: single-scattering albedo w0, phase function value P
+  al. 1984). Inputs: single-scattering albedo w0, phase function value
+  `phaseP` (P; not the geometric albedo p of `reflect`)
   (at the current phase angle, normalised so isotropic = 1), normal optical
   depth tau, mu0 = |sin B_sun| and mu = |sin B_obs| (elevations over the
   ring plane).
 - **Lit face** when observer and Sun are on the same side of the plane,
   **unlit face** otherwise: the caller chooses from the signs of the two
   elevations. `*IF` return I/F; `*Radiance` return I/F x E / pi.
-- The unlit face has a removable 0/0 at mu = mu0; it is evaluated in a form
-  with no singularity (e^(-tau/mu0) tau/(mu mu0) (e^x - 1)/x), finite and
-  continuous through mu = mu0. Do not re-derive it with the textbook
-  difference of exponentials in a shader without the same care.
+- The unlit face has a removable 0/0 at mu = mu0. For |x| < 1e-3
+  (x = tau (mu - mu0)/(mu mu0)) it is evaluated as
+  e^(-tau/mu0) tau/(mu mu0) (e^x - 1)/x with a series, finite and continuous
+  through mu = mu0; elsewhere by the textbook difference of exponentials
+  (both <= 1). **Do not use the product form for all x**: with the Sun
+  grazing the rings (tau/mu0 ~ 710-745) e^(-tau/mu0) is subnormal and e^x
+  overflows, giving Inf (0.1.0's evaluation caught this before release; a
+  sweep test pins finiteness). Shaders need the same two branches.
 - `ringTransmission(tau, mu)` = e^(-tau/|mu|) is the fraction passing
   through (alpha = 1 - it); 0 edge-on for tau > 0, 1 for tau = 0.
 - Shadow inputs: `ringPlaneHit(p, sunDir, pole)` returns where the sunward
@@ -273,7 +285,7 @@ Inner planets (Mercury-Mars) have b = c = s = f = 0.
 
 ## Validation
 
-`ailang test --package celestial` (from `packages/`) runs 91 tests: every
+`ailang test --package celestial` (from `packages/`) runs 93 tests: every
 check value is a published date or constant (JPL Horizons, IAU, NSSDC,
 Mallama) or a closed-form identity, cited in the test file.
 `python3 tools/orbits_ref.py --check` is the independent oracle (bisection
@@ -282,4 +294,16 @@ event times; light time by bisection, gravity in SI, disc and sphere
 integrals on 2-D grids, the ring layer integrated through its depth); its
 output is in `tools/orbits_ref.out`. `_smoke.ail` prints `OK: ...` and holds
 `keplerProbe`, `orbitsProbe` and `lightProbe`, which must print the same
-bytes under `ailang run --bytecode --strict-bytecode` and the interpreter.
+bytes under the strict VM and the interpreter. From `packages/celestial`:
+
+```sh
+ailang run --quiet --relax-modules --caps IO --entry main _smoke.ail
+for p in "keplerProbe 64" "orbitsProbe 64" "lightProbe 200"; do
+  set -- $p   # zsh: set -- ${=p}
+  ailang run --quiet --relax-modules --entry $1 --args-json $2 _smoke.ail > /tmp/$1.interp
+  ailang run --quiet --relax-modules --bytecode --strict-bytecode --entry $1 --args-json $2 _smoke.ail > /tmp/$1.vm
+  cmp /tmp/$1.interp /tmp/$1.vm
+done
+```
+
+(`--relax-modules`: the module path is the package's, not the directory's.)

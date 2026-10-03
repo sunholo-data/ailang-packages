@@ -6,9 +6,13 @@
 -- quadrature, the idealised Jupiter light time and the unlit ring limit.
 --
 -- keplerProbe, orbitsProbe and lightProbe are the VM-vs-interpreter probes: pure, and
--- the strict bytecode VM must print the same bytes as the interpreter:
---   ailang run --quiet --bytecode --strict-bytecode --entry keplerProbe --args-json 64 _smoke.ail
---   ailang run --quiet --entry keplerProbe --args-json 64 _smoke.ail
+-- the strict bytecode VM must print the same bytes as the interpreter. From
+-- packages/celestial (--relax-modules because the module path is the
+-- package's, not the directory's; main also needs --caps IO):
+--   ailang run --quiet --relax-modules --bytecode --strict-bytecode --entry keplerProbe --args-json 64 _smoke.ail
+--   ailang run --quiet --relax-modules --entry keplerProbe --args-json 64 _smoke.ail
+--   (likewise orbitsProbe 64 and lightProbe 200; compare with cmp)
+--   ailang run --quiet --relax-modules --caps IO --entry main _smoke.ail
 module sunholo/celestial/_smoke
 
 import std/io (println)

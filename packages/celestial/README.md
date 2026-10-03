@@ -36,10 +36,14 @@ interpreter, and no dependency on any other package (in particular not on
 `sunholo/relativity`: photometric inputs are parameters). Radiance is in
 cd/m^2 and illuminance in lux when the star's input is in lux.
 
-It was built as the orbit core of the Stapledon's Voyage rebuild, and its
-normative numbers are in the design repo's `physics/planets-spec.md`
-(sunholo-data/stapledons-design). It is general-purpose.
+It was built as the orbit and reflected-light core of the Stapledon's Voyage
+rebuild. Its normative numbers will be specified in the design repo's
+`physics/planets-spec.md` (sunholo-data/stapledons-design); until that spec
+exists they are set by the game repo's design doc
+`design_docs/planned/r1/m5-planets.md` (sunholo-data/stapledons-godot),
+section M5.0a. It is general-purpose.
 
-Check values are published dates and constants; `tools/orbits_ref.py` is an
+Check values are published dates and constants or closed-form identities; `tools/orbits_ref.py` is an
 independent Python oracle (`python3 tools/orbits_ref.py --check`, recorded
-in `tools/orbits_ref.out`).
+in `tools/orbits_ref.out`). `_smoke.ail` is run from this directory with
+`ailang run --quiet --relax-modules --caps IO --entry main _smoke.ail`.

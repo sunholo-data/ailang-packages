@@ -89,6 +89,9 @@ export pure func elementsAt(el: MeanElements, rates: ElementRates, jdTDB: float)
 }
 
 -- Heliocentric position (AU) and velocity (AU/day), ecliptic J2000.
+-- WARNING: THIS DOES NOT CARRY THE meanOrbit FLAG. Outside 3000 BC-3000 AD
+-- the result is a frozen mean orbit, not an ephemeris: call
+-- elementsAt(el, rates, jdTDB).meanOrbit as well and label it.
 export pure func planetAt(el: MeanElements, rates: ElementRates, jdTDB: float) -> State
   requires { el.a > 0.0 && el.e >= 0.0 && el.e < 1.0 }
 {

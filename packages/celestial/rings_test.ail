@@ -18,7 +18,7 @@
 
 module sunholo/celestial/rings_test
 
-import std/math (sin, cos, tan, exp, sqrt)
+import std/math (sin, cos, tan, exp, sqrt, log, intToFloat)
 import ./kepler (Vec3, absf, pi, norm)
 import ./rings (RingBand, RingHit, ringLitIF, ringUnlitIF, ringLitRadiance, ringUnlitRadiance, ringTransmission, bandAt, ringPlaneHit, ringShadowTransmission)
 
@@ -222,3 +222,46 @@ pure func checkHitNonUnitDir() -> bool {
 }
 
 test "ringPlaneHit: mu is for the unit direction, radius independent of |dir|" { checkHitNonUnitDir() }
+
+-- ---------- finite over the whole range (gate 5) ----------
+-- Eval round 1, B1: with tau/mu0 in ~(709.8, 745) e^(-tau/mu0) is subnormal
+-- but non-zero while e^x overflows, so the series-free product gave Inf.
+-- These are the Sun 0.1-0.4 deg above Saturn's B ring, near each equinox.
+-- Expected values: the textbook difference of exponentials (both <= 1).
+pure func checkGrazingSun() -> bool =
+  rel(ringUnlitIF(0.5, 1.3, 7.2, 0.01, 1.0), 0.0000012254565036485897, 0.000000001)
+  && rel(ringUnlitIF(0.5, 1.3, 5.1, 0.007, 1.0), 0.000006983936775703967, 0.000000001)
+  && rel(ringUnlitIF(0.5, 1.3, 2.5, 0.0035, 0.9), 0.000039445508128922096, 0.000000001)
+
+test "unlit face with the Sun grazing the rings (tau/mu0 ~ 710-745): finite and right" { checkGrazingSun() }
+
+pure func finiteNonNeg(v: float) -> bool = v == v && v >= 0.0 && v < 1.0e300
+
+pure func mu0At(i: int) -> float =
+  match i { 0 => 0.0001, 1 => 0.0007, 2 => 0.001, 3 => 0.0035, 4 => 0.007, 5 => 0.01, 6 => 0.05, 7 => 0.2, 8 => 0.45, _ => 1.0 }
+
+pure func muAt(j: int) -> float =
+  match j { 0 => 0.01, 1 => 0.0101, 2 => 0.1, 3 => 0.45, 4 => 0.9, _ => 1.0 }
+
+-- The unlit face peaks at tau* = ln(mu/mu0) / (1/mu0 - 1/mu) (tau* = mu0 at
+-- mu = mu0) and decays monotonically beyond it; both faces are finite and
+-- non-negative everywhere. tau = 0 .. 10 in steps of 0.01.
+pure func tauPeak(mu0: float, mu: float) -> float =
+  if mu == mu0 then mu0 else log(mu / mu0) / (1.0 / mu0 - 1.0 / mu)
+
+pure func sweepTau(mu0: float, mu: float, k: int, prev: float) -> bool =
+  if k > 1000 then true
+  else {
+    let tau = 0.01 * intToFloat(k);
+    let u = ringUnlitIF(0.5, 1.3, tau, mu0, mu);
+    let l = ringLitIF(0.5, 1.3, tau, mu0, mu);
+    let decays = tau - 0.01 < tauPeak(mu0, mu) || u <= prev * (1.0 + 0.000000000001);
+    finiteNonNeg(u) && finiteNonNeg(l) && decays && sweepTau(mu0, mu, k + 1, u)
+  }
+
+pure func sweepMu(i: int, j: int) -> bool =
+  if j > 5 then true else sweepTau(mu0At(i), muAt(j), 0, 0.0) && sweepMu(i, j + 1)
+
+pure func sweepAll(i: int) -> bool = if i > 9 then true else sweepMu(i, 0) && sweepAll(i + 1)
+
+test "both faces finite and >= 0 for mu0 1e-4..1, mu 0.01..1, tau 0..10; unlit decays past its peak" { sweepAll(0) }
