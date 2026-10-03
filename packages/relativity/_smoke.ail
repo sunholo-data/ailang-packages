@@ -3,7 +3,8 @@
 -- position (aberration), a black-hole shadow size (Schwarzschild), a
 -- G2V temperature (photometry), a white-dwarf temperature, a cruise
 -- trip with its energy ledger (journey plans, medium), and the sky
--- photometry of 0.5.0 (forward CMB radiance, B-V temperature, threshold).
+-- photometry of 0.5.0 (forward CMB radiance, B-V temperature, threshold),
+-- and the 0.6.0 glow pole (4 x the mean inward glow at 0.99c).
 module sunholo/relativity/_smoke
 
 import std/io (println)
@@ -13,7 +14,7 @@ import ./hyper (atanh, absf)
 import ./journey (TripPlan, TripPhase, Accelerating, Coasting, Decelerating, Arrived, flipAndBurn, planBurnCoastBurn, planFlipAndBurn, phaseAt, motionAt)
 import ./hyper (acosh1p)
 import ./optics (cmbForwardTemperature)
-import ./medium (tripEnergy, mirrorDragPower, loadScale, glowInwardFlux, brakeHoldsAgainstDrag, accelSI)
+import ./medium (tripEnergy, mirrorDragPower, loadScale, glowInwardFlux, glowEmittanceAt, brakeHoldsAgainstDrag, accelSI)
 import ./optics (aberrate, dot)
 import ./schwarzschild (shadowAngularRadius, pi)
 import ./photometry (teffFromBpRp, teffFromBV, bvInTable, luminanceFromSurfaceMag, surfaceMagFromLuminance, pointThresholdIlluminance, limitingMagnitude)
@@ -138,6 +139,26 @@ pure func hotSweep(i: int, n: int, acc: float) -> float =
 export pure func photopicHotDigest(n: int) -> float =
   hotSweep(0, n, 0.0) + log10(photopicRadiance(wdInf())) + photopicRadiance(wdNaN())
 
+pure func glowRow(phi: float, j: int, m: int, acc: float) -> float =
+  if j > m then acc
+  else glowRow(phi, j + 1, m, acc + glowEmittanceAt(100000.0, phi, 0.000000001, 0.5, -1.0 + 2.0 * intToFloat(j) / intToFloat(m)))
+
+pure func glowSweep(i: int, n: int, acc: float) -> float =
+  if i > n then acc
+  else glowSweep(i + 1, n, acc + glowRow(rapidityOfOneMinusBeta(0.000001) * intToFloat(i) / intToFloat(n), 0, 40, 0.0))
+
+-- 0.6.0: digest of glowEmittanceAt over [0, phiCap] x cos theta in [-1, 1]
+-- (both clamps, the aft zero), plus cos past 1 and the NaN arms (NaN
+-- cos theta adds 1 when it propagates); the interpreter and strict VM must
+-- print the same bits.
+export pure func glowDigest(n: int) -> float {
+  let nanOut = glowEmittanceAt(100000.0, 2.6466524123622457, 0.000000001, 0.5, wdNaN());
+  glowSweep(0, n, 0.0)
+    + glowEmittanceAt(100000.0, 2.6466524123622457, 0.000000001, 0.5, 1.0000000000000002)
+    + glowEmittanceAt(100000.0, 2.6466524123622457, 0.000000001, 0.5, -0.0)
+    + (if nanOut != nanOut then 1.0 else 0.0)
+}
+
 export func main() -> () ! {IO} {
   let trip = flipAndBurn(4.37, standardGravity());
   let fwd = { x: 0.0, y: 0.0, z: -1.0 };
@@ -154,7 +175,9 @@ export func main() -> () ! {IO} {
   let pole = { x: 0.0, y: 0.0, z: 1.0 };
   let cmbPole = cmbSeenTemperature(pole, pole, rapidityOfOneMinusBeta(0.000001));
   let skyOk = absf(cmbPole - 3853.730994033574) < 0.000001 && absf(photopicRadiance(cmbPole) / 198426544.37850556 - 1.0) < 0.000001 && absf(teffFromBV(0.65) - 5770.0) < 0.000000001 && absf(limitingMagnitude(0.0002, 1.0) - 6.942368201939953) < 0.000000001;
-  if tripOk && angleOk && shadowOk && photometryOk && photometryWdOk && cruiseOk && skyOk
-  then println("OK: relativity alpha-Cen trip 3.5824 ship-yr / 6.0025 yr, 90deg star seen at 25.842deg at 0.9c, shadow at 3 r_s = pi/4, G2V = 5770 K, WD BP-RP 0.30 = 8941.6 K, alpha Cen at 1-beta = 1e-6 2.263 ship-days / 1.510e19 J, forward CMB at the cap 3853.7 K = 1.984e8 cd/m^2, Sun B-V 0.65 = 5770 K, naked-eye limit V 6.94 at 2e-4 cd/m^2")
-  else println("FAIL: trip ${show(trip.shipTime)} / ${show(trip.galaxyTime)}, angle ${show(angle)}, shadow ${show(shadow)}, G2V ${show(teffFromBpRp(0.823))}, WD ${show(bbTeffFromBpRp(0.30))}, cruise ${show(cruise.trip.shipTime)}, CMB ${show(cmbPole)} K ${show(photopicRadiance(cmbPole))} cd/m^2, B-V ${show(teffFromBV(0.65))}, limit ${show(limitingMagnitude(0.0002, 1.0))}")
+  let phi099 = 2.6466524123622457;
+  let glowOk = glowEmittanceAt(100000.0, phi099, 0.000000001, 0.5, 1.0) == 4.0 * glowInwardFlux(100000.0, phi099, 0.000000001, 0.5) && absf(glowEmittanceAt(100000.0, phi099, 0.000000001, 0.5, 1.0) / 0.00009628776871706523 - 1.0) < 0.000000000001;
+  if tripOk && angleOk && shadowOk && photometryOk && photometryWdOk && cruiseOk && skyOk && glowOk
+  then println("OK: relativity alpha-Cen trip 3.5824 ship-yr / 6.0025 yr, 90deg star seen at 25.842deg at 0.9c, shadow at 3 r_s = pi/4, G2V = 5770 K, WD BP-RP 0.30 = 8941.6 K, alpha Cen at 1-beta = 1e-6 2.263 ship-days / 1.510e19 J, forward CMB at the cap 3853.7 K = 1.984e8 cd/m^2, Sun B-V 0.65 = 5770 K, naked-eye limit V 6.94 at 2e-4 cd/m^2, glow pole at 0.99c 9.6288e-5 W/m^2 = 4 x mean")
+  else println("FAIL: trip ${show(trip.shipTime)} / ${show(trip.galaxyTime)}, angle ${show(angle)}, shadow ${show(shadow)}, G2V ${show(teffFromBpRp(0.823))}, WD ${show(bbTeffFromBpRp(0.30))}, cruise ${show(cruise.trip.shipTime)}, CMB ${show(cmbPole)} K ${show(photopicRadiance(cmbPole))} cd/m^2, B-V ${show(teffFromBV(0.65))}, limit ${show(limitingMagnitude(0.0002, 1.0))}, glow pole ${show(glowEmittanceAt(100000.0, phi099, 0.000000001, 0.5, 1.0))}")
 }

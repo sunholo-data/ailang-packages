@@ -1,5 +1,41 @@
 # Changelog
 
+## 0.6.0
+
+Additive: no signature changes; every 0.5.2 result is bit-identical. The
+wall glow's angular profile, so a renderer can draw the forward glow from the
+package instead of deriving it (stapledons-godot milestone M4.6a, sprint
+R1-M4-JOURNEY; design m4-first-journey.md, Forward glow). Check values:
+tools/glow_ref.py (stdlib Python, 60-digit Decimal; output in
+tools/glow_ref.out) and the canon IDs HB-n of stapledons-design
+physics/higgs-bubble.md section 6.
+
+- **medium**: `glowEmittanceAt(n, phi, eps, fIn, cosTheta)` = eps fIn K
+  max(0, cos theta) (W/m^2), the inward glow emittance of the wall element
+  whose outward normal is at angle theta from the travel direction (ship
+  frame), K = `kineticFlux(n, phi)`. A sphere in a forward beam intercepts
+  K max(0, cos theta) per unit area, so the profile peaks at the forward pole
+  and is 0 on the aft hemisphere and at rest. Its value at cos theta = 1 is
+  exactly 4 x `glowInwardFlux` (bit for bit) and its mean over the sphere is
+  `glowInwardFlux`, since the sphere mean of max(0, cos theta) is 1/4.
+  cosTheta is clamped to [0, 1]; NaN gives NaN (tested first, ailang#1419).
+  With n = 0.1 cm^-3 (HB-3), eps = 1e-9 (D-15) and f_in = 1/2: pole
+  9.628776871706523e-5 W/m^2 at 0.99c (the M4 design's 9.62878e-5) and
+  1.1250843031053144 W/m^2 at 1 - beta = 1e-6 (design 1.12508).
+- Tests (`medium_test.ail`, 9 new): the profile at 0, 45, 80, 90 and 120
+  degrees at 0.5c, 0.99c and the cap against the oracle to 1e-12; pole =
+  4 x mean exactly at four speeds and another (eps, fIn); the sphere mean by a
+  4000-bin midpoint sum over cos theta equals `glowInwardFlux` to 1e-12, with
+  the aft half exactly 0; zeros at rest, on the equator, aft and at eps = 0;
+  the clamp; NaN in cos theta or phi; finite, >= 0 and <= the pole over
+  201 x 41 points of [0, phiCap] x [-1, 1]. The 10^4-point medium sweep also
+  covers the new function.
+- `_smoke.ail`: `glowDigest(n)` (interpreter and strict VM print the same
+  bits) and a pole check in `main`.
+- tools/glow_ref.py: the oracle. It checks the 1/4 sphere mean independently
+  by a Simpson quadrature in theta (not in cos theta) and asserts the M4
+  design's printed digits, HB-45 (K at 0.99c) and HB-61 with `--check`.
+
 ## 0.5.2
 
 Fix: the 0.5.0 evaluation's follow-ups. No API change. Results are

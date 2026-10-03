@@ -89,6 +89,22 @@ export pure func cruiseDragEnergy(n: float, phi: float, r: float, dCoast: float)
 export pure func glowInwardFlux(n: float, phi: float, eps: float, fIn: float) -> float =
   eps * fIn * kineticFlux(n, phi) / 4.0
 
+-- Inward glow emittance of the wall element whose outward normal is at angle
+-- theta from the travel direction (ship frame): the element intercepts
+-- K max(0, cos theta) of the forward beam, so it shines eps fIn K
+-- max(0, cos theta) inward (W/m^2). Brightest at the forward pole, where it
+-- is exactly 4 x glowInwardFlux; 0 on the aft hemisphere and at rest; its
+-- mean over the sphere is glowInwardFlux (the mean of max(0, cos) is 1/4).
+-- cosTheta is clamped to [0, 1], so a dot product that rounds past 1 gives
+-- the pole. NaN cosTheta gives NaN (tested first: ailang#1419).
+export pure func glowEmittanceAt(n: float, phi: float, eps: float, fIn: float, cosTheta: float) -> float {
+  let c = if cosTheta != cosTheta then cosTheta
+          else if cosTheta >= 1.0 then 1.0
+          else if cosTheta > 0.0 then cosTheta
+          else 0.0;
+  eps * fIn * kineticFlux(n, phi) * c
+}
+
 -- Energy ledger of a planned trip, ship frame (J).
 export type TripEnergy = { boost: float, brake: float, drag: float, total: float }
 

@@ -88,7 +88,7 @@ let vLim = limitingMagnitude(skyLum, 2.0);          -- faintest visible star, fi
 | `hyper` | `sinh cosh tanh atanh acosh acosh1p expm1 log1p sinhc absf`. Accurate near 0; std/math has none of these |
 | `kinematics` | `Motion {phi,tau,t,x}`, `rest`, `accelerate(m, a, dtau)`, `coast`, `standardGravity`, `betaOf`, `gammaOf`, `oneMinusBeta`, `gammaOfBeta`, `rapidityOfBeta`, `rapidityOfOneMinusBeta` |
 | `journey` | `Trip {distance, shipTime, galaxyTime, peakBeta, peakGamma}`, `flipAndBurn(d, a)`, `burnCoastBurn(d, a, maxBeta)`, `coastAt(d, beta)`, `TripPlan {trip, a, phiPeak, tauBurn, tauCoast, tauTotal, dBurn, dCoast, fellBack}`, `planBurnCoastBurn(d, a, phiCruise)`, `planFlipAndBurn(d, a)`, `TripPhase` (`Accelerating Coasting Decelerating Arrived`), `phaseAt(p, tau)`, `motionAt(p, tau)` |
-| `medium` | `cSI protonMassKg lightYearM julianYearS astronomicalUnitM cmbTemperatureK accelSI`, `photonDriveEnergy(mEff, phi)`, `loadScale(n, phi)`, `kineticFlux(n, phi)`, `mirrorDragForce(n, phi, r)`, `mirrorDragPower(n, phi, r)`, `cruiseDragEnergy(n, phi, r, dCoast)`, `glowInwardFlux(n, phi, eps, fIn)`, `TripEnergy {boost, brake, drag, total}`, `tripEnergy(p, mEff, n, r)`, `brakeHoldsAgainstDrag(mEff, a, n, phi, r)` |
+| `medium` | `cSI protonMassKg lightYearM julianYearS astronomicalUnitM cmbTemperatureK accelSI`, `photonDriveEnergy(mEff, phi)`, `loadScale(n, phi)`, `kineticFlux(n, phi)`, `mirrorDragForce(n, phi, r)`, `mirrorDragPower(n, phi, r)`, `cruiseDragEnergy(n, phi, r, dCoast)`, `glowInwardFlux(n, phi, eps, fIn)`, `glowEmittanceAt(n, phi, eps, fIn, cosTheta)`, `TripEnergy {boost, brake, drag, total}`, `tripEnergy(p, mEff, n, r)`, `brakeHoldsAgainstDrag(mEff, a, n, phi, r)` |
 | `optics` | `Vec3`, `aberrate`, `deaberrate`, `doppler`, `dopplerApparent`, `gammaOnePlusBetaCos`, `cosSeen`, `dot`, `norm`, `normalize`, `forwardDoppler`, `cmbForwardTemperature`, `cmbSeenTemperature`, `cmbSeenTemperatureApparent` |
 | `blackbody` | `XYZ`, `RGB`, `cmf`, `planck`, `xyz`, `luminance`, `chromaticity`, `rgbUnitLuminance`, `pointFluxRatio`, `surfaceBrightnessRatio`, `photopicRadiance` |
 | `photometry` | `teffFromBpRp`, `gMinusV`, `bpRpInTable`, `teffFromBV`, `bvInTable`, `vFromG`, `illuminanceFromV`, `vFromIlluminance`, `fluxRatioFromMags`, `luminanceFromSurfaceMag`, `surfaceMagFromLuminance`, `pointThresholdIlluminance`, `limitingMagnitude` |
@@ -125,6 +125,15 @@ let vLim = limitingMagnitude(skyLum, 2.0);          -- faintest visible star, fi
   work in the boost and brake cancels as a pair (exact while
   `brakeHoldsAgainstDrag`), and the ledger then closes at arrival.
 - `glowInwardFlux` is the mean over the inner wall, eps fIn K / 4.
+- `glowEmittanceAt(n, phi, eps, fIn, cosTheta)` is the glow's angular profile
+  (0.6.0): eps fIn K max(0, cos theta) W/m^2 at the wall element whose outward
+  normal is at theta from the travel direction, ship frame. The pole value
+  (cosTheta = 1) is exactly 4 x `glowInwardFlux` (bit for bit) and its sphere
+  mean is `glowInwardFlux`. Renderers that draw the glow should take the pole
+  value from this function and mirror only the max(0, cos) shape, never
+  multiply `glowInwardFlux` by 4 themselves. cosTheta is clamped to [0, 1], so
+  a dot product that rounds to 1.0000000000000002 gives the pole; NaN
+  cosTheta gives NaN.
 
 ## Photometry
 
@@ -227,10 +236,12 @@ V is good to about +-0.1 mag. Treat results as approximate.
   sky photometry values come from tools/photometry_ref.py: a 0.05 nm Simpson
   quadrature with exact SI constants, the official CIE 1931 ybar table, the
   platinum-point candela, 50-digit Decimal CMB temperatures and Crumey's
-  printed limits.
+  printed limits. The 0.6.0 glow profile values come from tools/glow_ref.py
+  (60-digit Decimal from the exact float inputs; the 1/4 sphere mean checked
+  by an independent quadrature in theta).
 - NaN: the interpreter answers NaN >= x with true (ailang#1419), the VM with
   false. Functions here test NaN first or are written with `<` so both engines
-  agree; `_smoke.ail`'s `wdDigest`, `journeyDigest` and `photometryDigest`
-  check that bit for bit.
+  agree; `_smoke.ail`'s `wdDigest`, `journeyDigest`, `photometryDigest` and
+  `glowDigest` check that bit for bit.
 - Colours use the Wyman–Sloan–Shirley (2013) fit to the CIE 1931 colour
   matching functions, which is accurate to about 0.002 in chromaticity.

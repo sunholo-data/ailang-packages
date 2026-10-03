@@ -1,5 +1,7 @@
 -- Check values for the 0.4.0 Higgs-bubble energetics (medium) and the
--- forward CMB (optics.forwardDoppler, optics.cmbForwardTemperature).
+-- forward CMB (optics.forwardDoppler, optics.cmbForwardTemperature), and the
+-- 0.6.0 glow profile (medium.glowEmittanceAt; oracle tools/glow_ref.py,
+-- output in tools/glow_ref.out).
 --
 -- Expected numbers come from tools/journey_ref.py (output committed as
 -- tools/journey_ref.out), never from the code under test. The readout table
@@ -17,7 +19,7 @@ import ./hyper (atanh, absf)
 import ./kinematics (standardGravity, rapidityOfOneMinusBeta)
 import ./journey (TripPlan, planBurnCoastBurn)
 import ./optics (forwardDoppler, cmbForwardTemperature)
-import ./medium (cSI, protonMassKg, lightYearM, julianYearS, astronomicalUnitM, cmbTemperatureK, accelSI, photonDriveEnergy, mirrorDragForce, mirrorDragPower, cruiseDragEnergy, loadScale, kineticFlux, glowInwardFlux, tripEnergy, brakeHoldsAgainstDrag)
+import ./medium (cSI, protonMassKg, lightYearM, julianYearS, astronomicalUnitM, cmbTemperatureK, accelSI, photonDriveEnergy, mirrorDragForce, mirrorDragPower, cruiseDragEnergy, loadScale, kineticFlux, glowInwardFlux, glowEmittanceAt, tripEnergy, brakeHoldsAgainstDrag)
 
 pure func rel(got: float, want: float, tol: float) -> bool = absf(got - want) <= tol * absf(want)
 pure func r12(got: float, want: float) -> bool = rel(got, want, 0.000000000001)
@@ -186,6 +188,8 @@ pure func allFiniteAt(phi: float) -> bool {
     && finite(mirrorDragPower(nIsm(), phi, rBub())) && finite(cruiseDragEnergy(nIsm(), phi, rBub(), dAcen()))
     && finite(loadScale(nIsm(), phi)) && finite(kineticFlux(nIsm(), phi))
     && finite(glowInwardFlux(nIsm(), phi, 0.000000001, 0.5))
+    && finite(glowEmittanceAt(nIsm(), phi, 0.000000001, 0.5, 1.0))
+    && finite(glowEmittanceAt(nIsm(), phi, 0.000000001, 0.5, 0.5))
     && finite(e.boost) && finite(e.brake) && finite(e.drag) && finite(e.total)
     && finite(forwardDoppler(phi)) && finite(cmbForwardTemperature(phi))
 }
@@ -204,3 +208,114 @@ pure func sweepOuter(i: int) -> bool =
 pure func checkFiniteSweep() -> bool = sweepOuter(0)
 
 test "every medium function finite over 10^4 points of [0, phiCap]" { checkFiniteSweep() }
+
+-- ---------- 0.6.0: glow angular profile (glowEmittanceAt) ----------
+-- Expected values: tools/glow_ref.py (60-digit Decimal from the exact float
+-- inputs; tools/glow_ref.out). eps = 1e-9 (D-15), f_in = 1/2 (M2 default).
+
+pure func eps9() -> float = 0.000000001
+pure func glowAt(phi: float, c: float) -> float = glowEmittanceAt(nIsm(), phi, eps9(), 0.5, c)
+pure func meanAt(phi: float) -> float = glowInwardFlux(nIsm(), phi, eps9(), 0.5)
+
+-- cos theta as a caller passes it: math.cos of 0, 45, 80, 90, 120 degrees.
+pure func cos45() -> float = 0.7071067811865476
+pure func cos80() -> float = 0.17364817766693041
+pure func cos90() -> float = 0.00000000000000006123233995736766
+pure func cos120() -> float = -0.49999999999999983
+
+pure func profileOk(phi: float, pole: float, e45: float, e80: float, e90: float) -> bool =
+  r12(glowAt(phi, 1.0), pole) && r12(glowAt(phi, cos45()), e45)
+    && r12(glowAt(phi, cos80()), e80) && r12(glowAt(phi, cos90()), e90)
+    && glowAt(phi, cos120()) == 0.0
+
+pure func checkGlowProfile099() -> bool =
+  profileOk(phi099(), 0.00009628776871706523, 0.00006808573420515874, 0.000016720195569333246, 0.000000000000000000005895925387819729)
+
+test "glowEmittanceAt at 0.99c: pole 9.62878e-5 W/m^2 (design AC8, G-M4-4); 45, 80, 90, 120 deg (oracle)" { checkGlowProfile099() }
+
+pure func checkGlowProfileCap() -> bool =
+  profileOk(phiCap(), 1.1250843031053144, 0.795554740132309, 0.19536883895590623, 0.00000000000000006889154452844269)
+
+test "glowEmittanceAt at the cap: pole 1.12508 W/m^2 (G-M4-4); 45, 80, 90, 120 deg (oracle)" { checkGlowProfileCap() }
+
+pure func checkGlowProfile05() -> bool =
+  profileOk(phi05(), 0.00000020126168103899967, 0.00000014231349945568067, 0.00000003494872414660529, 0.000000000000000000000012323723673771324)
+
+test "glowEmittanceAt at 0.5c: 45, 80, 90, 120 deg (oracle)" { checkGlowProfile05() }
+
+-- Pole = 4 x mean: the mean of max(0, cos theta) over the sphere is 1/4.
+-- Exact in float64 (a /4 then x4 is a power-of-two scale), so == not r12.
+pure func poleIsFourMean(phi: float) -> bool = glowAt(phi, 1.0) == 4.0 * meanAt(phi)
+
+pure func checkPoleFourMean() -> bool =
+  poleIsFourMean(phi05()) && poleIsFourMean(phi09()) && poleIsFourMean(phi099()) && poleIsFourMean(phiCap())
+    && glowEmittanceAt(nIsm(), phi099(), 0.0000000036, 0.25, 1.0) == 4.0 * glowInwardFlux(nIsm(), phi099(), 0.0000000036, 0.25)
+
+test "glowEmittanceAt(..., 1) == 4 x glowInwardFlux at 0.5c, 0.9c, 0.99c, the cap and other eps, fIn" { checkPoleFourMean() }
+
+-- Sphere mean over the solid angle: d Omega = 2 pi d(cos theta), so the mean
+-- is (1/2) int_{-1}^{1} f(mu) d mu. Midpoint rule on 4000 bins; the kink at
+-- mu = 0 is a bin edge and f is linear on each side, so the sum is exact up
+-- to rounding. (The oracle checks the 1/4 independently, in theta.)
+pure func meanSum(phi: float, i: int, stop: int, m: int, acc: float) -> float =
+  if i >= stop then acc
+  else meanSum(phi, i + 1, stop, m, acc + glowAt(phi, -1.0 + (2.0 * intToFloat(i) + 1.0) / intToFloat(m)))
+
+pure func sphereMean(phi: float) -> float {
+  let m = 4000;
+  let half = m / 2;
+  -- Two halves (aft, forward) to stay under the recursion limit.
+  (meanSum(phi, 0, half, m, 0.0) + meanSum(phi, half, m, m, 0.0)) / intToFloat(m)
+}
+
+-- The aft half contributes exactly 0, the forward half all of it.
+pure func checkSphereHalves() -> bool =
+  meanSum(phi099(), 0, 2000, 4000, 0.0) == 0.0
+    && r12(meanSum(phi099(), 2000, 4000, 4000, 0.0) / 4000.0, meanAt(phi099()))
+
+pure func checkSphereMean() -> bool =
+  r12(sphereMean(phi099()), meanAt(phi099())) && r12(sphereMean(phiCap()), meanAt(phiCap()))
+    && r12(sphereMean(phi05()), meanAt(phi05()))
+
+test "sphere mean of glowEmittanceAt over cos theta == glowInwardFlux (0.5c, 0.99c, cap)" { checkSphereMean() }
+
+test "sphere mean: the aft hemisphere adds 0, the forward hemisphere all of glowInwardFlux" { checkSphereHalves() }
+
+pure func nan() -> float = 0.0 / 0.0
+
+pure func checkGlowEdges() -> bool =
+  glowAt(0.0, 1.0) == 0.0                                              -- at rest
+    && glowAt(phi099(), 0.0) == 0.0 && glowAt(phi099(), -1.0) == 0.0   -- equator, aft pole
+    && glowAt(phi099(), -0.0) == 0.0 && glowAt(phiCap(), cos120()) == 0.0
+    && glowEmittanceAt(nIsm(), phi099(), 0.0, 0.5, 1.0) == 0.0         -- eps = 0
+    && glowAt(phi099(), 1.0000000000000002) == glowAt(phi099(), 1.0)  -- clamp above 1 (dot-product rounding)
+    && glowAt(phi099(), 5.0) == glowAt(phi099(), 1.0)
+    && glowAt(phi099(), -5.0) == 0.0
+    && glowAt(phi099(), cos45()) < glowAt(phi099(), 1.0)
+    && glowAt(phi099(), cos80()) < glowAt(phi099(), cos45())
+
+test "glowEmittanceAt: 0 at rest, on the equator and aft, eps 0; cos clamped to [0, 1]; falls off from the pole" { checkGlowEdges() }
+
+-- NaN cos theta propagates NaN on both the interpreter and the VM (ailang#1419:
+-- the interpreter answers NaN >= x with true, so the function tests NaN first).
+pure func checkGlowNaN() -> bool {
+  let a = glowAt(phi099(), nan());
+  let b = glowAt(nan(), 1.0);
+  a != a && b != b
+}
+
+test "glowEmittanceAt: NaN cos theta or phi gives NaN, never a silent 0 or pole" { checkGlowNaN() }
+
+pure func profileFiniteRow(phi: float, j: int) -> bool =
+  if j > 40 then true
+  else {
+    let v = glowAt(phi, -1.0 + 2.0 * intToFloat(j) / 40.0);
+    finite(v) && v >= 0.0 && v <= glowAt(phi, 1.0) && profileFiniteRow(phi, j + 1)
+  }
+
+pure func profileFiniteSweep(i: int) -> bool =
+  if i > 200 then true
+  else if profileFiniteRow(phiCap() * intToFloat(i) / 200.0, 0) then profileFiniteSweep(i + 1)
+  else false
+
+test "glowEmittanceAt finite, >= 0 and <= the pole over 201 x 41 points of [0, phiCap] x [-1, 1]" { profileFiniteSweep(0) }
