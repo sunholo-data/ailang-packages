@@ -1,0 +1,224 @@
+-- Check values for sunholo/celestial/rings. Expected values are closed-form
+-- limits of the classical single-scattering thin layer (Chandrasekhar 1960,
+-- Radiative Transfer; Cuzzi et al. 1984, "Saturn's rings: properties and
+-- processes", in Planetary Rings, Univ. Arizona Press) or published ring
+-- data, never this module's output:
+--   tau -> inf, lit face: the Lommel-Seeliger law I/F = (w0 P / 4) mu0 / (mu0 + mu)
+--   tau -> 0: both faces -> 0, the lit face as w0 P tau / (4 mu)
+--   mu -> mu0, unlit face: w0 P tau exp(-tau / mu0) / (4 mu0)
+--   transmission exp(-tau / |mu|): 1 at tau = 0, exp(-tau) at mu = 1
+-- Fixture: Saturn's main rings, NASA NSSDCA Saturnian Rings Fact Sheet
+--   (D. R. Williams, updated 2022-04-19, compiled from Voyager and Cassini):
+--   C ring 74,658-91,975 km, tau 0.05-0.35; B ring 91,975-117,507 km,
+--   tau 0.4-2.5; Cassini Division to 122,340 km, tau 0-0.1; A ring
+--   122,340-136,780 km, tau 0.4-1.0. Cassini UVIS occultations put the B
+--   ring core above tau 5 (Colwell et al. 2010, Icarus 206, 646). Saturn's
+--   obliquity 26.73 deg (NSSDC): the Sun's elevation over the rings at
+--   solstice.
+
+module sunholo/celestial/rings_test
+
+import std/math (sin, cos, tan, exp, sqrt)
+import ./kepler (Vec3, absf, pi, norm)
+import ./rings (RingBand, RingHit, ringLitIF, ringUnlitIF, ringLitRadiance, ringUnlitRadiance, ringTransmission, bandAt, ringPlaneHit, ringShadowTransmission)
+
+pure func rel(got: float, want: float, tol: float) -> bool = absf(got - want) <= tol * absf(want)
+
+pure func lommelSeeliger(w0: float, p: float, mu0: float, mu: float) -> float = w0 * p / 4.0 * mu0 / (mu0 + mu)
+
+-- ---------- lit face ----------
+
+pure func checkLitThick() -> bool =
+  rel(ringLitIF(0.5, 1.3, 50.0, 0.45, 0.7), lommelSeeliger(0.5, 1.3, 0.45, 0.7), 0.000000000000001)
+  && rel(ringLitIF(0.5, 1.3, 1.0e300, 0.2, 0.9), lommelSeeliger(0.5, 1.3, 0.2, 0.9), 0.000000000000001)
+  && rel(ringLitIF(0.5, 1.3, 1.0e300, 0.6, 0.6), 0.5 * 1.3 / 8.0, 0.000000000000001)
+
+test "lit face, tau -> inf: the Lommel-Seeliger law" { checkLitThick() }
+
+pure func checkLitThin() -> bool {
+  let tau = 0.000000001;
+  ringLitIF(0.5, 1.3, 0.0, 0.45, 0.7) == 0.0
+  && rel(ringLitIF(0.5, 1.3, tau, 0.45, 0.7), 0.5 * 1.3 * tau / (4.0 * 0.7), 0.000001)
+  && ringLitIF(0.5, 1.3, tau, 0.45, 0.7) < 0.0000000003
+}
+
+test "lit face, tau -> 0: tends to 0 as w0 P tau / (4 mu)" { checkLitThin() }
+
+pure func checkLitClosedForm() -> bool =
+  rel(ringLitIF(0.6, 1.1, 0.8, 0.3, 0.5), 0.6 * 1.1 * 0.3 / (4.0 * 0.8) * (1.0 - exp(0.0 - 0.8 * (1.0 / 0.5 + 1.0 / 0.3))), 0.00000000000001)
+
+test "lit face matches the single-scattering formula at tau 0.8" { checkLitClosedForm() }
+
+-- ---------- unlit face ----------
+
+pure func unlitLimit(w0: float, p: float, tau: float, mu0: float) -> float = w0 * p * tau * exp(0.0 - tau / mu0) / (4.0 * mu0)
+
+pure func checkUnlitLimit() -> bool {
+  let lim = unlitLimit(0.5, 1.3, 0.7, 0.45);
+  let at = ringUnlitIF(0.5, 1.3, 0.7, 0.45, 0.45);
+  let above = ringUnlitIF(0.5, 1.3, 0.7, 0.45, 0.45 * (1.0 + 0.000000001));
+  let below = ringUnlitIF(0.5, 1.3, 0.7, 0.45, 0.45 * (1.0 - 0.000000001));
+  let tiny = ringUnlitIF(0.5, 1.3, 0.7, 0.45, 0.45 + 0.0000000000000001);
+  rel(at, lim, 0.000000000000001) && rel(above, lim, 0.00000001) && rel(below, lim, 0.00000001)
+  && rel(tiny, lim, 0.0000000001) && at == at
+}
+
+test "unlit face: finite at mu -> mu0, equal to w0 P tau e^(-tau/mu0) / (4 mu0)" { checkUnlitLimit() }
+
+pure func checkUnlitFormula() -> bool =
+  rel(ringUnlitIF(0.6, 1.1, 0.8, 0.3, 0.5), 0.6 * 1.1 * 0.3 / (4.0 * (0.5 - 0.3)) * (exp(0.0 - 0.8 / 0.5) - exp(0.0 - 0.8 / 0.3)), 0.0000000000001)
+  && rel(ringUnlitIF(0.6, 1.1, 0.8, 0.7, 0.2), 0.6 * 1.1 * 0.7 / (4.0 * (0.2 - 0.7)) * (exp(0.0 - 0.8 / 0.2) - exp(0.0 - 0.8 / 0.7)), 0.0000000000001)
+
+test "unlit face matches the single-scattering formula away from mu0" { checkUnlitFormula() }
+
+pure func checkUnlitThinThick() -> bool =
+  ringUnlitIF(0.5, 1.3, 0.0, 0.45, 0.7) == 0.0
+  && ringUnlitIF(0.5, 1.3, 0.000000001, 0.45, 0.7) < 0.0000000003
+  && ringUnlitIF(0.5, 1.3, 1.0e300, 0.45, 0.7) == 0.0
+  && ringUnlitIF(0.5, 1.3, 200.0, 0.45, 0.45) < 0.000000000000001
+
+test "unlit face: 0 for tau -> 0 and for an opaque ring" { checkUnlitThinThick() }
+
+-- The unlit face peaks near tau ~ mu (light must get through, but not all of it).
+pure func checkUnlitPeak() -> bool =
+  ringUnlitIF(0.5, 1.3, 0.4, 0.45, 0.5) > ringUnlitIF(0.5, 1.3, 0.05, 0.45, 0.5)
+  && ringUnlitIF(0.5, 1.3, 0.4, 0.45, 0.5) > ringUnlitIF(0.5, 1.3, 3.0, 0.45, 0.5)
+
+test "unlit face is brightest at moderate tau" { checkUnlitPeak() }
+
+-- ---------- radiance ----------
+
+pure func checkRadiance() -> bool =
+  rel(ringLitRadiance(0.5, 1.3, 0.8, 0.45, 0.7, 10000.0), ringLitIF(0.5, 1.3, 0.8, 0.45, 0.7) * 10000.0 / pi(), 0.000000000000001)
+  && rel(ringUnlitRadiance(0.5, 1.3, 0.8, 0.45, 0.7, 10000.0), ringUnlitIF(0.5, 1.3, 0.8, 0.45, 0.7) * 10000.0 / pi(), 0.000000000000001)
+  && ringLitRadiance(0.5, 1.3, 0.8, 0.0, 0.7, 10000.0) == 0.0
+  && ringUnlitRadiance(0.5, 1.3, 0.8, 0.0, 0.7, 10000.0) == 0.0
+
+test "radiance = I/F x E / pi (cd/m^2 for lux); dark when the Sun is in the ring plane" { checkRadiance() }
+
+-- ---------- transmission ----------
+
+pure func checkTransmission() -> bool =
+  ringTransmission(0.0, 0.3) == 1.0 && ringTransmission(0.0, 0.0) == 1.0
+  && ringTransmission(0.7, 1.0) == exp(0.0 - 0.7) && ringTransmission(0.7, 0.0 - 1.0) == exp(0.0 - 0.7)
+  && rel(ringTransmission(0.7, 0.5), exp(0.0 - 1.4), 0.000000000000001)
+  && ringTransmission(0.7, 0.0) == 0.0
+
+test "transmission: 1 at tau 0, e^(-tau) at mu 1, |mu| either side, 0 edge-on" { checkTransmission() }
+
+-- ---------- Saturn's main rings (NSSDC fixture) ----------
+
+pure func saturnRings() -> [RingBand] = [
+  { rIn: 74658.0, rOut: 91975.0, tau: 0.1, w0: 0.2 },
+  { rIn: 91975.0, rOut: 117507.0, tau: 1.8, w0: 0.5 },
+  { rIn: 117507.0, rOut: 122340.0, tau: 0.08, w0: 0.3 },
+  { rIn: 122340.0, rOut: 136780.0, tau: 0.6, w0: 0.5 }
+]
+
+pure func checkBands() -> bool =
+  bandAt(saturnRings(), 80000.0).tau == 0.1 && bandAt(saturnRings(), 100000.0).tau == 1.8
+  && bandAt(saturnRings(), 120000.0).tau == 0.08 && bandAt(saturnRings(), 130000.0).tau == 0.6
+  && bandAt(saturnRings(), 91975.0).tau == 1.8 && bandAt(saturnRings(), 136780.0).tau == 0.0
+  && bandAt(saturnRings(), 60268.0).tau == 0.0 && bandAt(saturnRings(), 140000.0).tau == 0.0
+  && bandAt([], 100000.0).tau == 0.0
+
+test "bandAt: Saturn's C, B, Cassini Division, A (NSSDC radii); tau 0 off the rings" { checkBands() }
+
+-- At solstice the Sun stands 26.73 deg over the rings: the A ring
+-- (tau 0.4-1.0) passes 41-11 % of sunlight to the globe, the C ring
+-- (tau 0.05-0.35) 89-46 %, and the B ring core (tau > 5, Cassini UVIS)
+-- under 0.002 %.
+pure func mu0Solstice() -> float = sin(26.73 * pi() / 180.0)
+
+pure func checkSolsticeShadow() -> bool =
+  ringTransmission(1.0, mu0Solstice()) > 0.10 && ringTransmission(0.4, mu0Solstice()) < 0.42
+  && ringTransmission(0.05, mu0Solstice()) > 0.89 && ringTransmission(0.35, mu0Solstice()) < 0.46
+  && ringTransmission(5.0, mu0Solstice()) < 0.00002
+
+test "Saturn at solstice: the A ring's shadow passes 11-41 %, the B core < 0.002 %" { checkSolsticeShadow() }
+
+-- ---------- ring-shadow geometry ----------
+-- Pole +z, Sun in the x-z plane at elevation B above the ring plane. A point
+-- on Saturn's globe at planetocentric latitude phi (south of the equator,
+-- facing the Sun) looks toward the Sun and crosses the ring plane at
+-- radius R (cos phi - sin phi cot B).
+
+pure func pole() -> Vec3 = { x: 0.0, y: 0.0, z: 1.0 }
+
+pure func sunDir(b: float) -> Vec3 = { x: cos(b), y: 0.0, z: sin(b) }
+
+pure func surface(phi: float) -> Vec3 = { x: 60268.0 * cos(phi), y: 0.0, z: 60268.0 * sin(phi) }
+
+pure func checkHitGeometry() -> bool {
+  let b = 26.73 * pi() / 180.0;
+  let phi = 0.0 - 20.0 * pi() / 180.0;
+  let h = ringPlaneHit(surface(phi), sunDir(b), pole());
+  let want = 60268.0 * (cos(phi) - sin(phi) * cos(b) / sin(b));
+  h.hits && rel(h.radius, want, 0.000000000001) && rel(h.mu, sin(b), 0.000000000000001)
+}
+
+test "ray to the Sun meets the ring plane at R (cos phi - sin phi cot B)" { checkHitGeometry() }
+
+pure func checkNoHit() -> bool {
+  let b = 26.73 * pi() / 180.0;
+  -- northern point with the Sun north: the ray climbs away from the plane
+  let north = ringPlaneHit(surface(20.0 * pi() / 180.0), sunDir(b), pole());
+  -- Sun exactly in the ring plane (equinox): parallel, no crossing
+  let equinox = ringPlaneHit(surface(0.0 - 20.0 * pi() / 180.0), sunDir(0.0), pole());
+  !north.hits && !equinox.hits && equinox.mu == 0.0
+}
+
+test "no crossing on the sunward hemisphere or at equinox" { checkNoHit() }
+
+pure func checkShadowTransmission() -> bool {
+  let b = 26.73 * pi() / 180.0;
+  let phi = 0.0 - 20.0 * pi() / 180.0;
+  let h = ringPlaneHit(surface(phi), sunDir(b), pole());
+  let t = ringShadowTransmission(saturnRings(), surface(phi), sunDir(b), pole());
+  rel(t, exp(0.0 - bandAt(saturnRings(), h.radius).tau / sin(b)), 0.000000000000001)
+  && ringShadowTransmission(saturnRings(), surface(20.0 * pi() / 180.0), sunDir(b), pole()) == 1.0
+  && ringShadowTransmission(saturnRings(), surface(0.0 - 20.0 * pi() / 180.0), sunDir(0.0), pole()) == 1.0
+}
+
+test "shadow transmission e^(-tau(r) / mu0) where the sunward ray crosses a band, else 1" { checkShadowTransmission() }
+
+-- The shadow's latitude band: at solstice, phi = -20 deg looks through r =
+-- 60268 (cos 20 + sin 20 cot 26.73) = 97,564 km, inside the B ring.
+pure func checkBRingShadow() -> bool {
+  let b = 26.73 * pi() / 180.0;
+  let h = ringPlaneHit(surface(0.0 - 20.0 * pi() / 180.0), sunDir(b), pole());
+  absf(h.radius - 97564.0) < 1.0 && bandAt(saturnRings(), h.radius).tau == 1.8
+}
+
+test "Saturn at solstice: latitude -20 deg lies in the B ring's shadow (r = 97,564 km)" { checkBRingShadow() }
+
+-- ---------- precision near the removable singularities ----------
+-- Just inside the series threshold (x < 1e-3) the textbook difference of exponentials
+-- is still good to ~1e-13, so the stable form must agree to 1e-11 there;
+-- and for tau ~ 1e-9 the lit face must keep the second-order term of
+-- 1 - e^(-x) = x - x^2/2 + x^3/6 (relative size x/2 ~ 2e-9).
+pure func checkNearMu0Precision() -> bool {
+  let mu = 0.45 * (1.0 + 0.0005);
+  let direct = 0.5 * 1.3 * 0.45 / (4.0 * (mu - 0.45)) * (exp(0.0 - 0.7 / mu) - exp(0.0 - 0.7 / 0.45));
+  rel(ringUnlitIF(0.5, 1.3, 0.7, 0.45, mu), direct, 0.00000000001)
+}
+
+test "unlit face near mu0 (x ~ 7.8e-4, series branch): stable form = textbook form to 1e-11" { checkNearMu0Precision() }
+
+pure func checkThinLitPrecision() -> bool {
+  let tau = 0.000000001;
+  let x = tau * (1.0 / 0.7 + 1.0 / 0.45);
+  let want = 0.5 * 1.3 * 0.45 / (4.0 * (0.7 + 0.45)) * x * (1.0 - x / 2.0 + x * x / 6.0);
+  rel(ringLitIF(0.5, 1.3, tau, 0.45, 0.7), want, 0.000000000001)
+}
+
+test "lit face at tau 1e-9 keeps 1 - e^(-x) to 1e-12 (no cancellation)" { checkThinLitPrecision() }
+
+pure func checkHitNonUnitDir() -> bool {
+  let b = 26.73 * pi() / 180.0;
+  let d = { x: 3.0 * cos(b), y: 0.0, z: 3.0 * sin(b) };
+  let h = ringPlaneHit(surface(0.0 - 20.0 * pi() / 180.0), d, pole());
+  h.hits && rel(h.mu, sin(b), 0.000000000000001) && absf(h.radius - 97564.0) < 1.0
+}
+
+test "ringPlaneHit: mu is for the unit direction, radius independent of |dir|" { checkHitNonUnitDir() }

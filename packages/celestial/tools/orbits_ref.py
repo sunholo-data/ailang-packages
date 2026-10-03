@@ -1,9 +1,12 @@
 #!/usr/bin/env python3
-"""Independent reference values for sunholo/celestial 0.1.0, part 1
-(kepler, ephemeris, frames). Standard library only; no network.
+"""Independent reference values for sunholo/celestial 0.1.0: part 1
+(kepler, ephemeris, frames) and part 2 (lighttime, gravity, reflect, rings;
+its sources and independent methods are listed above part2() below).
+Standard library only; no network (the Horizons values were fetched once
+and are copied in with their query).
 
-Every check in kepler_test.ail, ephemeris_test.ail and frames_test.ail is a
-published date or constant. This script is the second-language oracle: it
+Every check in the *_test.ail files is a published date or constant, or a
+closed-form identity. This script is the second-language oracle: it
 re-derives each check with independent code paths and asserts that the
 published values are reproduced within the tests' tolerances, so a bug the
 AILANG VM and interpreter would share is caught here.
@@ -361,9 +364,242 @@ def main():
     check("Io sidereal period 1.769137786 +-1e-4 d", abs(P - 1.769137786) <= 1e-4, "%.7f d" % P)
     print("  (prograde-apse reading would give %.5f d)" % (360.0 / (mdot - wdot)))
 
+    part2()
+
     if "--check" in sys.argv and FAILS:
         print("FAILED: " + ", ".join(FAILS))
         sys.exit(1)
+
+
+# ====================================================================== part 2
+# lighttime, gravity, reflect, rings. Independent paths:
+#   * light time: bisection on c s = |x_obs(t) - x_src(t - s)| (the package
+#     iterates a fixed point 4 times); positions from this file's 50-digit
+#     Standish elements; checked against JPL Horizons.
+#   * gravity: SI units throughout (m, m^3/s^2), not km and AU.
+#   * reflect: disc integrals by brute force over a 2-D grid of the visible
+#     disc in the observer's frame (normal, cos i, cos e per cell), not the
+#     separable photometric-coordinate integral the package uses; Bond albedo
+#     by a 2-D grid over the sphere.
+#   * rings: the single-scattering layer integrated numerically through its
+#     depth (sources at optical depth t, attenuated in and out), not the
+#     closed forms.
+#
+# Published inputs for part 2 (cited at each use):
+#   JPL Horizons (DE441), observer 500@399, quantities 9,19,20,21 (fetched
+#     2026-10-03): https://ssd.jpl.nasa.gov/api/horizons.api?format=text&
+#     COMMAND='599'&EPHEM_TYPE='OBSERVER'&CENTER='500@399'&
+#     START_TIME='2023-11-03'&STOP_TIME='2023-11-04'&STEP_SIZE='1d'&
+#     QUANTITIES='9,19,20,21'   (and COMMAND='699', 2023-08-27)
+#     Jupiter 2023-11-03 00:00 UT: APmag -2.910, r 4.974517268850,
+#       delta 3.98256409999321 au, 1-way LT 33.12197563 min, phase 0.2857 deg
+#     Saturn 2023-08-27 00:00 UT: delta 8.76304564804493 au,
+#       1-way LT 72.88002832 min
+#   IAU 2015 Resolution B3 nominal GM and radii (Prsa et al. 2016, AJ 152, 41)
+#   NASA NSSDC planetary fact sheets: surface gravity Earth 9.80, Jupiter
+#     24.79 m/s^2
+#   Mallama, Krobusek & Pavlov 2017, Icarus 282, 19: Jupiter p_V 0.538
+#   Mallama & Hilton 2018, Astron. Comput. 25, 10: Jupiter V(1,0) -9.395
+#   The Sun: V -26.74; visual zero point V -13.98 at 1 lux
+#   Russell 1916, ApJ 43, 173: Lambert phase integral q = 3/2
+#   NASA NSSDCA Saturnian Rings Fact Sheet (updated 2022-04-19): ring radii
+#     and optical depths; Colwell et al. 2010, Icarus 206, 646 (Cassini
+#     UVIS): B ring core tau > 5
+
+C_KMS = 299792.458
+C_AUD = C_KMS * 86400.0 / AU_KM
+
+
+def light_time_bisect(src, obs, t):
+    lo, hi = 0.0, 1.0                  # days; < 1 d for anything inside 170 au
+    for _ in range(200):
+        mid = 0.5 * (lo + hi)
+        if C_AUD * mid - math.dist(obs, src(t - mid)) > 0:
+            hi = mid
+        else:
+            lo = mid
+    return 0.5 * (lo + hi)
+
+
+def light_time_fixed4(src, obs, t):
+    s = 0.0
+    for _ in range(4):
+        s = math.dist(obs, src(t - s)) / C_AUD
+    return s
+
+
+def accel_si(gm_si, r_m):
+    return gm_si / (r_m * r_m)
+
+
+def lambert_phase(a):
+    return (math.sin(a) + (math.pi - a) * math.cos(a)) / math.pi
+
+
+def disc_brightness(alpha, k, rho, n=600):
+    """Intensity (R = 1, E = 1) of a Minnaert sphere at phase alpha, by a grid
+    over the visible disc in the observer's frame: view along +x, the Sun at
+    (cos a, sin a, 0)."""
+    s = (math.cos(alpha), math.sin(alpha), 0.0)
+    h = 2.0 / n
+    tot = 0.0
+    for i in range(n):
+        y = -1.0 + (i + 0.5) * h
+        for j in range(n):
+            z = -1.0 + (j + 0.5) * h
+            rr = y * y + z * z
+            if rr >= 1.0:
+                continue
+            x = math.sqrt(1.0 - rr)                  # cos e
+            ci = x * s[0] + y * s[1]
+            if ci <= 0.0:
+                continue
+            L = rho * ci ** k * x ** (k - 1.0) / math.pi
+            tot += L * h * h                         # projected area element
+    return tot
+
+
+def sphere_bond(k, rho, n=400):
+    """Reflected power over incident (E pi R^2) for a Minnaert sphere: grid
+    over the lit hemisphere in mu0 and, per patch, the plane albedo by a
+    1-D grid over emergent mu."""
+    def plane(mu0, m=2000):
+        return sum(2.0 * math.pi * (rho * mu0 ** k * ((j + 0.5) / m) ** (k - 1.0) / math.pi) * ((j + 0.5) / m) / m
+                   for j in range(m)) / mu0
+    return sum(2.0 * plane((i + 0.5) / n) * ((i + 0.5) / n) / n for i in range(n))
+
+
+def ring_layer(w0, P, tau, mu0, mu, lit, n=20000):
+    """I/F of a single-scattering slab: sources at depth t lit by
+    e^(-t/mu0), seen through e^(-t/mu) (lit face) or e^(-(tau-t)/mu) (unlit),
+    I/F = w0 P / (4 mu) int_0^tau ... dt, midpoint rule (relative error
+    ~ (tau/n)^2 (1/mu + 1/mu0)^2 / 24, < 1e-7 for the cases below)."""
+    h = tau / n
+    tot = 0.0
+    for i in range(n):
+        t = (i + 0.5) * h
+        out = t if lit else tau - t
+        tot += math.exp(-t / mu0) * math.exp(-out / mu) * h
+    return w0 * P / (4.0 * mu) * tot
+
+
+def part2():
+    # ---- light time
+    sec = 86400.0
+    check("c: 1 au of light in 499.004784 s", abs(sec / C_AUD - 499.00478383615643) < 1e-9, "%.9f s" % (sec / C_AUD))
+    kg = K_GAUSS
+    n = kg / math.sqrt(5.2 ** 3)
+    circ = lambda t: (5.2 * math.cos(n * t), 5.2 * math.sin(n * t), 0.0)
+    s = light_time_bisect(circ, (1.0, 0.0, 0.0), 0.0)
+    disp = math.dist(circ(-s), circ(0.0)) * AU_KM
+    check("idealised Jupiter (r 5.20, delta 4.20): lag ~2094 s (design), package value 4.2 au / c",
+          abs(s * sec - 2094.0) < 3.0 and abs(s * sec - 4.2 * 499.00478383615643) < 0.01,
+          "%.4f s; fixed-point x4 %.4f s" % (s * sec, light_time_fixed4(circ, (1.0, 0.0, 0.0), 0.0) * sec))
+    check("idealised Jupiter: drawn 27,400 km (0.38 R_J) behind", abs(disp - 27400.0) < 100 and abs(disp / 71492 - 0.38) < 0.005,
+          "%.1f km = %.4f R_J" % (disp, disp / 71492.0))
+    for body, (y, m, d), lt_min, tol in [("Jupiter", (2023, 11, 3), 33.12197563, 3.0),
+                                         ("Saturn", (2023, 8, 27), 72.88002832, 6.0)]:
+        t = jd_gregorian(y, m, d)
+        src = lambda tt, b=body: standish(b, tt)[0]
+        obs = standish("EMB", t)[0]
+        s = light_time_bisect(src, obs, t) * sec
+        s4 = light_time_fixed4(src, obs, t) * sec
+        check("%s %04d-%02d-%02d light time vs Horizons %.4f s (+-%g s)" % (body, y, m, d, lt_min * 60, tol),
+              abs(s - lt_min * 60) < tol and abs(s4 - s) < 1e-6, "bisection %.4f s, fixed-point x4 %.4f s" % (s, s4))
+    # contraction at v/c = 0.04: error exactly (v/c)^4
+    v = 6.9
+    fast = lambda t: (10.0 + v * (t - 50.0), 0.0, 0.0)
+    want = 10.0 / (C_AUD + v)
+    err = abs(light_time_fixed4(fast, (0.0, 0.0, 0.0), 50.0) - want) / want
+    check("4 fixed-point steps at v/c 0.04 leave (v/c)^4 = 2.5e-6", 2e-6 < err < 3e-6, "%.3e (pred %.3e)" % (err, (v / C_AUD) ** 4))
+
+    # ---- gravity (SI)
+    GM_E, GM_J, R_E, R_J = 3.986004e14, 1.2668653e17, 6.3781e6, 7.1492e7
+    g1 = accel_si(GM_E, R_E + 5.0e7)
+    g2 = accel_si(GM_J, 1.5 * R_J)
+    check("g at 50,000 km above Earth ~0.1254 m/s^2", abs(g1 - 0.1254) < 1e-4, "%.6f m/s^2" % g1)
+    check("g at 1.5 R_J ~11.0 m/s^2", abs(g2 - 11.0) < 0.05, "%.4f m/s^2" % g2)
+    check("surface gravity Earth 9.798 / Jupiter 24.79 (NSSDC)",
+          abs(accel_si(GM_E, R_E) - 9.798) < 1e-3 and abs(accel_si(GM_J, R_J) - 24.79) < 0.01,
+          "%.4f / %.4f m/s^2" % (accel_si(GM_E, R_E), accel_si(GM_J, R_J)))
+    tide = 2 * 1.3271244e20 * 5.63781e7 / (AU_KM * 1e3) ** 3
+    print("  solar tide at 56,378 km from Earth (1 au): <= %.3e m/s^2; solar pull %.4e m/s^2" % (tide, accel_si(1.3271244e20, AU_KM * 1e3)))
+    print("  design hold example: m_eff |g| c at 50,000 km = %.3e W/kg" % (g1 * C_KMS * 1e3))
+
+    # ---- reflect
+    e1 = 10 ** (-0.4 * (-26.74 + 13.98))
+    check("E_sun(1 au) from V -26.74 = 1.2706e5 lux (design wrote 1.261e5)", abs(e1 - 127057.41) < 0.01, "%.4f lux" % e1)
+    check("Lambert Phi(0)=1, Phi(pi/2)=1/pi, Phi(pi)=0",
+          lambert_phase(0) == 1.0 and abs(lambert_phase(math.pi / 2) - 1 / math.pi) < 1e-15 and abs(lambert_phase(math.pi)) < 1e-15, "")
+    nq = 20000
+    q = sum(2 * lambert_phase((i + 0.5) * math.pi / nq) * math.sin((i + 0.5) * math.pi / nq) * math.pi / nq for i in range(nq))
+    check("Lambert phase integral q = 3/2 (Russell 1916)", abs(q - 1.5) < 1e-6, "%.8f" % q)
+    for k in (1.0, 0.9, 1.3):
+        rho = 0.4 * (2 * k + 1) / 2
+        I0 = disc_brightness(0.0, k, rho)
+        check("2-D disc grid: Minnaert k %.1f opposition brightness = p (rho = p(2k+1)/2)" % k, abs(I0 - 0.4) < 2e-3, "%.5f vs 0.4" % I0)
+    for k in (1.0, 1.2):
+        I0 = disc_brightness(0.0, k, 1.0)
+        for a_deg in (30.0, 90.0, 140.0):
+            a = math.radians(a_deg)
+            ph = disc_brightness(a, k, 1.0) / I0
+            # separable 1-D form (the package's): int (cos(L-a) cos L)^k dL / same at 0
+            m = 20000
+            def lk(al):
+                lo = al - math.pi / 2
+                hh = (math.pi / 2 - lo) / m
+                return sum(max(math.cos(lo + (j + 0.5) * hh - al) * math.cos(lo + (j + 0.5) * hh), 0.0) ** k * hh for j in range(m))
+            sep = lk(a) / lk(0.0)
+            ref = lambert_phase(a) if k == 1.0 else sep
+            check("Minnaert k %.1f phase at %g deg: 2-D disc grid vs separable form" % (k, a_deg),
+                  abs(ph - sep) < 3e-3 and abs(sep - ref) < 1e-6, "grid %.5f, separable %.6f, Lambert %.6f" % (ph, sep, lambert_phase(a)))
+    for k in (1.0, 1.25):
+        b = sphere_bond(k, 0.6)
+        check("Bond albedo of the Minnaert sphere = 4 rho/(k+1)^2 (k %.2f)" % k, abs(b - 2.4 / (k + 1) ** 2) < 2e-3, "%.5f vs %.5f" % (b, 2.4 / (k + 1) ** 2))
+
+    def jup_v(r, d, a_deg):
+        R = 71492.0
+        E = e1 * 0.538 * (R / (d * AU_KM)) ** 2 * lambert_phase(math.radians(a_deg)) / r ** 2
+        return -26.74 - 2.5 * math.log10(E / e1)
+    v = jup_v(5.20, 4.20, 0.0)
+    vmh = 5 * math.log10(5.20 * 4.20) - 9.395
+    check("Jupiter at opposition r 5.20 delta 4.20 p 0.538: V -2.77 (Mallama-Hilton %.3f)" % vmh,
+          abs(v + 2.77) < 0.01 and abs(v - vmh) < 0.1, "%.4f" % v)
+    vh = jup_v(4.974517268850, 3.98256409999321, 0.2857)
+    check("Jupiter 2023-11-03: V within 0.1 of Horizons -2.910", abs(vh + 2.910) < 0.1, "%.4f" % vh)
+
+    # ---- rings
+    w0, P = 0.5, 1.3
+    for tau, mu0, mu in [(0.8, 0.3, 0.5), (0.1, 0.45, 0.7), (2.0, 0.2, 0.9)]:
+        num = ring_layer(w0, P, tau, mu0, mu, True)
+        cf = w0 * P * mu0 / (4 * (mu + mu0)) * (1 - math.exp(-tau * (1 / mu + 1 / mu0)))
+        check("ring lit face: depth integral = closed form (tau %g)" % tau, abs(num - cf) < 1e-7 * cf, "%.10f vs %.10f" % (num, cf))
+        num = ring_layer(w0, P, tau, mu0, mu, False)
+        cf = w0 * P * mu0 / (4 * (mu - mu0)) * (math.exp(-tau / mu) - math.exp(-tau / mu0))
+        check("ring unlit face: depth integral = closed form (tau %g)" % tau, abs(num - cf) < 1e-7 * cf, "%.10f vs %.10f" % (num, cf))
+    num = ring_layer(w0, P, 0.7, 0.45, 0.45, False)
+    lim = w0 * P * 0.7 * math.exp(-0.7 / 0.45) / (4 * 0.45)
+    check("ring unlit face at mu = mu0: depth integral = w0 P tau e^(-tau/mu0)/(4 mu0)", abs(num - lim) < 1e-8 * lim, "%.12f vs %.12f" % (num, lim))
+    thick = ring_layer(w0, P, 60.0, 0.45, 0.7, True, n=200000)
+    ls = w0 * P / 4 * 0.45 / (0.45 + 0.7)
+    check("ring lit face tau 60 -> Lommel-Seeliger", abs(thick - ls) < 1e-6 * ls, "%.10f vs %.10f" % (thick, ls))
+    mu_s = math.sin(math.radians(26.73))
+    check("Saturn solstice: A ring (tau 0.4-1.0) passes 11-41 %, B core (tau > 5) < 0.002 %",
+          0.10 < math.exp(-1.0 / mu_s) and math.exp(-0.4 / mu_s) < 0.42 and math.exp(-5.0 / mu_s) < 2e-5,
+          "%.3f-%.3f, %.2e" % (math.exp(-1.0 / mu_s), math.exp(-0.4 / mu_s), math.exp(-5.0 / mu_s)))
+    # ring-plane crossing by marching the ray (not the closed form)
+    B, phi = math.radians(26.73), math.radians(-20.0)
+    p = (60268.0 * math.cos(phi), 0.0, 60268.0 * math.sin(phi))
+    sd = (math.cos(B), 0.0, math.sin(B))
+    lo, hi = 0.0, 1e6
+    for _ in range(200):
+        mid = 0.5 * (lo + hi)
+        if p[2] + mid * sd[2] < 0:
+            lo = mid
+        else:
+            hi = mid
+    r = math.hypot(p[0] + lo * sd[0], p[1] + lo * sd[1])
+    check("Saturn solstice: latitude -20 deg sees the Sun through r = 97,564 km (B ring)", abs(r - 97564.0) < 1.0 and 91975 <= r < 117507, "%.3f km" % r)
 
 
 if __name__ == "__main__":

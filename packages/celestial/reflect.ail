@@ -1,0 +1,122 @@
+-- sunholo/celestial/reflect — reflected starlight: how bright a planet or
+-- moon is, per pixel (radiance) and as a point (illuminance at the observer).
+--
+-- Photometric inputs are parameters, so this package needs no photometry of
+-- its own and never imports sunholo/relativity: pass the star's illuminance
+-- at 1 AU, e1AU (lux), e.g. relativity's illuminanceFromV(-26.74) =
+-- 1.2706e5 lux for the Sun in V. Radiance comes back in cd/m^2 when E is in
+-- lux.
+--
+-- Surfaces are Minnaert: L = rho E cos^k(i) cos^(k-1)(e) / pi. k = 1 is
+-- Lambert (rocky bodies); k ~ 0.9-1.3 fits the giants' limb darkening. The
+-- normalisation rho is tied to the measurable albedos:
+--   geometric albedo   p   = 2 rho / (2k + 1)      (Lambert: p = 2 rho / 3)
+--   Bond albedo        A_B = 4 rho / (k + 1)^2     (Lambert: A_B = rho)
+-- Real planets are not Minnaert spheres at all phases (Mallama 2017 gives
+-- Jupiter p_V 0.538 but its Bond albedo is 0.34, Li et al. 2018), so feed
+-- the measured p_V for brightness and treat the Bond value as the model's.
+
+module sunholo/celestial/reflect
+
+import std/math (sin, cos, pow, intToFloat)
+import ./kepler (pi)
+
+-- E = e1AU / r^2: a point source's illuminance at r AU.
+export pure func starIlluminanceAt(e1AU: float, rAU: float) -> float
+  requires { rAU > 0.0 }
+  ensures { result >= 0.0 }
+{
+  e1AU / (rAU * rAU)
+}
+
+-- The Lambert sphere's phase function, Phi(alpha) = (sin a + (pi - a) cos a) / pi:
+-- the disc-integrated brightness at phase angle alpha (radians, 0..pi)
+-- relative to opposition. Phi(0) = 1, Phi(pi/2) = 1/pi, Phi(pi) = 0.
+export pure func lambertPhase(alpha: float) -> float
+  requires { alpha >= 0.0 && alpha <= 3.141592653589794 }
+{
+  let p = (sin(alpha) + (pi() - alpha) * cos(alpha)) / pi();
+  if p < 0.0 then 0.0 else p
+}
+
+-- L = rho E cos i / pi (cd/m^2 for E in lux); zero where cos i <= 0.
+export pure func lambertRadiance(rho: float, e: float, cosI: float) -> float =
+  if cosI <= 0.0 then 0.0 else rho * e * cosI / pi()
+
+-- L = rho E cos^k i cos^(k-1) e / pi. Zero where unlit (cos i <= 0) or
+-- unseen (cos e < 0). At the limb (cos e = 0) k = 1 is Lambert's value,
+-- k > 1 is 0, and k < 1, where the law diverges on a zero-area ring, is 0.
+export pure func minnaertRadiance(rho: float, k: float, e: float, cosI: float, cosE: float) -> float =
+  if cosI <= 0.0 || cosE < 0.0 then 0.0
+  else if k == 1.0 then rho * e * cosI / pi()
+  else if cosE == 0.0 && k < 1.0 then 0.0
+  else rho * e * pow(cosI, k) * pow(cosE, k - 1.0) / pi()
+
+-- rho such that the Minnaert sphere's opposition disc integral equals the
+-- geometric albedo p: rho = p (2k + 1) / 2 (Lambert: 3p/2).
+export pure func rhoFromGeometricAlbedo(p: float, k: float) -> float
+  requires { k > 0.0 }
+{
+  p * (2.0 * k + 1.0) / 2.0
+}
+
+export pure func geometricAlbedoFromRho(rho: float, k: float) -> float
+  requires { k > 0.0 }
+{
+  2.0 * rho / (2.0 * k + 1.0)
+}
+
+-- Bond (spherical) albedo of the Minnaert sphere: 4 rho / (k + 1)^2.
+export pure func bondAlbedo(rho: float, k: float) -> float
+  requires { k > 0.0 }
+{
+  4.0 * rho / ((k + 1.0) * (k + 1.0))
+}
+
+export pure func bondFromGeometricAlbedo(p: float, k: float) -> float = bondAlbedo(rhoFromGeometricAlbedo(p, k), k)
+
+-- int_{a-pi/2}^{pi/2} (cos(L - a) cos L)^k dL by composite Simpson, 256
+-- intervals (a fixed count: the same operations on the VM and interpreter).
+pure func lonIntegrand(alpha: float, k: float, l: float) -> float {
+  let c = cos(l - alpha) * cos(l);
+  if c <= 0.0 then 0.0 else pow(c, k)
+}
+
+pure func lonSum(alpha: float, k: float, lo: float, h: float, i: int, n: int, acc: float) -> float =
+  if i > n then acc * h / 3.0
+  else {
+    let w = if i == 0 || i == n then 1.0 else if i % 2 == 1 then 4.0 else 2.0;
+    lonSum(alpha, k, lo, h, i + 1, n, acc + w * lonIntegrand(alpha, k, lo + h * intToFloat(i)))
+  }
+
+pure func lonIntegral(alpha: float, k: float) -> float {
+  let lo = alpha - pi() / 2.0;
+  lonSum(alpha, k, lo, (pi() / 2.0 - lo) / 256.0, 0, 256, 0.0)
+}
+
+-- The Minnaert sphere's phase function (disc-integrated brightness at phase
+-- alpha over that at opposition). In photometric coordinates the integral
+-- separates into latitude x longitude; the latitude part cancels, leaving
+-- Phi = Lk(alpha) / Lk(0), Lk(a) = int (cos(L - a) cos L)^k dL. Exactly 1 at
+-- alpha = 0; k = 1 reproduces lambertPhase to ~1e-9.
+export pure func minnaertPhase(alpha: float, k: float) -> float
+  requires { alpha >= 0.0 && alpha <= 3.141592653589794 && k > 0.0 }
+{
+  if alpha >= pi() then 0.0 else lonIntegral(alpha, k) / lonIntegral(0.0, k)
+}
+
+-- lambertPhase for k = 1 (closed form), minnaertPhase otherwise.
+export pure func phaseFunction(alpha: float, k: float) -> float =
+  if k == 1.0 then lambertPhase(alpha) else minnaertPhase(alpha, k)
+
+-- The body's illuminance at the observer (lux for e1AU in lux):
+--   E = e1AU p (R / d)^2 Phi(alpha) / r^2
+-- p geometric albedo, R the body's radius and d the observer distance in
+-- the same unit (km), r the body's distance from the star in AU, alpha the
+-- phase angle (radians), k the Minnaert exponent of Phi.
+export pure func discIlluminance(e1AU: float, p: float, radius: float, rAU: float, d: float, alpha: float, k: float) -> float
+  requires { rAU > 0.0 && d > 0.0 }
+  ensures { result >= 0.0 }
+{
+  e1AU * p * (radius / d) * (radius / d) * phaseFunction(alpha, k) / (rAU * rAU)
+}

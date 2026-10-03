@@ -1,19 +1,25 @@
 -- Boot probe for publish: prints "OK: ..." iff independent checks hold in a
 -- clean workdir — Kepler's equation at e = 0.97, Jupiter's 2023 opposition
 -- (Standish elements), the north ecliptic pole in galactic coordinates, and
--- Io's sidereal period (JPL mean elements on the Laplace plane).
+-- Io's sidereal period (JPL mean elements on the Laplace plane); and from
+-- part 2 the hold gravity 50,000 km above Earth, the Lambert phase at
+-- quadrature, the idealised Jupiter light time and the unlit ring limit.
 --
--- keplerProbe and orbitsProbe are the VM-vs-interpreter probes: pure, and
+-- keplerProbe, orbitsProbe and lightProbe are the VM-vs-interpreter probes: pure, and
 -- the strict bytecode VM must print the same bytes as the interpreter:
 --   ailang run --quiet --bytecode --strict-bytecode --entry keplerProbe --args-json 64 _smoke.ail
 --   ailang run --quiet --entry keplerProbe --args-json 64 _smoke.ail
 module sunholo/celestial/_smoke
 
 import std/io (println)
-import std/math (sin, atan2, intToFloat)
+import std/math (sin, cos, sqrt, atan2, intToFloat)
 import ./kepler (Vec3, State, Orbit, solveKepler, stateFromElements, driftingState, absf, wrapPi, twoPi, pi)
 import ./frames (PoleModel, eclipticToGalactic, lonLat, poleAndSpin)
-import ./ephemeris (MeanElements, ElementRates, SatElements, elementsAt, planetAt, satelliteAt, satelliteElementsAt, julianDate)
+import ./ephemeris (MeanElements, ElementRates, SatElements, elementsAt, planetAt, satelliteAt, satelliteElementsAt, julianDate, auKm)
+import ./lighttime (retarded, secondsPerDay)
+import ./gravity (GravBody, accelerationAt, accelerationRelativeTo, gmSunNominal, gmEarthNominal, radiusSunNominal, radiusEarthNominal)
+import ./reflect (lambertPhase, minnaertRadiance, minnaertPhase, rhoFromGeometricAlbedo, bondAlbedo, discIlluminance, starIlluminanceAt)
+import ./rings (RingBand, ringLitIF, ringUnlitIF, ringTransmission, ringShadowTransmission, ringPlaneHit)
 
 pure func rad(d: float) -> float = d * 3.141592653589793 / 180.0
 
@@ -89,6 +95,52 @@ pure func orbitRows(k: int, n: int, acc: [float]) -> [float] =
 
 export pure func orbitsProbe(n: int) -> [float] = orbitRows(0, n, [])
 
+pure func jupAt(jd: float) -> Vec3 = planetAt(jupEl(), jupRt(), jd).pos
+
+pure func sunAt(jd: float) -> Vec3 = { x: 0.0, y: 0.0, z: 0.0 }
+
+pure func embAt(jd: float) -> Vec3 = planetAt(embEl(), embRt(), jd).pos
+
+pure func solarBodies() -> [GravBody] =
+  [{ gm: gmSunNominal(), radius: radiusSunNominal(), posAt: sunAt }, { gm: gmEarthNominal(), radius: radiusEarthNominal(), posAt: embAt }]
+
+pure func bands() -> [RingBand] =
+  [{ rIn: 74658.0, rOut: 91975.0, tau: 0.1, w0: 0.2 }, { rIn: 91975.0, rOut: 117507.0, tau: 1.8, w0: 0.5 },
+   { rIn: 117507.0, rOut: 122340.0, tau: 0.08, w0: 0.3 }, { rIn: 122340.0, rOut: 136780.0, tau: 0.6, w0: 0.5 }]
+
+-- Light time, gravity, reflection and rings over n steps: every function of
+-- part 2, every component, in order (the n dates sweep 2000-2030).
+pure func lightRows(k: int, n: int, acc: [float]) -> [float] =
+  if k > n then acc
+  else {
+    let u = intToFloat(k) / intToFloat(n);
+    let jd = 2451545.0 + 11000.0 * u;
+    let obs = embAt(jd);
+    let r = retarded(jupAt, obs, jd);
+    let x = { x: obs.x + (6378.1 + 1000.0 + 300000.0 * u) / auKm(), y: obs.y, z: obs.z + 20000.0 / auKm() };
+    let g = accelerationAt(solarBodies(), x, jd);
+    let gr = accelerationRelativeTo(solarBodies(), x, 1, jd);
+    let alpha = 3.14159 * u;
+    let mu0 = 0.01 + 0.98 * u;
+    let mu = 0.99 - 0.9 * u;
+    let tau = 0.001 + 4.0 * u * u;
+    let p = { x: 60268.0 * (0.5 - u), y: 1000.0 * u, z: 0.0 - 30000.0 - 20000.0 * u };
+    let sun = { x: 1.0, y: 0.1, z: 0.05 + 0.6 * u };
+    lightRows(k + 1, n, r.lagDays :: r.time :: r.pos.x :: r.pos.y :: r.pos.z :: g.acc.x :: g.acc.y :: g.acc.z
+      :: gr.acc.x :: gr.acc.y :: gr.acc.z :: lambertPhase(alpha) :: minnaertPhase(alpha, 0.85 + 0.5 * u)
+      :: minnaertRadiance(0.6, 0.85 + 0.5 * u, 1000.0, mu0, mu) :: rhoFromGeometricAlbedo(0.538, 0.9 + u) :: bondAlbedo(0.7, 0.9 + u)
+      :: discIlluminance(127057.41052085393, 0.538, 71492.0, 5.2, 600000000.0, alpha, 1.0 + 0.2 * u)
+      :: ringLitIF(0.5, 1.3, tau, mu0, mu) :: ringUnlitIF(0.5, 1.3, tau, mu0, mu) :: ringUnlitIF(0.5, 1.3, tau, mu0, mu0)
+      :: ringTransmission(tau, mu) :: ringPlaneHit(p, sun, { x: 0.0, y: 0.0, z: 1.0 }).radius
+      :: ringShadowTransmission(bands(), p, sun, { x: 0.0, y: 0.0, z: 1.0 }) :: acc)
+  }
+
+export pure func lightProbe(n: int) -> [float] = lightRows(0, n, [])
+
+pure func earthAt(jd: float) -> Vec3 = { x: 1.0, y: 0.0, z: 0.0 }
+
+pure func circJup(t: float) -> Vec3 = { x: 5.2 * cos(0.01720209895 / sqrt(140.608) * t), y: 5.2 * sin(0.01720209895 / sqrt(140.608) * t), z: 0.0 }
+
 pure func oppositionLonDiff(jd: float) -> float =
   wrapPi(atan2(planetAt(jupEl(), jupRt(), jd).pos.y, planetAt(jupEl(), jupRt(), jd).pos.x)
          - atan2(planetAt(embEl(), embRt(), jd).pos.y, planetAt(embEl(), embRt(), jd).pos.x))
@@ -105,7 +157,13 @@ export func main() -> () ! {IO} {
   let o1 = satelliteElementsAt(io(), 2451545.0);
   let o2 = satelliteElementsAt(io(), 2451545.0 + 1.769137786);
   let ioOk = absf(wrapPi(o2.node + o2.argPeri + o2.meanAnom - o1.node - o1.argPeri - o1.meanAnom)) / (twoPi() / 1.769137786) < 0.0001;
-  if keplerOk && oppOk && nepOk && ioOk
-  then println("OK: celestial Kepler e 0.97 residual < 1e-14, Jupiter opposition 2023-11-03 +-2 d, north ecliptic pole at galactic (96.3840, 29.8114), Io sidereal period 1.769138 d")
-  else println("FAIL: kepler ${show(ea)}, opposition ${show(oppositionLonDiff(ref - 2.0))} / ${show(oppositionLonDiff(ref + 2.0))}, NEP ${show(l)} ${show(b)}, Io ${show(o2.meanAnom)}")
+  let hold = accelerationAt([{ gm: gmEarthNominal(), radius: radiusEarthNominal(), posAt: earthAt }], { x: 1.0, y: 0.0, z: 56378.1 / auKm() }, 0.0);
+  let holdOk = !hold.inside && absf(hold.acc.z * (0.0 - 1.0) - 0.125406) < 0.00001;
+  let phaseOk = absf(lambertPhase(pi() / 2.0) - 1.0 / pi()) < 0.000000000000001;
+  let lag = retarded(circJup, { x: 1.0, y: 0.0, z: 0.0 }, 0.0).lagDays * secondsPerDay();
+  let lagOk = absf(lag - 4.2 * 499.00478383615643) < 0.01;
+  let ringOk = absf(ringUnlitIF(0.5, 1.3, 0.7, 0.45, 0.45) - 0.5 * 1.3 * 0.7 * 0.21107208779109024 / 1.8) < 0.000000000000001;
+  if keplerOk && oppOk && nepOk && ioOk && holdOk && phaseOk && lagOk && ringOk
+  then println("OK: celestial Kepler e 0.97 residual < 1e-14, Jupiter opposition 2023-11-03 +-2 d, north ecliptic pole at galactic (96.3840, 29.8114), Io sidereal period 1.769138 d, 0.1254 m/s^2 at 50,000 km above Earth, Lambert Phi(pi/2) = 1/pi, Jupiter light time 2095.8 s at 4.20 au, unlit ring limit finite")
+  else println("FAIL: kepler ${show(ea)}, opposition ${show(oppositionLonDiff(ref - 2.0))} / ${show(oppositionLonDiff(ref + 2.0))}, NEP ${show(l)} ${show(b)}, Io ${show(o2.meanAnom)}, hold ${show(hold.acc.z)}, lag ${show(lag)}, ring ${show(ringUnlitIF(0.5, 1.3, 0.7, 0.45, 0.45))}")
 }

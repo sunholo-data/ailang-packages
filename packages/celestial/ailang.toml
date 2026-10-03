@@ -3,7 +3,7 @@ name = "sunholo/celestial"
 version = "0.1.0"
 edition = "1"
 ailang = ">=0.52.0"
-description = "Pure solar-system mechanics: Kepler's equation and orbit state vectors, JPL approximate planetary elements (3000 BC-3000 AD, labelled mean-orbit outside) and satellite mean elements on their Laplace planes, ecliptic/equatorial/galactic frames and IAU WGCCRE 2015 poles and rotation"
+description = "Pure solar-system mechanics and reflected light: Kepler's equation and orbit state vectors, JPL approximate planetary elements (3000 BC-3000 AD, labelled mean-orbit outside) and satellite mean elements, ecliptic/equatorial/galactic frames and IAU WGCCRE 2015 poles, light-travel time, Newtonian gravity, Lambert/Minnaert photometry tied to geometric and Bond albedo, and single-scattering planetary rings"
 license = "Apache-2.0"
 
 [exports]
@@ -11,14 +11,18 @@ modules = [
   "sunholo/celestial/kepler",
   "sunholo/celestial/frames",
   "sunholo/celestial/ephemeris",
+  "sunholo/celestial/lighttime",
+  "sunholo/celestial/gravity",
+  "sunholo/celestial/reflect",
+  "sunholo/celestial/rings",
 ]
 
 [effects]
 max = ["IO"]  # every export is pure; IO is used only by _smoke.ail to print its verdict
 
 [metadata]
-tags = ["physics", "astronomy", "orbits", "ephemeris", "simulation", "games", "science"]
-ai_summary = "Pure celestial mechanics in float64: Kepler's equation (fixed 8-step Newton, residual < 1e-14 for e <= 0.97), position and velocity from Keplerian elements, the JPL Standish approximate planetary elements (Table 2a/2b, 3000 BC-3000 AD; outside it the secular terms freeze at the window edge and a mean-orbit flag is set), JPL satellite mean elements referred to a Laplace plane with apse and node precession, ecliptic J2000 to ICRS (obliquity 84381.406 arcsec) to galactic (Hipparcos 1997 matrix) rotations, and IAU WGCCRE 2015 pole and prime-meridian models. Units AU, days (TDB), km, radians. No dependency on any other package."
+tags = ["physics", "astronomy", "orbits", "ephemeris", "photometry", "gravity", "simulation", "games", "science"]
+ai_summary = "Pure celestial mechanics in float64: Kepler's equation (fixed 8-step Newton, residual < 1e-14 for e <= 0.97), position and velocity from Keplerian elements, the JPL Standish approximate planetary elements (Table 2a/2b, 3000 BC-3000 AD; outside it the secular terms freeze at the window edge and a mean-orbit flag is set), JPL satellite mean elements referred to a Laplace plane with apse and node precession, ecliptic J2000 to ICRS (obliquity 84381.406 arcsec) to galactic (Hipparcos 1997 matrix) rotations, and IAU WGCCRE 2015 pole and prime-meridian models. Light-travel (retarded) time by a fixed 4-step iteration, checked against JPL Horizons. Newtonian point-mass gravity in m/s^2 with IAU 2015 nominal GM, refusing inside a body, also relative to a body's centre for station-keeping. Lambert and Minnaert radiance and phase functions with rho tied to geometric albedo (rho = p(2k+1)/2) and Bond albedo (4 rho/(k+1)^2), and a body's illuminance at the observer from the star's illuminance at 1 AU passed as a parameter. Classical single-scattering ring layer (lit face, unlit face with its finite mu -> mu0 limit, transmission), ring bands and ring-shadow ray geometry. Units AU, days (TDB), km, radians, lux, cd/m^2. No dependency on any other package."
 repository = "https://github.com/sunholo-data/ailang-packages/tree/main/packages/celestial"
 homepage = "https://ailang.sunholo.com/docs/packages/sunholo/celestial"
 license_url = "https://github.com/sunholo-data/ailang-packages/blob/main/LICENSE"
