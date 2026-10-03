@@ -10,6 +10,7 @@
 module sunholo/relativity/blackbody
 
 import std/math (exp, pow)
+import ./hyper (expm1)
 
 export type XYZ = { x: float, y: float, z: float }
 export type RGB = { r: float, g: float, b: float }
@@ -30,14 +31,30 @@ export pure func cmf(l: float) -> XYZ = {
   z: 1.217 * lobe(l, 437.0, 11.8, 36.0) + 0.681 * lobe(l, 459.0, 26.0, 13.8)
 }
 
+-- Planck temperature (CODATA 2018), the ceiling `planck` clamps to.
+pure func planckTemperature() -> float = 1.416784e32
+
 -- Spectral radiance up to a constant; wavelength enters in micrometres so
 -- cool sources stay far from float underflow.
+-- Finite, and accurate, for every T > 0, +Inf included (0.5.2):
+--   * for e < 1e-5 (T > ~1.7e9 K at 830 nm) the denominator is
+--     hyper.expm1(e) instead of exp(e) - 1. In 0.5.1, exp(e) - 1 lost
+--     digits there (relative error ~1e-16 / e: 19% high at 1e20 K) and was
+--     exactly 0 once exp(e) rounded to 1 (T > ~1.6e20 K), giving +Inf;
+--   * T is clamped at the Planck temperature 1.416784e32 K, beyond which a
+--     blackbody means nothing; that keeps the sums in xyz/luminance/
+--     photopicRadiance far below overflow (photopicRadiance(T_P) = 9.2e38).
+-- For e >= 1e-5 (every T below ~1.7e9 K) the arithmetic is unchanged, so
+-- those results are bit-identical to 0.5.1. NaN is tested first and never
+-- clamped, so NaN behaves as in 0.5.1 on both engines (ailang#1419).
 export pure func planck(lNm: float, kelvin: float) -> float
   requires { lNm > 0.0 && kelvin > 0.0 }
   ensures { result >= 0.0 }
 {
-  let e = c2() / (lNm * kelvin);
-  if e > 700.0 then 0.0 else pow(lNm / 1000.0, -5.0) / (exp(e) - 1.0)
+  let t = if kelvin == kelvin && kelvin > planckTemperature() then planckTemperature() else kelvin;
+  let e = c2() / (lNm * t);
+  if e > 700.0 then 0.0
+  else pow(lNm / 1000.0, -5.0) / (if e < 0.00001 then expm1(e) else exp(e) - 1.0)
 }
 
 func integrate(kelvin: float, l: float, acc: XYZ) -> XYZ {
@@ -121,8 +138,12 @@ export pure func surfaceBrightnessRatio(kelvin: float, d: float) -> float
 -- 2041.4 K 5.98e5 (the pre-1979 candela defined it as 6.0e5). The ybar fit
 -- is within 0.5% of the CIE table for 1,900-6,000 K, 1% at 800 K; its red
 -- tail falls off too fast, so below about 700 K the value is too low (still
--- far below any visible luminance). Finite and >= 0 for every finite T:
--- T <= 0 and NaN give 0, and the CMB's 2.725 K underflows to exactly 0.
+-- far below any visible luminance). Finite and >= 0 for every input, +Inf
+-- included: T <= 0 and NaN give 0, the CMB's 2.725 K underflows to exactly 0,
+-- at very high T it follows Rayleigh-Jeans (linear in T: 1e25 K gives
+-- 6.4956e31), and from the Planck temperature 1.416784e32 K up it is flat at
+-- 9.2028e38 (see `planck`; 0.5.1 lost digits above ~1e10 K, 3e-7 at 1e15 K
+-- and 19% at 1e20 K, and returned +Inf above ~1.6e20 K).
 export pure func photopicRadiance(kelvin: float) -> float
   ensures { result >= 0.0 }
 {
