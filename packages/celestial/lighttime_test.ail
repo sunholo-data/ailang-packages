@@ -1,0 +1,141 @@
+-- Check values for sunholo/celestial/lighttime. Expected values are
+-- published or closed-form, never this module's output:
+--   JPL Horizons (DE441), observer 500@399, quantity 21 "1-way_down_LT":
+--     Jupiter 2023-11-03 00:00 UT 33.12197563 min = 1987.3185 s
+--       (delta 3.98256409999321 AU);
+--     Saturn 2023-08-27 00:00 UT 72.88002832 min = 4372.8017 s
+--       (delta 8.76304564804493 AU)
+--   (fetched 2026-10-03; tools/orbits_ref.py lists the query). The Standish
+--   elements are approximate and give the EMB, not the geocentre, so the
+--   tolerance is 3 s (Jupiter) and 6 s (Saturn): range errors of 1e-3 AU.
+--   c = 299,792.458 km/s (SI, exact) and the au = 149,597,870.7 km (IAU 2012
+--   B2), so light crosses 1 au in 499.004784 s.
+--   A source in uniform motion has a closed-form retarded time (a quadratic).
+-- The design's idealised check (r 5.20, delta 4.20 AU, circular Jupiter):
+-- lag 4.20 au/c = 2095.8 s (design rounded it to "about 2,094 s") and a
+-- displacement v * lag = 27,380 km = 0.383 R_J (design: 27,400 km, 0.38 R_J).
+
+module sunholo/celestial/lighttime_test
+
+import std/math (sin, cos, sqrt)
+import ./kepler (Vec3, norm, sub, add, scale, absf, dot)
+import ./ephemeris (MeanElements, ElementRates, planetAt, julianDate, auKm)
+import ./lighttime (Retarded, retarded, retardedTime, lightTimeDays, cAuPerDay, secondsPerDay)
+
+pure func rad(d: float) -> float = d * 3.141592653589793 / 180.0
+
+pure func rel(got: float, want: float, tol: float) -> bool = absf(got - want) <= tol * absf(want)
+
+-- ---------- constants ----------
+
+pure func checkC() -> bool =
+  rel(cAuPerDay(), 299792.458 * 86400.0 / 149597870.7, 0.000000000000001)
+  && absf(secondsPerDay() / cAuPerDay() - 499.00478383615643) < 0.000000001
+
+test "c in au/day: 1 au of light is 499.004784 s" { checkC() }
+
+-- ---------- a fixed source: lag = distance / c exactly ----------
+
+pure func fixedSrc(t: float) -> Vec3 = { x: 3.0, y: 4.0, z: 0.0 }
+
+pure func checkFixed() -> bool {
+  let r = retarded(fixedSrc, { x: 0.0, y: 0.0, z: 0.0 }, 100.0);
+  rel(r.lagDays, 5.0 / cAuPerDay(), 0.000000000000001) && absf(r.time + r.lagDays - 100.0) < 0.00000000001 && r.pos.x == 3.0
+}
+
+test "a fixed source lags by distance / c" { checkFixed() }
+
+-- ---------- uniform motion: closed form ----------
+-- src(t) = p0 + v (t - t0); observer at the origin. |p0 + v (tr - t0)| = c (t - tr)
+-- with s = t - tr: (v.v - c^2) s^2 - 2 (q.v) s + q.q = 0, q = p0 + v (t - t0).
+pure func movingSrc(t: float) -> Vec3 = add({ x: 5.2, y: 0.3, z: 0.1 }, scale(t - 1000.0, { x: 0.004, y: 0.0075, z: -0.0002 }))
+
+pure func closedFormLag(t: float) -> float {
+  let q = movingSrc(t);
+  let v = { x: 0.004, y: 0.0075, z: -0.0002 };
+  let c = cAuPerDay();
+  let a = c * c - dot(v, v);
+  let b = dot(q, v);
+  -- a s^2 + 2 b s - q.q = 0, positive root in the cancellation-free form
+  dot(q, q) / (b + sqrt(b * b + a * dot(q, q)))
+}
+
+pure func checkUniform() -> bool {
+  let t = 1003.25;
+  let r = retarded(movingSrc, { x: 0.0, y: 0.0, z: 0.0 }, t);
+  rel(r.lagDays, closedFormLag(t), 0.0000000000001) && absf(retardedTime(movingSrc, { x: 0.0, y: 0.0, z: 0.0 }, t) - (t - closedFormLag(t))) < 0.00000000001
+}
+
+test "uniform motion: matches the closed-form quadratic" { checkUniform() }
+
+-- A source 1000x faster than a planet (v/c = 0.0399): the error after k
+-- iterations from tr = t is exactly (v/c)^k of the lag, 2.52e-6 for k = 4.
+-- The band 2e-6 .. 3e-6 pins the count at exactly 4 (3 gives 6.3e-5, 5 gives
+-- 1.0e-7).
+pure func fastSrc(t: float) -> Vec3 = { x: 10.0 + 6.9 * (t - 50.0), y: 0.0, z: 0.0 }
+
+pure func checkFastContraction() -> bool {
+  let r = retarded(fastSrc, { x: 0.0, y: 0.0, z: 0.0 }, 50.0);
+  -- receding at v: lag = 10 / (c + v)
+  let want = 10.0 / (cAuPerDay() + 6.9);
+  let err = absf(r.lagDays - want) / want;
+  err < 0.000003 && err > 0.000002
+}
+
+test "exactly 4 iterations: error (v/c)^4 = 2.5e-6 at v/c = 0.04" { checkFastContraction() }
+
+-- ---------- the design's idealised Jupiter ----------
+-- Circular orbit r 5.20 au (Gaussian k), observer at 1 au on the same line.
+
+pure func kGauss() -> float = 0.01720209895
+
+pure func circJup(t: float) -> Vec3 {
+  let n = kGauss() / sqrt(5.2 * 5.2 * 5.2);
+  { x: 5.2 * cos(n * t), y: 5.2 * sin(n * t), z: 0.0 }
+}
+
+pure func checkIdealJupiter() -> bool {
+  let r = retarded(circJup, { x: 1.0, y: 0.0, z: 0.0 }, 0.0);
+  let lagS = r.lagDays * secondsPerDay();
+  let dispKm = norm(sub(r.pos, circJup(0.0))) * auKm();
+  absf(lagS - 4.2 * 499.00478383615643) < 0.01 && absf(lagS - 2094.0) < 3.0
+  && absf(dispKm - 27400.0) < 100.0 && absf(dispKm / 71492.0 - 0.38) < 0.005
+}
+
+test "idealised Jupiter at opposition: lag ~2,095.8 s, drawn 27,400 km behind" { checkIdealJupiter() }
+
+-- ---------- against JPL Horizons ----------
+
+pure func me(a: float, e: float, i: float, l: float, w: float, n: float) -> MeanElements =
+  { a: a, e: e, incl: rad(i), meanLong: rad(l), longPeri: rad(w), node: rad(n) }
+
+pure func rt(a: float, e: float, i: float, l: float, w: float, n: float, b: float, c: float, s: float, f: float) -> ElementRates =
+  { a: a, e: e, incl: rad(i), meanLong: rad(l), longPeri: rad(w), node: rad(n), b: rad(b), c: rad(c), s: rad(s), f: rad(f) }
+
+pure func embEl() -> MeanElements = me(1.00000018, 0.01673163, 0.0 - 0.00054346, 100.46691572, 102.93005885, 0.0 - 5.11260389)
+pure func embRt() -> ElementRates = rt(0.0 - 0.00000003, 0.0 - 0.00003661, 0.0 - 0.01337178, 35999.37306329, 0.31795260, 0.0 - 0.24123856, 0.0, 0.0, 0.0, 0.0)
+pure func jupEl() -> MeanElements = me(5.20248019, 0.04853590, 1.29861416, 34.33479152, 14.27495244, 100.29282654)
+pure func jupRt() -> ElementRates = rt(0.0 - 0.00002864, 0.00018026, 0.0 - 0.00322699, 3034.90371757, 0.18199196, 0.13024619, 0.0 - 0.00012452, 0.06064060, 0.0 - 0.35635438, 38.35125000)
+pure func satEl() -> MeanElements = me(9.54149883, 0.05550825, 2.49424102, 50.07571329, 92.86136063, 113.63998702)
+pure func satRt() -> ElementRates = rt(0.0 - 0.00003065, 0.0 - 0.00032044, 0.00451969, 1222.11494724, 0.54179478, 0.0 - 0.25015002, 0.00025899, 0.0 - 0.13434469, 0.87320147, 38.35125000)
+
+pure func jupAt(jd: float) -> Vec3 = planetAt(jupEl(), jupRt(), jd).pos
+pure func satAt(jd: float) -> Vec3 = planetAt(satEl(), satRt(), jd).pos
+
+-- 00:00 UT on the date; TT - UT = 69.2 s is negligible here (range rates
+-- of 0.6 and 0.3 km/s move the light time by < 2e-4 s).
+pure func checkHorizonsJupiter() -> bool {
+  let jd = julianDate(2023, 11, 3.0);
+  let lagS = lightTimeDays(jupAt, planetAt(embEl(), embRt(), jd).pos, jd) * secondsPerDay();
+  absf(lagS - 33.12197563 * 60.0) < 3.0
+}
+
+test "Jupiter 2023-11-03: light time 1987.3 s (JPL Horizons) within 3 s" { checkHorizonsJupiter() }
+
+pure func checkHorizonsSaturn() -> bool {
+  let jd = julianDate(2023, 8, 27.0);
+  let lagS = lightTimeDays(satAt, planetAt(embEl(), embRt(), jd).pos, jd) * secondsPerDay();
+  absf(lagS - 72.88002832 * 60.0) < 6.0
+}
+
+test "Saturn 2023-08-27: light time 4372.8 s (JPL Horizons) within 6 s" { checkHorizonsSaturn() }

@@ -1,0 +1,51 @@
+-- sunholo/celestial/lighttime — where a body is seen: the light-travel-time
+-- (retarded-time) correction.
+--
+-- Light reaching an observer at x_obs at time t left the source at the
+-- retarded time t_r with t - t_r = |x_obs - x_src(t_r)| / c. The equation is
+-- solved by fixed-point iteration from t_r = t, run exactly 4 times (no
+-- convergence test, so the strict VM and the interpreter take the same path).
+-- Each step shrinks the error by the source's radial speed over c, at most
+-- ~2e-4 for anything in the solar system, so 4 steps leave (v/c)^4 < 2e-15 of
+-- the lag; at v/c = 0.04 they still leave 2.5e-6 (tested).
+--
+-- Units: positions in AU, times in days (TDB). Newtonian light time only:
+-- no Shapiro delay (< 0.1 ms across the solar system), no aberration (that
+-- is the observer's velocity: sunholo/relativity).
+
+module sunholo/celestial/lighttime
+
+import ./kepler (Vec3, norm, sub)
+
+-- The speed of light in AU per day: 299,792.458 km/s (exact) x 86,400 s
+-- over 149,597,870.7 km (IAU 2012 B2) = 173.1446326742403.
+export pure func cAuPerDay() -> float = 299792.458 * 86400.0 / 149597870.7
+
+export pure func secondsPerDay() -> float = 86400.0
+
+-- The retarded solution: time (TDB days) the light left, the source's
+-- position then (AU), and the lag t - time (days).
+export type Retarded = { time: float, pos: Vec3, lagDays: float }
+
+-- The iteration runs on the lag s = t - t_r, not on t_r: a Julian date near
+-- 2.46e6 has an ulp of 4.7e-10 d (40 us), so t - t_r formed from two dates
+-- would carry that error, while s itself keeps full relative precision.
+pure func iterate(srcFn: (float) -> Vec3, obs: Vec3, t: float, s: float, k: int) -> float =
+  if k <= 0 then s
+  else iterate(srcFn, obs, t, norm(sub(obs, srcFn(t - s))) / cAuPerDay(), k - 1)
+
+-- srcFn(t) is the source's position at TDB t, in the same frame and origin
+-- as obs, the observer's position at t (observation time).
+export pure func retarded(srcFn: (float) -> Vec3, obs: Vec3, t: float) -> Retarded {
+  let s = iterate(srcFn, obs, t, 0.0, 4);
+  { time: t - s, pos: srcFn(t - s), lagDays: s }
+}
+
+export pure func retardedTime(srcFn: (float) -> Vec3, obs: Vec3, t: float) -> float = retarded(srcFn, obs, t).time
+
+-- The light time t - t_r, in days (multiply by secondsPerDay() for seconds).
+export pure func lightTimeDays(srcFn: (float) -> Vec3, obs: Vec3, t: float) -> float
+  ensures { result >= 0.0 }
+{
+  retarded(srcFn, obs, t).lagDays
+}

@@ -1,0 +1,159 @@
+-- Check values for sunholo/celestial/gravity. Expected values are published
+-- constants or closed-form Newtonian identities, never this module's output:
+--   IAU 2015 Resolution B3 nominal values: GM_Sun 1.3271244e20, GM_Earth
+--   3.986004e14, GM_Jupiter 1.2668653e17 m^3 s^-2; R_Earth (equatorial)
+--   6.3781e6 m, R_Jupiter (equatorial) 7.1492e7 m, R_Sun 6.957e8 m.
+--   Surface gravity, NASA NSSDC planetary fact sheet: Earth 9.80 m/s^2
+--   (equatorial, without rotation: 9.798), Jupiter 24.79 m/s^2.
+--   The design's hold values: 0.1254 m/s^2 at 50,000 km above Earth and
+--   11.0 m/s^2 at 1.5 R_J (GM / r^2, re-derived here digit by digit).
+-- tools/orbits_ref.py recomputes each in SI from the same constants.
+
+module sunholo/celestial/gravity_test
+
+import std/math (sqrt)
+import ./kepler (Vec3, norm, add, sub, scale, absf, dot)
+import ./ephemeris (auKm)
+import ./gravity (GravBody, Gravity, accelerationAt, accelerationRelativeTo, pointAcceleration, gmSunNominal, gmEarthNominal, gmJupiterNominal, radiusSunNominal, radiusEarthNominal, radiusJupiterNominal)
+
+pure func rel(got: float, want: float, tol: float) -> bool = absf(got - want) <= tol * absf(want)
+
+-- ---------- constants ----------
+
+pure func checkNominal() -> bool =
+  gmSunNominal() == 132712440000.0 && gmEarthNominal() == 398600.4 && gmJupiterNominal() == 126686530.0
+  && radiusEarthNominal() == 6378.1 && radiusJupiterNominal() == 71492.0 && radiusSunNominal() == 695700.0
+
+test "IAU 2015 B3 nominal GM and radii, in km^3/s^2 and km" { checkNominal() }
+
+pure func checkSurface() -> bool =
+  absf(pointAcceleration(gmEarthNominal(), radiusEarthNominal()) - 9.798) < 0.001
+  && absf(pointAcceleration(gmJupiterNominal(), radiusJupiterNominal()) - 24.79) < 0.01
+
+test "surface gravity: Earth 9.798, Jupiter 24.79 m/s^2 (NSSDC)" { checkSurface() }
+
+-- ---------- bodies at fixed places ----------
+
+pure func earthPos() -> Vec3 = { x: 0.98, y: 0.17, z: 0.0001 }
+
+pure func earthAt(t: float) -> Vec3 = earthPos()
+
+pure func sunAt(t: float) -> Vec3 = { x: 0.0, y: 0.0, z: 0.0 }
+
+pure func jupAt(t: float) -> Vec3 = { x: -3.1, y: 4.2, z: -0.05 }
+
+pure func earth() -> GravBody = { gm: gmEarthNominal(), radius: radiusEarthNominal(), posAt: earthAt }
+
+pure func sun() -> GravBody = { gm: gmSunNominal(), radius: radiusSunNominal(), posAt: sunAt }
+
+pure func jupiter() -> GravBody = { gm: gmJupiterNominal(), radius: radiusJupiterNominal(), posAt: jupAt }
+
+pure func unit(v: Vec3) -> Vec3 = scale(1.0 / norm(v), v)
+
+-- A point at distance dKm from a body centre c (AU), along the direction u.
+pure func offset(c: Vec3, u: Vec3, dKm: float) -> Vec3 = add(c, scale(dKm / auKm(), unit(u)))
+
+pure func dir() -> Vec3 = { x: 0.3, y: -0.8, z: 0.52 }
+
+pure func checkEarthHold() -> bool {
+  let x = offset(earthPos(), dir(), 6378.1 + 50000.0);
+  let g = accelerationAt([earth()], x, 2460000.0);
+  -- GM / r^2 in SI: 3.986004e14 / (5.63781e7)^2 = 0.125406 m/s^2
+  !g.inside && g.body == 0 - 1 && rel(norm(g.acc), 0.125406, 0.00001) && absf(norm(g.acc) - 0.1254) < 0.0001
+  && rel(dot(unit(g.acc), unit(dir())), 0.0 - 1.0, 0.000000001)
+}
+
+test "50,000 km above Earth: 0.1254 m/s^2, pointing at Earth's centre" { checkEarthHold() }
+
+pure func checkJupiterHold() -> bool {
+  let x = offset(jupAt(0.0), dir(), 1.5 * 71492.0);
+  let g = accelerationAt([jupiter()], x, 2460000.0);
+  -- 1.2668653e17 / (1.07238e8)^2 = 11.016 m/s^2
+  !g.inside && rel(norm(g.acc), 11.0164, 0.0001) && absf(norm(g.acc) - 11.0) < 0.05
+}
+
+test "1.5 R_J from Jupiter: 11.0 m/s^2" { checkJupiterHold() }
+
+-- ---------- inside a body ----------
+
+pure func checkInside() -> bool {
+  let deep = accelerationAt([sun(), earth(), jupiter()], offset(earthPos(), dir(), 6000.0), 0.0);
+  let surface = accelerationAt([sun(), earth(), jupiter()], offset(jupAt(0.0), dir(), 71491.9), 0.0);
+  let outside = accelerationAt([sun(), earth(), jupiter()], offset(jupAt(0.0), dir(), 71492.5), 0.0);
+  let centre = accelerationAt([sun()], { x: 0.0, y: 0.0, z: 0.0 }, 0.0);
+  deep.inside && deep.body == 1 && norm(deep.acc) == 0.0
+  && surface.inside && surface.body == 2 && !outside.inside && outside.body == 0 - 1
+  && centre.inside && centre.body == 0
+}
+
+test "inside: within any body's radius, with that body's index and zero acceleration" { checkInside() }
+
+-- ---------- superposition and inverse square ----------
+
+pure func checkSuperposition() -> bool {
+  let x = { x: 2.0, y: -1.0, z: 0.3 };
+  let a = accelerationAt([sun(), earth(), jupiter()], x, 0.0).acc;
+  let s = add(add(accelerationAt([sun()], x, 0.0).acc, accelerationAt([earth()], x, 0.0).acc), accelerationAt([jupiter()], x, 0.0).acc);
+  norm(sub(a, s)) <= 0.000000000000001 * norm(a)
+}
+
+test "the field of several bodies is the sum of their fields" { checkSuperposition() }
+
+pure func checkInverseSquare() -> bool {
+  let a1 = norm(accelerationAt([earth()], offset(earthPos(), dir(), 20000.0), 0.0).acc);
+  let a2 = norm(accelerationAt([earth()], offset(earthPos(), dir(), 40000.0), 0.0).acc);
+  let a3 = norm(accelerationAt([earth()], offset(earthPos(), dir(), 200000.0), 0.0).acc);
+  rel(a1 / a2, 4.0, 0.0000001) && rel(a1 / a3, 100.0, 0.0000001)
+}
+
+test "inverse square: double the distance, a quarter of the pull" { checkInverseSquare() }
+
+-- Two equal masses: zero at the midpoint.
+pure func twinA(t: float) -> Vec3 = { x: 1.0, y: 0.0, z: 0.0 }
+
+pure func twinB(t: float) -> Vec3 = { x: 1.0, y: 0.002, z: 0.0 }
+
+pure func checkSymmetry() -> bool {
+  let g = accelerationAt([{ gm: 1000.0, radius: 100.0, posAt: twinA }, { gm: 1000.0, radius: 100.0, posAt: twinB }], { x: 1.0, y: 0.001, z: 0.0 }, 0.0);
+  norm(g.acc) < 0.000000000000000001 && !g.inside
+}
+
+test "two equal masses cancel at the midpoint" { checkSymmetry() }
+
+-- ---------- time-dependent positions ----------
+
+pure func movingEarth(t: float) -> Vec3 = { x: 1.0 + (t - 100.0) * 0.001, y: 0.0, z: 0.0 }
+
+pure func checkTimeUsed() -> bool {
+  let b = { gm: gmEarthNominal(), radius: radiusEarthNominal(), posAt: movingEarth };
+  -- at t = 100 the point is 0.001 au (149,598 km) away; at t = 101 Earth sits on it.
+  let far = accelerationAt([b], { x: 1.001, y: 0.0, z: 0.0 }, 100.0);
+  let on = accelerationAt([b], { x: 1.001, y: 0.0, z: 0.0 }, 101.0);
+  !far.inside && rel(norm(far.acc), 398600.4 / (149597.8707 * 149597.8707) * 1000.0, 0.000000001) && on.inside
+}
+
+test "posAt is evaluated at jdTDB" { checkTimeUsed() }
+
+-- ---------- the hold relative to a body ----------
+-- Holding station 50,000 km above Earth, the ship co-moves with Earth, which
+-- itself falls toward the Sun at 5.9e-3 m/s^2. Relative to Earth the Sun only
+-- adds its tide, 2 GM_Sun d / r^3 <= 4.5e-6 m/s^2 at 56,378 km.
+
+pure func checkRelative() -> bool {
+  let x = offset(earthPos(), dir(), 56378.1);
+  let bodies = [sun(), earth()];
+  let inertial = accelerationAt(bodies, x, 0.0);
+  let relative = accelerationRelativeTo(bodies, x, 1, 0.0);
+  let earthOnly = accelerationAt([earth()], x, 0.0);
+  let r = norm(earthPos()) * auKm();
+  let tideMax = 2.0 * gmSunNominal() * 56378.1 / (r * r * r) * 1000.0;
+  norm(sub(relative.acc, earthOnly.acc)) <= tideMax && norm(sub(relative.acc, earthOnly.acc)) > 0.25 * tideMax
+  && norm(sub(inertial.acc, earthOnly.acc)) > 0.0058 && !relative.inside
+}
+
+test "relative to Earth: Earth's pull plus only the Sun's tide (<= 4.5e-6 m/s^2)" { checkRelative() }
+
+pure func checkRelativeInside() -> bool =
+  accelerationRelativeTo([sun(), earth()], offset(earthPos(), dir(), 100.0), 1, 0.0).inside
+
+test "relative acceleration also refuses inside a body" { checkRelativeInside() }

@@ -1,0 +1,118 @@
+-- sunholo/celestial/rings — planetary rings as a thin, classical
+-- single-scattering layer (Chandrasekhar 1960; as used for Saturn's rings by
+-- Cuzzi et al. 1984), and the inputs of ring-shadow geometry.
+--
+-- A ring patch has normal optical depth tau, single-scattering albedo w0 and
+-- phase function value phaseP (P below) at the current phase angle. mu0 = |sin| of the
+-- Sun's elevation over the ring plane, mu = |sin| of the observer's.
+--   lit face (observer on the Sun's side):
+--     I/F = w0 P mu0 / (4 (mu + mu0)) [1 - e^(-tau (1/mu + 1/mu0))]
+--   unlit face (observer on the other side), mu != mu0:
+--     I/F = w0 P mu0 / (4 (mu - mu0)) [e^(-tau/mu) - e^(-tau/mu0)]
+--   with the finite limit w0 P tau e^(-tau/mu0) / (4 mu0) at mu = mu0.
+--   transmission (alpha of the ring = 1 - it): e^(-tau/|mu|).
+-- I/F is the reflectance relative to a white Lambert disc lit face-on, so the
+-- radiance is I/F x lux / pi (cd/m^2).
+--
+-- Single scattering only: dense rings (tau >~ 1) are somewhat brighter in
+-- reality from multiple scattering, and close-packed particles add an
+-- opposition surge that P must carry.
+
+module sunholo/celestial/rings
+
+import std/math (exp)
+import ./kepler (Vec3, absf, pi, dot, add, scale, norm)
+
+-- (e^x - 1) / x: a 5-term series below |x| = 1e-3 (truncation < x^5/720
+-- relative), the direct form above (callers keep x small enough not to overflow).
+pure func expm1OverX(x: float) -> float =
+  if absf(x) < 0.001 then 1.0 + x / 2.0 * (1.0 + x / 3.0 * (1.0 + x / 4.0 * (1.0 + x / 5.0)))
+  else (exp(x) - 1.0) / x
+
+-- 1 - e^(-x) without cancellation for small x.
+pure func oneMinusExpNeg(x: float) -> float =
+  if x < 0.001 then x * expm1OverX(0.0 - x) else 1.0 - exp(0.0 - x)
+
+export pure func ringLitIF(w0: float, phaseP: float, tau: float, mu0: float, mu: float) -> float
+  requires { tau >= 0.0 && mu0 >= 0.0 && mu > 0.0 }
+{
+  if mu0 <= 0.0 || tau <= 0.0 then 0.0
+  else w0 * phaseP * mu0 / (4.0 * (mu + mu0)) * oneMinusExpNeg(tau * (1.0 / mu + 1.0 / mu0))
+}
+
+-- Two branches, both bounded:
+--  * |x| < 1e-3, x = tau (mu - mu0) / (mu mu0): the difference of
+--    exponentials cancels, so use e^(-tau/mu) - e^(-tau/mu0) =
+--    e^(-tau/mu0) (e^x - 1) and divide by (mu - mu0) analytically:
+--    e^(-tau/mu0) tau / (mu mu0) (e^x - 1)/x, with the series for (e^x - 1)/x
+--    (e^x <= e^0.001, so no overflow): no 0/0 at mu = mu0.
+--  * otherwise the textbook form; both exponentials are <= 1 and the
+--    relative cancellation is at most ~1e-13. (mu - mu0) and the
+--    difference share a sign because exp is monotone, so it is >= 0. (Round 1 used the product form
+--    everywhere; with tau/mu0 in ~(709.8, 745) its e^(-tau/mu0) is subnormal
+--    while e^x overflows, giving Inf: the Sun grazing the rings.)
+export pure func ringUnlitIF(w0: float, phaseP: float, tau: float, mu0: float, mu: float) -> float
+  requires { tau >= 0.0 && mu0 >= 0.0 && mu > 0.0 }
+  ensures { result >= 0.0 }
+{
+  if mu0 <= 0.0 || tau <= 0.0 then 0.0
+  else {
+    let x = tau * (mu - mu0) / (mu * mu0);
+    if absf(x) < 0.001
+    then w0 * phaseP * mu0 / 4.0 * exp(0.0 - tau / mu0) * tau / (mu * mu0) * expm1OverX(x)
+    else w0 * phaseP * mu0 / (4.0 * (mu - mu0)) * (exp(0.0 - tau / mu) - exp(0.0 - tau / mu0))
+  }
+}
+
+-- Radiance in cd/m^2 for lux in lux: I/F x lux / pi.
+export pure func ringLitRadiance(w0: float, phaseP: float, tau: float, mu0: float, mu: float, lux: float) -> float =
+  ringLitIF(w0, phaseP, tau, mu0, mu) * lux / pi()
+
+export pure func ringUnlitRadiance(w0: float, phaseP: float, tau: float, mu0: float, mu: float, lux: float) -> float =
+  ringUnlitIF(w0, phaseP, tau, mu0, mu) * lux / pi()
+
+-- e^(-tau/|mu|): 1 when tau = 0, 0 edge-on (mu = 0) for tau > 0.
+export pure func ringTransmission(tau: float, mu: float) -> float
+  ensures { result >= 0.0 && result <= 1.0 }
+{
+  if tau <= 0.0 then 1.0
+  else if mu == 0.0 then 0.0
+  else exp(0.0 - tau / absf(mu))
+}
+
+-- A ring band: radii (km, rIn <= r < rOut), normal optical depth and
+-- single-scattering albedo.
+export type RingBand = { rIn: float, rOut: float, tau: float, w0: float }
+
+-- The band containing radius r (km); tau 0 (empty) when r is in no band.
+-- Bands are searched in order, so the first match wins where they overlap.
+export pure func bandAt(bands: [RingBand], r: float) -> RingBand =
+  match bands {
+    [] => { rIn: r, rOut: r, tau: 0.0, w0: 0.0 },
+    b :: rest => if r >= b.rIn && r < b.rOut then b else bandAt(rest, r)
+  }
+
+-- Where the ray p + s dir (s > 0) crosses the ring plane through the
+-- planet's centre with unit normal pole: hits, the radius of the crossing
+-- (in p's units), and mu = |dir . pole| (dir need not be unit; mu is for its
+-- unit). p is planetocentric.
+export type RingHit = { hits: bool, radius: float, mu: float }
+
+export pure func ringPlaneHit(p: Vec3, dir: Vec3, pole: Vec3) -> RingHit {
+  let dn = dot(dir, pole);
+  let mu = absf(dn) / norm(dir);
+  if dn == 0.0 then { hits: false, radius: 0.0, mu: 0.0 }
+  else {
+    let s = 0.0 - dot(p, pole) / dn;
+    if s <= 0.0 then { hits: false, radius: 0.0, mu: mu }
+    else { hits: true, radius: norm(add(p, scale(s, dir))), mu: mu }
+  }
+}
+
+-- The fraction of sunlight reaching planetocentric point p through the rings:
+-- e^(-tau(r)/mu0) where the ray toward the Sun crosses the plane at r, else 1.
+-- (The globe's own shadow and the Sun's penumbra are the caller's.)
+export pure func ringShadowTransmission(bands: [RingBand], p: Vec3, sunDir: Vec3, pole: Vec3) -> float {
+  let h = ringPlaneHit(p, sunDir, pole);
+  if h.hits then ringTransmission(bandAt(bands, h.radius).tau, h.mu) else 1.0
+}

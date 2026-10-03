@@ -1,0 +1,153 @@
+-- Check values for sunholo/celestial/frames. Expected values are published
+-- constants: the IAU 2006 obliquity, the Hipparcos galactic pole and the
+-- published galactic coordinates of the north ecliptic pole, and the IAU
+-- WGCCRE 2015 rotation models (Archinal et al. 2018) evaluated at their
+-- epoch. tools/orbits_ref.py builds the galactic frame from the Hipparcos
+-- angles (alpha_G, delta_G, l_Omega) by spherical trigonometry, a separate
+-- path from the 3x3 matrix used here.
+
+module sunholo/celestial/frames_test
+
+import std/math (sin, cos, sqrt, intToFloat)
+import ./kepler (Vec3, norm, dot, sub, absf, pi, twoPi)
+import ./frames (PoleModel, PoleTerm, Spin, LonLat, obliquityJ2000, eclipticToEquatorial, equatorialToEcliptic, equatorialToGalactic, eclipticToGalactic, unitFromAngles, lonLat, poleAndSpin, rotationPeriod)
+
+pure func deg(r: float) -> float = r * 180.0 / 3.141592653589793
+
+pure func rad(d: float) -> float = d * 3.141592653589793 / 180.0
+
+pure func ex() -> Vec3 = { x: 1.0, y: 0.0, z: 0.0 }
+
+pure func ez() -> Vec3 = { x: 0.0, y: 0.0, z: 1.0 }
+
+pure func checkObliquity() -> bool = absf(deg(obliquityJ2000()) - 23.439279444444445) < 0.000000000001
+
+test "obliquity at J2000 is 84381.406 arcsec (IAU 2006)" { checkObliquity() }
+
+-- The north ecliptic pole in galactic coordinates. Published (96.38, 29.81)
+-- to two decimals; from the published obliquity and the Hipparcos pole
+-- angles (orbits_ref.py, spherical trig): l 96.383986, b 29.811439.
+pure func checkNorthEclipticPole() -> bool {
+  let g = lonLat(eclipticToGalactic(ez()));
+  absf(deg(g.lon) - 96.38) <= 0.005 && absf(deg(g.lat) - 29.81) <= 0.005
+  && absf(deg(g.lon) - 96.383986) <= 0.0001 && absf(deg(g.lat) - 29.811439) <= 0.0001
+}
+
+test "north ecliptic pole -> galactic (96.38, 29.81), within 1e-4 deg of the angle-built frame" { checkNorthEclipticPole() }
+
+-- The Hipparcos definition: the north galactic pole is at ICRS
+-- (192.85948, +27.12825) deg, and the galactic centre at l = 0, b = 0 lies
+-- at ICRS (266.40499, -28.93617) deg (ESA SP-1200 Vol 1, sec 1.5.3).
+pure func checkGalacticDefinition() -> bool {
+  let ngp = equatorialToGalactic(unitFromAngles(rad(192.85948), rad(27.12825)));
+  let gc = lonLat(equatorialToGalactic(unitFromAngles(rad(266.40499), rad(0.0 - 28.93617))));
+  sqrt(ngp.x * ngp.x + ngp.y * ngp.y) < 0.000000001 && ngp.z > 0.0 && absf(gc.lat) < rad(0.00002)
+  && (gc.lon < rad(0.00002) || gc.lon > twoPi() - rad(0.00002))
+}
+
+test "galactic pole and centre match the Hipparcos definition" { checkGalacticDefinition() }
+
+pure func checkEquinoxFixed() -> bool {
+  let q = eclipticToEquatorial(ex());
+  q.x == 1.0 && q.y == 0.0 && q.z == 0.0
+}
+
+test "the vernal equinox is common to the ecliptic and the equator" { checkEquinoxFixed() }
+
+pure func checkEclipticPoleInIcrs() -> bool {
+  let p = lonLat(eclipticToEquatorial(ez()));
+  absf(deg(p.lon) - 270.0) < 0.000000001 && absf(deg(p.lat) - (90.0 - 23.439279444444445)) < 0.000000001
+}
+
+test "the ecliptic pole is at ICRS RA 270 deg, Dec 90 deg - obliquity" { checkEclipticPoleInIcrs() }
+
+pure func sampleVec(i: int) -> Vec3 {
+  let t = intToFloat(i);
+  unitFromAngles(0.7 * t, sin(1.3 * t))
+}
+
+pure func roundTrips(i: int) -> bool =
+  if i > 12 then true
+  else {
+    let v = sampleVec(i);
+    let back = equatorialToEcliptic(eclipticToEquatorial(v));
+    let g = eclipticToGalactic(v);
+    norm(sub(back, v)) < 0.000000000000001 && absf(norm(g) - 1.0) < 0.000000001 && roundTrips(i + 1)
+  }
+
+test "ecliptic <-> equatorial round-trips; the galactic rotation keeps length" { roundTrips(0) }
+
+-- The galactic rotation keeps angles: dot products agree to the matrix's
+-- 10 published digits.
+pure func checkKeepsAngles() -> bool {
+  let a = sampleVec(3);
+  let b = sampleVec(8);
+  absf(dot(eclipticToGalactic(a), eclipticToGalactic(b)) - dot(a, b)) < 0.000000001
+}
+
+test "the galactic rotation keeps angles" { checkKeepsAngles() }
+
+pure func checkLonLatRange() -> bool {
+  let w = lonLat({ x: 0.0, y: 0.0 - 1.0, z: 0.0 });
+  let s = lonLat({ x: 0.0, y: 0.0, z: 0.0 - 2.0 });
+  absf(w.lon - 1.5 * pi()) < 0.000000000000001 && w.lat == 0.0 && absf(s.lat + 0.5 * pi()) < 0.000000000000001
+}
+
+test "lonLat: longitude in [0, 2 pi), latitude from any length" { checkLonLatRange() }
+
+-- ---------- IAU WGCCRE 2015 rotation models ----------
+
+pure func perCy(d: float) -> float = rad(d) / 36525.0
+
+-- Saturn (Archinal et al. 2018, Table 2).
+pure func saturn() -> PoleModel =
+  { ra0: rad(40.589), ra1: rad(0.0 - 0.036), dec0: rad(83.537), dec1: rad(0.0 - 0.004),
+    w0: rad(38.90), w1: rad(810.7939024), w2: 0.0, terms: [] }
+
+pure func jterm(p: float, r: float, a: float, d: float) -> PoleTerm =
+  { phase0: rad(p), rate: perCy(r), ra: rad(a), dec: rad(d), w: 0.0 }
+
+-- Jupiter, with the five Ja..Je nutation-precession terms.
+pure func jupiter() -> PoleModel =
+  { ra0: rad(268.056595), ra1: rad(0.0 - 0.006499), dec0: rad(64.495303), dec1: rad(0.002413),
+    w0: rad(284.95), w1: rad(870.5360000), w2: 0.0,
+    terms: [jterm(99.360714, 4850.4046, 0.000117, 0.000050), jterm(175.895369, 1191.9605, 0.000938, 0.000404),
+            jterm(300.323162, 262.5475, 0.001432, 0.000617), jterm(114.012305, 6070.2476, 0.000030, 0.0 - 0.000013),
+            jterm(49.511251, 64.3000, 0.002150, 0.000926)] }
+
+pure func checkSaturnAtEpoch() -> bool {
+  let s = poleAndSpin(saturn(), 2451545.0);
+  let want = equatorialToEcliptic(unitFromAngles(rad(40.589), rad(83.537)));
+  absf(deg(s.ra) - 40.589) < 0.000000001 && absf(deg(s.dec) - 83.537) < 0.000000001
+  && absf(deg(s.w) - 38.90) < 0.000000001 && norm(sub(s.pole, want)) < 0.000000000000001
+  && absf(norm(s.pole) - 1.0) < 0.000000000000001
+}
+
+test "Saturn at J2000: pole (40.589, 83.537), W 38.90, unit ecliptic pole vector" { checkSaturnAtEpoch() }
+
+-- Linear drift: a century later RA 40.553, Dec 83.533; W wraps into [0, 360).
+pure func checkSaturnDrift() -> bool {
+  let s = poleAndSpin(saturn(), 2451545.0 + 36525.0);
+  let w10 = poleAndSpin(saturn(), 2451545.0 + 10.0);
+  absf(deg(s.ra) - 40.553) < 0.000000001 && absf(deg(s.dec) - 83.533) < 0.000000001
+  && absf(deg(w10.w) - (38.90 + 8107.939024 - 7920.0)) < 0.0000001 && w10.w >= 0.0 && w10.w < twoPi()
+}
+
+test "Saturn's pole drifts linearly; W advances 810.7939024 deg/day, wrapped" { checkSaturnDrift() }
+
+-- Jupiter's series at J2000 and at J2000 + 25 yr (the published model
+-- evaluated term by term in orbits_ref.py-style float64):
+-- RA 268.05720404, Dec 64.49580995; RA 268.05783620, Dec 64.49672099.
+pure func checkJupiterSeries() -> bool {
+  let a = poleAndSpin(jupiter(), 2451545.0);
+  let b = poleAndSpin(jupiter(), 2451545.0 + 9131.25);
+  absf(deg(a.ra) - 268.05720404) < 0.00000001 && absf(deg(a.dec) - 64.49580995) < 0.00000001
+  && absf(deg(b.ra) - 268.05783620) < 0.00000001 && absf(deg(b.dec) - 64.49672099) < 0.00000001
+}
+
+test "Jupiter's pole with its five periodic terms" { checkJupiterSeries() }
+
+pure func checkRotationPeriod() -> bool =
+  absf(rotationPeriod(jupiter()) * 24.0 - 9.925) < 0.0005 && absf(rotationPeriod(saturn()) * 24.0 - 10.656) < 0.0005
+
+test "rotation periods from W: Jupiter System III 9.925 h, Saturn 10.656 h" { checkRotationPeriod() }

@@ -1,0 +1,86 @@
+-- sunholo/celestial/gravity — Newtonian point-mass gravity, the field a ship
+-- must cancel to hold a straight line or a station near planets.
+--
+--   a(x) = sum_i GM_i (x_i - x) / |x_i - x|^3
+--
+-- Positions are AU (any common frame and origin, e.g. ecliptic J2000
+-- heliocentric from ephemeris.planetAt); GM in km^3/s^2 and radii in km, as
+-- tabulated; the acceleration comes back in m/s^2. Inside any body's radius
+-- the point-mass field is not the body's field, so the function refuses:
+-- `inside` is true, `body` is the first containing body's index, and `acc`
+-- is zero.
+--
+-- No relativity (the 1PN correction is ~1e-8 of the pull at Jupiter's cloud
+-- tops), no oblateness (J2) and no tides beyond the point-mass sum.
+
+module sunholo/celestial/gravity
+
+import ./kepler (Vec3, norm, add, sub, scale)
+import ./ephemeris (auKm)
+
+-- IAU 2015 Resolution B3 nominal values (Prsa et al. 2016, AJ 152, 41):
+-- GM in km^3/s^2, radii in km (equatorial for the planets).
+export pure func gmSunNominal() -> float = 132712440000.0
+export pure func gmEarthNominal() -> float = 398600.4
+export pure func gmJupiterNominal() -> float = 126686530.0
+export pure func radiusSunNominal() -> float = 695700.0
+export pure func radiusEarthNominal() -> float = 6378.1
+export pure func radiusJupiterNominal() -> float = 71492.0
+
+-- A gravitating body: GM (km^3/s^2), radius (km) inside which the field is
+-- refused, and its position (AU) as a function of TDB days.
+export type GravBody = { gm: float, radius: float, posAt: (float) -> Vec3 }
+
+-- acc in m/s^2; inside true (and acc zero, body >= 0) within a body's radius;
+-- body = -1 when outside every body.
+export type Gravity = { acc: Vec3, inside: bool, body: int }
+
+-- GM / r^2 in m/s^2 for GM in km^3/s^2 and r in km.
+export pure func pointAcceleration(gm: float, rKm: float) -> float
+  requires { rKm > 0.0 }
+{
+  gm / (rKm * rKm) * 1000.0
+}
+
+pure func zero() -> Vec3 = { x: 0.0, y: 0.0, z: 0.0 }
+
+-- Sum over bodies, skipping index `skip` (-1 skips none).
+pure func sumField(bodies: [GravBody], x: Vec3, jd: float, i: int, skip: int, acc: Vec3) -> Gravity =
+  match bodies {
+    [] => { acc: acc, inside: false, body: 0 - 1 },
+    b :: rest => {
+      if i == skip then sumField(rest, x, jd, i + 1, skip, acc)
+      else {
+        let d = scale(auKm(), sub(b.posAt(jd), x));
+        let r = norm(d);
+        if r <= b.radius then { acc: zero(), inside: true, body: i }
+        else sumField(rest, x, jd, i + 1, skip, add(acc, scale(b.gm / (r * r * r) * 1000.0, d)))
+      }
+    }
+  }
+
+-- The Newtonian acceleration (m/s^2) at x (AU) and TDB jdTDB.
+export pure func accelerationAt(bodies: [GravBody], x: Vec3, jdTDB: float) -> Gravity =
+  sumField(bodies, x, jdTDB, 0, 0 - 1, zero())
+
+pure func nth(bodies: [GravBody], k: int) -> [GravBody] =
+  match bodies {
+    [] => [],
+    b :: rest => if k == 0 then [b] else nth(rest, k - 1)
+  }
+
+-- The acceleration at x relative to body `ref`'s centre: a(x) minus the
+-- acceleration of ref's centre due to all the other bodies. This is what a
+-- ship holding station co-moving with ref must cancel: ref's own pull plus
+-- the other bodies' tides. An out-of-range ref gives accelerationAt.
+export pure func accelerationRelativeTo(bodies: [GravBody], x: Vec3, ref: int, jdTDB: float) -> Gravity {
+  let g = accelerationAt(bodies, x, jdTDB);
+  if g.inside then g
+  else match nth(bodies, ref) {
+    [] => g,
+    r :: _ => {
+      let frame = sumField(bodies, r.posAt(jdTDB), jdTDB, 0, ref, zero());
+      if frame.inside then g else { acc: sub(g.acc, frame.acc), inside: false, body: 0 - 1 }
+    }
+  }
+}

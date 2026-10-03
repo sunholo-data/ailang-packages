@@ -1,0 +1,108 @@
+-- sunholo/celestial/frames — constant frame rotations and IAU rotation models.
+--
+-- Frames (all right-handed, unit vectors or any length):
+--   ecliptic    mean ecliptic and equinox of J2000 (the planets' elements)
+--   equatorial  ICRS / ICRF (to the ~20 mas frame-tie, the same as EME2000)
+--   galactic    the Hipparcos 1997 galactic frame: x toward the galactic
+--               centre, z toward the north galactic pole (the frame the
+--               Stapledon's Voyage starfield uses)
+-- Angles in radians; JD in TDB.
+
+module sunholo/celestial/frames
+
+import std/math (sin, cos, sqrt, atan2, floor)
+import ./kepler (Vec3, absf, twoPi)
+
+-- Mean obliquity of the ecliptic at J2000, 84381.406 arcsec
+-- (IAU 2006 precession, Capitaine et al. 2003).
+export pure func obliquityJ2000() -> float = 84381.406 / 3600.0 * 3.141592653589793 / 180.0
+
+-- Rotation about x by the obliquity: ecliptic J2000 -> ICRS.
+export pure func eclipticToEquatorial(v: Vec3) -> Vec3 {
+  let c = cos(obliquityJ2000());
+  let s = sin(obliquityJ2000());
+  { x: v.x, y: c * v.y - s * v.z, z: s * v.y + c * v.z }
+}
+
+export pure func equatorialToEcliptic(v: Vec3) -> Vec3 {
+  let c = cos(obliquityJ2000());
+  let s = sin(obliquityJ2000());
+  { x: v.x, y: c * v.y + s * v.z, z: c * v.z - s * v.y }
+}
+
+-- ICRS -> galactic: the transpose of A_G, ESA SP-1200 (Hipparcos) Vol 1,
+-- eq. 1.5.11, which realises alpha_G 192.85948, delta_G 27.12825,
+-- l_Omega 32.93192 deg to the 10 digits given.
+export pure func equatorialToGalactic(v: Vec3) -> Vec3 =
+  { x: 0.0 - 0.0548755604 * v.x - 0.8734370902 * v.y - 0.4838350155 * v.z,
+    y: 0.4941094279 * v.x - 0.4448296300 * v.y + 0.7469822445 * v.z,
+    z: 0.0 - 0.8676661490 * v.x - 0.1980763734 * v.y + 0.4559837762 * v.z }
+
+-- ecliptic J2000 -> ICRS -> galactic.
+export pure func eclipticToGalactic(v: Vec3) -> Vec3 = equatorialToGalactic(eclipticToEquatorial(v))
+
+-- Unit vector from a longitude-like and a latitude-like angle (RA/Dec,
+-- ecliptic or galactic l/b).
+export pure func unitFromAngles(lon: float, lat: float) -> Vec3 =
+  { x: cos(lat) * cos(lon), y: cos(lat) * sin(lon), z: sin(lat) }
+
+export type LonLat = { lon: float, lat: float }
+
+-- Spherical angles of any non-zero vector: lon in [0, 2 pi), lat in
+-- [-pi/2, pi/2].
+export pure func lonLat(v: Vec3) -> LonLat
+  ensures { result.lon >= 0.0 && result.lon <= twoPi() && result.lat >= -1.5707963267948968 && result.lat <= 1.5707963267948968 }
+{
+  let l = atan2(v.y, v.x);
+  { lon: if l < 0.0 then l + twoPi() else l, lat: atan2(v.z, sqrt(v.x * v.x + v.y * v.y)) }
+}
+
+-- One periodic term of a WGCCRE model, with argument theta = phase0 + rate d
+-- (d days from J2000 TDB; convert per-century rates to per-day): it adds
+-- ra sin theta to alpha0, dec cos theta to delta0 and w sin theta to W.
+export type PoleTerm = { phase0: float, rate: float, ra: float, dec: float, w: float }
+
+-- An IAU WGCCRE rotation model (Archinal et al. 2018):
+--   alpha0 = ra0 + ra1 T + sum ra_k sin theta_k        (T Julian centuries)
+--   delta0 = dec0 + dec1 T + sum dec_k cos theta_k
+--   W      = w0 + w1 d + w2 d^2 + sum w_k sin theta_k  (d days)
+-- ra1, dec1 in radians per century; w1 per day, w2 per day^2.
+export type PoleModel = { ra0: float, ra1: float, dec0: float, dec1: float, w0: float, w1: float, w2: float, terms: [PoleTerm] }
+
+-- pole: the north pole as a unit vector in ecliptic J2000; ra, dec its ICRS
+-- angles; w the prime-meridian angle in [0, 2 pi).
+export type Spin = { pole: Vec3, ra: float, dec: float, w: float }
+
+pure func sumTerms(ts: [PoleTerm], d: float, ra: float, dec: float, w: float) -> Spin =
+  match ts {
+    [] => { pole: { x: 0.0, y: 0.0, z: 0.0 }, ra: ra, dec: dec, w: w },
+    t :: rest => {
+      let th = t.phase0 + t.rate * d;
+      sumTerms(rest, d, ra + t.ra * sin(th), dec + t.dec * cos(th), w + t.w * sin(th))
+    }
+  }
+
+pure func wrap2Pi(u: float) -> float =
+  if u >= 0.0 && u < twoPi() then u
+  else {
+    let r = u - twoPi() * floor(u / twoPi());
+    if r >= twoPi() || r < 0.0 then 0.0 else r
+  }
+
+-- The body's pole and prime meridian at jdTDB.
+export pure func poleAndSpin(body: PoleModel, jdTDB: float) -> Spin
+  ensures { result.w >= 0.0 && result.w < twoPi() }
+{
+  let d = jdTDB - 2451545.0;
+  let t = d / 36525.0;
+  let s = sumTerms(body.terms, d, body.ra0 + body.ra1 * t, body.dec0 + body.dec1 * t, body.w0 + body.w1 * d + body.w2 * d * d);
+  { pole: equatorialToEcliptic(unitFromAngles(s.ra, s.dec)), ra: s.ra, dec: s.dec, w: wrap2Pi(s.w) }
+}
+
+-- Sidereal rotation period from the linear W rate, days (negative for
+-- retrograde rotators such as Venus and Uranus under the IAU convention).
+export pure func rotationPeriod(body: PoleModel) -> float
+  requires { absf(body.w1) > 0.0 }
+{
+  twoPi() / body.w1
+}

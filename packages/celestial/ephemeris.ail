@@ -1,0 +1,148 @@
+-- sunholo/celestial/ephemeris — where the planets and their moons are.
+--
+-- Planets: JPL "Keplerian Elements for Approximate Positions of the Major
+-- Planets" (E.M. Standish & J.G. Williams 1992), Table 2a (3000 BC-3000 AD)
+-- with Table 2b's b, c, s, f terms for Jupiter-Neptune. Heliocentric,
+-- mean ecliptic and equinox of J2000, AU and AU/day.
+--
+-- Outside the window (T < -50 or T > +10 Julian centuries from J2000) the
+-- secular terms are frozen at the edge and only the mean longitude keeps
+-- advancing, so the planet stays on a fixed mean orbit and its phase still
+-- moves; `meanOrbit` is then true and callers must label the result as a
+-- mean orbit, not an ephemeris.
+--
+-- Satellites: JPL SSD planetary-satellite mean elements, referred to the
+-- satellite's Laplace plane (or the ecliptic, for the Moon) with apse and
+-- node precession. Planetocentric, ecliptic J2000, AU and AU/day.
+--
+-- Time is JD in TDB throughout.
+
+module sunholo/celestial/ephemeris
+
+import std/math (sin, cos, floor, intToFloat)
+import ./kepler (Vec3, State, Orbit, Drift, driftingState, wrapPi)
+import ./frames (equatorialToEcliptic)
+
+-- The astronomical unit in km (IAU 2012 Resolution B2).
+export pure func auKm() -> float = 149597870.7
+
+export pure func j2000() -> float = 2451545.0
+
+-- Table 2a's window in JD: T = -50 (3000 BC) and T = +10 (3000 AD).
+export pure func windowStartJd() -> float = 2451545.0 - 50.0 * 36525.0
+
+export pure func windowEndJd() -> float = 2451545.0 + 10.0 * 36525.0
+
+-- Julian Date of a proleptic Gregorian calendar date at day fraction d
+-- (Meeus, Astronomical Algorithms, eq. 7.1; years astronomical, so
+-- 1 BC = 0). 0h on a date is .5: julianDate(2000, 1, 1.5) = 2451545.0.
+export pure func julianDate(year: int, month: int, day: float) -> float
+  requires { month >= 1 && month <= 12 && year > -4700 }
+{
+  let y = if month <= 2 then year - 1 else year;
+  let m = if month <= 2 then month + 12 else month;
+  let a = floor(intToFloat(y) / 100.0);
+  let b = 2.0 - a + floor(a / 4.0);
+  floor(365.25 * intToFloat(y + 4716)) + floor(30.6001 * intToFloat(m + 1)) + day + b - 1524.5
+}
+
+-- Table 2a elements at J2000: a (AU), e, and incl, meanLong (L), longPeri
+-- (varpi), node (Omega) in radians.
+export type MeanElements = { a: float, e: float, incl: float, meanLong: float, longPeri: float, node: float }
+
+-- Their rates per Julian century (radians or AU per century), plus Table 2b:
+-- b (radians per century^2), c and s (radians), f (radians per century).
+-- b = c = s = f = 0 for Mercury-Mars.
+export type ElementRates = { a: float, e: float, incl: float, meanLong: float, longPeri: float, node: float, b: float, c: float, s: float, f: float }
+
+-- orbit: the osculating-style Kepler elements at the date, with gm the
+-- effective n^2 a^3 of the fitted mean motion; meanOrbit: true outside the
+-- 3000 BC-3000 AD window.
+export type Ephem = { orbit: Orbit, meanOrbit: bool, drift: Drift }
+
+pure func clampT(t: float) -> float = if t < 0.0 - 50.0 then 0.0 - 50.0 else if t > 10.0 then 10.0 else t
+
+-- Standish's recipe: elements at T (secular terms at the clamped T), M =
+-- L - varpi + b T^2 + c cos(f T) + s sin(f T), omega = varpi - Omega.
+-- drift holds the element rates per day (all zero outside the window), so
+-- planetAt's velocity is the exact derivative of its position.
+export pure func elementsAt(el: MeanElements, rates: ElementRates, jdTDB: float) -> Ephem
+  requires { el.a > 0.0 && el.e >= 0.0 && el.e < 1.0 }
+  ensures { result.orbit.a > 0.0 && result.orbit.e >= 0.0 && result.orbit.e < 1.0 }
+{
+  let t = (jdTDB - 2451545.0) / 36525.0;
+  let tc = clampT(t);
+  let inside = tc == t;
+  let k = if inside then 1.0 else 0.0;
+  let wbar = el.longPeri + rates.longPeri * tc;
+  let node = el.node + rates.node * tc;
+  let ft = rates.f * tc;
+  let m = el.meanLong + rates.meanLong * t - wbar + rates.b * tc * tc + rates.c * cos(ft) + rates.s * sin(ft);
+  let mdotCy = rates.meanLong - k * (rates.longPeri - 2.0 * rates.b * tc + rates.c * rates.f * sin(ft) - rates.s * rates.f * cos(ft));
+  let a = el.a + rates.a * tc;
+  let n = mdotCy / 36525.0;
+  { orbit: { a: a, e: el.e + rates.e * tc, incl: el.incl + rates.incl * tc, node: node,
+             argPeri: wbar - node, meanAnom: wrapPi(m), gm: n * n * a * a * a },
+    meanOrbit: !inside,
+    drift: { a: k * rates.a / 36525.0, e: k * rates.e / 36525.0, incl: k * rates.incl / 36525.0,
+             node: k * rates.node / 36525.0, argPeri: k * (rates.longPeri - rates.node) / 36525.0 } }
+}
+
+-- Heliocentric position (AU) and velocity (AU/day), ecliptic J2000.
+-- WARNING: THIS DOES NOT CARRY THE meanOrbit FLAG. Outside 3000 BC-3000 AD
+-- the result is a frozen mean orbit, not an ephemeris: call
+-- elementsAt(el, rates, jdTDB).meanOrbit as well and label it.
+export pure func planetAt(el: MeanElements, rates: ElementRates, jdTDB: float) -> State
+  requires { el.a > 0.0 && el.e >= 0.0 && el.e < 1.0 }
+{
+  let ep = elementsAt(el, rates, jdTDB);
+  driftingState(ep.orbit, ep.drift)
+}
+
+-- JPL SSD mean satellite elements at epochJd: a (km), e, and argPeri,
+-- meanAnom, incl, node (radians) in the reference plane; the rates
+-- d(meanAnom)/dt, d(argPeri)/dt and d(node)/dt in radians per day (signed);
+-- poleRa, poleDec: the ICRS direction (radians) of the reference plane's
+-- pole (the Laplace pole, or the ecliptic pole RA 270 deg, Dec 90 deg -
+-- obliquity for ecliptic elements).
+--
+-- JPL's P column is NOT uniform: for the Moon it is the sidereal period
+-- (meanAnomRate = 2 pi / P - periRate - nodeRate), for Io the anomalistic
+-- one (meanAnomRate = 2 pi / P). The tabulated P apsis / P node are
+-- magnitudes; a node regresses, and an apse can regress too (Io's, forced by
+-- the Laplace resonance). The caller supplies the signed rates.
+export type SatElements = { a: float, e: float, argPeri: float, meanAnom: float, incl: float, node: float, epochJd: float, meanAnomRate: float, periRate: float, nodeRate: float, poleRa: float, poleDec: float }
+
+-- The precessed elements at jdTDB, in the reference-plane frame, a in AU;
+-- gm is meanAnomRate^2 a^3 so the velocity follows the mean motion.
+export pure func satelliteElementsAt(s: SatElements, jdTDB: float) -> Orbit
+  requires { s.a > 0.0 && s.e >= 0.0 && s.e < 1.0 && s.meanAnomRate != 0.0 }
+  ensures { result.a > 0.0 && result.gm > 0.0 }
+{
+  let dt = jdTDB - s.epochJd;
+  let a = s.a / auKm();
+  { a: a, e: s.e, incl: s.incl, node: s.node + s.nodeRate * dt, argPeri: s.argPeri + s.periRate * dt,
+    meanAnom: wrapPi(s.meanAnom + s.meanAnomRate * dt), gm: s.meanAnomRate * s.meanAnomRate * a * a * a }
+}
+
+-- Reference plane -> ICRS: Rz(poleRa + 90 deg) Rx(90 deg - poleDec), the
+-- plane's ascending node on the ICRS equator at poleRa + 90 deg.
+pure func planeToEquatorial(s: SatElements, v: Vec3) -> Vec3 {
+  let ci = sin(s.poleDec);
+  let si = cos(s.poleDec);
+  let cn = 0.0 - sin(s.poleRa);
+  let sn = cos(s.poleRa);
+  let y1 = ci * v.y - si * v.z;
+  let z1 = si * v.y + ci * v.z;
+  { x: cn * v.x - sn * y1, y: sn * v.x + cn * y1, z: z1 }
+}
+
+pure func planeToEcliptic(s: SatElements, v: Vec3) -> Vec3 = equatorialToEcliptic(planeToEquatorial(s, v))
+
+-- Planetocentric position (AU) and velocity (AU/day), ecliptic J2000.
+export pure func satelliteAt(s: SatElements, jdTDB: float) -> State
+  requires { s.a > 0.0 && s.e >= 0.0 && s.e < 1.0 && s.meanAnomRate != 0.0 }
+{
+  let st = driftingState(satelliteElementsAt(s, jdTDB), { a: 0.0, e: 0.0, incl: 0.0, node: s.nodeRate, argPeri: s.periRate });
+  { pos: planeToEcliptic(s, st.pos), vel: planeToEcliptic(s, st.vel) }
+}

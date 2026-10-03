@@ -1,0 +1,180 @@
+-- Check values for sunholo/celestial/reflect. Expected values are published
+-- or closed-form, never this module's output:
+--   The Sun at 1 au: V = -26.74 and the visual zero point V = -13.98 at
+--     1 lux (the convention of sunholo/relativity photometry.illuminanceFromV,
+--     passed here as the literal 10^(-0.4 (-26.74 + 13.98)) = 127,057.4 lux;
+--     celestial does not import relativity).
+--   The Lambert sphere: Phi(0) = 1, Phi(pi/2) = 1/pi, Phi(pi) = 0 and the
+--     phase integral q = 3/2, so Bond albedo = 3p/2 (Russell 1916, ApJ 43,
+--     173; Lester et al. 1979).
+--   Geometric albedo p_V of Jupiter 0.538 (Mallama, Krobusek & Pavlov 2017,
+--     Icarus 282, 19, Table 11); equatorial radius 71,492 km (IAU 2015).
+--   Jupiter's V: Mallama & Hilton 2018 (Astron. Comput. 25, 10) give
+--     V(1,0) = -9.395 and a phase term ~0 below 12 deg, so V = -2.699 at
+--     r 5.20, delta 4.20 au; JPL Horizons (which uses Mallama & Hilton)
+--     gives APmag -2.910 at 2023-11-03 00:00 UT (r 4.974517 au, delta
+--     3.982564 au, phase 0.2857 deg; fetched 2026-10-03).
+--   Disc and sphere integrals are re-done numerically here (Simpson), so the
+--   normalisations are checked against the definition of p and A_B, not
+--   against the algebra in reflect.ail.
+
+module sunholo/celestial/reflect_test
+
+import std/math (sin, cos, sqrt, pow, log10, intToFloat)
+import ./kepler (absf, pi)
+import ./reflect (starIlluminanceAt, lambertPhase, lambertRadiance, minnaertRadiance, minnaertPhase, phaseFunction, rhoFromGeometricAlbedo, geometricAlbedoFromRho, bondAlbedo, bondFromGeometricAlbedo, discIlluminance)
+
+pure func rel(got: float, want: float, tol: float) -> bool = absf(got - want) <= tol * absf(want)
+
+-- illuminanceFromV(-26.74) in sunholo/relativity 0.5.x: pow(10, -0.4 (V + 13.98)).
+pure func sunE1au() -> float = 127057.41052085393
+
+pure func vOf(e: float) -> float = -26.74 - 2.5 * log10(e / sunE1au())
+
+-- ---------- starIlluminanceAt ----------
+
+pure func checkStar() -> bool =
+  rel(sunE1au(), pow(10.0, -0.4 * (-26.74 + 13.98)), 0.000000000000001)
+  && starIlluminanceAt(sunE1au(), 1.0) == sunE1au()
+  && rel(starIlluminanceAt(sunE1au(), 5.2), sunE1au() / 27.04, 0.000000000000001)
+  && rel(starIlluminanceAt(sunE1au(), 0.5), 4.0 * sunE1au(), 0.000000000000001)
+
+test "the Sun at 1 au: 1.2706e5 lux (V -26.74); inverse square beyond" { checkStar() }
+
+-- ---------- Lambert ----------
+
+pure func checkLambertPhase() -> bool =
+  lambertPhase(0.0) == 1.0 && absf(lambertPhase(pi() / 2.0) - 1.0 / pi()) < 0.000000000000001
+  && absf(lambertPhase(pi())) < 0.000000000000001 && lambertPhase(pi()) >= 0.0
+  && lambertPhase(1.0) < lambertPhase(0.5) && lambertPhase(2.5) < lambertPhase(2.0)
+
+test "Lambert phase: Phi(0) = 1, Phi(pi/2) = 1/pi, Phi(pi) = 0, decreasing" { checkLambertPhase() }
+
+-- q = 2 int_0^pi Phi(a) sin a da = 3/2, by Simpson with 400 intervals.
+pure func simpson(f: (float) -> float, a: float, b: float, n: int, i: int, acc: float) -> float =
+  if i > n then acc * (b - a) / intToFloat(n) / 3.0
+  else {
+    let x = a + (b - a) * intToFloat(i) / intToFloat(n);
+    let w = if i == 0 || i == n then 1.0 else if i % 2 == 1 then 4.0 else 2.0;
+    simpson(f, a, b, n, i + 1, acc + w * f(x))
+  }
+
+pure func qIntegrand(a: float) -> float = 2.0 * lambertPhase(a) * sin(a)
+
+pure func checkPhaseIntegral() -> bool = absf(simpson(qIntegrand, 0.0, pi(), 400, 0, 0.0) - 1.5) < 0.0000001
+
+test "Lambert phase integral q = 3/2 (Russell 1916)" { checkPhaseIntegral() }
+
+pure func checkLambertRadiance() -> bool =
+  rel(lambertRadiance(0.3, 1000.0, 1.0), 300.0 / pi(), 0.000000000000001)
+  && rel(lambertRadiance(0.3, 1000.0, 0.5), 150.0 / pi(), 0.000000000000001)
+  && lambertRadiance(0.3, 1000.0, 0.0 - 0.2) == 0.0
+
+test "Lambert radiance rho E cos i / pi, zero on the night side" { checkLambertRadiance() }
+
+-- ---------- Minnaert ----------
+
+pure func checkMinnaertK1() -> bool =
+  absf(minnaertRadiance(0.7, 1.0, 5000.0, 0.8, 0.3) - lambertRadiance(0.7, 5000.0, 0.8)) <= 0.000000000000001 * lambertRadiance(0.7, 5000.0, 0.8)
+  && absf(minnaertRadiance(0.7, 1.0, 5000.0, 0.123, 0.987) - lambertRadiance(0.7, 5000.0, 0.123)) <= 0.000000000000001 * lambertRadiance(0.7, 5000.0, 0.123)
+  && minnaertRadiance(0.7, 1.0, 5000.0, 0.6, 0.0) == lambertRadiance(0.7, 5000.0, 0.6)
+
+test "Minnaert k = 1 equals Lambert to 1e-15 (also at the limb)" { checkMinnaertK1() }
+
+pure func checkMinnaertShape() -> bool =
+  rel(minnaertRadiance(0.5, 1.2, 1000.0, 0.5, 0.25), 0.5 * 1000.0 * pow(0.5, 1.2) * pow(0.25, 0.2) / pi(), 0.000000000000001)
+  && minnaertRadiance(0.5, 1.2, 1000.0, 0.0 - 0.1, 0.5) == 0.0
+  && minnaertRadiance(0.5, 1.2, 1000.0, 0.5, 0.0 - 0.1) == 0.0
+  && minnaertRadiance(0.5, 0.9, 1000.0, 0.5, 0.0) == 0.0
+  && minnaertRadiance(0.5, 1.2, 1000.0, 0.5, 0.0) == 0.0
+  -- k > 1 darkens the limb relative to Lambert at the same i
+  && minnaertRadiance(0.5, 1.2, 1000.0, 0.3, 0.3) < minnaertRadiance(0.5, 1.2, 1000.0, 0.3, 1.0)
+
+test "Minnaert rho E cos^k i cos^(k-1) e / pi; zero unlit, unseen or at the k < 1 limb" { checkMinnaertShape() }
+
+-- ---------- geometric and Bond albedo ----------
+
+pure func checkRoundTrip() -> bool =
+  absf(geometricAlbedoFromRho(rhoFromGeometricAlbedo(0.538, 1.0), 1.0) - 0.538) < 0.000000000001
+  && absf(geometricAlbedoFromRho(rhoFromGeometricAlbedo(0.499, 0.93), 0.93) - 0.499) < 0.000000000001
+  && absf(rhoFromGeometricAlbedo(geometricAlbedoFromRho(0.2, 1.37), 1.37) - 0.2) < 0.000000000001
+  && rhoFromGeometricAlbedo(0.538, 1.0) == 1.5 * 0.538
+
+test "rho <-> p round trip to 1e-12; Lambert rho = 3p/2" { checkRoundTrip() }
+
+-- The disc-integrated intensity at opposition, numerically: with mu = cos e
+-- = cos i, I = 2 pi R^2 int_0^1 L(mu, mu) mu dmu, which must equal p E R^2
+-- (the definition of geometric albedo). R = 1, E = 1.
+pure func discK(k: float, rho: float, mu: float) -> float = 2.0 * pi() * minnaertRadiance(rho, k, 1.0, mu, mu) * mu
+
+pure func disc09(mu: float) -> float = discK(0.9, rhoFromGeometricAlbedo(0.4, 0.9), mu)
+pure func disc10(mu: float) -> float = discK(1.0, rhoFromGeometricAlbedo(0.4, 1.0), mu)
+pure func disc13(mu: float) -> float = discK(1.3, rhoFromGeometricAlbedo(0.4, 1.3), mu)
+
+pure func checkDiscIntegral() -> bool =
+  absf(simpson(disc09, 0.0, 1.0, 2000, 0, 0.0) - 0.4) < 0.00001
+  && absf(simpson(disc10, 0.0, 1.0, 2000, 0, 0.0) - 0.4) < 0.0000001
+  && absf(simpson(disc13, 0.0, 1.0, 2000, 0, 0.0) - 0.4) < 0.00001
+
+test "rhoFromGeometricAlbedo: the opposition disc integral of the Minnaert sphere equals p" { checkDiscIntegral() }
+
+-- Bond albedo, numerically: reflected power over the lit hemisphere
+-- (plane albedo int L cos e dOmega / (E mu0), integrated over the disc of
+-- incidence) / incident power E pi R^2. Plane albedo of a Minnaert surface:
+-- 2 rho mu0^(k-1) / (k + 1); sphere: int_0^1 planeAlb(mu0) mu0 2 dmu0.
+pure func planeAlbedo(rho: float, k: float, mu0: float) -> float {
+  -- int over the hemisphere: 2 pi int_0^1 (rho mu0^k mu^(k-1) / pi) mu dmu, by Simpson
+  let f = \mu. 2.0 * minnaertRadiance(rho, k, 1.0, mu0, mu) * pi() * mu;
+  simpson(f, 0.0, 1.0, 400, 0, 0.0) / mu0
+}
+
+pure func sphereBond(rho: float, k: float) -> float {
+  let g = \mu0. 2.0 * planeAlbedo(rho, k, mu0) * mu0;
+  simpson(g, 0.000001, 1.0, 200, 0, 0.0)
+}
+
+pure func checkBond() -> bool =
+  absf(sphereBond(0.6, 1.0) - bondAlbedo(0.6, 1.0)) < 0.00001
+  && absf(sphereBond(0.6, 1.25) - bondAlbedo(0.6, 1.25)) < 0.0001
+  && bondAlbedo(0.6, 1.0) == 0.6
+  && rel(bondFromGeometricAlbedo(0.538, 1.0), 1.5 * 0.538, 0.000000000000001)
+
+test "Bond albedo 4 rho / (k + 1)^2 (Lambert: A_B = rho = 3p/2), checked by a sphere integral" { checkBond() }
+
+-- ---------- Minnaert phase ----------
+
+pure func checkMinnaertPhase() -> bool =
+  minnaertPhase(0.0, 0.9) == 1.0 && minnaertPhase(0.0, 1.3) == 1.0
+  && absf(minnaertPhase(0.7, 1.0) - lambertPhase(0.7)) < 0.000000001
+  && absf(minnaertPhase(2.0, 1.0) - lambertPhase(2.0)) < 0.000000001
+  && absf(minnaertPhase(pi(), 1.2)) < 0.000000000001
+  && minnaertPhase(1.0, 1.3) < minnaertPhase(0.5, 1.3)
+  && phaseFunction(0.7, 1.0) == lambertPhase(0.7) && phaseFunction(0.7, 1.2) == minnaertPhase(0.7, 1.2)
+
+test "Minnaert phase: 1 at opposition, Lambert's for k = 1, 0 at pi" { checkMinnaertPhase() }
+
+-- ---------- Jupiter's magnitude ----------
+
+pure func jupV(r: float, d: float, alphaDeg: float) -> float =
+  vOf(discIlluminance(sunE1au(), 0.538, 71492.0, r, d * 149597870.7, alphaDeg * pi() / 180.0, 1.0))
+
+pure func checkJupiterIdeal() -> bool {
+  let v = jupV(5.20, 4.20, 0.0);
+  let vMH = 5.0 * log10(5.20 * 4.20) - 9.395;
+  absf(v - (0.0 - 2.77)) < 0.01 && absf(v - vMH) < 0.1 && v < 0.0 - 2.7 && v > 0.0 - 2.9
+}
+
+test "Jupiter at opposition (r 5.20, delta 4.20, p 0.538): V -2.77, Mallama-Hilton -2.70" { checkJupiterIdeal() }
+
+pure func checkJupiterHorizons() -> bool = absf(jupV(4.974517268850, 3.98256409999321, 0.2857) - (0.0 - 2.910)) < 0.1
+
+test "Jupiter 2023-11-03: V within 0.1 of JPL Horizons -2.910" { checkJupiterHorizons() }
+
+pure func checkDiscScaling() -> bool {
+  let e0 = discIlluminance(sunE1au(), 0.5, 1000.0, 2.0, 1000000.0, 0.0, 1.0);
+  rel(e0, sunE1au() * 0.5 * 0.000001 / 4.0, 0.000000000000001)
+  && rel(discIlluminance(sunE1au(), 0.5, 1000.0, 2.0, 1000000.0, pi() / 2.0, 1.0), e0 / pi(), 0.000000000000001)
+  && discIlluminance(sunE1au(), 0.5, 1000.0, 2.0, 1000000.0, 1.0, 1.2) == e0 * minnaertPhase(1.0, 1.2)
+}
+
+test "disc illuminance e1AU p (R/d)^2 Phi(alpha) / r^2" { checkDiscScaling() }
