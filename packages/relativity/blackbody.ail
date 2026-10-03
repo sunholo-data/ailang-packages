@@ -151,3 +151,30 @@ export pure func photopicRadiance(kelvin: float) -> float
   then 683.0 * 119104.29723971884 * luminance(kelvin)
   else 0.0
 }
+
+-- Stefan-Boltzmann constant sigma, W m^-2 K^-4 (CODATA 2018, the exact SI
+-- value 2 pi^5 k^4 / (15 h^3 c^2) = 5.670374419...e-8 rounded to 10 digits).
+-- A blackbody surface at T emits sigma T^4 (W/m^2), radiance sigma T^4 / pi.
+export pure func stefanBoltzmannSI() -> float = 0.00000005670374419
+
+-- Luminous efficacy of blackbody radiation at T (lm/W): the photopic
+-- luminance per unit radiance, pi photopicRadiance(T) / (sigma T^4). It is
+-- the same for any greybody at T, so a source of radiance L (W m^-2 sr^-1)
+-- and a blackbody-shaped spectrum at T has luminance L x luminousEfficacy(T)
+-- (cd/m^2). Uses this module's ybar fit (360-830 nm, 1 nm); the 1 nm sum
+-- and the fit set its accuracy (see photopicRadiance: within 0.5% for
+-- 1,900-6,000 K, about 1% at 800 K, too low below about 700 K). Checks
+-- (tools/glow_spectrum_ref.py): peak 95.455 lm/W at 6600 K (the CIE
+-- blackbody maximum is about 95 lm/W near 6,600 K), 0.0233 lm/W at 1357.5 K,
+-- 43.68 lm/W at 14,114 K. Finite and >= 0 for every input: T <= 0, NaN and
+-- temperatures whose visible light underflows (below about 25 K) give 0; at
+-- very high T it falls as 1/T^3 and is 0 at +Inf.
+export pure func luminousEfficacy(kelvin: float) -> float
+  ensures { result >= 0.0 }
+{
+  let p = photopicRadiance(kelvin);
+  if p > 0.0 then {
+    let t2 = kelvin * kelvin;
+    3.141592653589793 * p / (stefanBoltzmannSI() * t2 * t2)
+  } else 0.0
+}

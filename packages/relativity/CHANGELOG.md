@@ -1,5 +1,62 @@
 # Changelog
 
+## 0.8.0
+
+Feature: the wall glow's spectrum (stapledons ledger D-30, attended
+2026-10-03), so a renderer takes the glow's colour and luminance from the
+package instead of GDScript (the M4.2 evaluation's gate-3 finding). Additive;
+every existing function and digest is bit-identical to 0.7.0
+(`glowEmittanceAt` is parameterised by eps, so the canon change of D-29,
+eps 1e-9 -> 1e-11, lives in callers and check values, not here). Canon:
+stapledons-design physics/higgs-bubble.md section 6, HB-95 to HB-111.
+
+- **Model.** The wall is a greybody of emissivity eps. By Kirchhoff's law it
+  emits light as well as it absorbs it, and the wall is transparent, so the
+  emissivity is the same small eps that thermalises the impacts. The energy
+  balance eps K cos theta = eps sigma T^4 cancels eps:
+  T = (K max(0, cos theta) / sigma)^(1/4), the temperature a black surface
+  would reach if it thermalised the whole forward beam. eps and fIn set only
+  the brightness: the inner face emits eps fIn sigma T^4 = `glowEmittanceAt`.
+  Game approximation: real GeV impacts give hadronic cascades, not a Planck
+  spectrum. Rejected: T from the per-particle energy (about 7e13 K at 0.99c,
+  a fixed Rayleigh-Jeans blue) and a black wall radiating only the glow flux
+  (2 K at 0.99c, invisible at every speed).
+- **medium**: `glowTemperatureAt(n, phi, cosTheta)` (K), by two square roots
+  (no pow; VM = interpreter bit for bit): 290.27 K at 0.5c, 1357.52 K at 0.99c,
+  2481.90 K at 0.999c, 14114.02 K at 1 - beta = 1e-6 (pole); cos^(1/4) off
+  the pole; 0 at rest, aft, on the equator and for phi < 0; NaN in, NaN out.
+- **medium**: `glowRadianceAt(n, phi, eps, fIn, cosTheta)` = `glowEmittanceAt`
+  / pi (Lambertian wall, W m^-2 sr^-1).
+- **medium**: `glowEfficacyAt(n, phi, cosTheta)` (lm/W) = `luminousEfficacy`
+  at the glow temperature: 0.02331 at the 0.99c pole, 43.68 at the cap (the
+  M4.2 placeholder white was 182.57).
+- **medium**: `glowLuminanceAt(n, phi, eps, fIn, cosTheta)` (cd/m^2) =
+  radiance x efficacy. At eps 1e-11, n 0.1 cm^-3, fIn 1/2: 7.1437e-9 cd/m^2
+  on the 0.99c pole (1.65e-4 of the 23.5 mag/arcsec^2 dark sky, HB-105) and
+  0.15643 at the cap (3.61e3, HB-107); the pole reaches the dark sky at
+  gamma 24.7 (HB-108).
+- **blackbody**: `stefanBoltzmannSI()` = 5.670374419e-8 and
+  `luminousEfficacy(kelvin)` = pi photopicRadiance(T) / (sigma T^4) (lm/W),
+  finite and >= 0 for every input (0 at T <= 0, NaN, +Inf and below the
+  visible underflow near 25 K). 95.455 lm/W at 6600 K, the CIE blackbody
+  maximum (about 95 lm/W near 6,600 K).
+- Tests: `glow_spectrum_test.ail` (17 tests): temperature, radiance,
+  efficacy and luminance at 0.5c, 0.99c, 0.999c and the cap at 0 to 90 deg
+  against the oracle to 1e-12; sigma T^4 = K cos theta and emittance =
+  eps fIn sigma T^4; T = T_pole cos^(1/4); the canon rows HB-95 to HB-110 to
+  their printed digits; the dark-sky and Draper crossings bracketed; edges
+  (rest, aft, equator, phi < 0, clamp, NaN, eps 0, linear in eps); finite,
+  >= 0 and <= the pole over 26 x 11 points of [0, phiCap] x [-1, 1].
+- tools/glow_spectrum_ref.py (output tools/glow_spectrum_ref.out): the
+  oracle, 60-digit Decimal. sigma from exact SI h, k, c (agrees to 3e-11);
+  Stefan-Boltzmann checked by integrating Planck's law in the package's
+  normalisation (6e-8, from the package's rounded c2); the 1 nm sum against
+  a 0.1 nm Simpson integral (5e-9 at 1357 K, 5e-7 at 14,114 K, reported);
+  efficacy maximum 95.46 lm/W near 6,650 K. `--check` asserts the canon
+  digits.
+- `_smoke.ail`: `glowSpectrumDigest(n)` (interpreter and strict VM print the
+  same bits) and a spectrum check in `main`.
+
 ## 0.7.0
 
 Feature: the apparent disc of a nearby sphere, and hover power. Additive; every
