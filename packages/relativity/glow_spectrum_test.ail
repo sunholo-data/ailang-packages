@@ -1,12 +1,14 @@
--- 0.8.0: the wall glow's spectrum (stapledons ledger D-30, D-29;
--- stapledons-design physics/higgs-bubble.md section 6, HB-95 to HB-110).
+-- 0.8.0: the wall glow's spectrum (stapledons ledger D-30, D-29 and its
+-- follow-up; stapledons-design physics/higgs-bubble.md section 6, HB-95 to HB-112).
+-- 0.8.1: the canon rows are at eps = 1e-10 (HB-111); 0.8.0 asserted the first D-29
+-- value 1e-11 under the same HB labels.
 -- medium.glowTemperatureAt, glowRadianceAt, glowEfficacyAt, glowLuminanceAt;
 -- blackbody.stefanBoltzmannSI, luminousEfficacy.
 --
 -- Every expected number comes from tools/glow_spectrum_ref.py (60-digit
 -- Decimal; output in tools/glow_spectrum_ref.out) or from the canon rows,
 -- never from the code under test. n = 0.1 cm^-3 (HB-3), f_in = 1/2,
--- eps = 1e-11 (D-29).
+-- eps = 1e-10 (HB-111, the D-29 follow-up).
 
 module sunholo/relativity/glow_spectrum_test
 
@@ -25,7 +27,7 @@ pure func inf() -> float = 1.0e308 * 10.0
 pure func finiteNonNeg(x: float) -> bool = x == x && x >= 0.0 && x < inf()
 
 pure func nIsm() -> float = 100000.0
-pure func eps11() -> float = 0.00000000001
+pure func eps10() -> float = 0.0000000001
 pure func phi05() -> float = atanh(0.5)
 pure func phi099() -> float = 2.6466524123622457
 pure func phi0999() -> float = atanh(0.999)
@@ -37,7 +39,7 @@ pure func cos120() -> float = -0.49999999999999983
 pure func darkSky() -> float = luminanceFromSurfaceMag(23.5)
 
 pure func tAt(phi: float, c: float) -> float = glowTemperatureAt(nIsm(), phi, c)
-pure func lumAt(phi: float, c: float) -> float = glowLuminanceAt(nIsm(), phi, eps11(), 0.5, c)
+pure func lumAt(phi: float, c: float) -> float = glowLuminanceAt(nIsm(), phi, eps10(), 0.5, c)
 
 -- ---------- constants and blackbody efficacy ----------
 
@@ -121,7 +123,7 @@ pure func checkStefanBoltzmann() -> bool =
   sbHolds(phi05(), 1.0) && sbHolds(phi099(), 1.0) && sbHolds(phiCap(), 1.0)
     && sbHolds(phi099(), cos45()) && sbHolds(phiCap(), cos80())
     -- eps and fIn cancel: the wall is a greybody of emissivity eps fIn at T
-    && rel(glowEmittanceAt(nIsm(), phi099(), eps11(), 0.5, 1.0), eps11() * 0.5 * stefanBoltzmannSI() * tAt(phi099(), 1.0) * tAt(phi099(), 1.0) * tAt(phi099(), 1.0) * tAt(phi099(), 1.0), 0.000000000000005)
+    && rel(glowEmittanceAt(nIsm(), phi099(), eps10(), 0.5, 1.0), eps10() * 0.5 * stefanBoltzmannSI() * tAt(phi099(), 1.0) * tAt(phi099(), 1.0) * tAt(phi099(), 1.0) * tAt(phi099(), 1.0), 0.000000000000005)
     && rel(tAt(phi099(), cos45()), tAt(phi099(), 1.0) * sqrt(sqrt(cos45())), 0.000000000000001)
 
 test "sigma T^4 = K cos theta (eps cancels); emittance = eps fIn sigma T^4; T = T_pole cos^1/4" { checkStefanBoltzmann() }
@@ -148,11 +150,11 @@ test "glowTemperatureAt: NaN cos theta or phi gives NaN" { checkTemperatureNaN()
 -- ---------- radiance, efficacy, luminance ----------
 
 pure func checkRadiance() -> bool =
-  glowRadianceAt(nIsm(), phi099(), eps11(), 0.5, 1.0) == glowEmittanceAt(nIsm(), phi099(), eps11(), 0.5, 1.0) / 3.141592653589793
-    && glowRadianceAt(nIsm(), phiCap(), eps11(), 0.5, cos45()) == glowEmittanceAt(nIsm(), phiCap(), eps11(), 0.5, cos45()) / 3.141592653589793
-    && r12(glowRadianceAt(nIsm(), phi099(), eps11(), 0.5, 1.0), 0.00000030649348701220186)
-    && r12(glowRadianceAt(nIsm(), phiCap(), eps11(), 0.5, 1.0), 0.0035812545646862204)
-    && glowRadianceAt(nIsm(), phi099(), eps11(), 0.5, cos120()) == 0.0
+  glowRadianceAt(nIsm(), phi099(), eps10(), 0.5, 1.0) == glowEmittanceAt(nIsm(), phi099(), eps10(), 0.5, 1.0) / 3.141592653589793
+    && glowRadianceAt(nIsm(), phiCap(), eps10(), 0.5, cos45()) == glowEmittanceAt(nIsm(), phiCap(), eps10(), 0.5, cos45()) / 3.141592653589793
+    && r12(glowRadianceAt(nIsm(), phi099(), eps10(), 0.5, 1.0), 0.0000030649348701220186)
+    && r12(glowRadianceAt(nIsm(), phiCap(), eps10(), 0.5, 1.0), 0.035812545646862204)
+    && glowRadianceAt(nIsm(), phi099(), eps10(), 0.5, cos120()) == 0.0
 
 test "glowRadianceAt = glowEmittanceAt / pi (Lambertian wall); 0.99c and cap poles (oracle)" { checkRadiance() }
 
@@ -171,32 +173,32 @@ pure func checkGlowEfficacy() -> bool =
 test "glowEfficacyAt: 0.0233 lm/W at the 0.99c pole, 43.7 at the cap (HB-100, 101; oracle); 0 at rest, aft, NaN" { checkGlowEfficacy() }
 
 pure func checkLuminance() -> bool =
-  r12(lumAt(phi099(), 1.0), 0.000000007143664288681881)
-    && r12(lumAt(phi099(), cos45()), 0.00000000143848003412958)
-    && r12(lumAt(phi099(), cos80()), 0.0000000000005036628739143385)
-    && r12(lumAt(phi0999(), 1.0), 0.000026189628614000476)
-    && r12(lumAt(phi0999(), cos80()), 0.00000010955990202507377)
-    && r12(lumAt(phiCap(), 1.0), 0.15643160647071194)
-    && r12(lumAt(phiCap(), cos45()), 0.12851974663522478)
-    && r12(lumAt(phiCap(), cos80()), 0.050472870723428855)
-    && r12(lumAt(phi05(), 1.0), 0.00000000000000000000000000000000017533930901260934)
-    && lumAt(phi099(), 1.0) == glowRadianceAt(nIsm(), phi099(), eps11(), 0.5, 1.0) * glowEfficacyAt(nIsm(), phi099(), 1.0)
+  r12(lumAt(phi099(), 1.0), 0.00000007143664288681882)
+    && r12(lumAt(phi099(), cos45()), 0.000000014384800341295801)
+    && r12(lumAt(phi099(), cos80()), 0.0000000000050366287391433855)
+    && r12(lumAt(phi0999(), 1.0), 0.00026189628614000477)
+    && r12(lumAt(phi0999(), cos80()), 0.0000010955990202507378)
+    && r12(lumAt(phiCap(), 1.0), 1.5643160647071195)
+    && r12(lumAt(phiCap(), cos45()), 1.2851974663522479)
+    && r12(lumAt(phiCap(), cos80()), 0.5047287072342885)
+    && r12(lumAt(phi05(), 1.0), 0.0000000000000000000000000000000017533930901260934)
+    && lumAt(phi099(), 1.0) == glowRadianceAt(nIsm(), phi099(), eps10(), 0.5, 1.0) * glowEfficacyAt(nIsm(), phi099(), 1.0)
 
-test "glowLuminanceAt at eps 1e-11 (D-29): 0.99c, 0.999c, cap, 0.5c (oracle, 1e-12); = radiance x efficacy" { checkLuminance() }
+test "glowLuminanceAt at eps 1e-10 (HB-111): 0.99c, 0.999c, cap, 0.5c (oracle, 1e-12); = radiance x efficacy" { checkLuminance() }
 
 pure func checkCanonLuminance() -> bool =
-  printed(glowEmittanceAt(nIsm(), phi099(), eps11(), 0.5, 1.0), 0.000000963, 0.0000000005)      -- HB-102
-    && printed(glowEmittanceAt(nIsm(), phiCap(), eps11(), 0.5, 1.0), 0.01125, 0.000005)       -- HB-103
-    && printed(lumAt(phi099(), 1.0), 0.00000000714, 0.000000000005)                            -- HB-104
-    && printed(lumAt(phi099(), 1.0) / darkSky(), 0.000165, 0.0000005)                          -- HB-105
-    && printed(lumAt(phiCap(), 1.0), 0.156, 0.0005)                                            -- HB-106
-    && printed(lumAt(phiCap(), 1.0) / darkSky(), 3610.0, 5.0)                                  -- HB-107
-    && printed(glowInwardFlux(nIsm(), phi099(), eps11(), 0.5), 0.000000241, 0.0000000005)      -- HB-109
-    && printed(glowInwardFlux(nIsm(), phiCap(), eps11(), 0.5), 0.00281, 0.000005)              -- HB-110
-    && r12(lumAt(phi099(), 1.0) / darkSky(), 0.00016484309904555818)
-    && r12(lumAt(phiCap(), 1.0) / darkSky(), 3609.7260113640355)
+  printed(glowEmittanceAt(nIsm(), phi099(), eps10(), 0.5, 1.0), 0.00000963, 0.000000005)      -- HB-102
+    && printed(glowEmittanceAt(nIsm(), phiCap(), eps10(), 0.5, 1.0), 0.1125, 0.00005)       -- HB-103
+    && printed(lumAt(phi099(), 1.0), 0.0000000714, 0.00000000005)                            -- HB-104
+    && printed(lumAt(phi099(), 1.0) / darkSky(), 0.00165, 0.000005)                          -- HB-105
+    && printed(lumAt(phiCap(), 1.0), 1.56, 0.005)                                            -- HB-106
+    && printed(lumAt(phiCap(), 1.0) / darkSky(), 36100.0, 50.0)                              -- HB-107
+    && printed(glowInwardFlux(nIsm(), phi099(), eps10(), 0.5), 0.00000241, 0.000000005)      -- HB-109
+    && printed(glowInwardFlux(nIsm(), phiCap(), eps10(), 0.5), 0.0281, 0.00005)              -- HB-110
+    && r12(lumAt(phi099(), 1.0) / darkSky(), 0.001648430990455582)
+    && r12(lumAt(phiCap(), 1.0) / darkSky(), 36097.26011364036)
 
-test "canon HB-102..110: the 0.99c pole is 1.65e-4 of the 23.5 mag/arcsec^2 dark sky, the cap pole 3.61e3" { checkCanonLuminance() }
+test "canon HB-102..110 at eps 1e-10: the 0.99c pole is 1.65e-3 of the 23.5 mag/arcsec^2 dark sky, the cap pole 3.61e4" { checkCanonLuminance() }
 
 pure func checkLuminanceEdges() -> bool {
   let a = lumAt(phi099(), nan());
@@ -204,20 +206,21 @@ pure func checkLuminanceEdges() -> bool {
   a != a && b != b
     && lumAt(0.0, 1.0) == 0.0 && lumAt(phiCap(), cos120()) == 0.0 && lumAt(phiCap(), 0.0) == 0.0
     && glowLuminanceAt(nIsm(), phiCap(), 0.0, 0.5, 1.0) == 0.0
-    -- linear in eps: the 1e-9 (D-15) glow is exactly 100 x brighter at the same spectrum
-    && rel(glowLuminanceAt(nIsm(), phi099(), 0.000000001, 0.5, 1.0), 100.0 * lumAt(phi099(), 1.0), 0.000000000000005)
+    -- linear in eps: the 1e-9 (D-15) glow is exactly 10 x brighter at the same spectrum
+    && rel(glowLuminanceAt(nIsm(), phi099(), 0.000000001, 0.5, 1.0), 10.0 * lumAt(phi099(), 1.0), 0.000000000000005)
 }
 
 test "glowLuminanceAt: NaN propagates; 0 at rest, aft, on the equator, eps 0; linear in eps" { checkLuminanceEdges() }
 
--- the dark-sky crossing (HB-108): the pole reaches the dark sky between gamma 24 and 25.5
+-- the dark-sky crossing (HB-108, gamma 16.2) and the visibility threshold (HB-112, 0.3 x dark sky at gamma 13.5)
 pure func phiOfGamma(g: float) -> float = atanh(sqrt(1.0 - 1.0 / (g * g)))
 
 pure func checkDarkSkyCrossing() -> bool =
-  lumAt(phiOfGamma(24.6), 1.0) < darkSky() && lumAt(phiOfGamma(24.8), 1.0) > darkSky()
+  lumAt(phiOfGamma(16.15), 1.0) < darkSky() && lumAt(phiOfGamma(16.35), 1.0) > darkSky()
+    && lumAt(phiOfGamma(13.4), 1.0) < 0.3 * darkSky() && lumAt(phiOfGamma(13.55), 1.0) > 0.3 * darkSky()
     && tAt(phiOfGamma(2.88), 1.0) < 798.0 && tAt(phiOfGamma(2.89), 1.0) > 798.0   -- HB-99 Draper point at gamma 2.89
 
-test "canon HB-108: the pole luminance crosses the dark sky at gamma 24.7; HB-99: Draper point at gamma 2.89" { checkDarkSkyCrossing() }
+test "canon HB-108: pole = dark sky at gamma 16.2; HB-112: 0.3 x dark sky at gamma 13.5; HB-99: Draper point at gamma 2.89" { checkDarkSkyCrossing() }
 
 -- ---------- finite over the whole range ----------
 
@@ -228,7 +231,7 @@ pure func rowOk(phi: float, j: int, tp: float, lp: float) -> bool =
     let t = tAt(phi, c);
     let l = lumAt(phi, c);
     finiteNonNeg(t) && t <= tp && finiteNonNeg(l) && l <= lp
-      && finiteNonNeg(glowRadianceAt(nIsm(), phi, eps11(), 0.5, c))
+      && finiteNonNeg(glowRadianceAt(nIsm(), phi, eps10(), 0.5, c))
       && rowOk(phi, j + 1, tp, lp)
   }
 

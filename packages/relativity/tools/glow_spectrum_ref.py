@@ -38,7 +38,7 @@ Independence from the package:
 Usage:
   python3 tools/glow_spectrum_ref.py          # print every check row
   python3 tools/glow_spectrum_ref.py --check  # also assert the canon digits
-                                              # (higgs-bubble.md HB-95..HB-110)
+                                              # (higgs-bubble.md HB-95..HB-112)
                                               # and the relations; exit 1 on
                                               # mismatch
 """
@@ -54,7 +54,8 @@ H_SI = D("6.62607015e-34")             # J s, exact
 K_B = D("1.380649e-23")                # J/K, exact
 M_P = D(1.67262192369e-27)             # kg, the package's float64 constant
 N_ISM = D(100000)                      # m^-3 (0.1 cm^-3, HB-3)
-EPS = D(1e-11)                         # D-29 canon (float64 value)
+EPS = D(1e-10)                         # HB-111 canon since the D-29 follow-up (float64 value)
+EPS_D29 = D(1e-11)                     # the first D-29 value (0.8.0 check rows)
 EPS_OLD = D(1e-9)                      # D-15, superseded by D-29
 F_IN = D(0.5)
 SIGMA_PKG = D(5.670374419e-8)          # the package's float64 constant
@@ -284,7 +285,7 @@ def main():
             c = cos_deg(deg)
             t = temperature(N_ISM, phi, c)
             eff = efficacy(t) if t > 0 else D(0)
-            for epsname, eps in (("1e-11", EPS), ("1e-9", EPS_OLD)):
+            for epsname, eps in (("1e-10", EPS), ("1e-11", EPS_D29), ("1e-9", EPS_OLD)):
                 e = emittance(N_ISM, phi, eps, F_IN, c)
                 rad = e / PI
                 lum = rad * eff
@@ -304,9 +305,11 @@ def main():
     print("thresholds:")
     g_draper = gamma_where(lambda p: temperature(N_ISM, float(p), 1.0), D(798))
     g_dark = gamma_where(lambda p: pole_luminance(float(p), EPS), ld)
+    g_03 = gamma_where(lambda p: pole_luminance(float(p), EPS), D("0.3") * ld)
     g_dark_old = gamma_where(lambda p: pole_luminance(float(p), EPS_OLD), ld)
     print(f"  gamma where the glow pole reaches the Draper point 798 K: {fmt(g_draper)}")
-    print(f"  gamma where the pole luminance equals the dark sky, eps 1e-11: {fmt(g_dark)}")
+    print(f"  gamma where the pole luminance equals the dark sky, eps 1e-10: {fmt(g_dark)}")
+    print(f"  gamma where the pole luminance reaches 0.3 of the dark sky, eps 1e-10 (HB-112): {fmt(g_03)}")
     print(f"  the same at eps 1e-9 (D-15, superseded): {fmt(g_dark_old)}")
     lum099 = pole_luminance(PHI099, EPS)
     eps_13 = D("1.3") * ld / (lum099 / EPS)
@@ -329,15 +332,17 @@ def main():
         printed(g_draper, "2.89", "0.005", "HB-99 gamma at Draper")
         printed(efficacy(temperature(N_ISM, PHI099, 1.0)), "0.0233", "0.00005", "HB-100 efficacy 0.99c")
         printed(efficacy(temperature(N_ISM, PHICAP, 1.0)), "43.7", "0.05", "HB-101 efficacy cap")
-        printed(emittance(N_ISM, PHI099, EPS, F_IN, 1.0), "9.63e-7", "5e-10", "HB-102 pole emittance 0.99c")
-        printed(emittance(N_ISM, PHICAP, EPS, F_IN, 1.0), "0.01125", "5e-6", "HB-103 pole emittance cap")
-        printed(lum099, "7.14e-9", "5e-12", "HB-104 pole luminance 0.99c")
-        printed(lum099 / ld, "1.65e-4", "5e-7", "HB-105 0.99c / dark sky")
-        printed(pole_luminance(PHICAP, EPS), "0.156", "0.0005", "HB-106 pole luminance cap")
-        printed(pole_luminance(PHICAP, EPS) / ld, "3.61e3", "5", "HB-107 cap / dark sky")
-        printed(g_dark, "24.7", "0.05", "HB-108 gamma where pole = dark sky")
-        printed(emittance(N_ISM, PHI099, EPS, F_IN, 1.0) / 4, "2.41e-7", "5e-10", "HB-109 mean inward glow 0.99c")
-        printed(emittance(N_ISM, PHICAP, EPS, F_IN, 1.0) / 4, "2.81e-3", "5e-6", "HB-110 mean inward glow cap")
+        printed(emittance(N_ISM, PHI099, EPS, F_IN, 1.0), "9.63e-6", "5e-9", "HB-102 pole emittance 0.99c")
+        printed(emittance(N_ISM, PHICAP, EPS, F_IN, 1.0), "0.1125", "5e-5", "HB-103 pole emittance cap")
+        printed(lum099, "7.14e-8", "5e-11", "HB-104 pole luminance 0.99c")
+        printed(lum099 / ld, "1.65e-3", "5e-6", "HB-105 0.99c / dark sky")
+        printed(pole_luminance(PHICAP, EPS), "1.56", "0.005", "HB-106 pole luminance cap")
+        printed(pole_luminance(PHICAP, EPS) / ld, "3.61e4", "50", "HB-107 cap / dark sky")
+        printed(g_dark, "16.2", "0.05", "HB-108 gamma where pole = dark sky")
+        printed(emittance(N_ISM, PHI099, EPS, F_IN, 1.0) / 4, "2.41e-6", "5e-9", "HB-109 mean inward glow 0.99c")
+        printed(emittance(N_ISM, PHICAP, EPS, F_IN, 1.0) / 4, "2.81e-2", "5e-5", "HB-110 mean inward glow cap")
+        printed(g_03, "13.5", "0.05", "HB-112 gamma where pole = 0.3 x dark sky")
+        printed(EPS, "1e-10", "1e-25", "HB-111 eps")
         printed(1 / (F_IN * kinetic_flux(N_ISM, PHICAP) / 4), "3.6e-9", "5e-11", "HB-61 unchanged")
         printed(kinetic_flux(N_ISM, PHI099), "1.93e5", "500", "HB-45 unchanged")
         printed(kinetic_flux(N_ISM, PHICAP), "2.25e9", "5e6", "HB-46 unchanged")

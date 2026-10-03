@@ -144,8 +144,9 @@ let vLim = limitingMagnitude(skyLum, 2.0);          -- faintest visible star, fi
   temperature (0.0233 lm/W at 0.99c, 43.7 at the cap), and `glowLuminanceAt`
   = radiance x efficacy in cd/m^2. Colour: `blackbody.rgbUnitLuminance(T)`;
   guard it with luminance > 0, since below about 25 K the visible integral is
-  0 and the colour is 0/0. Canon eps is 1e-11 (D-29): the 0.99c pole is then
-  1.65e-4 of a 23.5 mag/arcsec^2 dark sky and the cap pole 3.61e3 of it.
+  0 and the colour is 0/0. Canon eps is 1e-10 (HB-111, the D-29 follow-up): the 0.99c pole is then
+  1.65e-3 of a 23.5 mag/arcsec^2 dark sky, it reaches 0.3 of it at gamma 13.5
+  (HB-112) and the cap pole is 3.61e4 of it.
   The blackbody is a game stand-in (real GeV impacts are not thermal).
 - `hoverPower(mEffKg, gMs2)` = m_eff |g| c (W): holding still (or on a
   planned line) against an unfelt acceleration g costs the photon drive
