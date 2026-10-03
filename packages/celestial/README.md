@@ -16,7 +16,9 @@ ailang pkg-docs sunholo/celestial   # AGENT.md: usage, units, pitfalls
   (the exact velocity of an orbit whose elements drift), vector helpers.
 - `ephemeris`: the JPL approximate planetary elements (Standish & Williams
   1992, Tables 2a/2b, valid 3000 BC-3000 AD; outside it a labelled mean orbit),
-  JPL satellite mean elements on their Laplace planes, `julianDate`.
+  JPL satellite mean elements on their Laplace planes, `julianDate`, and
+  the Earth and Moon split out of the Earth-Moon barycentre (`earthAt`,
+  `moonAt`, `earthMoonSplit`; DE440 mass ratio).
 - `frames`: ecliptic J2000 -> ICRS (IAU 2006 obliquity) -> galactic
   (Hipparcos 1997), and IAU WGCCRE 2015 pole and prime-meridian models.
 - `lighttime`: the retarded time and position of a source seen by an

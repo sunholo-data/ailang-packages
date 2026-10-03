@@ -7,7 +7,12 @@
 --   obliquity to orbit, NASA NSSDC fact sheets: Earth 23.44, Saturn 26.73 deg;
 --   the lunar distance extremes 356,375-406,720 km (Meeus ch. 50);
 --   the Moon's apsidal period 8.85 yr (3232.6 d) and Io's sidereal period
---   1.769137786 d (NSSDC Jovian satellite fact sheet).
+--   1.769137786 d (NSSDC Jovian satellite fact sheet);
+--   the Earth-Moon split (0.1.1): JPL Horizons (DE441) state vectors of the
+--   Earth relative to the EMB, the EMB and the Earth relative to the Sun and
+--   the Moon relative to the Earth on 2000-01-01.5, 2023-11-03.0 and
+--   2026-01-01.0 TDB (query in tools/orbits_ref.py), and DE440's
+--   EMRAT = 81.3005682214972154 (Park et al. 2021, AJ 161, 105).
 -- Fixtures: JPL SSD "Approximate Positions of the Planets" Tables 2a/2b
 -- (Standish & Williams 1992) and "Planetary Satellite Mean Elements"
 -- (Moon DE405/LE405, ecliptic; Io JUP365, Laplace), copied digit for digit.
@@ -16,9 +21,10 @@
 module sunholo/celestial/ephemeris_test
 
 import std/math (sin, cos, atan2, intToFloat)
-import ./kepler (Vec3, State, Orbit, stateFromElements, norm, dot, sub, scale, absf, pi, twoPi, wrapPi)
+import ./kepler (Vec3, State, Orbit, stateFromElements, norm, dot, add, sub, scale, absf, pi, twoPi, wrapPi)
 import ./frames (PoleModel, poleAndSpin, unitFromAngles, equatorialToEcliptic, obliquityJ2000)
-import ./ephemeris (MeanElements, ElementRates, Ephem, SatElements, elementsAt, planetAt, julianDate, windowStartJd, windowEndJd, satelliteElementsAt, satelliteAt, auKm)
+import ./ephemeris (MeanElements, ElementRates, Ephem, SatElements, EarthMoon, elementsAt, planetAt, julianDate, windowStartJd, windowEndJd, satelliteElementsAt, satelliteAt, auKm,
+  earthMoonMu, earthMoonMassRatio, earthMoonSplit, earthAt, moonAt)
 
 pure func rad(d: float) -> float = d * 3.141592653589793 / 180.0
 
@@ -262,3 +268,133 @@ pure func satVelOk(s: SatElements, jd: float, h: float) -> bool {
 }
 
 test "satelliteAt velocity equals d(pos)/dt (Moon, Io)" { satVelOk(moon(), 2455000.25, 0.0009765625) && satVelOk(io(), 2455000.25, 0.0001220703125) }
+
+-- ---------- the Earth-Moon barycentre split (0.1.1) ----------
+
+-- JPL Horizons (DE441) vectors, ecliptic J2000 (ICRF), AU and AU/day, TDB,
+-- copied digit for digit (query in tools/orbits_ref.py): hEmb = EMB (3) from
+-- the Sun (500@10); hEarth = Earth (399) from the Sun; hEarthEmb = Earth
+-- from the EMB (500@3); hMoonGeo = Moon (301) from the Earth (500@399).
+pure func hEmbJ2000() -> State =
+  { pos: { x: (0.0 - 0.1771587841839055), y: 0.9672193524609504, z: (0.0 - 0.000001139275508446145) },
+    vel: { x: (0.0 - 0.01720310905522688), y: (0.0 - 0.003163911860749114), z: 0.00000002424167134816753 } }
+
+pure func hEarthJ2000() -> State =
+  { pos: { x: (0.0 - 0.1771350992727098), y: 0.9672416867665306, z: (0.0 - 0.000004085281582511366) },
+    vel: { x: (0.0 - 0.01720762506872895), y: (0.0 - 0.003158782144324866), z: 0.0000001049888594613343 } }
+
+pure func hEarthEmbJ2000() -> State =
+  { pos: { x: 0.00002368491119575935, y: 0.00002233430558007885, z: (0.0 - 0.000002946006074095761) },
+    vel: { x: (0.0 - 0.000004516013502075859), y: 0.000005129716424248584, z: 0.00000008074718811302325 } }
+
+pure func hMoonGeoJ2000() -> State =
+  { pos: { x: (0.0 - 0.001949281649686695), y: (0.0 - 0.001838126040073046), z: 0.0002424579738820632 },
+    vel: { x: 0.0003716704773167968, y: (0.0 - 0.0004221785765308054), z: (0.0 - 0.000006645539463989926) } }
+
+pure func hEmb2023() -> State =
+  { pos: { x: 0.7603704946134947, y: 0.6374383439575997, z: (0.0 - 0.00004026850683718436) },
+    vel: { x: (0.0 - 0.01133301968054092), y: 0.01311972952785614, z: (0.0 - 0.0000006519930732839620) } }
+
+pure func hEarth2023() -> State =
+  { pos: { x: 0.7603780157594194, y: 0.6374072852014431, z: (0.0 - 0.00004315879098775194) },
+    vel: { x: (0.0 - 0.01132617936003689), y: 0.01312101721737500, z: (0.0 - 0.0000008049544182482179) } }
+
+pure func hEarthEmb2023() -> State =
+  { pos: { x: 0.000007521145924737144, y: (0.0 - 0.00003105875615656290), z: (0.0 - 0.000002890284150579967) },
+    vel: { x: 0.000006840320504037754, y: 0.000001287689518855818, z: (0.0 - 0.0000001529613449632012) } }
+
+pure func hMoonGeo2023() -> State =
+  { pos: { x: (0.0 - 0.0006189945832826651), y: 0.002556153279938051, z: 0.0002378720279143189 },
+    vel: { x: (0.0 - 0.0005629622642994656), y: (0.0 - 0.0001059775790947002), z: 0.00001258880560639592 } }
+
+pure func hEmb2026() -> State =
+  { pos: { x: (0.0 - 0.1742697585483051), y: 0.9677856743241913, z: (0.0 - 0.00005686608136245510) },
+    vel: { x: (0.0 - 0.01721159519305110), y: (0.0 - 0.003113653580027250), z: 0.0000002763727760594844 } }
+
+pure func hEarth2026() -> State =
+  { pos: { x: (0.0 - 0.1742814809205833), y: 0.9677589202546031, z: (0.0 - 0.00005944511017526243) },
+    vel: { x: (0.0 - 0.01720454736868129), y: (0.0 - 0.003116607022544302), z: 0.0000002371782782240443 } }
+
+pure func hEarthEmb2026() -> State =
+  { pos: { x: (0.0 - 0.00001172237227825803), y: (0.0 - 0.00002675406958804738), z: (0.0 - 0.000002579028812853566) },
+    vel: { x: 0.000007047824369809083, y: (0.0 - 0.000002953442517052326), z: (0.0 - 0.00000003919449783556250) } }
+
+pure func hMoonGeo2026() -> State =
+  { pos: { x: 0.0009647578994045626, y: 0.002201875129333777, z: 0.0002122555367574619 },
+    vel: { x: (0.0 - 0.0005800399503606030), y: 0.0002430699973629355, z: 0.000003225729443022998 } }
+
+pure func posErr(a: State, b: State) -> float = norm(sub(a.pos, b.pos))
+
+pure func velErr(a: State, b: State) -> float = norm(sub(a.vel, b.vel))
+
+-- mu = 1 / (1 + EMRAT); Horizons' Earth-from-EMB is -mu times its
+-- geocentric Moon, so the DE441 ratio pins mu to ~1e-15.
+pure func muMatches(e: State, m: State) -> bool =
+  norm(add(e.pos, scale(earthMoonMu(), m.pos))) <= 0.000000000001 * norm(e.pos)
+  && norm(add(e.vel, scale(earthMoonMu(), m.vel))) <= 0.000000000001 * norm(e.vel)
+
+test "earthMoonMu = 1/(1 + EMRAT) and equals DE441's Earth-from-EMB / Moon-from-Earth ratio to 1e-12" {
+  earthMoonMassRatio() == 81.3005682214972154
+  && absf(earthMoonMu() - 0.0121505843958292) < 0.0000000000000001
+  && muMatches(hEarthEmbJ2000(), hMoonGeoJ2000()) && muMatches(hEarthEmb2023(), hMoonGeo2023())
+  && muMatches(hEarthEmb2026(), hMoonGeo2026())
+}
+
+-- Horizons' EMB split with Horizons' geocentric Moon is Horizons' Earth (to
+-- 1e-13 AU = 1.5 cm, 1e-15 AU/day), and the Moon is Horizons' Earth plus
+-- the geocentric Moon.
+pure func splitMatchesHorizons(emb: State, moonGeo: State, earth: State) -> bool {
+  let s = earthMoonSplit(emb, moonGeo);
+  let moonH = { pos: add(earth.pos, moonGeo.pos), vel: add(earth.vel, moonGeo.vel) };
+  posErr(s.earth, earth) <= 0.0000000000001 && velErr(s.earth, earth) <= 0.000000000000001
+  && posErr(s.moon, moonH) <= 0.0000000000001 && velErr(s.moon, moonH) <= 0.000000000000001
+}
+
+test "earthMoonSplit of Horizons' EMB and geocentric Moon gives Horizons' Earth (2000, 2023, 2026)" {
+  splitMatchesHorizons(hEmbJ2000(), hMoonGeoJ2000(), hEarthJ2000())
+  && splitMatchesHorizons(hEmb2023(), hMoonGeo2023(), hEarth2023())
+  && splitMatchesHorizons(hEmb2026(), hMoonGeo2026(), hEarth2026())
+}
+
+-- The mean-element path: earthAt - EMB against Horizons' Earth-from-EMB.
+-- The JPL mean elements omit the Moon's periodic terms (evection,
+-- variation: ~2 deg, ~4,000 km), so the Earth's offset is good to
+-- mu x that ~ 250 km at worst (54, 134, 49 km on these dates), against
+-- the 4,387-4,890 km error of putting the Earth at the EMB.
+pure func offsetKm(jd: float, h: State) -> float =
+  norm(sub(sub(earthAt(embEl(), embRt(), moon(), jd).pos, planetAt(embEl(), embRt(), jd).pos), h.pos)) * auKm()
+
+test "earthAt - EMB is within 200 km of Horizons' Earth-from-EMB (2000, 2023, 2026)" {
+  offsetKm(2451545.0, hEarthEmbJ2000()) < 200.0 && offsetKm(2460251.5, hEarthEmb2023()) < 200.0
+  && offsetKm(2461041.5, hEarthEmb2026()) < 200.0
+  && norm(hEarthEmb2023().pos) * auKm() > 4000.0
+}
+
+-- Over 30 years: moon - earth is the geocentric Moon (to the float spacing
+-- of a 1 AU coordinate, 1e-15 AU) and (1 - mu) earth + mu moon is the EMB.
+pure func splitIdentities(i: int, n: int) -> bool =
+  if i > n then true
+  else {
+    let jd = 2451545.0 + 11000.0 * intToFloat(i) / intToFloat(n);
+    let emb = planetAt(embEl(), embRt(), jd);
+    let geo = satelliteAt(moon(), jd);
+    let e = earthAt(embEl(), embRt(), moon(), jd);
+    let m = moonAt(embEl(), embRt(), moon(), jd);
+    let mu = earthMoonMu();
+    let rel = { pos: sub(m.pos, e.pos), vel: sub(m.vel, e.vel) };
+    let bary = { pos: add(scale(1.0 - mu, e.pos), scale(mu, m.pos)), vel: add(scale(1.0 - mu, e.vel), scale(mu, m.vel)) };
+    posErr(rel, geo) <= 0.000000000000001 && velErr(rel, geo) <= 0.00000000000000002
+    && posErr(bary, emb) <= 0.000000000000001 && velErr(bary, emb) <= 0.00000000000000002
+    && dot(sub(e.pos, emb.pos), geo.pos) < 0.0
+    && splitIdentities(i + 1, n)
+  }
+
+test "the split keeps moon - earth = geocentric Moon and recovers the barycentre (1e-15 AU, 400 dates)" { splitIdentities(0, 400) }
+
+-- earthAt's velocity is the derivative of its position (h a power of two).
+pure func earthVelOk(jd: float, h: float) -> bool {
+  let d = scale(1.0 / (2.0 * h), sub(earthAt(embEl(), embRt(), moon(), jd + h).pos, earthAt(embEl(), embRt(), moon(), jd - h).pos));
+  norm(sub(d, earthAt(embEl(), embRt(), moon(), jd).vel)) <= 0.0000001 * norm(d)
+}
+
+test "earthAt velocity equals d(pos)/dt" { earthVelOk(2460251.5, 0.0009765625) && earthVelOk(2455000.25, 0.0009765625) }

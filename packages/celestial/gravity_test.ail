@@ -36,13 +36,13 @@ test "surface gravity: Earth 9.798, Jupiter 24.79 m/s^2 (NSSDC)" { checkSurface(
 
 pure func earthPos() -> Vec3 = { x: 0.98, y: 0.17, z: 0.0001 }
 
-pure func earthAt(t: float) -> Vec3 = earthPos()
+pure func earthPosAt(t: float) -> Vec3 = earthPos()
 
 pure func sunAt(t: float) -> Vec3 = { x: 0.0, y: 0.0, z: 0.0 }
 
 pure func jupAt(t: float) -> Vec3 = { x: -3.1, y: 4.2, z: -0.05 }
 
-pure func earth() -> GravBody = { gm: gmEarthNominal(), radius: radiusEarthNominal(), posAt: earthAt }
+pure func earth() -> GravBody = { gm: gmEarthNominal(), radius: radiusEarthNominal(), posAt: earthPosAt }
 
 pure func sun() -> GravBody = { gm: gmSunNominal(), radius: radiusSunNominal(), posAt: sunAt }
 

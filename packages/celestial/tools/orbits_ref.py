@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Independent reference values for sunholo/celestial 0.1.0: part 1
 (kepler, ephemeris, frames) and part 2 (lighttime, gravity, reflect, rings;
-its sources and independent methods are listed above part2() below).
+its sources and independent methods are listed above part2() below); and
+0.1.1's Earth-Moon barycentre split (sources above earth_moon() below).
 Standard library only; no network (the Horizons values were fetched once
 and are copied in with their query).
 
@@ -365,6 +366,7 @@ def main():
     print("  (prograde-apse reading would give %.5f d)" % (360.0 / (mdot - wdot)))
 
     part2()
+    earth_moon()
 
     if "--check" in sys.argv and FAILS:
         print("FAILED: " + ", ".join(FAILS))
@@ -600,6 +602,116 @@ def part2():
             hi = mid
     r = math.hypot(p[0] + lo * sd[0], p[1] + lo * sd[1])
     check("Saturn solstice: latitude -20 deg sees the Sun through r = 97,564 km (B ring)", abs(r - 97564.0) < 1.0 and 91975 <= r < 117507, "%.3f km" % r)
+
+
+# ====================================================================== 0.1.1
+# The Earth-Moon barycentre split: Earth = EMB - mu r_geo,
+# Moon = EMB + (1 - mu) r_geo, mu = 1 / (1 + EMRAT).
+#
+# Published inputs:
+#   JPL DE440/DE441 EMRAT = GM_Earth / GM_Moon = 81.3005682214972154
+#     (Park, Folkner, Williams & Boggs 2021, AJ 161, 105; the DE440 header)
+#   JPL Horizons (DE441) state vectors, fetched 2026-10-03, no network here:
+#     https://ssd.jpl.nasa.gov/api/horizons.api?format=text&EPHEM_TYPE='VECTORS'&
+#     COMMAND='<c>'&CENTER='<o>'&TLIST='2451545.0','2460251.5','2461041.5'&
+#     TLIST_TYPE='JD'&TIME_TYPE='TDB'&REF_PLANE='ECLIPTIC'&REF_SYSTEM='ICRF'&
+#     OUT_UNITS='AU-D'&VEC_TABLE='2'
+#     with (<c>, <o>) = ('399','500@3') Earth from the EMB,
+#     ('301','500@399') Moon from the Earth, ('3','500@10') EMB from the Sun,
+#     ('399','500@10') Earth from the Sun. Ecliptic J2000, AU, AU/day, TDB.
+#
+# Independent paths: the split in 50-digit Decimal (the package works in
+# float64); the Moon from this file's sat_pos (bisection Kepler, angle-built
+# plane rotation) and the EMB from its Decimal Standish elements.
+EMRAT = Decimal("81.3005682214972154")
+MU_D = 1 / (1 + EMRAT)
+
+# jd: Earth-from-EMB (pos, vel), Moon-from-Earth, EMB-from-Sun, Earth-from-Sun
+HORIZONS_EM = {
+    2451545.0: (
+        (("2.368491119575935E-05", "2.233430558007885E-05", "-2.946006074095761E-06"),
+         ("-4.516013502075859E-06", "5.129716424248584E-06", "8.074718811302325E-08")),
+        (("-1.949281649686695E-03", "-1.838126040073046E-03", "2.424579738820632E-04"),
+         ("3.716704773167968E-04", "-4.221785765308054E-04", "-6.645539463989926E-06")),
+        (("-1.771587841839055E-01", "9.672193524609504E-01", "-1.139275508446145E-06"),
+         ("-1.720310905522688E-02", "-3.163911860749114E-03", "2.424167134816753E-08")),
+        (("-1.771350992727098E-01", "9.672416867665306E-01", "-4.085281582511366E-06"),
+         ("-1.720762506872895E-02", "-3.158782144324866E-03", "1.049888594613343E-07"))),
+    2460251.5: (
+        (("7.521145924737144E-06", "-3.105875615656290E-05", "-2.890284150579967E-06"),
+         ("6.840320504037754E-06", "1.287689518855818E-06", "-1.529613449632012E-07")),
+        (("-6.189945832826651E-04", "2.556153279938051E-03", "2.378720279143189E-04"),
+         ("-5.629622642994656E-04", "-1.059775790947002E-04", "1.258880560639592E-05")),
+        (("7.603704946134947E-01", "6.374383439575997E-01", "-4.026850683718436E-05"),
+         ("-1.133301968054092E-02", "1.311972952785614E-02", "-6.519930732839620E-07")),
+        (("7.603780157594194E-01", "6.374072852014431E-01", "-4.315879098775194E-05"),
+         ("-1.132617936003689E-02", "1.312101721737500E-02", "-8.049544182482179E-07"))),
+    2461041.5: (
+        (("-1.172237227825803E-05", "-2.675406958804738E-05", "-2.579028812853566E-06"),
+         ("7.047824369809083E-06", "-2.953442517052326E-06", "-3.919449783556250E-08")),
+        (("9.647578994045626E-04", "2.201875129333777E-03", "2.122555367574619E-04"),
+         ("-5.800399503606030E-04", "2.430699973629355E-04", "3.225729443022998E-06")),
+        (("-1.742697585483051E-01", "9.677856743241913E-01", "-5.686608136245510E-05"),
+         ("-1.721159519305110E-02", "-3.113653580027250E-03", "2.763727760594844E-07")),
+        (("-1.742814809205833E-01", "9.677589202546031E-01", "-5.944511017526243E-05"),
+         ("-1.720454736868129E-02", "-3.116607022544302E-03", "2.371782782240443E-07"))),
+}
+
+
+def dvec(t):
+    return [Decimal(x) for x in t]
+
+
+def dnorm(v):
+    return math.sqrt(sum(float(c) ** 2 for c in v))
+
+
+def moon_geo_km(jd):
+    p, _ = sat_pos(384400.0, 0.0554, 318.15, 135.27, 5.16, 125.08,
+                   360.0 / 27.322, 360.0 / (5.997 * 365.25), -360.0 / (18.600 * 365.25),
+                   270.0, 90.0 - math.degrees(EPS0), jd)
+    return p
+
+
+def earth_moon():
+    mu = float(MU_D)
+    print("  mu = 1/(1 + EMRAT) = %s" % format(MU_D, ".20f"))
+    for jd, (e_emb, m_geo, emb, earth) in sorted(HORIZONS_EM.items()):
+        for k, what in ((0, "pos"), (1, "vel")):
+            ee, mg, eb, ea = dvec(e_emb[k]), dvec(m_geo[k]), dvec(emb[k]), dvec(earth[k])
+            # DE441's own ratio Earth-from-EMB / Moon-from-Earth is -mu
+            ratio = [-a / b for a, b in zip(ee, mg)]
+            worst = max(abs(r / MU_D - 1) for r in ratio)
+            check("JD %.1f %s: DE441 Earth-from-EMB = -mu Moon-from-Earth (1e-12)" % (jd, what),
+                  worst < Decimal("1e-12"), "ratio %s, rel %.1e" % (format(ratio[0], ".16f"), worst))
+            # split Horizons' EMB with Horizons' Moon -> Horizons' Earth and Earth + Moon
+            es = [b - MU_D * m for b, m in zip(eb, mg)]
+            ms = [b + (1 - MU_D) * m for b, m in zip(eb, mg)]
+            de = dnorm([a - b for a, b in zip(es, ea)])
+            dm = dnorm([a - (b + m) for a, b, m in zip(ms, ea, mg)])
+            tol = 1e-13 if k == 0 else 1e-15
+            check("JD %.1f %s: split of Horizons EMB + Moon = Horizons Earth, Earth + Moon (%g)" % (jd, what, tol),
+                  de <= tol and dm <= tol, "earth %.2e moon %.2e" % (de, dm))
+            # identities, exact in Decimal
+            rel = [a - b for a, b in zip(ms, es)]
+            bar = [(1 - MU_D) * a + MU_D * b for a, b in zip(es, ms)]
+            check("JD %.1f %s: moon - earth = r_geo and (1-mu) earth + mu moon = EMB (1e-40)" % (jd, what),
+                  max(abs(a - b) for a, b in zip(rel, mg)) < Decimal("1e-40")
+                  and max(abs(a - b) for a, b in zip(bar, eb)) < Decimal("1e-40"), "")
+        # mean-element path: -mu r_geo(mean elements) vs Horizons Earth-from-EMB
+        p = moon_geo_km(jd)
+        off = [-mu * c for c in p]
+        h = [float(c) * AU_KM for c in dvec(e_emb[0])]
+        err = math.dist(off, h)
+        check("JD %.1f: mean-element Earth-from-EMB within 200 km of Horizons" % jd, err < 200.0,
+              "package-style %.1f km, Horizons %.1f km, error %.1f km" % (math.hypot(*off), math.hypot(*h), err))
+        # the Earth's heliocentric error, Standish EMB split vs Horizons Earth:
+        # informational (dominated by Standish's own EMB error)
+        sb = standish("EMB", jd)[0]
+        ex = [b * AU_KM + o for b, o in zip(sb, off)]
+        hx = [float(c) * AU_KM for c in dvec(earth[0])]
+        print("  JD %.1f Earth (Standish EMB split) vs Horizons Earth: %.0f km; EMB unsplit vs Horizons Earth: %.0f km (info)"
+              % (jd, math.dist(ex, hx), math.dist([b * AU_KM for b in sb], hx)))
 
 
 if __name__ == "__main__":

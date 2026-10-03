@@ -15,12 +15,16 @@
 -- satellite's Laplace plane (or the ecliptic, for the Moon) with apse and
 -- node precession. Planetocentric, ecliptic J2000, AU and AU/day.
 --
+-- Earth and Moon: Standish's "EMB" row is the Earth-Moon barycentre, not
+-- the Earth. earthMoonSplit / earthAt / moonAt split it with the geocentric
+-- Moon and the DE440 mass ratio (0.1.1).
+--
 -- Time is JD in TDB throughout.
 
 module sunholo/celestial/ephemeris
 
 import std/math (sin, cos, floor, intToFloat)
-import ./kepler (Vec3, State, Orbit, Drift, driftingState, wrapPi)
+import ./kepler (Vec3, State, Orbit, Drift, driftingState, wrapPi, add, sub, scale)
 import ./frames (equatorialToEcliptic)
 
 -- The astronomical unit in km (IAU 2012 Resolution B2).
@@ -145,4 +149,53 @@ export pure func satelliteAt(s: SatElements, jdTDB: float) -> State
 {
   let st = driftingState(satelliteElementsAt(s, jdTDB), { a: 0.0, e: 0.0, incl: 0.0, node: s.nodeRate, argPeri: s.periRate });
   { pos: planeToEcliptic(s, st.pos), vel: planeToEcliptic(s, st.vel) }
+}
+
+-- ---------- Earth-Moon barycentre split (0.1.1) ----------
+--
+-- Standish's EMB row gives the Earth-Moon barycentre. The Earth sits
+-- mu |r_geo| (~4,670 km) from it, towards the far side from the Moon, and
+-- the Moon (1 - mu) |r_geo| on the near side:
+--   Earth = EMB - mu r_geo,   Moon = EMB + (1 - mu) r_geo,
+-- with r_geo the geocentric Moon (satelliteAt) and mu = M_moon / (M_earth +
+-- M_moon) = 1 / (1 + EMRAT), EMRAT = GM_Earth / GM_Moon from JPL DE440
+-- (Park et al. 2021, AJ 161, 105; DE441 shares it). The split is linear, so
+-- velocities split the same way and stay the exact derivatives.
+
+-- EMRAT = GM_Earth / GM_Moon, JPL DE440/DE441: 81.3005682214972154.
+export pure func earthMoonMassRatio() -> float = 81.3005682214972154
+
+-- mu = GM_Moon / (GM_Earth + GM_Moon) = 0.0121505843958292...
+export pure func earthMoonMu() -> float = 1.0 / (1.0 + 81.3005682214972154)
+
+export type EarthMoon = { earth: State, moon: State }
+
+-- emb: the barycentre's state (e.g. planetAt with Standish's EMB row);
+-- moonGeo: the Moon relative to the Earth's centre (e.g. satelliteAt with
+-- JPL's Moon elements). Same frame and units for both; the result is in
+-- emb's frame and origin. moon - earth = moonGeo (to the float spacing of
+-- emb) and (1 - mu) earth + mu moon = emb.
+export pure func earthMoonSplit(emb: State, moonGeo: State) -> EarthMoon {
+  let mu = earthMoonMu();
+  let nu = 1.0 - mu;
+  { earth: { pos: sub(emb.pos, scale(mu, moonGeo.pos)), vel: sub(emb.vel, scale(mu, moonGeo.vel)) },
+    moon: { pos: add(emb.pos, scale(nu, moonGeo.pos)), vel: add(emb.vel, scale(nu, moonGeo.vel)) } }
+}
+
+-- The Earth's centre, heliocentric ecliptic J2000 (AU, AU/day): Standish's
+-- EMB row (embEl, embRt) split with the Moon's mean elements (moon). Within
+-- ~250 km of DE441 for the barycentre offset (the mean elements omit the
+-- Moon's periodic terms); the EMB itself carries Standish's own error.
+-- Like planetAt it does not carry the meanOrbit flag.
+export pure func earthAt(embEl: MeanElements, embRt: ElementRates, moon: SatElements, jdTDB: float) -> State
+  requires { embEl.a > 0.0 && embEl.e >= 0.0 && embEl.e < 1.0 && moon.a > 0.0 && moon.e >= 0.0 && moon.e < 1.0 && moon.meanAnomRate != 0.0 }
+{
+  earthMoonSplit(planetAt(embEl, embRt, jdTDB), satelliteAt(moon, jdTDB)).earth
+}
+
+-- The Moon, heliocentric ecliptic J2000 (AU, AU/day), from the same inputs.
+export pure func moonAt(embEl: MeanElements, embRt: ElementRates, moon: SatElements, jdTDB: float) -> State
+  requires { embEl.a > 0.0 && embEl.e >= 0.0 && embEl.e < 1.0 && moon.a > 0.0 && moon.e >= 0.0 && moon.e < 1.0 && moon.meanAnomRate != 0.0 }
+{
+  earthMoonSplit(planetAt(embEl, embRt, jdTDB), satelliteAt(moon, jdTDB)).moon
 }

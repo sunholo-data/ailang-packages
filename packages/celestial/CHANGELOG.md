@@ -1,5 +1,41 @@
 # Changelog
 
+## 0.1.1
+
+Feature: the Earth-Moon barycentre split. Standish's "EMB" row is the
+Earth-Moon barycentre, so 0.1.0 put the Earth (and anything placed relative
+to it) mu |r_geo| = 4,330-4,950 km from its centre. Every 0.1.0 signature
+and result is unchanged; the additions are in `ephemeris`.
+
+- `earthMoonSplit(emb, moonGeo)` -> `EarthMoon {earth, moon}`:
+  Earth = EMB - mu r_geo, Moon = EMB + (1 - mu) r_geo, positions and
+  velocities alike. `earthAt(embEl, embRt, moon, jd)` and
+  `moonAt(embEl, embRt, moon, jd)`: the heliocentric Earth and Moon from
+  Standish's EMB row and the Moon's JPL mean elements (`satelliteAt`).
+  `earthMoonMu()` = 1 / (1 + EMRAT) = 0.0121505843958292 and
+  `earthMoonMassRatio()` = EMRAT = GM_Earth / GM_Moon = 81.3005682214972154
+  (JPL DE440/DE441; Park et al. 2021, AJ 161, 105).
+- Tests (5 more, 98 in all), against JPL Horizons (DE441) vectors on
+  2000-01-01.5, 2023-11-03.0 and 2026-01-01.0 TDB: DE441's Earth-from-EMB
+  is -mu times its geocentric Moon (1e-12); Horizons' EMB split with
+  Horizons' Moon gives Horizons' Earth and Earth + Moon (1e-13 AU,
+  1e-15 AU/day); `earthAt` - EMB is within 200 km of Horizons'
+  Earth-from-EMB (54, 134, 49 km; the Moon's mean elements omit evection and
+  variation); over 400 dates moon - earth = the geocentric Moon and
+  (1 - mu) earth + mu moon = the EMB to 1e-15 AU; `earthAt`'s velocity is
+  its derivative. Five hand mutations of the split (mu = 0.01215,
+  mu = M_moon/M_earth, the Earth's sign, 1 - mu -> 1, an unsplit Earth
+  velocity) are each killed.
+- `tools/orbits_ref.py`: `earth_moon()` re-derives the split in 50-digit
+  Decimal from the Horizons values (query recorded) and the mean-element
+  offset with its own Kepler and plane rotation; `tools/orbits_ref.out`
+  gains those rows (additions only).
+- `_smoke.ail`: `earthMoonProbe(n)` (strict VM = interpreter, bit for bit)
+  and the Earth-from-EMB check against Horizons in `main`'s OK line.
+  Private test helpers named `earthAt` in `_smoke.ail` and
+  `gravity_test.ail` are renamed (`unitEarthAt`, `earthPosAt`) so they do
+  not shadow the new export (ailang#1461).
+
 ## 0.1.0
 
 New package: orbits (part 1) and light, gravity and rings (part 2).
