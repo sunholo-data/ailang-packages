@@ -11,7 +11,7 @@
 
 module sunholo/relativity/optics
 
-import std/math (sqrt, exp)
+import std/math (sqrt, exp, sin, cos, acos, atan2)
 import ./hyper (sinh, cosh, absf)
 import ./medium (cmbTemperatureK)
 
@@ -117,4 +117,43 @@ export pure func cmbSeenTemperatureApparent(nSeen: Vec3, bh: Vec3, phi: float) -
   ensures { result > 0.0 }
 {
   cmbTemperatureK() * dopplerApparent(nSeen, bh, phi)
+}
+
+-- ---------- apparent disc of a nearby sphere ----------
+
+-- Apparent polar angle (rad from bh) of a source at rest-frame polar angle
+-- theta: the angle form of cosSeen, by the half-angle law
+--   tan(theta'/2) = e^-phi tan(theta/2) = tan(theta/2) / forwardDoppler(phi)
+-- (e^-phi = sqrt((1 - beta) / (1 + beta))), so nothing forms 1 - beta and it
+-- is exact at the cap and next to both poles, where acos(cosSeen) is not.
+-- Written with atan2, it is continuous and odd in theta over (-2 pi, 2 pi):
+-- a negative theta is the same meridian on the far side of the pole, and
+-- angleSeen(2 pi - t) = 2 pi - angleSeen(t).
+export pure func angleSeen(theta: float, phi: float) -> float
+  requires { phi >= 0.0 }
+{
+  let h = theta / 2.0;
+  2.0 * atan2(exp(0.0 - phi) * sin(h), cos(h))
+}
+
+-- The apparent disc: centre angle from bh and angular radius, radians.
+export type ApparentDisc = { centre: float, radius: float }
+
+-- Image of a sphere of angular radius alpha whose centre lies at rest-frame
+-- polar angle theta (cosTheta = cos theta) from the observer's heading.
+-- Aberration is conformal on the sky, so the outline stays a circle; its
+-- edge points on the meridian are the aberrated theta - alpha and
+-- theta + alpha, so the apparent centre is their mean and the radius half
+-- their difference. That centre is NOT the aberrated centre angleSeen(theta)
+-- (25.928 vs 25.842 deg at 0.9c, theta 90, alpha 5). A disc over a pole
+-- (theta < alpha or theta > pi - alpha) keeps the pole inside its image.
+-- Identity at phi = 0; finite for every phi to the cap.
+export pure func apparentDisc(cosTheta: float, alpha: float, phi: float) -> ApparentDisc
+  requires { cosTheta >= -1.0 && cosTheta <= 1.0 && alpha >= 0.0 && alpha <= 1.5707963267948966 && phi >= 0.0 }
+  ensures { result.radius >= 0.0 && result.centre >= 0.0 }
+{
+  let theta = acos(cosTheta);
+  let nearEdge = angleSeen(theta - alpha, phi);
+  let farEdge = angleSeen(theta + alpha, phi);
+  { centre: (nearEdge + farEdge) / 2.0, radius: (farEdge - nearEdge) / 2.0 }
 }

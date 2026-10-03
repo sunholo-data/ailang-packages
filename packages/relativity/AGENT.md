@@ -88,8 +88,8 @@ let vLim = limitingMagnitude(skyLum, 2.0);          -- faintest visible star, fi
 | `hyper` | `sinh cosh tanh atanh acosh acosh1p expm1 log1p sinhc absf`. Accurate near 0; std/math has none of these |
 | `kinematics` | `Motion {phi,tau,t,x}`, `rest`, `accelerate(m, a, dtau)`, `coast`, `standardGravity`, `betaOf`, `gammaOf`, `oneMinusBeta`, `gammaOfBeta`, `rapidityOfBeta`, `rapidityOfOneMinusBeta` |
 | `journey` | `Trip {distance, shipTime, galaxyTime, peakBeta, peakGamma}`, `flipAndBurn(d, a)`, `burnCoastBurn(d, a, maxBeta)`, `coastAt(d, beta)`, `TripPlan {trip, a, phiPeak, tauBurn, tauCoast, tauTotal, dBurn, dCoast, fellBack}`, `planBurnCoastBurn(d, a, phiCruise)`, `planFlipAndBurn(d, a)`, `TripPhase` (`Accelerating Coasting Decelerating Arrived`), `phaseAt(p, tau)`, `motionAt(p, tau)` |
-| `medium` | `cSI protonMassKg lightYearM julianYearS astronomicalUnitM cmbTemperatureK accelSI`, `photonDriveEnergy(mEff, phi)`, `loadScale(n, phi)`, `kineticFlux(n, phi)`, `mirrorDragForce(n, phi, r)`, `mirrorDragPower(n, phi, r)`, `cruiseDragEnergy(n, phi, r, dCoast)`, `glowInwardFlux(n, phi, eps, fIn)`, `glowEmittanceAt(n, phi, eps, fIn, cosTheta)`, `TripEnergy {boost, brake, drag, total}`, `tripEnergy(p, mEff, n, r)`, `brakeHoldsAgainstDrag(mEff, a, n, phi, r)` |
-| `optics` | `Vec3`, `aberrate`, `deaberrate`, `doppler`, `dopplerApparent`, `gammaOnePlusBetaCos`, `cosSeen`, `dot`, `norm`, `normalize`, `forwardDoppler`, `cmbForwardTemperature`, `cmbSeenTemperature`, `cmbSeenTemperatureApparent` |
+| `medium` | `cSI protonMassKg lightYearM julianYearS astronomicalUnitM cmbTemperatureK accelSI`, `photonDriveEnergy(mEff, phi)`, `loadScale(n, phi)`, `kineticFlux(n, phi)`, `mirrorDragForce(n, phi, r)`, `mirrorDragPower(n, phi, r)`, `cruiseDragEnergy(n, phi, r, dCoast)`, `glowInwardFlux(n, phi, eps, fIn)`, `glowEmittanceAt(n, phi, eps, fIn, cosTheta)`, `TripEnergy {boost, brake, drag, total}`, `tripEnergy(p, mEff, n, r)`, `brakeHoldsAgainstDrag(mEff, a, n, phi, r)`, `hoverPower(mEffKg, gMs2)` |
+| `optics` | `Vec3`, `aberrate`, `deaberrate`, `doppler`, `dopplerApparent`, `gammaOnePlusBetaCos`, `cosSeen`, `dot`, `norm`, `normalize`, `forwardDoppler`, `cmbForwardTemperature`, `cmbSeenTemperature`, `cmbSeenTemperatureApparent`, `angleSeen(theta, phi)`, `ApparentDisc {centre, radius}`, `apparentDisc(cosTheta, alpha, phi)` |
 | `blackbody` | `XYZ`, `RGB`, `cmf`, `planck`, `xyz`, `luminance`, `chromaticity`, `rgbUnitLuminance`, `pointFluxRatio`, `surfaceBrightnessRatio`, `photopicRadiance` |
 | `photometry` | `teffFromBpRp`, `gMinusV`, `bpRpInTable`, `teffFromBV`, `bvInTable`, `vFromG`, `illuminanceFromV`, `vFromIlluminance`, `fluxRatioFromMags`, `luminanceFromSurfaceMag`, `surfaceMagFromLuminance`, `pointThresholdIlluminance`, `limitingMagnitude` |
 | `photometry_table` | Generated Gaia BP-RP, Teff, G-V and spectral-type node lists, and the Johnson B-V and Teff node lists |
@@ -134,6 +134,11 @@ let vLim = limitingMagnitude(skyLum, 2.0);          -- faintest visible star, fi
   multiply `glowInwardFlux` by 4 themselves. cosTheta is clamped to [0, 1], so
   a dot product that rounds to 1.0000000000000002 gives the pole; NaN
   cosTheta gives NaN.
+- `hoverPower(mEffKg, gMs2)` = m_eff |g| c (W): holding still (or on a
+  planned line) against an unfelt acceleration g costs the photon drive
+  F c with F = m_eff |g| (higgs-bubble.md §10, HB-90). 0.1254 m/s^2 (50,000 km
+  above Earth) is 3.759e7 W per kg of m_eff; Sgr A* at 3 r_s is 1.44e14 W/kg.
+  Linear in both arguments, so a stepped hold sums it times dtau per tick.
 
 ## Photometry
 
@@ -210,6 +215,27 @@ V is good to about +-0.1 mag. Treat results as approximate.
   calls per call) is for tests and tools only.
 - Convention: Gaia EDR3 Vega-mag, photon counting, published zero points.
 
+## Nearby spheres: `apparentDisc`
+
+- `apparentDisc(cosTheta, alpha, phi)` takes a sphere of angular radius
+  alpha (rad, 0 to pi/2) whose centre is at REST-frame polar angle theta from
+  the heading, and returns `{centre, radius}` of its image (rad, centre
+  measured from the heading). Aberration is conformal, so the outline stays
+  a circle; a Lorentz-squashed disc never appears.
+- **The apparent centre is not the aberrated centre.** At 0.9c, theta 90,
+  alpha 5: centre 25.928 deg, radius 2.184 deg, while the centre's own ray
+  appears at 25.842 deg. Draw the disc at `centre`; use `angleSeen(theta,
+  phi)` only for a point (the body's centre of mass, a label).
+- Astern discs are magnified (0.9c, theta 150: radius 9.940 deg), ahead
+  they shrink (0.99c: 0.707 deg). D at the disc's apparent centre is
+  `dopplerApparent` of that direction (2.2871, 7.0623, 0.4981 for the three).
+- `angleSeen` uses tan(theta'/2) = e^-phi tan(theta/2): no 1 - beta, exact at
+  the cap and next to both poles (acos(cosSeen) loses digits there). A disc
+  over a pole keeps the pole inside its image (centre < radius).
+- Near the forward pole at the cap, `dopplerApparent` itself carries about
+  gamma^2 ulp of rounding (1.3e-11 relative at gamma 707); the disc angles do
+  not.
+
 ## Physics notes that trip people up
 
 - **Stars crowd forward.** A star at 90° appears at acos(β) ahead of the
@@ -232,6 +258,9 @@ V is good to about +-0.1 mag. Treat results as approximate.
   CIE Planckian locus, the relativistic rocket equations and the Schwarzschild
   metric. The 0.4.0 plan and energetics values come from tools/journey_ref.py
   (float64 closed forms checked against 50-digit Decimal) to 1e-12 relative,
+  and the 0.7.0 apparent-disc and hover values from tools/optics_ref.py (the
+  rest-frame circle Lorentz-transformed point by point in 60-digit Decimal,
+  outline circular to 1e-30 rad) to 1e-12 relative,
   and the canon higgs-bubble HB-n values to their printed digits. The 0.5.0
   sky photometry values come from tools/photometry_ref.py: a 0.05 nm Simpson
   quadrature with exact SI constants, the official CIE 1931 ybar table, the
@@ -241,7 +270,7 @@ V is good to about +-0.1 mag. Treat results as approximate.
   by an independent quadrature in theta).
 - NaN: the interpreter answers NaN >= x with true (ailang#1419), the VM with
   false. Functions here test NaN first or are written with `<` so both engines
-  agree; `_smoke.ail`'s `wdDigest`, `journeyDigest`, `photometryDigest` and
-  `glowDigest` check that bit for bit.
+  agree; `_smoke.ail`'s `wdDigest`, `journeyDigest`, `photometryDigest`,
+  `glowDigest` and `discDigest` check that bit for bit.
 - Colours use the Wyman–Sloan–Shirley (2013) fit to the CIE 1931 colour
   matching functions, which is accurate to about 0.002 in chromaticity.
