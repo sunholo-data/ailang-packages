@@ -16,8 +16,10 @@
 
 module sunholo/relativity/medium
 
+import std/math (sqrt)
 import ./hyper (sinh)
 import ./journey (TripPlan)
+import ./blackbody (stefanBoltzmannSI, luminousEfficacy)
 
 -- Speed of light, m/s (exact).
 export pure func cSI() -> float = 299792458.0
@@ -104,6 +106,61 @@ export pure func glowEmittanceAt(n: float, phi: float, eps: float, fIn: float, c
           else 0.0;
   eps * fIn * kineticFlux(n, phi) * c
 }
+
+-- 0.8.0: the glow's spectrum (stapledons ledger D-30, higgs-bubble.md §6).
+--
+-- Model: the wall is a greybody. A fraction eps of the impacts is
+-- inelastic and thermalised in the wall element; by Kirchhoff's law the
+-- element emits light with the same small coupling, emissivity eps (fIn of
+-- it on the inner face), which is also why the wall is transparent
+-- (absorptivity = emissivity, ~0). In local equilibrium the thermalised
+-- flux eps K cos theta is radiated as eps sigma T^4, so eps cancels:
+--     T = (K max(0, cos theta) / sigma)^(1/4)
+-- the temperature a black surface would reach if it thermalised the whole
+-- forward beam. eps and fIn set only the brightness: the inner face emits
+-- eps fIn sigma T^4 = glowEmittanceAt, a blackbody spectrum at T dimmed by
+-- the emissivity. Game approximation (the Higgs bubble is the one admitted
+-- hand-wave): real GeV impacts give hadronic cascades and gamma rays, not a
+-- thermal spectrum; the wall's emissivity equal to eps, local equilibrium
+-- per element and an instant response are design choices.
+
+-- Glow temperature of the wall element at angle theta from the travel
+-- direction (K): (K max(0, cos theta) / sigma)^(1/4), by two square roots
+-- (correctly rounded, so VM and interpreter agree bit for bit; no pow).
+-- Independent of eps and fIn. 1357.5 K (orange-red) on the pole at 0.99c,
+-- 14,114 K (blue-white) at 1 - beta = 1e-6, 290 K at 0.5c; T_pole cos^(1/4)
+-- theta off the pole; 0 at rest, on the equator and aft. cosTheta is
+-- clamped as in glowEmittanceAt; NaN cosTheta or phi gives NaN. phi < 0
+-- (kineticFlux < 0) gives 0.
+export pure func glowTemperatureAt(n: float, phi: float, cosTheta: float) -> float {
+  let c = if cosTheta != cosTheta then cosTheta
+          else if cosTheta >= 1.0 then 1.0
+          else if cosTheta > 0.0 then cosTheta
+          else 0.0;
+  let x = kineticFlux(n, phi) * c / stefanBoltzmannSI();
+  if x != x then x
+  else if x > 0.0 then sqrt(sqrt(x))
+  else 0.0
+}
+
+-- Inward glow radiance of the wall element (W m^-2 sr^-1): the wall is a
+-- Lambertian emitter, so L = glowEmittanceAt / pi.
+export pure func glowRadianceAt(n: float, phi: float, eps: float, fIn: float, cosTheta: float) -> float =
+  glowEmittanceAt(n, phi, eps, fIn, cosTheta) / pi()
+
+-- Luminous efficacy of the glow (lm/W): blackbody.luminousEfficacy at
+-- glowTemperatureAt. 0.0233 lm/W on the pole at 0.99c, 43.68 at the cap
+-- (the placeholder equal-energy white was 182.57). 0 at rest and for NaN.
+export pure func glowEfficacyAt(n: float, phi: float, cosTheta: float) -> float =
+  luminousEfficacy(glowTemperatureAt(n, phi, cosTheta))
+
+-- Glow luminance seen on the wall element (cd/m^2): glowRadianceAt x
+-- glowEfficacyAt. With n = 0.1 cm^-3, eps = 1e-11 (D-29) and fIn = 1/2:
+-- 7.144e-9 cd/m^2 on the pole at 0.99c (1.65e-4 of the 23.5 mag/arcsec^2
+-- dark sky) and 0.1564 cd/m^2 at the cap (3.61e3 of it). NaN cosTheta or
+-- phi gives NaN.
+export pure func glowLuminanceAt(n: float, phi: float, eps: float, fIn: float, cosTheta: float) -> float =
+  glowRadianceAt(n, phi, eps, fIn, cosTheta) * glowEfficacyAt(n, phi, cosTheta)
 
 -- Energy ledger of a planned trip, ship frame (J).
 export type TripEnergy = { boost: float, brake: float, drag: float, total: float }

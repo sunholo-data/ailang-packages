@@ -88,9 +88,9 @@ let vLim = limitingMagnitude(skyLum, 2.0);          -- faintest visible star, fi
 | `hyper` | `sinh cosh tanh atanh acosh acosh1p expm1 log1p sinhc absf`. Accurate near 0; std/math has none of these |
 | `kinematics` | `Motion {phi,tau,t,x}`, `rest`, `accelerate(m, a, dtau)`, `coast`, `standardGravity`, `betaOf`, `gammaOf`, `oneMinusBeta`, `gammaOfBeta`, `rapidityOfBeta`, `rapidityOfOneMinusBeta` |
 | `journey` | `Trip {distance, shipTime, galaxyTime, peakBeta, peakGamma}`, `flipAndBurn(d, a)`, `burnCoastBurn(d, a, maxBeta)`, `coastAt(d, beta)`, `TripPlan {trip, a, phiPeak, tauBurn, tauCoast, tauTotal, dBurn, dCoast, fellBack}`, `planBurnCoastBurn(d, a, phiCruise)`, `planFlipAndBurn(d, a)`, `TripPhase` (`Accelerating Coasting Decelerating Arrived`), `phaseAt(p, tau)`, `motionAt(p, tau)` |
-| `medium` | `cSI protonMassKg lightYearM julianYearS astronomicalUnitM cmbTemperatureK accelSI`, `photonDriveEnergy(mEff, phi)`, `loadScale(n, phi)`, `kineticFlux(n, phi)`, `mirrorDragForce(n, phi, r)`, `mirrorDragPower(n, phi, r)`, `cruiseDragEnergy(n, phi, r, dCoast)`, `glowInwardFlux(n, phi, eps, fIn)`, `glowEmittanceAt(n, phi, eps, fIn, cosTheta)`, `TripEnergy {boost, brake, drag, total}`, `tripEnergy(p, mEff, n, r)`, `brakeHoldsAgainstDrag(mEff, a, n, phi, r)`, `hoverPower(mEffKg, gMs2)` |
+| `medium` | `cSI protonMassKg lightYearM julianYearS astronomicalUnitM cmbTemperatureK accelSI`, `photonDriveEnergy(mEff, phi)`, `loadScale(n, phi)`, `kineticFlux(n, phi)`, `mirrorDragForce(n, phi, r)`, `mirrorDragPower(n, phi, r)`, `cruiseDragEnergy(n, phi, r, dCoast)`, `glowInwardFlux(n, phi, eps, fIn)`, `glowEmittanceAt(n, phi, eps, fIn, cosTheta)`, `glowTemperatureAt(n, phi, cosTheta)`, `glowRadianceAt(n, phi, eps, fIn, cosTheta)`, `glowEfficacyAt(n, phi, cosTheta)`, `glowLuminanceAt(n, phi, eps, fIn, cosTheta)`, `TripEnergy {boost, brake, drag, total}`, `tripEnergy(p, mEff, n, r)`, `brakeHoldsAgainstDrag(mEff, a, n, phi, r)`, `hoverPower(mEffKg, gMs2)` |
 | `optics` | `Vec3`, `aberrate`, `deaberrate`, `doppler`, `dopplerApparent`, `gammaOnePlusBetaCos`, `cosSeen`, `dot`, `norm`, `normalize`, `forwardDoppler`, `cmbForwardTemperature`, `cmbSeenTemperature`, `cmbSeenTemperatureApparent`, `angleSeen(theta, phi)`, `ApparentDisc {centre, radius}`, `apparentDisc(cosTheta, alpha, phi)` |
-| `blackbody` | `XYZ`, `RGB`, `cmf`, `planck`, `xyz`, `luminance`, `chromaticity`, `rgbUnitLuminance`, `pointFluxRatio`, `surfaceBrightnessRatio`, `photopicRadiance` |
+| `blackbody` | `XYZ`, `RGB`, `cmf`, `planck`, `xyz`, `luminance`, `chromaticity`, `rgbUnitLuminance`, `pointFluxRatio`, `surfaceBrightnessRatio`, `photopicRadiance`, `stefanBoltzmannSI`, `luminousEfficacy(kelvin)` |
 | `photometry` | `teffFromBpRp`, `gMinusV`, `bpRpInTable`, `teffFromBV`, `bvInTable`, `vFromG`, `illuminanceFromV`, `vFromIlluminance`, `fluxRatioFromMags`, `luminanceFromSurfaceMag`, `surfaceMagFromLuminance`, `pointThresholdIlluminance`, `limitingMagnitude` |
 | `photometry_table` | Generated Gaia BP-RP, Teff, G-V and spectral-type node lists, and the Johnson B-V and Teff node lists |
 | `blackbody_photometry` | `bbTeffMin`, `bbTeffMax`, `bbBpRp`, `bbGMinusV`, `bbBpRpInvertible`, `bbClampTeff`, `bbTeffFromBpRp`, `bbTeffFromBpRpExact`, `bbGMinusVFromBpRp`, `bbVFromG` |
@@ -134,6 +134,19 @@ let vLim = limitingMagnitude(skyLum, 2.0);          -- faintest visible star, fi
   multiply `glowInwardFlux` by 4 themselves. cosTheta is clamped to [0, 1], so
   a dot product that rounds to 1.0000000000000002 gives the pole; NaN
   cosTheta gives NaN.
+- The glow's spectrum (0.8.0, stapledons D-30): the wall is a greybody of
+  emissivity eps (Kirchhoff: it absorbs almost no light, so it emits almost
+  none), so eps cancels in the energy balance and
+  `glowTemperatureAt(n, phi, cosTheta)` = (K max(0, cos theta) / sigma)^(1/4):
+  1357.5 K on the pole at 0.99c, 14,114 K at 1 - beta = 1e-6, cos^(1/4) off
+  the pole. eps and fIn set only the brightness. `glowRadianceAt` = emittance
+  / pi (Lambertian), `glowEfficacyAt` = `blackbody.luminousEfficacy` at that
+  temperature (0.0233 lm/W at 0.99c, 43.7 at the cap), and `glowLuminanceAt`
+  = radiance x efficacy in cd/m^2. Colour: `blackbody.rgbUnitLuminance(T)`;
+  guard it with luminance > 0, since below about 25 K the visible integral is
+  0 and the colour is 0/0. Canon eps is 1e-11 (D-29): the 0.99c pole is then
+  1.65e-4 of a 23.5 mag/arcsec^2 dark sky and the cap pole 3.61e3 of it.
+  The blackbody is a game stand-in (real GeV impacts are not thermal).
 - `hoverPower(mEffKg, gMs2)` = m_eff |g| c (W): holding still (or on a
   planned line) against an unfelt acceleration g costs the photon drive
   F c with F = m_eff |g| (higgs-bubble.md §10, HB-90). 0.1254 m/s^2 (50,000 km
@@ -267,10 +280,13 @@ V is good to about +-0.1 mag. Treat results as approximate.
   platinum-point candela, 50-digit Decimal CMB temperatures and Crumey's
   printed limits. The 0.6.0 glow profile values come from tools/glow_ref.py
   (60-digit Decimal from the exact float inputs; the 1/4 sphere mean checked
-  by an independent quadrature in theta).
+  by an independent quadrature in theta). The 0.8.0 glow spectrum values come
+  from tools/glow_spectrum_ref.py (60-digit Decimal; sigma from exact SI
+  h, k, c; Stefan-Boltzmann checked by integrating Planck's law; the efficacy
+  peak checked against the CIE blackbody maximum).
 - NaN: the interpreter answers NaN >= x with true (ailang#1419), the VM with
   false. Functions here test NaN first or are written with `<` so both engines
   agree; `_smoke.ail`'s `wdDigest`, `journeyDigest`, `photometryDigest`,
-  `glowDigest` and `discDigest` check that bit for bit.
+  `glowDigest`, `discDigest` and `glowSpectrumDigest` check that bit for bit.
 - Colours use the Wyman–Sloan–Shirley (2013) fit to the CIE 1931 colour
   matching functions, which is accurate to about 0.002 in chromaticity.
