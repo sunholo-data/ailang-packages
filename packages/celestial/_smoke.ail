@@ -3,23 +3,26 @@
 -- (Standish elements), the north ecliptic pole in galactic coordinates, and
 -- Io's sidereal period (JPL mean elements on the Laplace plane); and from
 -- part 2 the hold gravity 50,000 km above Earth, the Lambert phase at
--- quadrature, the idealised Jupiter light time and the unlit ring limit.
+-- quadrature, the idealised Jupiter light time and the unlit ring limit;
+-- and from 0.2.0 the Earth 4,800 km from the EMB on 2023-11-03, within
+-- 200 km of JPL Horizons (DE441).
 --
--- keplerProbe, orbitsProbe and lightProbe are the VM-vs-interpreter probes: pure, and
+-- keplerProbe, orbitsProbe, lightProbe and earthMoonProbe are the VM-vs-interpreter probes: pure, and
 -- the strict bytecode VM must print the same bytes as the interpreter. From
 -- packages/celestial (--relax-modules because the module path is the
 -- package's, not the directory's; main also needs --caps IO):
 --   ailang run --quiet --relax-modules --bytecode --strict-bytecode --entry keplerProbe --args-json 64 _smoke.ail
 --   ailang run --quiet --relax-modules --entry keplerProbe --args-json 64 _smoke.ail
---   (likewise orbitsProbe 64 and lightProbe 200; compare with cmp)
+--   (likewise orbitsProbe 64, lightProbe 200 and earthMoonProbe 200; compare with cmp)
 --   ailang run --quiet --relax-modules --caps IO --entry main _smoke.ail
 module sunholo/celestial/_smoke
 
 import std/io (println)
 import std/math (sin, cos, sqrt, atan2, intToFloat)
 import ./kepler (Vec3, State, Orbit, solveKepler, stateFromElements, driftingState, absf, wrapPi, twoPi, pi)
-import ./frames (PoleModel, eclipticToGalactic, lonLat, poleAndSpin)
-import ./ephemeris (MeanElements, ElementRates, SatElements, elementsAt, planetAt, satelliteAt, satelliteElementsAt, julianDate, auKm)
+import ./frames (PoleModel, eclipticToGalactic, lonLat, poleAndSpin, obliquityJ2000)
+import ./ephemeris (MeanElements, ElementRates, SatElements, elementsAt, planetAt, satelliteAt, satelliteElementsAt, julianDate, auKm,
+  earthMoonSplit, earthAt, moonAt)
 import ./lighttime (retarded, secondsPerDay)
 import ./gravity (GravBody, accelerationAt, accelerationRelativeTo, gmSunNominal, gmEarthNominal, radiusSunNominal, radiusEarthNominal)
 import ./reflect (lambertPhase, minnaertRadiance, minnaertPhase, rhoFromGeometricAlbedo, bondAlbedo, discIlluminance, starIlluminanceAt)
@@ -141,7 +144,46 @@ pure func lightRows(k: int, n: int, acc: [float]) -> [float] =
 
 export pure func lightProbe(n: int) -> [float] = lightRows(0, n, [])
 
-pure func earthAt(jd: float) -> Vec3 = { x: 1.0, y: 0.0, z: 0.0 }
+-- The Moon, JPL SSD mean elements (DE405/LE405) on the ecliptic.
+pure func moonEl() -> SatElements {
+  let wdot = twoPi() / (5.997 * 365.25);
+  let ndot = 0.0 - twoPi() / (18.600 * 365.25);
+  { a: 384400.0, e: 0.0554, argPeri: rad(318.15), meanAnom: rad(135.27), incl: rad(5.16), node: rad(125.08),
+    epochJd: 2451545.0, meanAnomRate: twoPi() / 27.322 - wdot - ndot, periRate: wdot, nodeRate: ndot,
+    poleRa: rad(270.0), poleDec: rad(90.0) - obliquityJ2000() }
+}
+
+-- The Earth-Moon split (0.2.0) at n dates over 6,000 years, crossing both
+-- window edges: earthAt and moonAt, and earthMoonSplit of a synthetic
+-- state, every component, in order.
+pure func earthMoonRows(k: int, n: int, acc: [float]) -> [float] =
+  if k > n then acc
+  else {
+    let jd = 2451545.0 - 55.0 * 36525.0 + 70.0 * 36525.0 * intToFloat(k) / intToFloat(n);
+    let e = earthAt(embEl(), embRt(), moonEl(), jd);
+    let m = moonAt(embEl(), embRt(), moonEl(), jd);
+    let u = intToFloat(k) / intToFloat(n);
+    let s = earthMoonSplit({ pos: { x: 1.0 - u, y: u, z: 0.001 * u }, vel: { x: 0.01 * u, y: 0.0 - 0.017, z: 0.0 } },
+                           { pos: { x: 0.0025 * cos(7.0 * u), y: 0.0025 * sin(7.0 * u), z: 0.0002 }, vel: { x: 0.0005, y: 0.0 - 0.0001, z: u } });
+    earthMoonRows(k + 1, n, e.pos.x :: e.pos.y :: e.pos.z :: e.vel.x :: e.vel.y :: e.vel.z
+      :: m.pos.x :: m.pos.y :: m.pos.z :: m.vel.x :: m.vel.y :: m.vel.z
+      :: s.earth.pos.x :: s.earth.pos.y :: s.earth.pos.z :: s.earth.vel.x :: s.earth.vel.y :: s.earth.vel.z
+      :: s.moon.pos.x :: s.moon.pos.y :: s.moon.pos.z :: s.moon.vel.x :: s.moon.vel.y :: s.moon.vel.z :: acc)
+  }
+
+export pure func earthMoonProbe(n: int) -> [float] = earthMoonRows(0, n, [])
+
+-- Earth from the EMB on 2023-11-03.0 TDB, JPL Horizons DE441 (500@3), AU.
+pure func horizonsEarthEmb2023() -> Vec3 = { x: 0.000007521145924737144, y: 0.0 - 0.00003105875615656290, z: 0.0 - 0.000002890284150579967 }
+
+pure func earthEmbErrKm(jd: float) -> float {
+  let e = earthAt(embEl(), embRt(), moonEl(), jd).pos;
+  let b = planetAt(embEl(), embRt(), jd).pos;
+  let h = horizonsEarthEmb2023();
+  sqrt((e.x - b.x - h.x) * (e.x - b.x - h.x) + (e.y - b.y - h.y) * (e.y - b.y - h.y) + (e.z - b.z - h.z) * (e.z - b.z - h.z)) * auKm()
+}
+
+pure func unitEarthAt(jd: float) -> Vec3 = { x: 1.0, y: 0.0, z: 0.0 }
 
 pure func circJup(t: float) -> Vec3 = { x: 5.2 * cos(0.01720209895 / sqrt(140.608) * t), y: 5.2 * sin(0.01720209895 / sqrt(140.608) * t), z: 0.0 }
 
@@ -161,13 +203,15 @@ export func main() -> () ! {IO} {
   let o1 = satelliteElementsAt(io(), 2451545.0);
   let o2 = satelliteElementsAt(io(), 2451545.0 + 1.769137786);
   let ioOk = absf(wrapPi(o2.node + o2.argPeri + o2.meanAnom - o1.node - o1.argPeri - o1.meanAnom)) / (twoPi() / 1.769137786) < 0.0001;
-  let hold = accelerationAt([{ gm: gmEarthNominal(), radius: radiusEarthNominal(), posAt: earthAt }], { x: 1.0, y: 0.0, z: 56378.1 / auKm() }, 0.0);
+  let hold = accelerationAt([{ gm: gmEarthNominal(), radius: radiusEarthNominal(), posAt: unitEarthAt }], { x: 1.0, y: 0.0, z: 56378.1 / auKm() }, 0.0);
   let holdOk = !hold.inside && absf(hold.acc.z * (0.0 - 1.0) - 0.125406) < 0.00001;
   let phaseOk = absf(lambertPhase(pi() / 2.0) - 1.0 / pi()) < 0.000000000000001;
   let lag = retarded(circJup, { x: 1.0, y: 0.0, z: 0.0 }, 0.0).lagDays * secondsPerDay();
   let lagOk = absf(lag - 4.2 * 499.00478383615643) < 0.01;
   let ringOk = absf(ringUnlitIF(0.5, 1.3, 0.7, 0.45, 0.45) - 0.5 * 1.3 * 0.7 * 0.21107208779109024 / 1.8) < 0.000000000000001;
-  if keplerOk && oppOk && nepOk && ioOk && holdOk && phaseOk && lagOk && ringOk
-  then println("OK: celestial Kepler e 0.97 residual < 1e-14, Jupiter opposition 2023-11-03 +-2 d, north ecliptic pole at galactic (96.3840, 29.8114), Io sidereal period 1.769138 d, 0.1254 m/s^2 at 50,000 km above Earth, Lambert Phi(pi/2) = 1/pi, Jupiter light time 2095.8 s at 4.20 au, unlit ring limit finite")
-  else println("FAIL: kepler ${show(ea)}, opposition ${show(oppositionLonDiff(ref - 2.0))} / ${show(oppositionLonDiff(ref + 2.0))}, NEP ${show(l)} ${show(b)}, Io ${show(o2.meanAnom)}, hold ${show(hold.acc.z)}, lag ${show(lag)}, ring ${show(ringUnlitIF(0.5, 1.3, 0.7, 0.45, 0.45))}")
+  let emErr = earthEmbErrKm(2460251.5);
+  let emOk = emErr < 200.0;
+  if keplerOk && oppOk && nepOk && ioOk && holdOk && phaseOk && lagOk && ringOk && emOk
+  then println("OK: celestial Kepler e 0.97 residual < 1e-14, Jupiter opposition 2023-11-03 +-2 d, north ecliptic pole at galactic (96.3840, 29.8114), Io sidereal period 1.769138 d, 0.1254 m/s^2 at 50,000 km above Earth, Lambert Phi(pi/2) = 1/pi, Jupiter light time 2095.8 s at 4.20 au, unlit ring limit finite, Earth-from-EMB 2023-11-03 within 200 km of Horizons")
+  else println("FAIL: kepler ${show(ea)}, opposition ${show(oppositionLonDiff(ref - 2.0))} / ${show(oppositionLonDiff(ref + 2.0))}, NEP ${show(l)} ${show(b)}, Io ${show(o2.meanAnom)}, hold ${show(hold.acc.z)}, lag ${show(lag)}, ring ${show(ringUnlitIF(0.5, 1.3, 0.7, 0.45, 0.45))}, earth-EMB err ${show(emErr)} km")
 }

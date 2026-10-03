@@ -54,6 +54,7 @@ export func main() -> () ! {IO, FS, Net} =
 | [sunholo/testing-utils](packages/testing-utils/) | Test assertion helpers (assertEqual, assertOk, etc.) | Pure | [Guide](packages/testing-utils/AGENT.md) |
 | [sunholo/firestore](packages/firestore/) | Firestore REST API client — CRUD, queries, field encoding | Net, FS, Env | [Guide](packages/firestore/AGENT.md) |
 | [sunholo/deontic](packages/deontic/) | Verified contract reasoning: obligations, notice-and-cure, waiver, force majeure, termination — pure event fold with Z3-proved settlement math | Pure (IO in demo only) | [Guide](packages/deontic/AGENT.md) |
+| [sunholo/celestial](packages/celestial/) | Pure solar-system mechanics: Kepler, JPL approximate planet and satellite elements, Earth-Moon barycentre split (DE440), frames and IAU poles, light time, Newtonian gravity, reflected light and planetary rings | Pure (IO in `_smoke.ail` only) | [Guide](packages/celestial/AGENT.md) |
 | [sunholo/decisions](packages/decisions/) | Typed decisions from TypeSafe Jev (System One): Noul/Choice/Score + JSON-structured variants, distribution analytics, three-way detection gating, composite scores, ML features, self-consistency | Net, Env (IO in `_smoke.ail` only) | [Guide](packages/decisions/AGENT.md) |
 
 ### Billing Packages (DocParse)
