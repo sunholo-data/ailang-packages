@@ -1,0 +1,296 @@
+-- sunholo/mcp_oauth/flow: the authorization-server flow, and the ONLY
+-- module that holds secrets (design D4, ailang design_docs/planned/v0_52_0/
+-- m-mcp-oauth-package.md §"T7 in detail").
+--
+-- Secret handling rules this module follows (and tests/lint.sh enforces):
+--   * every code, handle, access token and refresh token is string<secret>:
+--     minted under Rand[mode=crypto], or classified on receipt (asSecret);
+--   * the only label-lowering function is digestOf (! {Declassify});
+--     storage, logs and comparisons see digests only;
+--   * no declared record type holds a <secret> (#1523: declared-record
+--     fields lose the label);
+--   * audit() refuses <secret> at compile time;
+--   * secrets leave only in the return value the caller writes to the
+--     HTTP response (redirect Location / token JSON). The label propagates
+--     there; the caller must not log it (AGENT.md checklist).
+
+module sunholo/mcp_oauth/flow
+
+import std/crypto (sha256Hex)
+import std/rand (uuid4)
+import std/string (replace, contains as strContains, length)
+import std/json (encode, decode, jo, kv, js, jb, jnum, ja, getString, getBool, getInt, getStringArrayOrEmpty)
+import std/option (Option, Some, None)
+import std/result (Result, Ok, Err)
+import std/list (mapE, map, length as listLen)
+import std/io (println)
+import std/math (intToFloat)
+import ./core (challengeMethodOk, pkceOk, redirectOk, codeExpiresAt, isExpired, verifierCharsOk)
+
+-- ============================================================
+-- Service hooks (design D3). One effect row for every hook.
+-- ============================================================
+
+-- Hook fields:
+--   authenticate(idToken)        -> account id (from the service's login page)
+--   mint(account, clientId)      -> a fresh access token the service's
+--                                   @mcp_token_verifier accepts (Parse: a dp_ key).
+--                                   Crypto is guaranteed by the MODE STACK, not the
+--                                   hook type: issueTokens declares Rand[mode=crypto],
+--                                   so a bare-Rand mint draws crypto/rand at runtime
+--                                   (verified 2026-10-02 via a seeded-mode probe through
+--                                   a record-held function). The checker accepts a
+--                                   bare-Rand function in this slot; a mint that
+--                                   itself declares another explicit mode would
+--                                   override the stack (AGENT.md #3: don't).
+--   put(key, json, expiresAtSec) / get(key) / del(key) -> storage
+--   revoke(tokenDigest)          -> invalidate the access token with that sha256Hex
+--   accessTtlSec                 -> lifetime of a minted access token (sent as expires_in)
+-- mint may use Declassify (e.g. to hash the key it stores); it must still return
+-- the raw token only as its result, never log or persist it unhashed.
+export type Hooks = {
+  authenticate: (string) -> Result[string, string] ! {IO, FS, Env, Net, Clock, SharedMem},
+  mint: (string, string) -> Result[string, string] ! {IO, FS, Env, Net, Clock, SharedMem, Rand[mode=crypto], Declassify},
+  put: (string, string, int) -> bool ! {IO, FS, Env, Net, Clock, SharedMem},
+  get: (string) -> Option[string] ! {IO, FS, Env, Net, Clock, SharedMem},
+  del: (string) -> bool ! {IO, FS, Env, Net, Clock, SharedMem},
+  revoke: (string) -> bool ! {IO, FS, Env, Net, Clock, SharedMem},
+  accessTtlSec: int
+}
+
+-- ============================================================
+-- Secrets: mint, classify, digest
+-- ============================================================
+
+-- 244 bits from two crypto UUIDv4s (uuid4 is always crypto/rand; the
+-- declared mode makes that auditable and forces it on callers).
+func newSecret() -> string<secret> ! {Rand[mode=crypto]} {
+  let a = replace(uuid4(), "-", "");
+  let b = replace(uuid4(), "-", "");
+  "${a}${b}"
+}
+
+-- Classify a value that arrives unlabelled (hook result, request param).
+pure func asSecret(raw: string) -> string<secret> = raw
+
+-- The ONE label-lowering function: secrets are stored and compared as digests.
+func digestOf(s: string<secret>) -> string ! {Declassify} = sha256Hex(s)
+
+-- Audit log: refuses secrets at compile time.
+func audit(event: string{not secret}) -> unit ! {IO} = println("[mcp_oauth] ${event}")
+
+-- ============================================================
+-- Errors (RFC 6749 §5.2)
+-- ============================================================
+
+export pure func oauthError(code: string, desc: string) -> string =
+  encode(jo([kv("error", js(code)), kv("error_description", js(desc))]))
+
+pure func invalidGrant(desc: string) -> string = oauthError("invalid_grant", desc)
+
+-- state is echoed into the redirect URL unencoded, so only unreserved
+-- characters are accepted (RFC 3986 §2.3), max 512.
+pure func stateOk(state: string) -> bool = length(state) <= 512 && verifierCharsOk(state)
+
+-- ============================================================
+-- 1. /oauth/authorize (validated client document already fetched by cimd)
+-- ============================================================
+
+-- Returns Ok(login page URL carrying the request handle) or Err(error JSON).
+export func beginAuthorize(h: Hooks, loginUrl: string, clientId: string, registered: [string],
+    redirectUri: string, responseType: string, challenge: string, method: string,
+    state: string, nowSec: int)
+  -> Result[string, string] ! {IO, FS, Env, Net, Clock, SharedMem, Rand[mode=crypto], Declassify} {
+  if responseType != "code" then Err(oauthError("unsupported_response_type", "response_type must be code"))
+  else if challengeMethodOk(method) == false then Err(oauthError("invalid_request", "code_challenge_method must be S256"))
+  else if length(challenge) != 43 then Err(oauthError("invalid_request", "code_challenge must be a 43-character S256 value"))
+  else if redirectOk(redirectUri, registered) == false then Err(oauthError("invalid_request", "redirect_uri is not registered for this client"))
+  else if stateOk(state) == false then Err(oauthError("invalid_request", "state must be unreserved characters, at most 512"))
+  else {
+    let handle = newSecret();
+    let rec = encode(jo([kv("client_id", js(clientId)), kv("redirect_uri", js(redirectUri)),
+                         kv("challenge", js(challenge)), kv("state", js(state))]));
+    let exp = codeExpiresAt(nowSec) + 540;  -- 10 minutes to sign in
+    if h.put("req:${digestOf(handle)}", rec, exp) then {
+      audit("authorize client=${clientId}");
+      Ok("${loginUrl}${if strContains(loginUrl, "?") then "&" else "?"}handle=${handle}")
+    } else Err(oauthError("server_error", "could not store the authorization request"))
+  }
+}
+
+-- The pending request behind a sign-in handle, for the service's consent
+-- screen: Ok({"client_id","redirect_uri"} JSON) or Err(error JSON). Read-only;
+-- the handle stays valid for completeLogin.
+export func describeRequest(h: Hooks, handleRaw: string)
+  -> Result[string, string] ! {IO, FS, Env, Net, Clock, SharedMem, Declassify} =
+  match h.get("req:${digestOf(asSecret(handleRaw))}") {
+    None => Err(oauthError("invalid_request", "unknown or expired sign-in request")),
+    Some(raw) => match decode(raw) {
+      Err(_) => Err(oauthError("server_error", "corrupt sign-in request")),
+      Ok(req) => Ok(encode(jo([kv("client_id", js(getStringOr(req, "client_id"))),
+                               kv("redirect_uri", js(getStringOr(req, "redirect_uri")))])))
+    }
+  }
+
+-- ============================================================
+-- 2. login complete: the service's login page posts handle + ID token
+-- ============================================================
+
+-- Returns Ok(redirect Location with ?code=&state=) or Err(error JSON).
+export func completeLogin(h: Hooks, handleRaw: string, idToken: string, nowSec: int)
+  -> Result[string, string] ! {IO, FS, Env, Net, Clock, SharedMem, Rand[mode=crypto], Declassify} {
+  let reqKey = "req:${digestOf(asSecret(handleRaw))}";
+  match h.get(reqKey) {
+    None => Err(oauthError("invalid_request", "unknown or expired sign-in request")),
+    Some(raw) => match decode(raw) {
+      Err(_) => Err(oauthError("server_error", "corrupt sign-in request")),
+      Ok(req) => match h.authenticate(idToken) {
+        Err(e) => Err(oauthError("access_denied", "sign-in failed: ${e}")),
+        Ok(account) => {
+          let _ = h.del(reqKey);  -- one sign-in per request handle
+          let code = newSecret();
+          let clientId = getStringOr(req, "client_id");
+          let redirectUri = getStringOr(req, "redirect_uri");
+          let rec = encode(jo([kv("client_id", js(clientId)), kv("redirect_uri", js(redirectUri)),
+                               kv("challenge", js(getStringOr(req, "challenge"))), kv("account", js(account)),
+                               kv("expires_at", jnum(intToFloat(codeExpiresAt(nowSec)))), kv("redeemed", jb(false)),
+                               kv("token_digest", js("")), kv("family", js(""))]));
+          if h.put("code:${digestOf(code)}", rec, codeExpiresAt(nowSec) + 3600) then {
+            audit("code issued client=${clientId}");
+            let sep = if strContains(redirectUri, "?") then "&" else "?";
+            Ok("${redirectUri}${sep}code=${code}&state=${getStringOr(req, "state")}")
+          } else Err(oauthError("server_error", "could not store the authorization code"))
+        }
+      }
+    }
+  }
+}
+
+pure func getStringOr(j: Json, k: string) -> string = match getString(j, k) { Some(s) => s, None => "" }
+
+
+-- ============================================================
+-- 3. /oauth/token (authorization_code)
+-- ============================================================
+
+pure func refreshTtlSec() -> int = 2592000  -- 30 days
+
+-- The token response (RFC 6749 §5.1). Built from <secret> values; the
+-- label propagates into the returned string (the caller writes it as the
+-- HTTP body and must not log it).
+func tokenBody(access: string<secret>, refreshTok: string<secret>, ttlSec: int) -> string =
+  encode(jo([kv("access_token", js(access)), kv("token_type", js("Bearer")),
+             kv("expires_in", jnum(intToFloat(ttlSec))), kv("refresh_token", js(refreshTok))]))
+
+-- Revoke every access token issued in a refresh family and close it.
+export func revokeFamily(h: Hooks, family: string, nowSec: int) -> bool ! {IO, FS, Env, Net, Clock, SharedMem} =
+  match h.get("fam:${family}") {
+    None => false,
+    Some(raw) => match decode(raw) {
+      Err(_) => false,
+      Ok(fam) => {
+        let digests = getStringArrayOrEmpty(fam, "tokens");
+        let _ = mapE(\d. h.revoke(d), digests);
+        audit("revoked family=${family} tokens=${show(listLen(digests))}");
+        h.put("fam:${family}", encode(jo([kv("tokens", ja(map(js, digests))), kv("closed", jb(true))])), nowSec + refreshTtlSec())
+      }
+    }
+  }
+
+-- Issue an access token + refresh token for (account, client) in `family`
+-- (a new family when family == ""). Returns Ok((body, tokenDigest, family)).
+func issueTokens(h: Hooks, account: string, clientId: string, family: string, priorDigests: [string], nowSec: int)
+  -> Result[(string, string, string), string] ! {IO, FS, Env, Net, Clock, SharedMem, Rand[mode=crypto], Declassify} =
+  match h.mint(account, clientId) {
+    Err(e) => Err(oauthError("server_error", "could not mint an access token: ${e}")),
+    Ok(minted) => {
+      let access = asSecret(minted);
+      let tokD = digestOf(access);
+      let rt = newSecret();
+      let fam = if family == "" then replace(uuid4(), "-", "") else family;
+      let famRec = encode(jo([kv("tokens", ja(map(js, priorDigests ++ [tokD]))), kv("closed", jb(false))]));
+      let rtRec = encode(jo([kv("family", js(fam)), kv("account", js(account)), kv("client_id", js(clientId)), kv("used", jb(false))]));
+      if h.put("fam:${fam}", famRec, nowSec + refreshTtlSec()) && h.put("rt:${digestOf(rt)}", rtRec, nowSec + refreshTtlSec())
+      then Ok((tokenBody(access, rt, h.accessTtlSec), tokD, fam))
+      else Err(oauthError("server_error", "could not store the token family"))
+    }
+  }
+
+-- authorization_code grant. A replayed code (already redeemed) revokes the
+-- tokens its first redemption issued (OAuth 2.1 §4.1.3).
+export func exchangeCode(h: Hooks, codeRaw: string, verifier: string, clientId: string, redirectUri: string, nowSec: int)
+  -> Result[string, string] ! {IO, FS, Env, Net, Clock, SharedMem, Rand[mode=crypto], Declassify} {
+  let codeKey = "code:${digestOf(asSecret(codeRaw))}";
+  match h.get(codeKey) {
+    None => Err(invalidGrant("unknown authorization code")),
+    Some(raw) => match decode(raw) {
+      Err(_) => Err(oauthError("server_error", "corrupt authorization code record")),
+      Ok(rec) =>
+        if getBoolOr(rec, "redeemed") then {
+          let _ = h.revoke(getStringOr(rec, "token_digest"));
+          let _ = revokeFamily(h, getStringOr(rec, "family"), nowSec);
+          audit("code replay: revoked client=${getStringOr(rec, "client_id")}");
+          Err(invalidGrant("authorization code already used"))
+        }
+        else if isExpired(nowSec, getIntOr(rec, "expires_at")) then Err(invalidGrant("authorization code expired"))
+        else if getStringOr(rec, "client_id") != clientId then Err(invalidGrant("client_id does not match the code"))
+        else if getStringOr(rec, "redirect_uri") != redirectUri then Err(invalidGrant("redirect_uri does not match the code"))
+        else if pkceOk(verifier, getStringOr(rec, "challenge")) == false then Err(invalidGrant("PKCE verification failed"))
+        else match issueTokens(h, getStringOr(rec, "account"), clientId, "", [], nowSec) {
+          Err(e) => Err(e),
+          Ok((body, tokD, fam)) => {
+            let redeemed = encode(jo([kv("client_id", js(clientId)), kv("redirect_uri", js(redirectUri)),
+                                      kv("challenge", js(getStringOr(rec, "challenge"))), kv("account", js(getStringOr(rec, "account"))),
+                                      kv("expires_at", jnum(intToFloat(getIntOr(rec, "expires_at")))), kv("redeemed", jb(true)),
+                                      kv("token_digest", js(tokD)), kv("family", js(fam))]));
+            let _ = h.put(codeKey, redeemed, nowSec + 3600);
+            audit("token issued client=${clientId}");
+            Ok(body)
+          }
+        }
+    }
+  }
+}
+
+-- ============================================================
+-- 4. /oauth/token (refresh_token): rotate; reuse revokes the family
+-- ============================================================
+
+export func refreshTokens(h: Hooks, refreshRaw: string, clientId: string, nowSec: int)
+  -> Result[string, string] ! {IO, FS, Env, Net, Clock, SharedMem, Rand[mode=crypto], Declassify} {
+  let rtKey = "rt:${digestOf(asSecret(refreshRaw))}";
+  match h.get(rtKey) {
+    None => Err(invalidGrant("unknown refresh token")),
+    Some(raw) => match decode(raw) {
+      Err(_) => Err(oauthError("server_error", "corrupt refresh token record")),
+      Ok(rec) => {
+        let fam = getStringOr(rec, "family");
+        if getBoolOr(rec, "used") then {
+          let _ = revokeFamily(h, fam, nowSec);
+          audit("refresh reuse: revoked family=${fam}");
+          Err(invalidGrant("refresh token already used"))
+        }
+        else if getStringOr(rec, "client_id") != clientId then Err(invalidGrant("client_id does not match the refresh token"))
+        else match h.get("fam:${fam}") {
+          None => Err(invalidGrant("refresh family not found")),
+          Some(famRaw) => match decode(famRaw) {
+            Err(_) => Err(oauthError("server_error", "corrupt refresh family")),
+            Ok(famRec) =>
+              if getBoolOr(famRec, "closed") then Err(invalidGrant("refresh family revoked"))
+              else {
+                let _ = h.put(rtKey, encode(jo([kv("family", js(fam)), kv("account", js(getStringOr(rec, "account"))),
+                                                 kv("client_id", js(clientId)), kv("used", jb(true))])), nowSec + refreshTtlSec());
+                match issueTokens(h, getStringOr(rec, "account"), clientId, fam, getStringArrayOrEmpty(famRec, "tokens"), nowSec) {
+                  Err(e) => Err(e),
+                  Ok((body, _, _)) => Ok(body)
+                }
+              }
+          }
+        }
+      }
+    }
+  }
+}
+
+pure func getBoolOr(j: Json, k: string) -> bool = match getBool(j, k) { Some(b) => b, None => false }
+pure func getIntOr(j: Json, k: string) -> int = match getInt(j, k) { Some(n) => n, None => 0 }

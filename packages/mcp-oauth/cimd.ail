@@ -1,0 +1,50 @@
+-- sunholo/mcp_oauth/cimd: fetch and validate a Client ID Metadata Document
+-- (CIMD), the client registration both Claude and ChatGPT use. Threat T5
+-- (SSRF via the client-supplied client_id URL) is closed in two layers:
+--   1. core.cimdUrlOk: the URL string (https only; no IP literal, localhost,
+--      .internal, metadata*, userinfo or fragment), Z3-backed;
+--   2. Net[scope=public] (ailang #1522): at connect time, after DNS, on the
+--      first request and every redirect hop, loopback / link-local
+--      (metadata) / private addresses are refused even under serve-api's
+--      permissive Net settings. A hostname that RESOLVES to 127.0.0.1 fails.
+-- One fetch per call (@limit=1); the document size is bounded.
+
+module sunholo/mcp_oauth/cimd
+
+import std/net (httpRequest)
+import std/json (decode, getString, getStringArrayOrEmpty)
+import std/string (length, startsWith)
+import std/list (length as listLen, any)
+import std/result (Result, Ok, Err)
+import ./core (cimdUrlOk, stripLoopbackPort)
+
+export pure func maxClientDocBytes() -> int = 65536
+
+-- A registered redirect must be https, or an RFC 8252 loopback http URI.
+pure func redirectShapeOk(u: string) -> bool = startsWith(u, "https://") || stripLoopbackPort(u) != ""
+
+-- Validate a fetched document against the URL it was fetched from.
+export pure func validateClientDoc(clientId: string, body: string) -> Result[[string], string] =
+  if length(body) > maxClientDocBytes() then Err("client metadata document too large")
+  else match decode(body) {
+    Err(_) => Err("client metadata document is not JSON"),
+    Ok(doc) => {
+      let declared = match getString(doc, "client_id") { Some(s) => s, None => "" };
+      let uris = getStringArrayOrEmpty(doc, "redirect_uris");
+      if declared != clientId then Err("client_id in the document does not equal the URL it was fetched from")
+      else if listLen(uris) == 0 then Err("client metadata document lists no redirect_uris")
+      else if any(\u. redirectShapeOk(u) == false, uris) then Err("a redirect_uri is neither https nor loopback http")
+      else Ok(uris)
+    }
+  }
+
+-- Fetch the client's document (public-only network, one request) and
+-- return its redirect_uris.
+export func fetchClient(clientId: string) -> Result[[string], string] ! {Net[scope=public] @limit=1} =
+  if cimdUrlOk(clientId) == false then Err("client_id is not an acceptable https client metadata URL")
+  else match httpRequest("GET", clientId, [], "") {
+    Err(e) => Err("could not fetch client metadata: ${show(e)}"),
+    Ok(resp) =>
+      if resp.status != 200 then Err("client metadata fetch returned HTTP ${show(resp.status)}")
+      else validateClientDoc(clientId, resp.body)
+  }

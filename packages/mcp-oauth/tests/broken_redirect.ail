@@ -1,0 +1,13 @@
+-- Negative contract fixture. `ailang verify` MUST report a VIOLATION: this
+-- accepts any redirect when the client registered at least one (a real
+-- class of bug: "has a redirect list => fine"). If this ever verifies, the
+-- redirect proof in core.ail has stopped meaning anything.
+module broken_redirect
+
+import std/list (contains, length)
+
+export pure func redirectAllowedBroken(presented: string, registered: [string]) -> bool
+  ensures { result == contains(registered, presented) }
+{
+  length(registered) > 0
+}

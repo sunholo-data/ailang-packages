@@ -1,0 +1,23 @@
+-- Network checks for sunholo/mcp_oauth/cimd.fetchClient (run with ailang run;
+-- prints PASS/FAIL lines; tests/cimd_check.sh asserts them).
+module sunholo/mcp_oauth/cimd_integration_test
+
+import std/io (println)
+import std/string (contains)
+import std/result (Ok, Err)
+import pkg/sunholo/mcp_oauth/cimd (fetchClient)
+
+func refusedWith(name: string, url: string, needle: string) -> () ! {IO, Net} =
+  match fetchClient(url) {
+    Ok(_) => println("FAIL ${name}: fetched"),
+    Err(e) => if contains(e, needle) then println("PASS ${name}") else println("FAIL ${name}: ${e}")
+  }
+
+export func main() -> () ! {IO, Net} {
+  -- string layer (no network): refused before any fetch
+  refusedWith("cimd fetch refuses http", "http://claude.ai/c", "not an acceptable");
+  refusedWith("cimd fetch refuses metadata ip", "https://169.254.169.254/latest", "not an acceptable");
+  -- connect-time layer: localtest.me is a public name that RESOLVES to 127.0.0.1;
+  -- only Net[scope=public] can refuse it (the string check passes it).
+  refusedWith("cimd fetch refused for private resolution", "https://localtest.me/client.json", "localhost IP blocked")
+}

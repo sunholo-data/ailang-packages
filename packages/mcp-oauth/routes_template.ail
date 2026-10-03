@@ -1,0 +1,25 @@
+-- Route template for adopters: copy into YOUR service module (serve-api
+-- serves only the service's own @route functions). Fill the four hooks
+-- (see AGENT.md). Do NOT log request bodies or the strings these routes
+-- return: they carry codes and tokens. Run serve-api with
+-- AILANG_TRACE_VALUES=off (traces render arguments verbatim).
+--
+-- This file is documentation that compiles; it is not exported.
+module sunholo/mcp_oauth/routes_template
+
+import std/clock (now)
+import std/result (Ok, Err)
+import pkg/sunholo/mcp_oauth/core (asMetadata)
+import pkg/sunholo/mcp_oauth/flow (Hooks, oauthError)
+
+-- GET /.well-known/oauth-authorization-server
+export func metadata(issuer: string) -> string = asMetadata(issuer)
+
+-- Seconds since the epoch for the flow functions (std/clock is milliseconds).
+export func nowSec() -> int ! {Clock} = now() / 1000
+
+-- The four flow routes map one-to-one onto flow.beginAuthorize (after the
+-- cimd fetch), flow.completeLogin, flow.exchangeCode and flow.refreshTokens.
+-- Return their Ok value as the response (302 Location for the first two,
+-- 200 JSON for the token endpoint) and their Err value as a 400 JSON body.
+export pure func badRequest(desc: string) -> string = oauthError("invalid_request", desc)
