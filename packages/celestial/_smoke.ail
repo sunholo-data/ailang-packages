@@ -4,7 +4,7 @@
 -- Io's sidereal period (JPL mean elements on the Laplace plane); and from
 -- part 2 the hold gravity 50,000 km above Earth, the Lambert phase at
 -- quadrature, the idealised Jupiter light time and the unlit ring limit;
--- and from 0.1.1 the Earth 4,800 km from the EMB on 2023-11-03, within
+-- and from 0.2.0 the Earth 4,800 km from the EMB on 2023-11-03, within
 -- 200 km of JPL Horizons (DE441).
 --
 -- keplerProbe, orbitsProbe, lightProbe and earthMoonProbe are the VM-vs-interpreter probes: pure, and
@@ -153,7 +153,7 @@ pure func moonEl() -> SatElements {
     poleRa: rad(270.0), poleDec: rad(90.0) - obliquityJ2000() }
 }
 
--- The Earth-Moon split (0.1.1) at n dates over 6,000 years, crossing both
+-- The Earth-Moon split (0.2.0) at n dates over 6,000 years, crossing both
 -- window edges: earthAt and moonAt, and earthMoonSplit of a synthetic
 -- state, every component, in order.
 pure func earthMoonRows(k: int, n: int, acc: [float]) -> [float] =

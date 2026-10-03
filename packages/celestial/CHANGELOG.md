@@ -1,8 +1,9 @@
 # Changelog
 
-## 0.1.1
+## 0.2.0
 
-Feature: the Earth-Moon barycentre split. Standish's "EMB" row is the
+Feature (minor bump, the repo's convention for new exports): the
+Earth-Moon barycentre split. Standish's "EMB" row is the
 Earth-Moon barycentre, so 0.1.0 put the Earth (and anything placed relative
 to it) mu |r_geo| = 4,330-4,950 km from its centre. Every 0.1.0 signature
 and result is unchanged; the additions are in `ephemeris`.

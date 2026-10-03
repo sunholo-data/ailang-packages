@@ -111,7 +111,7 @@ Inner planets (Mercury-Mars) have b = c = s = f = 0.
 | Module | Exports |
 |---|---|
 | `kepler` | `Vec3 {x,y,z}`, `State {pos, vel}`, `Orbit {a, e, incl, node, argPeri, meanAnom, gm}`, `Drift {a, e, incl, node, argPeri}`, `solveKepler(M, e)`, `stateFromElements(el)`, `driftingState(el, drift)`, `noDrift`, `meanMotion(gm, a)`, `period(gm, a)`, `orbitRadius(el)`, `orbitNormal(el)`, `wrapPi`, `pi`, `twoPi`, `absf`, `dot`, `norm`, `cross`, `scale`, `add`, `sub` |
-| `ephemeris` | `MeanElements {a, e, incl, meanLong, longPeri, node}`, `ElementRates {a, e, incl, meanLong, longPeri, node, b, c, s, f}`, `Ephem {orbit, meanOrbit, drift}`, `elementsAt(el, rates, jd)`, `planetAt(el, rates, jd)`, `SatElements {a, e, argPeri, meanAnom, incl, node, epochJd, meanAnomRate, periRate, nodeRate, poleRa, poleDec}`, `satelliteElementsAt(s, jd)`, `satelliteAt(s, jd)`, `julianDate(y, m, d)`, `auKm`, `j2000`, `windowStartJd`, `windowEndJd`; 0.1.1: `EarthMoon {earth, moon}`, `earthMoonSplit(emb, moonGeo)`, `earthAt(embEl, embRt, moon, jd)`, `moonAt(embEl, embRt, moon, jd)`, `earthMoonMu`, `earthMoonMassRatio` |
+| `ephemeris` | `MeanElements {a, e, incl, meanLong, longPeri, node}`, `ElementRates {a, e, incl, meanLong, longPeri, node, b, c, s, f}`, `Ephem {orbit, meanOrbit, drift}`, `elementsAt(el, rates, jd)`, `planetAt(el, rates, jd)`, `SatElements {a, e, argPeri, meanAnom, incl, node, epochJd, meanAnomRate, periRate, nodeRate, poleRa, poleDec}`, `satelliteElementsAt(s, jd)`, `satelliteAt(s, jd)`, `julianDate(y, m, d)`, `auKm`, `j2000`, `windowStartJd`, `windowEndJd`; 0.2.0: `EarthMoon {earth, moon}`, `earthMoonSplit(emb, moonGeo)`, `earthAt(embEl, embRt, moon, jd)`, `moonAt(embEl, embRt, moon, jd)`, `earthMoonMu`, `earthMoonMassRatio` |
 | `lighttime` | `Retarded {time, pos, lagDays}`, `retarded(srcFn, obs, t)`, `retardedTime(srcFn, obs, t)`, `lightTimeDays(srcFn, obs, t)`, `cAuPerDay`, `secondsPerDay` |
 | `gravity` | `GravBody {gm, radius, posAt}`, `Gravity {acc, inside, body}`, `accelerationAt(bodies, x, jdTDB)`, `accelerationRelativeTo(bodies, x, ref, jdTDB)`, `pointAcceleration(gm, rKm)`, `gmSunNominal`, `gmEarthNominal`, `gmJupiterNominal`, `radiusSunNominal`, `radiusEarthNominal`, `radiusJupiterNominal` |
 | `reflect` | `starIlluminanceAt(e1AU, rAU)`, `lambertPhase(alpha)`, `lambertRadiance(rho, lux, cosI)`, `minnaertRadiance(rho, k, lux, cosI, cosE)`, `minnaertPhase(alpha, k)`, `phaseFunction(alpha, k)`, `rhoFromGeometricAlbedo(p, k)`, `geometricAlbedoFromRho(rho, k)`, `bondAlbedo(rho, k)`, `bondFromGeometricAlbedo(p, k)`, `discIlluminance(e1AU, p, R, rAU, d, alpha, k)` |
@@ -172,11 +172,11 @@ Inner planets (Mercury-Mars) have b = c = s = f = 0.
   planet's heliocentric state for a heliocentric moon. Velocity includes the
   apse and node precession exactly.
 
-## Earth and Moon (`earthMoonSplit`, `earthAt`, `moonAt`; 0.1.1)
+## Earth and Moon (`earthMoonSplit`, `earthAt`, `moonAt`; 0.2.0)
 
 - **Standish's "EMB" row is the Earth-Moon barycentre, not the Earth.** The
   Earth's centre is mu |r_geo| = 4,330-4,950 km from it (mu times the Moon's 356,400-406,700 km),
-  on the side away from the Moon. 0.1.0 had no way to correct this; 0.1.1
+  on the side away from the Moon. 0.1.0 had no way to correct this; 0.2.0
   adds the split:
   Earth = EMB - mu r_geo, Moon = EMB + (1 - mu) r_geo, where r_geo is the
   geocentric Moon (`satelliteAt` with JPL's Moon elements) and
@@ -195,13 +195,18 @@ Inner planets (Mercury-Mars) have b = c = s = f = 0.
 - **Accuracy.** With exact inputs the split is exact: Horizons' EMB split
   with Horizons' geocentric Moon gives Horizons' Earth to 2e-16 AU. With the
   package's inputs, the Earth-from-EMB offset is within 54, 134 and 49 km of
-  DE441 on 2000-01-01.5, 2023-11-03 and 2026-01-01 (the Moon's mean elements
-  omit evection and variation: 0.5-1.6 deg and 2,100-2,400 km in the Moon on those dates, so
-  ~250 km at worst in the Earth). The **heliocentric** Earth is still only
+  DE441 on 2000-01-01.5, 2023-11-03 and 2026-01-01. The Moon's mean elements
+  omit evection and variation: 0.5-1.6 deg along track (3,300-10,800 km)
+  plus 2,100-2,400 km radially, 4,000-11,000 km in the Moon, times
+  mu = 49-134 km in the Earth. The **heliocentric** Earth is still only
   as good as Standish's EMB (3,500-12,000 km from DE441 on those dates):
-  the split removes a ~4,700 km systematic offset, not Standish's error.
-  For a ship 50,000 km above the Earth, place it relative to `earthAt`, not
-  relative to the EMB.
+  the split removes a ~4,700 km systematic offset, not Standish's error. On
+  some dates (e.g. 2026-01-01: 12,198 km split vs 8,016 km unsplit) the
+  split Earth is farther from DE441 than the unsplit EMB, because
+  Standish's error happened to cancel part of the offset. So for a ship
+  50,000 km above the Earth, place it relative to `earthAt` (the
+  Earth-relative geometry is what the split gets right), not relative to
+  the EMB, and do not judge the split by heliocentric distance.
 
 ## Frames
 
@@ -238,7 +243,7 @@ Inner planets (Mercury-Mars) have b = c = s = f = 0.
   observer's velocity, `sunholo/relativity`).
 - Standish positions give the EMB, not the geocentre; light times agree with
   JPL Horizons to 0.9 s (Jupiter 2023-11-03) and 3.0 s (Saturn 2023-08-27).
-  For a geocentric observer use `earthAt` (0.1.1); the light time moves by
+  For a geocentric observer use `earthAt` (0.2.0); the light time moves by
   at most ~0.017 s (4,950 km / c), well inside Standish's own error.
 
 ## Gravity (`gravity`)

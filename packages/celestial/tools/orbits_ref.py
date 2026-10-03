@@ -2,7 +2,7 @@
 """Independent reference values for sunholo/celestial 0.1.0: part 1
 (kepler, ephemeris, frames) and part 2 (lighttime, gravity, reflect, rings;
 its sources and independent methods are listed above part2() below); and
-0.1.1's Earth-Moon barycentre split (sources above earth_moon() below).
+0.2.0's Earth-Moon barycentre split (sources above earth_moon() below).
 Standard library only; no network (the Horizons values were fetched once
 and are copied in with their query).
 
@@ -604,7 +604,7 @@ def part2():
     check("Saturn solstice: latitude -20 deg sees the Sun through r = 97,564 km (B ring)", abs(r - 97564.0) < 1.0 and 91975 <= r < 117507, "%.3f km" % r)
 
 
-# ====================================================================== 0.1.1
+# ====================================================================== 0.2.0
 # The Earth-Moon barycentre split: Earth = EMB - mu r_geo,
 # Moon = EMB + (1 - mu) r_geo, mu = 1 / (1 + EMRAT).
 #

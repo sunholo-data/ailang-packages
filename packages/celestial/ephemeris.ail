@@ -17,7 +17,7 @@
 --
 -- Earth and Moon: Standish's "EMB" row is the Earth-Moon barycentre, not
 -- the Earth. earthMoonSplit / earthAt / moonAt split it with the geocentric
--- Moon and the DE440 mass ratio (0.1.1).
+-- Moon and the DE440 mass ratio (0.2.0).
 --
 -- Time is JD in TDB throughout.
 
@@ -151,7 +151,7 @@ export pure func satelliteAt(s: SatElements, jdTDB: float) -> State
   { pos: planeToEcliptic(s, st.pos), vel: planeToEcliptic(s, st.vel) }
 }
 
--- ---------- Earth-Moon barycentre split (0.1.1) ----------
+-- ---------- Earth-Moon barycentre split (0.2.0) ----------
 --
 -- Standish's EMB row gives the Earth-Moon barycentre. The Earth sits
 -- mu |r_geo| (~4,670 km) from it, towards the far side from the Moon, and
@@ -166,7 +166,7 @@ export pure func satelliteAt(s: SatElements, jdTDB: float) -> State
 export pure func earthMoonMassRatio() -> float = 81.3005682214972154
 
 -- mu = GM_Moon / (GM_Earth + GM_Moon) = 0.0121505843958292...
-export pure func earthMoonMu() -> float = 1.0 / (1.0 + 81.3005682214972154)
+export pure func earthMoonMu() -> float = 1.0 / (1.0 + earthMoonMassRatio())
 
 export type EarthMoon = { earth: State, moon: State }
 

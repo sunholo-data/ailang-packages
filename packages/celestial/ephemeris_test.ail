@@ -8,7 +8,7 @@
 --   the lunar distance extremes 356,375-406,720 km (Meeus ch. 50);
 --   the Moon's apsidal period 8.85 yr (3232.6 d) and Io's sidereal period
 --   1.769137786 d (NSSDC Jovian satellite fact sheet);
---   the Earth-Moon split (0.1.1): JPL Horizons (DE441) state vectors of the
+--   the Earth-Moon split (0.2.0): JPL Horizons (DE441) state vectors of the
 --   Earth relative to the EMB, the EMB and the Earth relative to the Sun and
 --   the Moon relative to the Earth on 2000-01-01.5, 2023-11-03.0 and
 --   2026-01-01.0 TDB (query in tools/orbits_ref.py), and DE440's
@@ -269,7 +269,7 @@ pure func satVelOk(s: SatElements, jd: float, h: float) -> bool {
 
 test "satelliteAt velocity equals d(pos)/dt (Moon, Io)" { satVelOk(moon(), 2455000.25, 0.0009765625) && satVelOk(io(), 2455000.25, 0.0001220703125) }
 
--- ---------- the Earth-Moon barycentre split (0.1.1) ----------
+-- ---------- the Earth-Moon barycentre split (0.2.0) ----------
 
 -- JPL Horizons (DE441) vectors, ecliptic J2000 (ICRF), AU and AU/day, TDB,
 -- copied digit for digit (query in tools/orbits_ref.py): hEmb = EMB (3) from
@@ -358,9 +358,13 @@ test "earthMoonSplit of Horizons' EMB and geocentric Moon gives Horizons' Earth 
 
 -- The mean-element path: earthAt - EMB against Horizons' Earth-from-EMB.
 -- The JPL mean elements omit the Moon's periodic terms (evection,
--- variation: ~2 deg, ~4,000 km), so the Earth's offset is good to
--- mu x that ~ 250 km at worst (54, 134, 49 km on these dates), against
--- the 4,387-4,890 km error of putting the Earth at the EMB.
+-- variation): 0.5-1.6 deg along track (3,300-10,800 km) plus 2,100-2,400 km
+-- radially, 4,000-11,000 km in the Moon on these dates, times mu = 49-134 km
+-- in the Earth (54, 134, 49 km measured), against the 4,387-4,890 km
+-- offset of putting the Earth at the EMB. This checks the Earth-relative
+-- geometry only: the heliocentric Earth keeps Standish's EMB error, which
+-- on some dates (2026-01-01) leaves the split Earth farther from DE441 than
+-- the unsplit EMB.
 pure func offsetKm(jd: float, h: State) -> float =
   norm(sub(sub(earthAt(embEl(), embRt(), moon(), jd).pos, planetAt(embEl(), embRt(), jd).pos), h.pos)) * auKm()
 
