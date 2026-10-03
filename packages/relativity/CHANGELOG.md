@@ -1,5 +1,45 @@
 # Changelog
 
+## 0.7.0
+
+Feature: the apparent disc of a nearby sphere, and hover power. Additive; every
+existing function is unchanged. (0.6.0 is M4's `medium.glowEmittanceAt`; this
+release follows it.)
+
+- **optics**: `apparentDisc(cosTheta, alpha, phi)` returns `ApparentDisc
+  {centre, radius}` (rad) for a sphere of angular radius alpha centred at
+  rest-frame polar angle theta. Aberration is conformal, so the outline stays
+  a circle whose meridian edges are the aberrated theta -/+ alpha; the centre
+  is their mean, which is not the aberrated centre. Check values (the M5
+  design's RS-24 to RS-29, for stapledons-design physics/relativity-spec.md):
+  0.9c, theta 90, alpha 5: centre 25.9277296298034 deg, radius
+  2.18394056339431 deg (aberrated centre 25.8419327631671); 0.99c: 8.14017747175280,
+  0.707096852084493; 0.9c, theta 150: 82.0207127068368, 9.94041081060385.
+  Identity at phi = 0 to 1e-15 rad; finite with radius > 0 and centre in
+  [0, pi] over phi to the 1 - beta = 1e-6 cap; a disc over a pole keeps it
+  inside.
+- **optics**: `angleSeen(theta, phi)`, the angle form of `cosSeen` by the
+  half-angle law tan(theta'/2) = e^-phi tan(theta/2). It never forms
+  1 - beta, is exact next to both poles and at the cap, and is continuous and
+  odd over (-2 pi, 2 pi), so edges past a pole need no branch.
+- **medium**: `hoverPower(mEffKg, gMs2)` = m_eff |g| c (W), higgs-bubble.md
+  §10 P_hover (HB-90): the photon-drive power that holds the ship against an
+  unfelt acceleration. 0.1254 m/s^2 gives 0.1254 c W/kg to 1e-15; rebuilt
+  from HB-10, Sgr A* at 3 r_s gives HB-88 4.82e5 m/s^2 and HB-90 1.44e14 W/kg.
+  M3's planned black-hole `hoverPowerPerKg` can compose it.
+- Tests: `optics_test.ail` (12 tests) and three `medium_test.ail` tests.
+  Expected values come from the new `tools/optics_ref.py` (output
+  `tools/optics_ref.out`): the rest-frame circle built in 3D, each photon
+  direction Lorentz-transformed in 60-digit Decimal, the nearest and farthest
+  image points found by search, and the outline checked circular to 1e-30
+  rad, a different method from the package's. Agreement 1e-12 relative (1e-11
+  at the cap). The oracle reproduces the M5 design's printed digits, also
+  asserted (`--check`). D at the apparent centre via the unchanged
+  `dopplerApparent` is checked too (2.2871, 7.0623, 0.4981); at the cap it
+  holds to 1e-9 only, from `dopplerApparent`'s own gamma^2-ulp conditioning
+  near the forward pole (noted in AGENT.md, not changed here).
+- `_smoke.ail`: `discDigest(n)` (strict VM = interpreter, bit for bit) and an
+  apparent-disc and hover check.
 ## 0.6.0
 
 Additive: no signature changes; every 0.5.2 result is bit-identical. The

@@ -1,0 +1,191 @@
+-- Check values for optics.apparentDisc and optics.angleSeen (0.6.x).
+--
+-- Expected numbers come from tools/optics_ref.py (output committed as
+-- tools/optics_ref.out), never from the code under test. The oracle builds
+-- the rest-frame circle in 3D, Lorentz-transforms 720 photon directions in
+-- 60-digit Decimal, finds the nearest and farthest image points from the
+-- axis and checks the outline is a circle to 1e-30 rad; the package instead
+-- aberrates the two meridian edges with the half-angle law. RS-24 to RS-29
+-- are the M5 design's rows for stapledons-design physics/relativity-spec.md
+-- (spec rows land with the M5.7 docs PR); the design printed them to 3
+-- decimals (centre, radius) and the oracle reproduces those digits.
+--
+-- Private names carry an `od` prefix: the test runner mixes up same-named
+-- private functions across modules (ailang#1461).
+
+module sunholo/relativity/optics_test
+
+import std/math (sin, cos, acos, intToFloat)
+import ./hyper (atanh, absf)
+import ./kinematics (rapidityOfOneMinusBeta)
+import ./optics (Vec3, ApparentDisc, apparentDisc, angleSeen, cosSeen, dopplerApparent)
+
+pure func odPi() -> float = 3.141592653589793
+pure func odDeg(r: float) -> float = r * 180.0 / odPi()
+pure func odRad(d: float) -> float = d * odPi() / 180.0
+pure func odRel(got: float, want: float, tol: float) -> bool = absf(got - want) <= tol * absf(want)
+pure func odR12(got: float, want: float) -> bool = odRel(got, want, 0.000000000001)
+
+pure func odPhi09() -> float = atanh(0.9)
+pure func odPhi099() -> float = atanh(0.99)
+pure func odPhiCap() -> float = rapidityOfOneMinusBeta(0.000001)
+
+pure func odDisc(thetaDeg: float, alphaDeg: float, phi: float) -> ApparentDisc =
+  apparentDisc(cos(odRad(thetaDeg)), odRad(alphaDeg), phi)
+
+-- centre and radius (degrees) against the oracle to tol relative
+pure func odDiscIs(d: ApparentDisc, centreDeg: float, radiusDeg: float, tol: float) -> bool =
+  odRel(odDeg(d.centre), centreDeg, tol) && odRel(odDeg(d.radius), radiusDeg, tol)
+
+-- ---------- RS-24 to RS-29 ----------
+
+pure func odCheckRs2425() -> bool {
+  let d = odDisc(90.0, 5.0, odPhi09());
+  let aberrated = odDeg(acos(cosSeen(cos(odRad(90.0)), 0.9)));
+  odDiscIs(d, 25.9277296298033926, 2.18394056339431461, 0.000000000001)
+    && odR12(aberrated, 25.8419327631671287)
+    && odDeg(d.centre) - aberrated > 0.0857 && odDeg(d.centre) - aberrated < 0.0859
+}
+
+test "RS-24/25: beta 0.9, theta 90, alpha 5: centre 25.928, radius 2.184 deg; aberrated centre 25.842 is not the centre" { odCheckRs2425() }
+
+pure func odCheckRs2627() -> bool {
+  let d = odDisc(90.0, 5.0, odPhi099());
+  let aberrated = odDeg(acos(cosSeen(cos(odRad(90.0)), 0.99)));
+  odDiscIs(d, 8.14017747175280070, 0.707096852084493450, 0.000000000001)
+    && odR12(aberrated, 8.10961445599417870)
+    && odDeg(d.centre) - aberrated > 0.03
+}
+
+test "RS-26/27: beta 0.99, theta 90, alpha 5: centre 8.140, radius 0.707 deg" { odCheckRs2627() }
+
+pure func odCheckRs2829() -> bool {
+  let d = odDisc(150.0, 5.0, odPhi09());
+  odDiscIs(d, 82.0207127068367928, 9.94041081060385319, 0.000000000001)
+    && d.radius > odRad(5.0)
+}
+
+test "RS-28/29: beta 0.9, theta 150, alpha 5: centre 82.021, radius 9.940 deg (magnified astern)" { odCheckRs2829() }
+
+-- ---------- design printed digits (M5 design table, 3 decimals) ----------
+
+pure func odPrinted(got: float, want: float) -> bool = absf(got - want) <= 0.0005
+
+pure func odCheckDesignDigits() -> bool {
+  let a = odDisc(90.0, 5.0, odPhi09());
+  let b = odDisc(90.0, 5.0, odPhi099());
+  let c = odDisc(150.0, 5.0, odPhi09());
+  odPrinted(odDeg(a.centre), 25.928) && odPrinted(odDeg(a.radius), 2.184)
+    && odPrinted(odDeg(b.centre), 8.140) && odPrinted(odDeg(b.radius), 0.707)
+    && odPrinted(odDeg(c.centre), 82.021) && odPrinted(odDeg(c.radius), 9.940)
+}
+
+test "the M5 design's printed oracle digits (25.928/2.184, 8.140/0.707, 82.021/9.940)" { odCheckDesignDigits() }
+
+-- ---------- Doppler at the apparent centre (dopplerApparent, unchanged) ----------
+
+pure func odAxis() -> Vec3 = { x: 0.0, y: 0.0, z: 1.0 }
+pure func odDir(t: float) -> Vec3 = { x: sin(t), y: 0.0, z: cos(t) }
+
+pure func odCheckDopplerCentre() -> bool {
+  let a = odDisc(90.0, 5.0, odPhi09());
+  let b = odDisc(90.0, 5.0, odPhi099());
+  let c = odDisc(150.0, 5.0, odPhi09());
+  odRel(dopplerApparent(odDir(a.centre), odAxis(), odPhi09()), 2.28707518016094601, 0.000000000001)
+    && odRel(dopplerApparent(odDir(b.centre), odAxis(), odPhi099()), 7.06232448629065262, 0.000000000001)
+    && odRel(dopplerApparent(odDir(c.centre), odAxis(), odPhi09()), 0.498122075824110387, 0.000000000001)
+}
+
+test "D at the apparent centre: 2.2871 (0.9c, 90), 7.0623 (0.99c), 0.4981 (0.9c, 150)" { odCheckDopplerCentre() }
+
+-- ---------- other geometries ----------
+
+-- D here is to 1e-9 only: dopplerApparent forms cosh phi - sinh phi cos theta'
+-- (gamma 707, result 1/704), which loses about gamma^2 ulp (1.3e-11 seen).
+-- That is the existing function's conditioning near the forward pole at the
+-- cap, not apparentDisc's (centre and radius hold to 1e-11 here).
+pure func odCheckCap() -> bool {
+  let d = odDisc(90.0, 5.0, odPhiCap());
+  odDiscIs(d, 0.0813379904031324788, 0.00708907060416243338, 0.00000000001)
+    && odRel(dopplerApparent(odDir(d.centre), odAxis(), odPhiCap()), 704.411088377627939, 0.000000001)
+}
+
+test "the cap, 1 - beta = 1e-6, theta 90, alpha 5: centre 0.08134, radius 0.007089 deg" { odCheckCap() }
+
+pure func odCheckModerate() -> bool =
+  odDiscIs(odDisc(30.0, 10.0, atanh(0.5)), 17.6801928386641209, 6.05454501288443821, 0.000000000001)
+
+test "beta 0.5, theta 30, alpha 10: centre 17.680, radius 6.055 deg" { odCheckModerate() }
+
+pure func odCheckOnAxis() -> bool {
+  let ahead = apparentDisc(1.0, odRad(5.0), odPhi09());
+  let astern = apparentDisc(-1.0, odRad(5.0), odPhi09());
+  ahead.centre == 0.0
+    && odR12(odDeg(ahead.radius), 1.14776879843965360)
+    && odR12(odDeg(astern.centre), 180.0)
+    && odR12(odDeg(astern.radius), 21.5506202012010019)
+}
+
+test "a disc on the axis stays on it: radius 1.148 deg ahead, 21.551 deg astern (beta 0.9, alpha 5)" { odCheckOnAxis() }
+
+-- A disc that contains the pole: its image still contains it (centre < radius),
+-- and its far edge is the aberrated theta + alpha.
+pure func odCheckContainsPole() -> bool {
+  let d = odDisc(2.0, 5.0, odPhi09());
+  d.centre >= 0.0 && d.centre < d.radius
+    && odR12(d.centre + d.radius, angleSeen(odRad(7.0), odPhi09()))
+}
+
+test "a disc over the pole keeps the pole inside its image" { odCheckContainsPole() }
+
+-- ---------- identity at rest ----------
+
+pure func odIdentityAt(thetaDeg: float, alphaDeg: float) -> bool {
+  let ct = cos(odRad(thetaDeg));
+  let d = apparentDisc(ct, odRad(alphaDeg), 0.0);
+  absf(d.centre - acos(ct)) <= 0.000000000000001 && absf(d.radius - odRad(alphaDeg)) <= 0.000000000000001
+}
+
+pure func odCheckIdentity() -> bool =
+  odIdentityAt(90.0, 5.0) && odIdentityAt(150.0, 5.0) && odIdentityAt(30.0, 10.0)
+    && odIdentityAt(0.0, 5.0) && odIdentityAt(180.0, 5.0) && odIdentityAt(2.0, 5.0)
+    && odIdentityAt(178.0, 5.0) && odIdentityAt(60.0, 90.0)
+
+test "phi = 0 is the identity to 1e-15 rad" { odCheckIdentity() }
+
+-- ---------- angleSeen agrees with cosSeen ----------
+
+pure func odSeenAgrees(thetaDeg: float, beta: float) -> bool {
+  let t = odRad(thetaDeg);
+  absf(cos(angleSeen(t, atanh(beta))) - cosSeen(cos(t), beta)) <= 0.0000000000001
+}
+
+pure func odCheckAgainstCosSeen() -> bool =
+  odSeenAgrees(10.0, 0.5) && odSeenAgrees(90.0, 0.9) && odSeenAgrees(120.0, 0.8)
+    && odSeenAgrees(170.0, 0.99) && odSeenAgrees(45.0, 0.3)
+
+test "angleSeen is cosSeen's angle: cos(angleSeen) = cosSeen to 1e-13" { odCheckAgainstCosSeen() }
+
+-- ---------- finite over the phi sweep to the cap ----------
+
+pure func odInf() -> float = 1.0e308 * 10.0
+pure func odFinite(x: float) -> bool = x == x && x < odInf() && x > 0.0 - odInf()
+
+pure func odDiscOk(ct: float, alpha: float, phi: float) -> bool {
+  let d = apparentDisc(ct, alpha, phi);
+  odFinite(d.centre) && odFinite(d.radius) && d.radius > 0.0
+    && d.centre >= 0.0 && d.centre <= odPi() && d.radius <= odPi()
+}
+
+pure func odAllOkAt(phi: float) -> bool =
+  odDiscOk(0.0, odRad(5.0), phi) && odDiscOk(-0.8660254037844386, odRad(5.0), phi)
+    && odDiscOk(1.0, odRad(0.001), phi) && odDiscOk(-1.0, odRad(0.001), phi)
+    && odDiscOk(0.9999, odRad(1.0), phi) && odDiscOk(-0.9999, odRad(1.0), phi)
+    && odDiscOk(0.5, odRad(90.0), phi) && odDiscOk(-0.5, 0.0000001, phi)
+
+pure func odSweep(i: int) -> bool =
+  if i > 200 then true
+  else if odAllOkAt(odPhiCap() * intToFloat(i) / 200.0) then odSweep(i + 1)
+  else false
+
+test "apparentDisc finite, radius > 0, centre in [0, pi] over phi in [0, cap] (201 steps x 8 discs)" { odSweep(0) }

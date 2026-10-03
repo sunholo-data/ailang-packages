@@ -128,3 +128,15 @@ export pure func brakeHoldsAgainstDrag(mEff: float, a: float, n: float, phi: flo
   let drag = mirrorDragForce(n, phi, r);
   if thrust == thrust && drag == drag then thrust >= drag else false
 }
+
+-- Power the photon drive spends to hold the ship still against a local
+-- gravitational (or any unfelt) acceleration g, ship frame: m_eff |g| c (W)
+-- (higgs-bubble.md §10, P_hover, HB-90). The pocket's acceleration is not
+-- felt (property 3); the drive supplies F = m_eff |g| as photons, at F c.
+-- gMs2 in m/s^2, signed or not. 0.1254 m/s^2 (50,000 km above Earth) costs
+-- 3.759e7 W per kg of m_eff; Sgr A* at 3 r_s, 1.44e14 W/kg (HB-90). Linear in
+-- both arguments, so a stepped hold integrates it per tick.
+export pure func hoverPower(mEffKg: float, gMs2: float) -> float {
+  let g = if gMs2 < 0.0 then 0.0 - gMs2 else gMs2;
+  mEffKg * g * cSI()
+}
