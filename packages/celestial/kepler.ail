@@ -1,0 +1,184 @@
+-- sunholo/celestial/kepler — the two-body problem: Kepler's equation and
+-- the state vector of an elliptic orbit.
+--
+-- Units: lengths in whatever unit `a` is in (AU for planets), time in days,
+-- angles in radians, gm in length^3 / day^2. Vectors are in the frame the
+-- elements are referred to (ecliptic J2000 for the planets).
+--
+-- Floats are outside Z3's decidable fragment: the float contracts below are
+-- runtime-checked assertions (ailang run --verify-contracts), not proofs.
+
+module sunholo/celestial/kepler
+
+import std/math (sin, cos, sqrt, floor)
+
+export type Vec3 = { x: float, y: float, z: float }
+
+-- Position and velocity: pos in length units, vel in length per day.
+export type State = { pos: Vec3, vel: Vec3 }
+
+-- Osculating Keplerian elements. a semi-major axis, e eccentricity (0 <= e < 1),
+-- incl inclination, node longitude of the ascending node, argPeri argument of
+-- periapsis, meanAnom mean anomaly (radians), gm the effective n^2 a^3 that
+-- sets the mean motion and so the velocity.
+export type Orbit = { a: float, e: float, incl: float, node: float, argPeri: float, meanAnom: float, gm: float }
+
+export pure func pi() -> float = 3.141592653589793
+
+export pure func twoPi() -> float = 6.283185307179586
+
+export pure func absf(u: float) -> float
+  ensures { result >= 0.0 }
+{
+  if u < 0.0 then 0.0 - u else u
+}
+
+export pure func dot(a: Vec3, b: Vec3) -> float = a.x * b.x + a.y * b.y + a.z * b.z
+
+export pure func norm(a: Vec3) -> float
+  ensures { result >= 0.0 }
+{
+  sqrt(dot(a, a))
+}
+
+export pure func cross(a: Vec3, b: Vec3) -> Vec3 =
+  { x: a.y * b.z - a.z * b.y, y: a.z * b.x - a.x * b.z, z: a.x * b.y - a.y * b.x }
+
+export pure func scale(k: float, a: Vec3) -> Vec3 = { x: k * a.x, y: k * a.y, z: k * a.z }
+
+export pure func add(a: Vec3, b: Vec3) -> Vec3 = { x: a.x + b.x, y: a.y + b.y, z: a.z + b.z }
+
+export pure func sub(a: Vec3, b: Vec3) -> Vec3 = { x: a.x - b.x, y: a.y - b.y, z: a.z - b.z }
+
+pure func reduced(u: float) -> float {
+  let r = u - twoPi() * floor((u + pi()) / twoPi());
+  if r >= pi() then r - twoPi() else if r < 0.0 - pi() then r + twoPi() else r
+}
+
+-- An angle reduced to [-pi, pi). Angles already inside are returned unchanged.
+export pure func wrapPi(u: float) -> float
+  requires { u - u == 0.0 }
+  ensures { result >= 0.0 - pi() && result < pi() }
+{
+  if u >= 0.0 - pi() && u < pi() then u else reduced(u)
+}
+
+-- Newton steps on f(E) = E - e sin E - m, a fixed count (no data-dependent
+-- loop exit, so the VM and the interpreter take the same path).
+pure func newton(m: float, e: float, ea: float, k: int) -> float =
+  if k <= 0 then ea
+  else newton(m, e, ea - (ea - e * sin(ea) - m) / (1.0 - e * cos(ea)), k - 1)
+
+-- Kepler's equation E - e sin E = M for the eccentric anomaly E (radians).
+-- Newton, exactly 8 iterations from E0 = M + e sin M. For |M| <= pi and
+-- e <= 0.97 the residual is below 1e-14 (tested, and swept over a 98 x 4001
+-- grid by tools/orbits_ref.py; worst 4.4e-16). M outside [-pi, pi) is reduced
+-- first and the turn count added back, so E stays on M's branch; e = 0 then
+-- gives E = M exactly for |M| <= pi.
+export pure func solveKepler(m: float, e: float) -> float
+  requires { e >= 0.0 && e < 1.0 }
+{
+  let mr = wrapPi(m);
+  let ea = newton(mr, e, mr + e * sin(mr), 8);
+  if mr == m then ea else ea + (m - mr)
+}
+
+-- Mean motion n = sqrt(gm / a^3), radians per day.
+export pure func meanMotion(gm: float, a: float) -> float
+  requires { gm > 0.0 && a > 0.0 }
+  ensures { result > 0.0 }
+{
+  sqrt(gm / (a * a * a))
+}
+
+-- Orbital period 2 pi / n, days.
+export pure func period(gm: float, a: float) -> float
+  requires { gm > 0.0 && a > 0.0 }
+  ensures { result > 0.0 }
+{
+  twoPi() / meanMotion(gm, a)
+}
+
+-- Distance from the focus, a (1 - e cos E). Exactly a for a circular orbit.
+export pure func orbitRadius(el: Orbit) -> float
+  requires { el.a > 0.0 && el.e >= 0.0 && el.e < 1.0 }
+  ensures { result > 0.0 }
+{
+  el.a * (1.0 - el.e * cos(solveKepler(el.meanAnom, el.e)))
+}
+
+-- The perifocal basis P (toward periapsis) and Q (90 deg ahead in the orbit)
+-- in the reference frame: Rz(node) Rx(incl) Rz(argPeri) applied to x and y.
+pure func basisP(el: Orbit) -> Vec3 {
+  let cn = cos(el.node);
+  let sn = sin(el.node);
+  let cw = cos(el.argPeri);
+  let sw = sin(el.argPeri);
+  let ci = cos(el.incl);
+  { x: cn * cw - sn * sw * ci, y: sn * cw + cn * sw * ci, z: sw * sin(el.incl) }
+}
+
+pure func basisQ(el: Orbit) -> Vec3 {
+  let cn = cos(el.node);
+  let sn = sin(el.node);
+  let cw = cos(el.argPeri);
+  let sw = sin(el.argPeri);
+  let ci = cos(el.incl);
+  { x: 0.0 - cn * sw - sn * cw * ci, y: cn * cw * ci - sn * sw, z: cw * sin(el.incl) }
+}
+
+-- Unit normal to the orbit plane (direction of the angular momentum).
+export pure func orbitNormal(el: Orbit) -> Vec3 =
+  { x: sin(el.incl) * sin(el.node), y: 0.0 - sin(el.incl) * cos(el.node), z: cos(el.incl) }
+
+-- Position and velocity from the elements (perifocal -> reference frame).
+-- sqrt(1 - e^2) is formed as sqrt((1 - e)(1 + e)) so it keeps its digits
+-- as e -> 1.
+export pure func stateFromElements(el: Orbit) -> State
+  requires { el.a > 0.0 && el.e >= 0.0 && el.e < 1.0 && el.gm > 0.0 }
+{
+  let ea = solveKepler(el.meanAnom, el.e);
+  let c = cos(ea);
+  let s = sin(ea);
+  let q = sqrt((1.0 - el.e) * (1.0 + el.e));
+  let edot = meanMotion(el.gm, el.a) / (1.0 - el.e * c);
+  let p = basisP(el);
+  let qv = basisQ(el);
+  let xp = el.a * (c - el.e);
+  let yp = el.a * q * s;
+  let vxp = 0.0 - el.a * s * edot;
+  let vyp = el.a * q * c * edot;
+  { pos: add(scale(xp, p), scale(yp, qv)), vel: add(scale(vxp, p), scale(vyp, qv)) }
+}
+
+-- Rates of the slow elements, per day: d a/dt, d e/dt, d incl/dt, d node/dt,
+-- d argPeri/dt. (The mean anomaly's rate is the orbit's own mean motion,
+-- sqrt(gm / a^3).)
+export type Drift = { a: float, e: float, incl: float, node: float, argPeri: float }
+
+export pure func noDrift() -> Drift = { a: 0.0, e: 0.0, incl: 0.0, node: 0.0, argPeri: 0.0 }
+
+-- The state of an orbit whose elements drift: the position is
+-- stateFromElements(el), and the velocity is its exact time derivative,
+-- the Kepler velocity plus the drift terms
+--   a' r/a + e' dr/de|M + incl' (N x r) + node' (z x r) + argPeri' (h x r)
+-- with N the unit node line and h the orbit normal.
+export pure func driftingState(el: Orbit, d: Drift) -> State
+  requires { el.a > 0.0 && el.e >= 0.0 && el.e < 1.0 && el.gm > 0.0 }
+{
+  let s = stateFromElements(el);
+  let ea = solveKepler(el.meanAnom, el.e);
+  let c = cos(ea);
+  let sn = sin(ea);
+  let q = sqrt((1.0 - el.e) * (1.0 + el.e));
+  let eaE = sn / (1.0 - el.e * c);
+  let dxe = el.a * (0.0 - sn * eaE - 1.0);
+  let dye = el.a * (q * c * eaE - el.e * sn / q);
+  let dre = add(scale(dxe, basisP(el)), scale(dye, basisQ(el)));
+  let nodeLine = { x: cos(el.node), y: sin(el.node), z: 0.0 };
+  let zHat = { x: 0.0, y: 0.0, z: 1.0 };
+  let extra = add(add(scale(d.a / el.a, s.pos), scale(d.e, dre)),
+                  add(scale(d.incl, cross(nodeLine, s.pos)),
+                      add(scale(d.node, cross(zHat, s.pos)), scale(d.argPeri, cross(orbitNormal(el), s.pos)))));
+  { pos: s.pos, vel: add(s.vel, extra) }
+}

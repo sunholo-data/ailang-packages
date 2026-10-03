@@ -1,0 +1,178 @@
+-- Check values for sunholo/celestial/kepler. Every expected value is a
+-- closed-form identity of the two-body problem or a published constant
+-- (the Gaussian year), never this module's own output. tools/orbits_ref.py
+-- solves Kepler's equation independently (bisection) and sweeps the residual
+-- of the 8-step Newton over a 98 x 4001 grid.
+
+module sunholo/celestial/kepler_test
+
+import std/math (sin, cos, sqrt, intToFloat)
+import ./kepler (Vec3, State, Orbit, Drift, driftingState, noDrift, solveKepler, stateFromElements, orbitRadius, meanMotion, period, norm, dot, cross, sub, scale, absf, wrapPi, pi, twoPi)
+
+pure func rel(got: float, want: float, tol: float) -> bool = absf(got - want) <= tol * absf(want)
+
+pure func residual(m: float, e: float) -> float {
+  let ea = solveKepler(m, e);
+  absf(ea - e * sin(ea) - m)
+}
+
+-- Worst residual over M = -pi .. pi in nm steps for one e.
+pure func worstOverM(e: float, i: int, nm: int, acc: float) -> float =
+  if i > nm then acc
+  else {
+    let m = 0.0 - pi() + twoPi() * intToFloat(i) / intToFloat(nm);
+    let r = residual(m, e);
+    worstOverM(e, i + 1, nm, if r > acc then r else acc)
+  }
+
+pure func eccAt(j: int) -> float = if j >= 20 then 0.97 else 0.05 * intToFloat(j)
+
+pure func worstGrid(j: int, acc: float) -> float =
+  if j > 20 then acc
+  else {
+    let w = worstOverM(eccAt(j), 0, 200, 0.0);
+    worstGrid(j + 1, if w > acc then w else acc)
+  }
+
+pure func checkResidualGrid() -> bool = worstGrid(0, 0.0) < 0.00000000000001
+
+test "Kepler residual < 1e-14 for e = 0 .. 0.97, M = -pi .. pi" { checkResidualGrid() }
+
+-- The hard corner: e near 1 and M near 0 or pi, where f'(E) -> 1 - e.
+pure func checkResidualCorners() -> bool =
+  residual(0.000001, 0.97) < 0.00000000000001 && residual(0.01, 0.97) < 0.00000000000001
+  && residual(0.0 - 0.01, 0.97) < 0.00000000000001 && residual(3.1, 0.97) < 0.00000000000001
+  && residual(3.14159, 0.97) < 0.00000000000001 && residual(0.0 - 3.14159, 0.97) < 0.00000000000001
+  && residual(0.3, 0.97) < 0.00000000000001
+
+test "Kepler residual < 1e-14 at the high-e corners" { checkResidualCorners() }
+
+pure func checkCircularExact() -> bool =
+  solveKepler(0.0, 0.0) == 0.0 && solveKepler(1.234567, 0.0) == 1.234567
+  && solveKepler(0.0 - 2.5, 0.0) == 0.0 - 2.5 && solveKepler(3.141592653589793, 0.0) == 3.141592653589793
+
+test "e = 0 gives E = M exactly" { checkCircularExact() }
+
+-- M beyond one turn stays on its branch: |E - M| <= e and the residual is
+-- at the float resolution of M itself (|M| ~ 100 -> ulp 1.4e-14).
+pure func checkLargeM() -> bool {
+  let e1 = solveKepler(100.0, 0.3);
+  let e2 = solveKepler(0.0 - 1000.0, 0.6);
+  absf(e1 - 100.0) <= 0.3 && residual(100.0, 0.3) < 0.0000000000001
+  && absf(e2 + 1000.0) <= 0.6 && residual(0.0 - 1000.0, 0.6) < 0.000000000001
+}
+
+test "M outside one turn: same branch, residual at float resolution" { checkLargeM() }
+
+pure func checkWrapPi() -> bool =
+  wrapPi(1.0) == 1.0 && absf(wrapPi(7.0) - (7.0 - twoPi())) < 0.000000000000001
+  && absf(wrapPi(0.0 - 4.0) - (twoPi() - 4.0)) < 0.000000000000001 && wrapPi(pi()) < pi()
+
+test "wrapPi reduces to [-pi, pi) and leaves inside values unchanged" { checkWrapPi() }
+
+-- ---------- state vectors ----------
+
+pure func gmSun() -> float = 0.01720209895 * 0.01720209895
+
+pure func orb(a: float, e: float, i: float, n: float, w: float, m: float) -> Orbit =
+  { a: a, e: e, incl: i, node: n, argPeri: w, meanAnom: m, gm: gmSun() }
+
+pure func checkCircularRadius() -> bool {
+  let el = orb(5.2, 0.0, 0.3, 1.1, 0.7, 2.2);
+  let s = stateFromElements(el);
+  orbitRadius(el) == 5.2 && rel(norm(s.pos), 5.2, 0.000000000000001)
+}
+
+test "circular orbit: radius = a exactly, |pos| = a to 1e-15" { checkCircularRadius() }
+
+pure func visViva(el: Orbit) -> bool {
+  let s = stateFromElements(el);
+  let r = norm(s.pos);
+  let v2 = dot(s.vel, s.vel);
+  rel(v2, el.gm * (2.0 / r - 1.0 / el.a), 0.000000000001) && rel(r, orbitRadius(el), 0.000000000000005)
+}
+
+pure func checkVisViva() -> bool =
+  visViva(orb(1.0, 0.0, 0.0, 0.0, 0.0, 0.0)) && visViva(orb(1.523, 0.0934, 0.032, 0.865, 5.0, 0.4))
+  && visViva(orb(5.2, 0.0485, 0.0227, 1.75, 4.78, 3.0)) && visViva(orb(17.8, 0.967, 2.83, 1.03, 1.95, 0.01))
+  && visViva(orb(3.0, 0.97, 1.0, 2.0, 3.0, 3.1)) && visViva(orb(0.387, 0.2056, 0.122, 0.843, 0.508, 0.0 - 2.0))
+
+test "vis-viva v^2 = GM (2/r - 1/a) to 1e-12" { checkVisViva() }
+
+pure func angMom(el: Orbit) -> bool {
+  let s = stateFromElements(el);
+  rel(norm(cross(s.pos, s.vel)), sqrt(el.gm * el.a * (1.0 - el.e * el.e)), 0.000000000001)
+}
+
+pure func checkAngMom() -> bool =
+  angMom(orb(1.523, 0.0934, 0.032, 0.865, 5.0, 0.4)) && angMom(orb(17.8, 0.967, 2.83, 1.03, 1.95, 1.5))
+
+test "angular momentum |r x v| = sqrt(GM a (1 - e^2))" { checkAngMom() }
+
+pure func checkPeriapsis() -> bool {
+  let s = stateFromElements(orb(2.0, 0.25, 0.0, 0.0, 0.0, 0.0));
+  rel(s.pos.x, 1.5, 0.000000000000001) && s.pos.y == 0.0 && s.pos.z == 0.0
+  && s.vel.x == 0.0 && rel(s.vel.y, sqrt(gmSun() * (1.25 / 0.75) / 2.0), 0.000000000000005)
+}
+
+test "periapsis at a(1 - e) on +x with the vis-viva speed" { checkPeriapsis() }
+
+-- A prograde orbit with incl = 0 circulates counter-clockwise about +z, and
+-- the ascending node lies on the line of nodes.
+pure func checkOrientation() -> bool {
+  let s = stateFromElements(orb(1.0, 0.0, 0.5, 1.0, 0.0, 0.0));
+  let flat = stateFromElements(orb(1.0, 0.1, 0.0, 0.0, 0.0, 1.0));
+  absf(s.pos.z) < 0.000000000000001 && rel(s.pos.x, cos(1.0), 0.000000000000005)
+  && rel(s.pos.y, sin(1.0), 0.000000000000005) && s.vel.z > 0.0
+  && cross(flat.pos, flat.vel).z > 0.0
+}
+
+test "orientation: node on the line of nodes, rising through it, prograde about +z" { checkOrientation() }
+
+pure func advance(el: Orbit, dt: float) -> Orbit =
+  { a: el.a, e: el.e, incl: el.incl, node: el.node, argPeri: el.argPeri,
+    meanAnom: el.meanAnom + meanMotion(el.gm, el.a) * dt, gm: el.gm }
+
+-- The velocity is the time derivative of the position (central difference).
+pure func checkVelocityIsDerivative() -> bool {
+  let el = orb(1.523, 0.0934, 0.032, 0.865, 5.0, 0.4);
+  let h = 0.01;
+  let d = scale(1.0 / (2.0 * h), sub(stateFromElements(advance(el, h)).pos, stateFromElements(advance(el, 0.0 - h)).pos));
+  let v = stateFromElements(el).vel;
+  norm(sub(d, v)) <= 0.00000001 * norm(v)
+}
+
+test "velocity equals d(pos)/dt" { checkVelocityIsDerivative() }
+
+pure func checkPeriodic() -> bool {
+  let el = orb(9.5, 0.0555, 0.0435, 1.98, 5.92, 0.8);
+  let p = stateFromElements(el).pos;
+  let q = stateFromElements(advance(el, period(el.gm, el.a))).pos;
+  norm(sub(p, q)) < 0.000000000001 * 9.5
+}
+
+test "one period returns to the same position" { checkPeriodic() }
+
+-- Kepler's third law with the Gaussian constant: the Gaussian year,
+-- 365.2568983 days (IAU 1938 / Explanatory Supplement).
+pure func checkGaussianYear() -> bool = absf(period(gmSun(), 1.0) - 365.2568983) < 0.0000001
+
+test "period at a = 1 AU with k^2 is the Gaussian year 365.2568983 d" { checkGaussianYear() }
+
+-- driftingState: the velocity is the exact derivative when every slow
+-- element moves (exaggerated rates, so each term matters at 1e-7).
+pure func drifted(el: Orbit, d: Drift, dt: float) -> Orbit =
+  { a: el.a + d.a * dt, e: el.e + d.e * dt, incl: el.incl + d.incl * dt, node: el.node + d.node * dt,
+    argPeri: el.argPeri + d.argPeri * dt, meanAnom: el.meanAnom + meanMotion(el.gm, el.a) * dt, gm: el.gm }
+
+pure func checkDriftingState() -> bool {
+  let el = orb(1.523, 0.0934, 0.32, 0.865, 5.0, 0.4);
+  let d = { a: 0.0001, e: 0.00002, incl: 0.0003, node: 0.0 - 0.0004, argPeri: 0.0005 };
+  let h = 0.0078125;
+  let fd = scale(1.0 / (2.0 * h), sub(stateFromElements(drifted(el, d, h)).pos, stateFromElements(drifted(el, d, 0.0 - h)).pos));
+  let v = driftingState(el, d).vel;
+  let still = driftingState(el, noDrift());
+  norm(sub(fd, v)) <= 0.0000001 * norm(v) && norm(sub(still.vel, stateFromElements(el).vel)) == 0.0
+}
+
+test "driftingState velocity is d(pos)/dt with all five element drifts" { checkDriftingState() }

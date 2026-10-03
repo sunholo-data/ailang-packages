@@ -1,0 +1,264 @@
+-- Check values for sunholo/celestial/ephemeris. Expected values are published
+-- dates and constants, never this module's output:
+--   Meeus, Astronomical Algorithms (2nd ed.) ch. 7 Julian Day examples;
+--   Jupiter's opposition 2023-11-03 and Mars's 2020-10-13 (+-2 d);
+--   Saturn's equinoxes (Sun ring-plane crossings) 2009-08-11 and 2025-05-06
+--   (+-10 d), with the IAU WGCCRE 2015 pole;
+--   obliquity to orbit, NASA NSSDC fact sheets: Earth 23.44, Saturn 26.73 deg;
+--   the lunar distance extremes 356,375-406,720 km (Meeus ch. 50);
+--   the Moon's apsidal period 8.85 yr (3232.6 d) and Io's sidereal period
+--   1.769137786 d (NSSDC Jovian satellite fact sheet).
+-- Fixtures: JPL SSD "Approximate Positions of the Planets" Tables 2a/2b
+-- (Standish & Williams 1992) and "Planetary Satellite Mean Elements"
+-- (Moon DE405/LE405, ecliptic; Io JUP365, Laplace), copied digit for digit.
+-- tools/orbits_ref.py re-derives every event time independently.
+
+module sunholo/celestial/ephemeris_test
+
+import std/math (sin, cos, atan2, intToFloat)
+import ./kepler (Vec3, State, Orbit, stateFromElements, norm, dot, sub, scale, absf, pi, twoPi, wrapPi)
+import ./frames (PoleModel, poleAndSpin, unitFromAngles, equatorialToEcliptic, obliquityJ2000)
+import ./ephemeris (MeanElements, ElementRates, Ephem, SatElements, elementsAt, planetAt, julianDate, windowStartJd, windowEndJd, satelliteElementsAt, satelliteAt, auKm)
+
+pure func rad(d: float) -> float = d * 3.141592653589793 / 180.0
+
+pure func deg(r: float) -> float = r * 180.0 / 3.141592653589793
+
+-- ---------- Julian dates (Meeus ch. 7) ----------
+
+pure func checkJulianDate() -> bool =
+  julianDate(2000, 1, 1.5) == 2451545.0 && julianDate(1987, 1, 27.0) == 2446822.5
+  && julianDate(1987, 6, 19.5) == 2446966.0 && julianDate(1988, 1, 27.0) == 2447187.5
+  && julianDate(1600, 12, 31.0) == 2305812.5 && absf(julianDate(1957, 10, 4.81) - 2436116.31) < 0.000001
+
+test "julianDate reproduces Meeus's Gregorian examples" { checkJulianDate() }
+
+-- ---------- Standish Table 2a/2b fixtures ----------
+
+pure func me(a: float, e: float, i: float, l: float, w: float, n: float) -> MeanElements =
+  { a: a, e: e, incl: rad(i), meanLong: rad(l), longPeri: rad(w), node: rad(n) }
+
+pure func rt(a: float, e: float, i: float, l: float, w: float, n: float, b: float, c: float, s: float, f: float) -> ElementRates =
+  { a: a, e: e, incl: rad(i), meanLong: rad(l), longPeri: rad(w), node: rad(n), b: rad(b), c: rad(c), s: rad(s), f: rad(f) }
+
+pure func embEl() -> MeanElements = me(1.00000018, 0.01673163, 0.0 - 0.00054346, 100.46691572, 102.93005885, 0.0 - 5.11260389)
+pure func embRt() -> ElementRates = rt(0.0 - 0.00000003, 0.0 - 0.00003661, 0.0 - 0.01337178, 35999.37306329, 0.31795260, 0.0 - 0.24123856, 0.0, 0.0, 0.0, 0.0)
+pure func marsEl() -> MeanElements = me(1.52371243, 0.09336511, 1.85181869, 0.0 - 4.56813164, 0.0 - 23.91744784, 49.71320984)
+pure func marsRt() -> ElementRates = rt(0.00000097, 0.00009149, 0.0 - 0.00724757, 19140.29934243, 0.45223625, 0.0 - 0.26852431, 0.0, 0.0, 0.0, 0.0)
+pure func jupEl() -> MeanElements = me(5.20248019, 0.04853590, 1.29861416, 34.33479152, 14.27495244, 100.29282654)
+pure func jupRt() -> ElementRates = rt(0.0 - 0.00002864, 0.00018026, 0.0 - 0.00322699, 3034.90371757, 0.18199196, 0.13024619, 0.0 - 0.00012452, 0.06064060, 0.0 - 0.35635438, 38.35125000)
+pure func satEl() -> MeanElements = me(9.54149883, 0.05550825, 2.49424102, 50.07571329, 92.86136063, 113.63998702)
+pure func satRt() -> ElementRates = rt(0.0 - 0.00003065, 0.0 - 0.00032044, 0.00451969, 1222.11494724, 0.54179478, 0.0 - 0.25015002, 0.00025899, 0.0 - 0.13434469, 0.87320147, 38.35125000)
+
+pure func helioLon(v: Vec3) -> float = atan2(v.y, v.x)
+
+-- Opposition: the planet's heliocentric ecliptic longitude equals the
+-- Earth-Moon barycentre's (Sun, Earth and planet aligned in longitude).
+pure func lonDiff(el: MeanElements, r: ElementRates, jd: float) -> float =
+  wrapPi(helioLon(planetAt(el, r, jd).pos) - helioLon(planetAt(embEl(), embRt(), jd).pos))
+
+pure func signChange(a: float, b: float) -> bool = (a < 0.0 && b > 0.0) || (a > 0.0 && b < 0.0)
+
+pure func checkJupiterOpposition() -> bool {
+  let ref = julianDate(2023, 11, 3.0);
+  signChange(lonDiff(jupEl(), jupRt(), ref - 2.0), lonDiff(jupEl(), jupRt(), ref + 2.0))
+}
+
+test "Jupiter at opposition on 2023-11-03, within +-2 d" { checkJupiterOpposition() }
+
+pure func checkMarsOpposition() -> bool {
+  let ref = julianDate(2020, 10, 13.0);
+  signChange(lonDiff(marsEl(), marsRt(), ref - 2.0), lonDiff(marsEl(), marsRt(), ref + 2.0))
+}
+
+test "Mars at opposition on 2020-10-13, within +-2 d" { checkMarsOpposition() }
+
+-- ---------- poles together with the elements ----------
+
+pure func saturnPole() -> PoleModel =
+  { ra0: rad(40.589), ra1: rad(0.0 - 0.036), dec0: rad(83.537), dec1: rad(0.0 - 0.004),
+    w0: rad(38.90), w1: rad(810.7939024), w2: 0.0, terms: [] }
+
+pure func earthPole() -> PoleModel =
+  { ra0: 0.0, ra1: rad(0.0 - 0.641), dec0: rad(90.0), dec1: rad(0.0 - 0.557),
+    w0: rad(190.147), w1: rad(360.9856235), w2: 0.0, terms: [] }
+
+-- The Sun's elevation above Saturn's ring plane (sign of sun . pole).
+pure func sunAboveRings(jd: float) -> float {
+  let p = planetAt(satEl(), satRt(), jd).pos;
+  0.0 - dot(p, poleAndSpin(saturnPole(), jd).pole)
+}
+
+pure func equinoxNear(y: int, m: int, d: float) -> bool {
+  let ref = julianDate(y, m, d);
+  signChange(sunAboveRings(ref - 10.0), sunAboveRings(ref + 10.0))
+}
+
+test "Saturn's ring-plane crossings 2009-08-11 and 2025-05-06, within +-10 d" { equinoxNear(2009, 8, 11.0) && equinoxNear(2025, 5, 6.0) }
+
+pure func angleDeg(u: Vec3, v: Vec3) -> float = deg(atan2(norm({ x: u.y * v.z - u.z * v.y, y: u.z * v.x - u.x * v.z, z: u.x * v.y - u.y * v.x }), dot(u, v)))
+
+pure func orbitNormalAt(el: MeanElements, r: ElementRates, jd: float) -> Vec3 {
+  let o = elementsAt(el, r, jd).orbit;
+  { x: sin(o.incl) * sin(o.node), y: 0.0 - sin(o.incl) * cos(o.node), z: cos(o.incl) }
+}
+
+pure func checkObliquities() -> bool =
+  absf(angleDeg(poleAndSpin(earthPole(), 2451545.0).pole, orbitNormalAt(embEl(), embRt(), 2451545.0)) - 23.44) <= 0.01
+  && absf(angleDeg(poleAndSpin(saturnPole(), 2451545.0).pole, orbitNormalAt(satEl(), satRt(), 2451545.0)) - 26.73) <= 0.01
+
+test "obliquity to orbit from pole and elements: Earth 23.44, Saturn 26.73 deg" { checkObliquities() }
+
+-- ---------- validity window ----------
+
+pure func checkMeanOrbitFlag() -> bool =
+  elementsAt(jupEl(), jupRt(), julianDate(3001, 1, 1.0)).meanOrbit
+  && elementsAt(jupEl(), jupRt(), julianDate(3000, 1, 1.0) + 365.25 + 1.0).meanOrbit
+  && !elementsAt(jupEl(), jupRt(), 2451545.0).meanOrbit
+  && !elementsAt(jupEl(), jupRt(), julianDate(2999, 12, 31.0)).meanOrbit
+  && !elementsAt(jupEl(), jupRt(), julianDate(-2998, 1, 1.0)).meanOrbit
+  && elementsAt(jupEl(), jupRt(), julianDate(-3100, 1, 1.0)).meanOrbit
+
+test "elementsAt flags mean-orbit outside 3000 BC-3000 AD and not inside" { checkMeanOrbitFlag() }
+
+pure func checkWindowEdges() -> bool =
+  windowStartJd() == 2451545.0 - 50.0 * 36525.0 && windowEndJd() == 2451545.0 + 10.0 * 36525.0
+
+test "the window is T = -50 .. +10 Julian centuries from J2000" { checkWindowEdges() }
+
+-- Past the edge the secular terms freeze (a, e, I, node, perihelion stay at
+-- their edge values) but the planet keeps moving round its orbit.
+pure func checkFrozenButMoving() -> bool {
+  let edge = elementsAt(jupEl(), jupRt(), windowEndJd()).orbit;
+  let far = elementsAt(jupEl(), jupRt(), windowEndJd() + 365250.0 * 100.0).orbit;
+  let p1 = planetAt(jupEl(), jupRt(), windowEndJd() + 1000.0).pos;
+  let p2 = planetAt(jupEl(), jupRt(), windowEndJd() + 3000.0).pos;
+  far.a == edge.a && far.e == edge.e && far.incl == edge.incl && far.node == edge.node
+  && far.argPeri == edge.argPeri && norm(sub(p1, p2)) > 1.0 && absf(norm(p1) - 5.2) < 0.3
+}
+
+test "a million years on: secular terms frozen at the edge, the planet still orbits" { checkFrozenButMoving() }
+
+-- Crossing the edge is continuous: one day either side moves the planet by
+-- about one day's motion (Jupiter ~0.0072 AU/d), no jump.
+pure func checkEdgeContinuity() -> bool {
+  let a = planetAt(jupEl(), jupRt(), windowEndJd() - 0.5).pos;
+  let b = planetAt(jupEl(), jupRt(), windowEndJd() + 0.5).pos;
+  norm(sub(a, b)) < 0.01
+}
+
+test "positions are continuous across the window edge" { checkEdgeContinuity() }
+
+-- The velocity is the exact time derivative of the position: b, c, s, f and
+-- the a, e, I, node and perihelion drifts included (h is a power of two so
+-- jd +- h is exact in float64).
+pure func checkPlanetVelocity() -> bool {
+  let jd = 2460251.5;
+  let h = 0.0625;
+  let d = scale(1.0 / (2.0 * h), sub(planetAt(satEl(), satRt(), jd + h).pos, planetAt(satEl(), satRt(), jd - h).pos));
+  let v = planetAt(satEl(), satRt(), jd).vel;
+  norm(sub(d, v)) <= 0.0000001 * norm(v)
+}
+
+test "planetAt velocity equals d(pos)/dt" { checkPlanetVelocity() }
+
+-- ---------- satellites ----------
+
+pure func eclipticPoleRa() -> float = rad(270.0)
+
+pure func eclipticPoleDec() -> float = rad(90.0) - obliquityJ2000()
+
+pure func perYr(p: float) -> float = twoPi() / (p * 365.25)
+
+-- The Moon (JPL SSD, DE405/LE405, ecliptic): a 384400 km, e 0.0554,
+-- w 318.15, M 135.27, i 5.16, node 125.08 deg, P 27.322 d (sidereal),
+-- P apsis 5.997 yr (prograde), P node 18.600 yr (regressing).
+pure func moon() -> SatElements {
+  let wdot = perYr(5.997);
+  let ndot = 0.0 - perYr(18.600);
+  { a: 384400.0, e: 0.0554, argPeri: rad(318.15), meanAnom: rad(135.27), incl: rad(5.16), node: rad(125.08),
+    epochJd: 2451545.0, meanAnomRate: twoPi() / 27.322 - wdot - ndot, periRate: wdot, nodeRate: ndot,
+    poleRa: eclipticPoleRa(), poleDec: eclipticPoleDec() }
+}
+
+-- Io (JPL SSD, JUP365, Laplace plane RA 268.1, Dec 64.5): a 421800 km,
+-- e 0.004, w 49.1, M 330.9, i 0.0, node 0.0 deg; P 1.762732 d is the
+-- anomalistic period, P apsis 1.333 yr with the apse regressing (forced by
+-- the Laplace resonance), no node motion.
+pure func io() -> SatElements =
+  { a: 421800.0, e: 0.004, argPeri: rad(49.1), meanAnom: rad(330.9), incl: 0.0, node: 0.0,
+    epochJd: 2451545.0, meanAnomRate: twoPi() / 1.762732, periRate: 0.0 - perYr(1.333), nodeRate: 0.0,
+    poleRa: rad(268.1), poleDec: rad(64.5) }
+
+pure func moonKm(jd: float) -> float = norm(satelliteAt(moon(), jd).pos) * auKm()
+
+pure func moonRange(i: int, n: int, lo: float, hi: float) -> bool =
+  if i > n then lo >= 356375.0 && hi <= 406720.0 && hi - lo > 40000.0
+  else {
+    let r = moonKm(2451545.0 + 17.0 * intToFloat(i));
+    moonRange(i + 1, n, if r < lo then r else lo, if r > hi then r else hi)
+  }
+
+test "the Moon stays within the published perigee-apogee range 356,375-406,720 km" { moonRange(0, 400, 1000000000.0, 0.0) }
+
+-- With the ecliptic as reference plane the Laplace rotation is the identity.
+pure func checkEclipticIdentity() -> bool {
+  let jd = 2455000.25;
+  let o = satelliteElementsAt(moon(), jd);
+  let p = stateFromElements(o).pos;
+  let q = satelliteAt(moon(), jd).pos;
+  norm(sub(p, q)) < 0.000000000001 * norm(p)
+}
+
+test "ecliptic reference plane: satelliteAt is the plain Kepler state" { checkEclipticIdentity() }
+
+pure func longPeri(o: Orbit) -> float = o.node + o.argPeri
+
+-- The perigee advances with period 8.85 yr = 3232.6 d (published), the sum
+-- of the apse and node rates.
+pure func checkMoonApsidalPeriod() -> bool {
+  let a = satelliteElementsAt(moon(), 2451545.0);
+  let b = satelliteElementsAt(moon(), 2451545.0 + 3232.6);
+  absf(wrapPi(longPeri(b) - longPeri(a))) < twoPi() * 5.0 / 3232.6
+}
+
+test "the Moon's perigee returns after 3232.6 d (8.85 yr) within 5 d" { checkMoonApsidalPeriod() }
+
+pure func meanLong(o: Orbit) -> float = o.node + o.argPeri + o.meanAnom
+
+-- Io's sidereal period, 1.769137786 d, from the mean longitude advance.
+pure func checkIoPeriod() -> bool {
+  let a = satelliteElementsAt(io(), 2451545.0);
+  let b = satelliteElementsAt(io(), 2451545.0 + 1.769137786);
+  let rate = twoPi() / 1.769137786;
+  absf(wrapPi(meanLong(b) - meanLong(a))) / rate < 0.0001
+}
+
+test "Io's sidereal period is 1.769137786 d within 1e-4 d" { checkIoPeriod() }
+
+pure func jupiterPole() -> PoleModel =
+  { ra0: rad(268.056595), ra1: rad(0.0 - 0.006499), dec0: rad(64.495303), dec1: rad(0.002413),
+    w0: rad(284.95), w1: rad(870.5360000), w2: 0.0, terms: [] }
+
+-- i = 0: Io lies in its Laplace plane, which is Jupiter's equator to 0.05 deg.
+pure func checkIoPlane() -> bool {
+  let jd = 2460000.5;
+  let p = satelliteAt(io(), jd).pos;
+  let lap = equatorialToEcliptic(unitFromAngles(rad(268.1), rad(64.5)));
+  let r = norm(p);
+  absf(dot(p, lap)) < 0.000000000001 * r
+  && absf(dot(p, poleAndSpin(jupiterPole(), jd).pole)) < 0.00088 * r
+  && absf(r * auKm() - 421800.0) <= 421800.0 * 0.004 * 1.0001
+}
+
+test "Io orbits in its Laplace plane, on Jupiter's equator, at a(1 +- e)" { checkIoPlane() }
+
+-- The satellite velocity is the time derivative of its position, apse and
+-- node precession included (h a power of two, so jd +- h is exact).
+pure func satVelOk(s: SatElements, jd: float, h: float) -> bool {
+  let d = scale(1.0 / (2.0 * h), sub(satelliteAt(s, jd + h).pos, satelliteAt(s, jd - h).pos));
+  let v = satelliteAt(s, jd).vel;
+  norm(sub(d, v)) <= 0.0000001 * norm(v)
+}
+
+test "satelliteAt velocity equals d(pos)/dt (Moon, Io)" { satVelOk(moon(), 2455000.25, 0.0009765625) && satVelOk(io(), 2455000.25, 0.0001220703125) }
