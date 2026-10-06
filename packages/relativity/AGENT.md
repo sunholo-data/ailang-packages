@@ -87,7 +87,7 @@ let vLim = limitingMagnitude(skyLum, 2.0);          -- faintest visible star, fi
 |---|---|
 | `hyper` | `sinh cosh tanh atanh acosh acosh1p expm1 log1p sinhc absf`. Accurate near 0; std/math has none of these |
 | `kinematics` | `Motion {phi,tau,t,x}`, `rest`, `accelerate(m, a, dtau)`, `coast`, `standardGravity`, `betaOf`, `gammaOf`, `oneMinusBeta`, `gammaOfBeta`, `rapidityOfBeta`, `rapidityOfOneMinusBeta` |
-| `journey` | `Trip {distance, shipTime, galaxyTime, peakBeta, peakGamma}`, `flipAndBurn(d, a)`, `burnCoastBurn(d, a, maxBeta)`, `coastAt(d, beta)`, `TripPlan {trip, a, phiPeak, tauBurn, tauCoast, tauTotal, dBurn, dCoast, fellBack}`, `planBurnCoastBurn(d, a, phiCruise)`, `planFlipAndBurn(d, a)`, `TripPhase` (`Accelerating Coasting Decelerating Arrived`), `phaseAt(p, tau)`, `motionAt(p, tau)` |
+| `journey` | `Trip {distance, shipTime, galaxyTime, peakBeta, peakGamma}`, `flipAndBurn(d, a)`, `burnCoastBurn(d, a, maxBeta)`, `coastAt(d, beta)`, `TripPlan {trip, a, phiPeak, tauBurn, tauCoast, tauTotal, dBurn, dCoast, fellBack, aApproach, phiApproach, tauApproach, dApproach}`, `planBurnCoastBurn(d, a, phiCruise)`, `planFlipAndBurn(d, a)`, `planBurnCoastBrakeApproach(d, a, phiCruise, aApproach, phiApproach)` (0.9.0), `TripPhase` (`Accelerating Coasting Decelerating Arrived`; the approach is `Decelerating`), `phaseAt(p, tau)`, `motionAt(p, tau)`, `inApproach(p, tau)`, `rapidityForTimedLeg(d, tBoost, tCruise)`, `rapidityForTimedApproach(d, tApproach)` |
 | `medium` | `cSI protonMassKg lightYearM julianYearS astronomicalUnitM cmbTemperatureK accelSI`, `photonDriveEnergy(mEff, phi)`, `loadScale(n, phi)`, `kineticFlux(n, phi)`, `mirrorDragForce(n, phi, r)`, `mirrorDragPower(n, phi, r)`, `cruiseDragEnergy(n, phi, r, dCoast)`, `glowInwardFlux(n, phi, eps, fIn)`, `glowEmittanceAt(n, phi, eps, fIn, cosTheta)`, `glowTemperatureAt(n, phi, cosTheta)`, `glowRadianceAt(n, phi, eps, fIn, cosTheta)`, `glowEfficacyAt(n, phi, cosTheta)`, `glowLuminanceAt(n, phi, eps, fIn, cosTheta)`, `TripEnergy {boost, brake, drag, total}`, `tripEnergy(p, mEff, n, r)`, `brakeHoldsAgainstDrag(mEff, a, n, phi, r)`, `hoverPower(mEffKg, gMs2)` |
 | `optics` | `Vec3`, `aberrate`, `deaberrate`, `doppler`, `dopplerApparent`, `gammaOnePlusBetaCos`, `cosSeen`, `dot`, `norm`, `normalize`, `forwardDoppler`, `cmbForwardTemperature`, `cmbSeenTemperature`, `cmbSeenTemperatureApparent`, `angleSeen(theta, phi)`, `ApparentDisc {centre, radius}`, `apparentDisc(cosTheta, alpha, phi)` |
 | `blackbody` | `XYZ`, `RGB`, `cmf`, `planck`, `xyz`, `luminance`, `chromaticity`, `rgbUnitLuminance`, `pointFluxRatio`, `surfaceBrightnessRatio`, `photopicRadiance`, `stefanBoltzmannSI`, `luminousEfficacy(kelvin)` |
@@ -287,6 +287,6 @@ V is good to about +-0.1 mag. Treat results as approximate.
 - NaN: the interpreter answers NaN >= x with true (ailang#1419), the VM with
   false. Functions here test NaN first or are written with `<` so both engines
   agree; `_smoke.ail`'s `wdDigest`, `journeyDigest`, `photometryDigest`,
-  `glowDigest`, `discDigest` and `glowSpectrumDigest` check that bit for bit.
+  `glowDigest`, `discDigest`, `glowSpectrumDigest` and `approachDigest` check that bit for bit.
 - Colours use the Wyman–Sloan–Shirley (2013) fit to the CIE 1931 colour
   matching functions, which is accurate to about 0.002 in chromaticity.

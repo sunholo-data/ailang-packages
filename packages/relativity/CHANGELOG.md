@@ -1,5 +1,39 @@
 # Changelog
 
+## 0.9.0
+
+Feature: a gentle final approach and timed legs (stapledons ledger D-46,
+attended 2026-10-06: in-system legs of equal rhythm, and arrivals that are
+not sudden). Additive: every existing function, `TripPlan` value and digest is
+bit-identical to 0.8.0 (`journeyDigest` 177359.65222313255 before and after).
+
+- **Why.** Under one constant brake the remaining distance falls with the
+  square of the time left, so a target grows explosively in the last
+  seconds: Jupiter from about 3 degrees to 60 degrees in the final ~8 s.
+- **journey**: `planBurnCoastBrakeApproach(distance, a, phiCruise,
+  aApproach, phiApproach)`. Accelerate at a, coast, brake at a down to
+  phiApproach, then brake at the gentler aApproach to rest. Each segment is
+  the constant proper-acceleration closed form already used by
+  `planBurnCoastBurn`; nothing physically new. Without a usable approach
+  (phiApproach <= 0, >= phiCruise, NaN, or aApproach <= 0) it is
+  `planBurnCoastBurn` bit for bit; if the segments do not fit it falls back
+  to it with `fellBack = true`.
+- **journey**: `TripPlan` gains `aApproach`, `phiApproach`, `tauApproach`
+  and `dApproach`, all 0 for the other profiles. `motionAt` is closed form
+  in every segment, each measured from its own start, and keeps its 0.8.0
+  code path verbatim when `tauApproach` is 0. `phaseAt` is unchanged: the
+  approach is `Decelerating`, so existing matches on `TripPhase` stay
+  exhaustive. `inApproach(p, tau)` marks [tauTotal - tauApproach, tauTotal).
+- **journey**: `rapidityForTimedLeg(distance, tBoost, tCruise)` solves
+  2 tBoost (cosh phi - 1)/phi + tCruise sinh phi = distance (the boost lasts
+  tBoost at a = phi/tBoost), and `rapidityForTimedApproach(distance,
+  tApproach)` solves tApproach (cosh phi - 1)/phi = distance. Both use 200
+  fixed bisection halvings (VM = interpreter) and return 0 for non-positive
+  or NaN input. Sun -> Jupiter (4.4 AU, 30 s + 60 s): phi 4.0807, 0.99943c;
+  Jupiter's approach from 4 degrees across, 25 s: phi 0.4981, 0.46c.
+- Tests: `approach_test.ail` (13). Oracle: `tools/approach_ref.py`
+  (float64 against 50-digit Decimal). Smoke: `approachDigest`.
+
 ## 0.8.0
 
 Feature: the wall glow's spectrum (stapledons ledger D-30, attended

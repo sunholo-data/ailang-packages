@@ -31,7 +31,15 @@ export type TripPlan = {
   tauTotal: float,
   dBurn: float,       -- distance covered by one burn, ly
   dCoast: float,      -- distance coasted, ly
-  fellBack: bool
+  fellBack: bool,
+  -- 0.9.0 final approach (planBurnCoastBrakeApproach): the brake at a ends at
+  -- rapidity phiApproach, then a gentler brake at aApproach takes tauApproach
+  -- over dApproach to rest. All four are 0 for the other profiles, whose
+  -- outputs are unchanged bit for bit.
+  aApproach: float,   -- proper acceleration of the approach, c/yr
+  phiApproach: float, -- rapidity where the approach begins
+  tauApproach: float, -- proper time of the approach
+  dApproach: float    -- distance covered by the approach, ly
 }
 
 export type TripPhase = Accelerating | Coasting | Decelerating | Arrived
@@ -59,7 +67,11 @@ export pure func planFlipAndBurn(distance: float, a: float) -> TripPlan
     tauTotal: 2.0 * tauBurn,
     dBurn: distance / 2.0,
     dCoast: 0.0,
-    fellBack: false
+    fellBack: false,
+    aApproach: 0.0,
+    phiApproach: 0.0,
+    tauApproach: 0.0,
+    dApproach: 0.0
   }
 }
 
@@ -96,7 +108,11 @@ export pure func planBurnCoastBurn(distance: float, a: float, phiCruise: float) 
       tauTotal: 2.0 * tauBurn + tauCoast,
       dBurn: dBurn,
       dCoast: dCoast,
-      fellBack: false
+      fellBack: false,
+      aApproach: 0.0,
+      phiApproach: 0.0,
+      tauApproach: 0.0,
+      dApproach: 0.0
     }
   }
 }
@@ -128,7 +144,10 @@ export pure func phaseAt(p: TripPlan, tau: float) -> TripPhase {
 -- Inside the brake, tau is only known to an ulp of tauTotal, so phi there
 -- carries an absolute error of about a * ulp(tauTotal) (3e-11 relative at
 -- the 0.99c default); this is the input's precision, not the formula's.
-export pure func motionAt(p: TripPlan, tau: float) -> Motion {
+export pure func motionAt(p: TripPlan, tau: float) -> Motion =
+  if p.tauApproach > 0.0 then motionWithApproach(p, tau) else motionBcb(p, tau)
+
+pure func motionBcb(p: TripPlan, tau: float) -> Motion {
   let t = clampTau(p, tau);
   let tau2 = p.tauBurn + p.tauCoast;
   if t < p.tauBurn then {
@@ -144,6 +163,133 @@ export pure func motionAt(p: TripPlan, tau: float) -> Motion {
     let s = sinh(phi / 2.0);
     { phi: phi, tau: t, t: p.trip.galaxyTime - sinh(phi) / p.a, x: p.trip.distance - 2.0 * s * s / p.a }
   } else { phi: 0.0, tau: p.tauTotal, t: p.trip.galaxyTime, x: p.trip.distance }
+}
+
+-- ---------------------------------------------------------------- 0.9.0
+-- A gentle final approach (stapledons ledger D-46). Under one constant
+-- brake the remaining distance falls with the square of the time left, so a
+-- target grows explosively in the last seconds. This profile brakes at a from
+-- phiCruise to phiApproach, then at the gentler aApproach to rest, so the end
+-- of the trip stretches over tauApproach. Every segment is the constant
+-- proper-acceleration closed form already used above; nothing new physically.
+--
+--   accelerate  0 -> phiCruise at a          dBurn  = 2 sinh^2(phiCruise/2)/a
+--   coast       phiCruise                    dCoast = rest of the distance
+--   brake       phiCruise -> phiApproach at a dBrake = 2 (sinh^2(phiCruise/2) - sinh^2(phiApproach/2))/a
+--   approach    phiApproach -> 0 at aApproach dApproach = 2 sinh^2(phiApproach/2)/aApproach
+--
+-- Without a usable approach (phiApproach <= 0, not below phiCruise, NaN, or
+-- aApproach <= 0) it is planBurnCoastBurn exactly. If the four segments do not
+-- fit in the distance it falls back to planBurnCoastBurn with fellBack = true.
+export pure func planBurnCoastBrakeApproach(distance: float, a: float, phiCruise: float, aApproach: float, phiApproach: float) -> TripPlan
+  requires { distance >= 0.0 && a > 0.0 && phiCruise > 0.0 }
+{
+  if not (phiApproach > 0.0 && phiApproach < phiCruise && aApproach > 0.0) then planBurnCoastBurn(distance, a, phiCruise)
+  else {
+    let sc = sinh(phiCruise / 2.0);
+    let sa = sinh(phiApproach / 2.0);
+    let dBurn = 2.0 * sc * sc / a;
+    let dBrake = 2.0 * (sc * sc - sa * sa) / a;
+    let dApproach = 2.0 * sa * sa / aApproach;
+    let dCoast = distance - dBurn - dBrake - dApproach;
+    if not (dCoast >= 0.0) then { planBurnCoastBurn(distance, a, phiCruise) | fellBack: true }
+    else {
+      let tauBurn = phiCruise / a;
+      let tauBrake = (phiCruise - phiApproach) / a;
+      let tauApproach = phiApproach / aApproach;
+      let shc = sinh(phiCruise);
+      let sha = sinh(phiApproach);
+      let tauCoast = dCoast / shc;
+      {
+        trip: {
+          distance: distance,
+          shipTime: tauBurn + tauCoast + tauBrake + tauApproach,
+          galaxyTime: shc / a + dCoast / tanh(phiCruise) + (shc - sha) / a + sha / aApproach,
+          peakBeta: tanh(phiCruise),
+          peakGamma: cosh(phiCruise)
+        },
+        a: a,
+        phiPeak: phiCruise,
+        tauBurn: tauBurn,
+        tauCoast: tauCoast,
+        tauTotal: tauBurn + tauCoast + tauBrake + tauApproach,
+        dBurn: dBurn,
+        dCoast: dCoast,
+        fellBack: false,
+        aApproach: aApproach,
+        phiApproach: phiApproach,
+        tauApproach: tauApproach,
+        dApproach: dApproach
+      }
+    }
+  }
+}
+
+-- Closed-form motion for planBurnCoastBrakeApproach (tauApproach > 0); the
+-- first two phases are motionBcb's, each later phase measured from its start.
+pure func motionWithApproach(p: TripPlan, tau: float) -> Motion {
+  let t = clampTau(p, tau);
+  let tau2 = p.tauBurn + p.tauCoast;
+  let tau3 = p.tauTotal - p.tauApproach;
+  let sa = sinh(p.phiApproach / 2.0);
+  let shA = sinh(p.phiApproach);
+  if t < tau2 then motionBcb({ p | tauTotal: tau2 + p.tauBurn }, t)
+  else if t < tau3 then {
+    let left = p.phiPeak - p.a * (t - tau2);
+    let phi = if left < p.phiApproach then p.phiApproach else left;
+    let s = sinh(phi / 2.0);
+    { phi: phi, tau: t, t: p.trip.galaxyTime - shA / p.aApproach - (sinh(phi) - shA) / p.a, x: p.trip.distance - p.dApproach - 2.0 * (s * s - sa * sa) / p.a }
+  } else if t < p.tauTotal then {
+    let left = p.phiApproach - p.aApproach * (t - tau3);
+    let phi = if left < 0.0 then 0.0 else left;
+    let s = sinh(phi / 2.0);
+    { phi: phi, tau: t, t: p.trip.galaxyTime - sinh(phi) / p.aApproach, x: p.trip.distance - 2.0 * s * s / p.aApproach }
+  } else { phi: 0.0, tau: p.tauTotal, t: p.trip.galaxyTime, x: p.trip.distance }
+}
+
+-- True while the ship is in the final approach (phaseAt reports it as
+-- Decelerating, so existing matches on TripPhase stay exhaustive).
+export pure func inApproach(p: TripPlan, tau: float) -> bool {
+  let t = clampTau(p, tau);
+  p.tauApproach > 0.0 && t >= p.tauTotal - p.tauApproach && t < p.tauTotal
+}
+
+-- A timed leg: the cruise rapidity phi for which accelerating for tBoost
+-- (proper years, at a = phi / tBoost), cruising for tCruise and braking the
+-- same way covers distance: 2 tBoost (cosh phi - 1)/phi + tCruise sinh phi = d.
+-- Monotonic in phi; 200 fixed bisection halvings (VM = interpreter). Returns
+-- 0 when no positive phi exists (distance <= 0, NaN, tBoost <= 0).
+export pure func rapidityForTimedLeg(distance: float, tBoost: float, tCruise: float) -> float
+  requires { tCruise >= 0.0 }
+  ensures { result >= 0.0 }
+{
+  if not (distance > 0.0 && tBoost > 0.0) then 0.0
+  else bisectPhi(distance, tBoost, tCruise, 0.0, upperPhi(distance, tBoost, tCruise, 1.0, 0), 200)
+}
+
+pure func timedDistance(tBoost: float, tCruise: float, phi: float) -> float {
+  let s = sinh(phi / 2.0);
+  2.0 * tBoost * 2.0 * s * s / phi + tCruise * sinh(phi)
+}
+
+pure func upperPhi(d: float, tB: float, tC: float, hi: float, n: int) -> float =
+  if n >= 40 || timedDistance(tB, tC, hi) >= d then hi else upperPhi(d, tB, tC, hi * 2.0, n + 1)
+
+pure func bisectPhi(d: float, tB: float, tC: float, lo: float, hi: float, n: int) -> float =
+  if n <= 0 then (lo + hi) / 2.0
+  else {
+    let mid = (lo + hi) / 2.0;
+    if timedDistance(tB, tC, mid) < d then bisectPhi(d, tB, tC, mid, hi, n - 1) else bisectPhi(d, tB, tC, lo, mid, n - 1)
+  }
+
+-- A timed approach: the rapidity at which a constant brake lasting tApproach
+-- (proper years, at aApproach = phi / tApproach) stops in exactly distance:
+-- tApproach (cosh phi - 1)/phi = d. Same solver (tCruise = 0, one burn).
+export pure func rapidityForTimedApproach(distance: float, tApproach: float) -> float
+  ensures { result >= 0.0 }
+{
+  if not (distance > 0.0 && tApproach > 0.0) then 0.0
+  else bisectPhi(2.0 * distance, tApproach, 0.0, 0.0, upperPhi(2.0 * distance, tApproach, 0.0, 1.0, 0), 200)
 }
 
 -- Accelerate at a to the midpoint, flip, decelerate at a to rest.
