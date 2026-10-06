@@ -12,7 +12,7 @@ import std/io (println)
 import std/math (acos, intToFloat, sin, cos, pow, log10)
 import ./kinematics (standardGravity, rapidityOfOneMinusBeta)
 import ./hyper (atanh, absf)
-import ./journey (TripPlan, TripPhase, Accelerating, Coasting, Decelerating, Arrived, flipAndBurn, planBurnCoastBurn, planFlipAndBurn, phaseAt, motionAt)
+import ./journey (TripPlan, TripPhase, Accelerating, Coasting, Decelerating, Arrived, flipAndBurn, planBurnCoastBurn, planFlipAndBurn, phaseAt, motionAt, planBurnCoastBrakeApproach, inApproach, rapidityForTimedLeg, rapidityForTimedApproach)
 import ./hyper (acosh1p)
 import ./optics (cmbForwardTemperature)
 import ./medium (tripEnergy, mirrorDragPower, loadScale, glowInwardFlux, glowEmittanceAt, brakeHoldsAgainstDrag, accelSI)
@@ -196,6 +196,22 @@ export pure func glowSpectrumDigest(n: int) -> float {
     + luminousEfficacy(wdNaN()) + luminousEfficacy(0.0) + luminousEfficacy(wdInf()) + luminousEfficacy(6600.0)
     + (if nanT != nanT then 1.0 else 0.0)
 }
+
+-- 0.9.0: timed legs and the final approach, swept over distance; interpreter
+-- and strict VM must print the same bits.
+pure func approachSweep(i: int, n: int, acc: float) -> float =
+  if i > n then acc
+  else {
+    let d = 0.0000001 + 0.0001 * intToFloat(i) / intToFloat(n);
+    let tb = 30.0 / 31557600.0;
+    let phi = rapidityForTimedLeg(d, tb, 60.0 / 31557600.0);
+    let pa = rapidityForTimedApproach(d * 0.01, 25.0 / 31557600.0);
+    let p = planBurnCoastBrakeApproach(d, phi / tb, phi, pa * 31557600.0 / 25.0, pa);
+    let m = motionAt(p, p.tauTotal - p.tauApproach * 0.5);
+    approachSweep(i + 1, n, acc + phi + pa + p.tauTotal * 31557600.0 + p.trip.galaxyTime * 31557600.0 + m.x / d + m.phi + (if inApproach(p, p.tauTotal - p.tauApproach * 0.5) then 1.0 else 0.0) + (if p.fellBack then 1.0 else 0.0))
+  }
+export pure func approachDigest(n: int) -> float =
+  approachSweep(0, n, 0.0) + rapidityForTimedLeg(wdNaN(), 1.0, 1.0) + rapidityForTimedApproach(wdNaN(), 1.0)
 
 export func main() -> () ! {IO} {
   let trip = flipAndBurn(4.37, standardGravity());

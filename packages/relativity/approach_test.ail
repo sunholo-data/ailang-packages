@@ -1,0 +1,128 @@
+-- Check values for 0.9.0: timed legs and the final-approach trip profile
+-- (journey: rapidityForTimedLeg, rapidityForTimedApproach,
+-- planBurnCoastBrakeApproach, inApproach; stapledons ledger D-46).
+--
+-- Every expected number comes from tools/approach_ref.py (float64 closed
+-- forms, cross-checked against 50-digit Decimal; output committed as
+-- tools/approach_ref.out), never from the code under test. Tolerance 1e-12
+-- relative; bisection results 1e-12 relative (200 halvings of [0, 2^k]).
+
+module sunholo/relativity/approach_test
+
+import ./hyper (absf, sinh)
+import ./kinematics (Motion)
+import ./journey (TripPlan, TripPhase, Decelerating, Arrived, planBurnCoastBurn, planBurnCoastBrakeApproach, motionAt, phaseAt, inApproach, rapidityForTimedLeg, rapidityForTimedApproach)
+
+pure func rel(got: float, want: float, tol: float) -> bool = absf(got - want) <= tol * absf(want)
+pure func r12(got: float, want: float) -> bool = rel(got, want, 0.000000000001)
+
+pure func yrS() -> float = 31557600.0
+pure func lyKm() -> float = 9460730472580.8
+pure func auKm() -> float = 149597870.7
+pure func tBoost() -> float = 30.0 / yrS()
+pure func tCruise() -> float = 60.0 / yrS()
+pure func dJupiter() -> float = 4.4 * auKm() / lyKm()
+pure func phiJ() -> float = rapidityForTimedLeg(dJupiter(), tBoost(), tCruise())
+pure func aJ() -> float = phiJ() / tBoost()
+pure func xApproach() -> float = 0.00000020141435407410357
+pure func tApproach() -> float = 25.0 / yrS()
+pure func phiA() -> float = rapidityForTimedApproach(xApproach(), tApproach())
+pure func aA() -> float = phiA() / tApproach()
+pure func planJ() -> TripPlan = planBurnCoastBrakeApproach(dJupiter(), aJ(), phiJ(), aA(), phiA())
+pure func tau3(p: TripPlan) -> float = p.tauTotal - p.tauApproach
+
+-- ---------- solvers ----------
+
+pure func checkTimedLegJupiter() -> bool = r12(phiJ(), 4.080689299167679) && r12(aJ(), 4292558.687580464)
+test "timed leg Sun -> Jupiter (4.4 AU, 30 s boost, 60 s cruise): phi 4.0807 (0.99943c)" { checkTimedLegJupiter() }
+
+pure func checkTimedLegSun() -> bool = r12(rapidityForTimedLeg(0.99 * auKm() / lyKm(), tBoost(), tCruise()), 2.51674261056312)
+test "timed leg Earth -> Sun (0.99 AU): phi 2.5167" { checkTimedLegSun() }
+
+pure func checkTimedLegCallisto() -> bool = r12(rapidityForTimedLeg(0.0126 * auKm() / lyKm(), tBoost(), tCruise()), 0.06981340005817965)
+test "timed leg Jupiter -> Callisto (0.0126 AU): phi 0.0698 (0.07c)" { checkTimedLegCallisto() }
+
+pure func checkTimedApproach() -> bool = r12(phiA(), 0.4981078796251638) && r12(aA(), 628763.5688823627)
+test "timed approach (Jupiter 4 deg across, 25 s): phi 0.4981 (0.46c)" { checkTimedApproach() }
+
+pure func checkSolverEdges() -> bool {
+  let nan = 0.0 / 0.0;
+  rapidityForTimedLeg(0.0, tBoost(), tCruise()) == 0.0 && rapidityForTimedLeg(nan, tBoost(), tCruise()) == 0.0
+  && rapidityForTimedLeg(dJupiter(), 0.0, tCruise()) == 0.0 && rapidityForTimedApproach(0.0, tApproach()) == 0.0
+  && rapidityForTimedApproach(xApproach(), 0.0) == 0.0
+}
+test "solvers return 0 for non-positive or NaN distance and time" { checkSolverEdges() }
+
+-- ---------- the plan ----------
+
+pure func checkPlanFields() -> bool {
+  let p = planJ();
+  r12(p.dBurn, 0.000006663059588225757) && r12(p.dCoast, 0.00005607700175798536) && r12(p.dApproach, 0.0000002014143540741036)
+  && r12(p.tauBurn, 0.0000009506426344208686) && r12(p.tauCoast, 0.0000018954744344012174) && r12(p.tauApproach, 0.0000007922021953507239)
+  && r12(p.tauTotal, 0.000004472922045471501) && r12(p.trip.galaxyTime, 0.00007059766882438914) && not p.fellBack
+}
+test "Jupiter plan: segments, 141.15 s aboard, galaxy time match the oracle" { checkPlanFields() }
+
+pure func near(a: float, b: float, scale: float) -> bool = absf(a - b) <= 0.000000001 * scale
+
+pure func checkContinuity() -> bool {
+  let p = planJ();
+  let e = p.tauTotal * 0.0000000001;
+  let t2 = p.tauBurn + p.tauCoast;
+  let b2l = motionAt(p, t2 - e); let b2 = motionAt(p, t2);
+  let b3l = motionAt(p, tau3(p) - e); let b3 = motionAt(p, tau3(p));
+  near(b2l.x, b2.x, p.trip.distance) && near(b2l.t, b2.t, p.trip.galaxyTime) && near(b2l.phi, b2.phi, p.phiPeak)
+  && near(b3l.x, b3.x, p.trip.distance) && near(b3l.t, b3.t, p.trip.galaxyTime) && near(b3l.phi, b3.phi, p.phiPeak)
+  && b3.phi == p.phiApproach && b3.x == p.trip.distance - p.dApproach
+}
+test "position, time and rapidity are continuous at the brake and approach boundaries" { checkContinuity() }
+
+pure func checkEndpoint() -> bool {
+  let p = planJ(); let m = motionAt(p, p.tauTotal); let late = motionAt(p, p.tauTotal * 2.0);
+  m.x == p.trip.distance && m.phi == 0.0 && m.t == p.trip.galaxyTime && late.x == p.trip.distance
+  && (match phaseAt(p, p.tauTotal) { Arrived => true, _ => false })
+}
+test "the approach ends exactly at the distance, at rest, at galaxy time" { checkEndpoint() }
+
+pure func monotonic(p: TripPlan, i: int, n: int, prev: float) -> bool =
+  if i > n then true else {
+    let m = motionAt(p, p.tauTotal * intToFloat(i) / intToFloat(n));
+    m.x >= prev && monotonic(p, i + 1, n, m.x)
+  }
+pure func checkMonotonic() -> bool = monotonic(planJ(), 0, 2000, 0.0)
+test "position never decreases over 2000 samples" { checkMonotonic() }
+
+pure func checkInApproach() -> bool {
+  let p = planJ(); let e = p.tauTotal * 0.000001;
+  not inApproach(p, tau3(p) - e) && inApproach(p, tau3(p)) && inApproach(p, p.tauTotal - e) && not inApproach(p, p.tauTotal)
+  && (match phaseAt(p, tau3(p) + e) { Decelerating => true, _ => false })
+}
+test "inApproach marks [tau3, tauTotal); phaseAt still says Decelerating there" { checkInApproach() }
+
+-- ---------- limits and fallbacks ----------
+
+pure func samePlan(a: TripPlan, b: TripPlan) -> bool =
+  a.tauTotal == b.tauTotal && a.trip.galaxyTime == b.trip.galaxyTime && a.dBurn == b.dBurn && a.dCoast == b.dCoast
+  && a.tauBurn == b.tauBurn && a.tauCoast == b.tauCoast && a.fellBack == b.fellBack && b.tauApproach == 0.0
+
+pure func checkNoApproachIsBcb() -> bool {
+  let bcb = planBurnCoastBurn(dJupiter(), aJ(), phiJ());
+  samePlan(planBurnCoastBrakeApproach(dJupiter(), aJ(), phiJ(), aA(), 0.0), bcb)
+  && samePlan(planBurnCoastBrakeApproach(dJupiter(), aJ(), phiJ(), aA(), phiJ()), bcb)
+  && samePlan(planBurnCoastBrakeApproach(dJupiter(), aJ(), phiJ(), 0.0, phiA()), bcb)
+  && samePlan(planBurnCoastBrakeApproach(dJupiter(), aJ(), phiJ(), aA(), 0.0 / 0.0), bcb)
+}
+test "without a usable approach the profile is planBurnCoastBurn bit for bit" { checkNoApproachIsBcb() }
+
+pure func checkSameAccelLimit() -> bool {
+  let p = planBurnCoastBrakeApproach(dJupiter(), aJ(), phiJ(), aJ(), phiA());
+  let bcb = planBurnCoastBurn(dJupiter(), aJ(), phiJ());
+  r12(p.tauTotal, bcb.tauTotal) && r12(p.trip.galaxyTime, bcb.trip.galaxyTime) && r12(p.dCoast, bcb.dCoast)
+}
+test "an approach at the same acceleration reproduces the symmetric trip" { checkSameAccelLimit() }
+
+pure func checkFallback() -> bool {
+  let p = planBurnCoastBrakeApproach(dJupiter() * 0.01, aJ(), phiJ(), aA(), phiA());
+  p.fellBack && p.tauApproach == 0.0
+}
+test "segments that do not fit fall back to planBurnCoastBurn (fellBack)" { checkFallback() }
