@@ -42,7 +42,9 @@ pure func asJson(s: string) -> Json = match decode(s) {
 
 -- The tool (signed in). Its result (structuredContent) is the descriptor the
 -- widget and the curl path read. Add @mcp_ui("ui://svc/upload") once serve-api
--- F1c ships so claude.ai renders uploadWidget() next to it.
+-- F1c ships so claude.ai renders uploadWidget() next to it. Say in the tool
+-- description that it uploads ONE file: a token works once, so the model must
+-- call it again for each file (or use createUploads(h, account, n, 0, now)).
 @route("POST", "/mcp/v1/createUpload")
 export func createUploadTool(filename: string, mimeType: string, _headers: Json)
   -> Json ! {IO, FS, Env, Net, Clock, SharedMem, Rand[mode=crypto], Declassify} =
@@ -81,7 +83,9 @@ export func uploadViaHost(ticket: string, filename: string, base64: string) -> J
 
 -- The widget resource body (ui://svc/upload, mime widget.widgetMimeType(),
 -- _meta widget.widgetCspMeta(["https://svc.example.com"])). Serve it with
--- @mcp_ui_resource once serve-api F1c ships.
+-- @mcp_ui_resource once serve-api F1c ships. To have the widget run your
+-- file tool itself once the upload lands (0.1.3), add
+--   onUploaded: callAfterUpload("mcpParse", "{\"fileRef\":\"{{fileRef}}\",\"outputFormat\":\"blocks\"}")
 export pure func uploadWidget() -> string =
   uploadWidgetHtml({defaultWidgetConfig("https://svc.example.com/uploads", "uploadViaHost") | title: "Upload a document", accept: ".pdf,.docx,.xlsx,.pptx",
                     nextStep: "Call the tool the user asked for with this fileRef."})

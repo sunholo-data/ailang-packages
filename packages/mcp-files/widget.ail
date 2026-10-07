@@ -16,6 +16,12 @@
 --     to the widget-only tool cfg.hostToolName with {ticket, filename, base64};
 --   * it reports the receipt with ui/update-model-context (never the host's
 --     message request, which drafts a user message under a caution banner).
+--   * after the upload (0.1.3) it can call a server tool itself through the
+--     host (cfg.onUploaded: an app-initiated tools/call, ext-apps
+--     App.callServerTool), with the fileRef substituted into a JSON argument
+--     template, and report the result with ui/update-model-context. A model
+--     context update starts no model turn (claude.ai, 2026-10-07: the widget
+--     sat on "parsing…" until the user typed), so the work is done first.
 --   * a brand (brand.ail, 0.1.2): header logo + name, accent on the primary
 --     button and focus ring, footer links; every value checked there. The
 --     host's theme, style variables and fonts are applied from the MCP Apps
@@ -26,10 +32,12 @@
 
 module sunholo/mcp_files/widget
 
-import std/string (replaceMany, substring, trim, join)
+import std/string (replaceMany, substring, trim, join, split, length, contains)
+import std/json (Json, JString, JArray, JObject, decode)
+import std/result (Ok, Err)
 import std/crypto (sha256Hex)
 import std/json (encode, jo, kv, js, ja, jint, jb)
-import std/list (map)
+import std/list (map, length as listLen, foldl)
 import ./extapps_bundle (extAppsBundle, extAppsVersion)
 import ./widget_assets (widgetHtmlTemplate, widgetJs, widgetCss)
 import ./brand (Brand, FooterLink, defaultBrand, brandName, brandLogo, brandAccent, brandLinks, onAccent)
@@ -43,11 +51,91 @@ import ./brand (Brand, FooterLink, defaultBrand, brandName, brandLogo, brandAcce
 --                  "Call mcpParse with this fileRef."
 -- afterUpload      shown after "Uploaded <name> (<size>) — ", e.g. "parsing…"
 -- brand            header logo + name, accent, footer (brand.ail; 0.1.2)
-export type WidgetConfig = {title: string, uploadUrl: string, hostToolName: string, maxViaHostBytes: int, accept: string, nextStep: string, afterUpload: string, brand: Brand}
+-- onUploaded       the server tool the widget calls after the upload (0.1.3;
+--                  noAutoCall() = report the fileRef only)
+-- resultSummary    a card with no upload (a call given a fileRef or a document)
+--                  shows one line read from its own result: "✓ Parsed a.docx ·
+--                  68 blocks · …", "✗ <code>: <message>", "✓ <tool> done"
+--                  (0.1.3; false = the bare "Done.")
+export type WidgetConfig = {title: string, uploadUrl: string, hostToolName: string, maxViaHostBytes: int, accept: string, nextStep: string, afterUpload: string, brand: Brand, onUploaded: OnUploaded, resultSummary: bool}
+
+-- tool      the server tool to call ("" = none: the 0.1.2 behaviour)
+-- argsJson  its arguments as a JSON object template holding the string value
+--           "{{fileRef}}" exactly once, e.g.
+--           {"fileRef":"{{fileRef}}","outputFormat":"blocks"}. The widget
+--           parses it and replaces that whole string value with the fileRef;
+--           nothing is spliced into text.
+export type OnUploaded = {tool: string, argsJson: string}
 
 export pure func defaultWidgetConfig(uploadUrl: string, hostToolName: string) -> WidgetConfig =
   {title: "Upload a file", uploadUrl: uploadUrl, hostToolName: hostToolName, maxViaHostBytes: 1048576, accept: "",
-   nextStep: "Continue the user's request with this fileRef.", afterUpload: "processing…", brand: defaultBrand()}
+   nextStep: "Continue the user's request with this fileRef.", afterUpload: "processing…", brand: defaultBrand(),
+   onUploaded: noAutoCall(), resultSummary: true}
+
+-- No server tool after the upload: the widget only reports the fileRef.
+export pure func noAutoCall() -> OnUploaded = {tool: "", argsJson: ""}
+
+-- Call `tool` with `argsJson` (the "{{fileRef}}" template) after the upload.
+export pure func callAfterUpload(tool: string, argsJson: string) -> OnUploaded = {tool: tool, argsJson: argsJson}
+
+export pure func fileRefPlaceholder() -> string = "{{fileRef}}"
+
+pure func toolCharOk(c: string) -> bool =
+  length(c) == 1 && contains("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_-", c)
+
+pure func toolCharsFrom(t: string, i: int) -> bool =
+  if i >= length(t) then true else toolCharOk(substring(t, i, i + 1)) && toolCharsFrom(t, i + 1)
+
+-- A plausible MCP tool name: [A-Za-z0-9_-]{1,64}.
+export pure func toolNameOk(t: string) -> bool =
+  length(t) >= 1 && length(t) <= 64 && toolCharsFrom(t, 0)
+
+pure func occurrences(s: string, needle: string) -> int = listLen(split(s, needle)) - 1
+
+pure func sumInts(xs: [int]) -> int = foldl(\a b. a + b, 0, xs)
+
+-- String values exactly equal to the placeholder.
+pure func wholePlaceholders(j: Json) -> int = match j {
+  JString(s) => if s == fileRefPlaceholder() then 1 else 0,
+  JArray(xs) => sumInts(map(wholePlaceholders, xs)),
+  JObject(fs) => sumInts(map(\f. wholePlaceholders(f.value), fs)),
+  _ => 0
+}
+
+-- Keys that mention the placeholder (after JSON unescaping).
+pure func placeholderKeys(j: Json) -> int = match j {
+  JArray(xs) => sumInts(map(placeholderKeys, xs)),
+  JObject(fs) => sumInts(map(\f. (if contains(f.key, fileRefPlaceholder()) then 1 else 0) + placeholderKeys(f.value), fs)),
+  _ => 0
+}
+
+-- "" when argsJson is a usable template, else what is wrong with it. The raw
+-- text must hold the placeholder once and the parsed object must hold it once
+-- as a whole string value, so a placeholder in a key, inside a longer string,
+-- written twice, or spelled with JSON escapes is refused.
+export pure func argsTemplateProblem(t: string) -> string =
+  match decode(t) {
+    Err(e) => "argsJson is not valid JSON (${e})",
+    Ok(j) => match j {
+      JObject(_) =>
+        if occurrences(t, fileRefPlaceholder()) != 1 then "argsJson must contain \"{{fileRef}}\" exactly once"
+        else if placeholderKeys(j) != 0 then "\"{{fileRef}}\" must be a value, not a key"
+        else if wholePlaceholders(j) != 1 then "\"{{fileRef}}\" must be a whole string value, not part of a string"
+        else "",
+      _ => "argsJson must be a JSON object"
+    }
+  }
+
+-- "" when the after-upload call is usable (or turned off), else the problem.
+export pure func onUploadedProblem(o: OnUploaded) -> string =
+  if o.tool == "" then ""
+  else if toolNameOk(o.tool) == false then "onUploaded.tool must match [A-Za-z0-9_-]{1,64}"
+  else argsTemplateProblem(o.argsJson)
+
+-- What the widget receives: the config if it passes, else no call (the widget
+-- then reports the fileRef only, and says why in the browser console).
+export pure func checkedOnUploaded(o: OnUploaded) -> OnUploaded =
+  if o.tool != "" && onUploadedProblem(o) == "" then o else noAutoCall()
 
 -- The MCP Apps resource mime type (ext-apps 2026-01-26).
 export pure func widgetMimeType() -> string = "text/html;profile=mcp-app"
@@ -85,6 +173,9 @@ export pure func configJson(cfg: WidgetConfig) -> string =
     kv("maxViaHostBytes", jint(cfg.maxViaHostBytes)),
     kv("nextStep", js(cfg.nextStep)),
     kv("afterUpload", js(cfg.afterUpload)),
+    kv("onUploaded", jo([kv("tool", js(checkedOnUploaded(cfg.onUploaded).tool)), kv("argsJson", js(checkedOnUploaded(cfg.onUploaded).argsJson))])),
+    kv("onUploadedProblem", js(onUploadedProblem(cfg.onUploaded))),
+    kv("resultSummary", jb(cfg.resultSummary)),
     kv("extAppsVersion", js(extAppsVersion()))
   ])), [("<", "\\u003c"), (">", "\\u003e")])
 

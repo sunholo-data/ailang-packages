@@ -5,7 +5,7 @@
 -- and a JavaScript syntax check (node --check) of both inline scripts.
 
 module sunholo/mcp_files/widget_test
-import ./widget (claudeWidgetOrigin, WidgetConfig, defaultWidgetConfig, uploadWidgetHtml, htmlEscape, configJson, widgetCspMeta, widgetMimeType)
+import ./widget (claudeWidgetOrigin, WidgetConfig, defaultWidgetConfig, uploadWidgetHtml, htmlEscape, configJson, widgetCspMeta, widgetMimeType, OnUploaded, noAutoCall, callAfterUpload, toolNameOk, argsTemplateProblem, onUploadedProblem, checkedOnUploaded)
 import ./extapps_bundle (extAppsBundle, extAppsVersion, extAppsSourceSha256)
 import ./widget_assets (widgetCss)
 import ./brand (Brand, brandWith, defaultBrand, ailangLogoSvg)
@@ -66,9 +66,12 @@ test "widget has exactly two inline scripts" {
   count(html(), "<script") == 2 && count(html(), "</script>") == 2
 }
 
--- The only URL in the widget script is the configured upload URL in CFG.
+-- The only absolute URL in the widget script is the configured upload URL in
+-- CFG; a result's download_url must pass the https-only check (0.1.3).
+pure func httpsCheckJs() -> string = "/^https:\\/\\/[^\\s\"'<>]+$/.test(u)"
+
 test "widget loads nothing external" {
-  contains(html(), "src=") == false && contains(html(), "<link") == false && contains(html(), "@import") == false && contains(html(), "<iframe") == false && count(appScript(), "http") == 1 && contains(appScript(), "import ") == false
+  contains(html(), "src=") == false && contains(html(), "<link") == false && contains(html(), "@import") == false && contains(html(), "<iframe") == false && count(appScript(), "https://") == 1 && contains(appScript(), "http://") == false && contains(appScript(), httpsCheckJs()) && contains(appScript(), "import ") == false
 }
 
 test "widget inlines the ext-apps client" {
@@ -187,4 +190,99 @@ test "chatgpt draws its own logo, so the header hides there" {
 
 test "footer links open through the host" {
   contains(appScript(), "app.openLink({ url: url })") && contains(appScript(), "window.openai.openExternal({ href: url })")
+}
+
+-- ---------- after the upload (0.1.3) ----------
+-- Templates live in functions (the unbalanced-brace cut above).
+pure func parseArgs() -> string = "{\"fileRef\":\"{{fileRef}}\",\"outputFormat\":\"blocks\"}"
+pure func nestedArgs() -> string = "{\"opts\":{\"files\":[\"{{fileRef}}\"]},\"n\":2}"
+pure func badJson() -> string = "{\"fileRef\":\"{{fileRef}}\""
+pure func noPlaceholder() -> string = "{\"fileRef\":\"x\"}"
+pure func twoPlaceholders() -> string = "{\"a\":\"{{fileRef}}\",\"b\":\"{{fileRef}}\"}"
+pure func placeholderKey() -> string = "{\"{{fileRef}}\":\"x\"}"
+pure func placeholderKeyAndValue() -> string = "{\"{{fileRef}}\":\"{{file\\u0052ef}}\"}"
+pure func concatenated() -> string = "{\"path\":\"/files/{{fileRef}}\"}"
+pure func concatenatedCode() -> string = "{\"q\":\"\\\"+{{fileRef}}+\\\"\"}"
+pure func escapedPlaceholder() -> string = "{\"fileRef\":\"{{file\\u0052ef}}\"}"
+pure func arrayTemplate() -> string = "[\"{{fileRef}}\"]"
+pure func stringTemplate() -> string = "\"{{fileRef}}\""
+
+pure func parseCall() -> OnUploaded = callAfterUpload("mcpParse", parseArgs())
+
+pure func noCallJson() -> string = "\"onUploaded\":{\"tool\":\"\",\"argsJson\":\"\"}"
+
+test "default config makes no after-upload call" {
+  cfg().onUploaded.tool == "" && cfg().onUploaded.argsJson == "" && onUploadedProblem(noAutoCall()) == "" && contains(configJson(cfg()), noCallJson())
+}
+
+test "tool names are 1 to 64 of A-Z a-z 0-9 _ -" {
+  toolNameOk("mcpParse") && toolNameOk("parse_doc-2") && toolNameOk("a") && toolNameOk("abcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghij1234") && toolNameOk("") == false && toolNameOk("abcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghij12345") == false && toolNameOk("mcp.parse") == false && toolNameOk("mcp parse") == false && toolNameOk("x'); alert(1)") == false && toolNameOk("tool/call") == false && toolNameOk("é") == false
+}
+
+test "a whole-value template is accepted" {
+  argsTemplateProblem(parseArgs()) == "" && argsTemplateProblem(nestedArgs()) == "" && onUploadedProblem(parseCall()) == ""
+}
+
+test "template: bad json refused" { startsWith(argsTemplateProblem(badJson()), "argsJson is not valid JSON") }
+
+test "template: zero or two placeholders refused" {
+  contains(argsTemplateProblem(noPlaceholder()), "exactly once") && contains(argsTemplateProblem(twoPlaceholders()), "exactly once")
+}
+
+test "template: placeholder in a key refused" {
+  contains(argsTemplateProblem(placeholderKey()), "not a key") && contains(argsTemplateProblem(placeholderKeyAndValue()), "not a key")
+}
+
+test "template: placeholder inside a string refused" {
+  contains(argsTemplateProblem(concatenated()), "whole string value") && contains(argsTemplateProblem(concatenatedCode()), "whole string value")
+}
+
+test "template: escaped placeholder refused" { contains(argsTemplateProblem(escapedPlaceholder()), "exactly once") }
+
+test "template: must be an object" {
+  argsTemplateProblem(arrayTemplate()) == "argsJson must be a JSON object" && argsTemplateProblem(stringTemplate()) == "argsJson must be a JSON object"
+}
+
+test "bad tool name refused even with a good template" {
+  onUploadedProblem(callAfterUpload("mcp.parse", parseArgs())) != "" && checkedOnUploaded(callAfterUpload("mcp.parse", parseArgs())).tool == ""
+}
+
+pure func parseWidget() -> WidgetConfig = { cfg() | onUploaded: parseCall() }
+
+pure func parseCallJson() -> string = "\"onUploaded\":{\"tool\":\"mcpParse\",\"argsJson\":\"{\\\"fileRef\\\":\\\"{{fileRef}}\\\",\\\"outputFormat\\\":\\\"blocks\\\"}\"}"
+
+test "a valid call reaches the widget config as a JSON string" {
+  contains(configJson(parseWidget()), parseCallJson()) && contains(configJson(parseWidget()), "\"onUploadedProblem\":\"\"")
+}
+
+test "an invalid call is not rendered and the problem is" {
+  contains(configJson({ cfg() | onUploaded: callAfterUpload("mcpParse", concatenated()) }), noCallJson()) && contains(configJson({ cfg() | onUploaded: callAfterUpload("mcpParse", concatenated()) }), "whole string value")
+}
+
+pure func closingTemplate() -> string = "{\"x\":\"</script><script>alert(9)</script>\",\"f\":\"{{fileRef}}\"}"
+
+test "a template cannot close the script" {
+  argsTemplateProblem(closingTemplate()) == "" && contains(uploadWidgetHtml({ cfg() | onUploaded: callAfterUpload("mcpParse", closingTemplate()) }), "alert(9)</script>") == false
+}
+
+pure func autoCallJs() -> string = "app.callServerTool({ name: tool, arguments: args }"
+pure func substituteJs() -> string = "if (v === PLACEHOLDER) { n++; return fileRef; }"
+pure func capabilityJs() -> string = "(app.getHostCapabilities() || {}).serverTools"
+
+test "widget calls the configured tool after the upload, with substituted args" {
+  contains(appScript(), autoCallJs()) && contains(appScript(), "fillArgs(CFG.onUploaded.argsJson, rc.fileRef)") && contains(appScript(), substituteJs())
+}
+
+test "widget falls back when the host cannot call tools" {
+  contains(appScript(), capabilityJs()) && contains(appScript(), "'tell the assistant to continue.'")
+}
+
+test "result cards summarise by default, and can be turned off" {
+  cfg().resultSummary && contains(configJson(cfg()), "\"resultSummary\":true") && contains(configJson({ cfg() | resultSummary: false }), "\"resultSummary\":false")
+}
+
+pure func resultCardJs() -> string = "const line = CFG.resultSummary && r ? resultLine(r, toolTitle()) : null;"
+
+test "result cards read the call's own result, with a download button" {
+  contains(appScript(), resultCardJs()) && contains(html(), "<button type='button' id='dl' hidden>Download</button>") && contains(appScript(), "openExternal(url)")
 }

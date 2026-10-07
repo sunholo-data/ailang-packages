@@ -213,9 +213,9 @@ test "descriptor upload matches sep-2631 field for field" {
 }
 
 -- The whole createUpload result: SEP-2631's {file: FileValue, upload} plus
--- fileRef (= file.uri), maxBytes and curl.
+-- fileRef (= file.uri), maxBytes, curl and the single-use note (0.1.3).
 test "descriptor golden" {
-  uploadDescriptor("https://upload.example.com/...", "abc123", "mcp-file://server/file_01HXYZ", "report.pdf", "application/pdf", 1776709800, 248123) == "{\"file\":{\"uri\":\"mcp-file://server/file_01HXYZ\",\"name\":\"report.pdf\",\"mimeType\":\"application/pdf\"},\"upload\":{\"transport\":\"https\",\"method\":\"POST\",\"url\":\"https://upload.example.com/...\",\"headers\":{},\"multipart\":{\"fileField\":\"file\",\"fields\":{\"token\":\"abc123\"}},\"expiresAt\":\"2026-04-20T18:30:00Z\"},\"fileRef\":\"mcp-file://server/file_01HXYZ\",\"maxBytes\":248123,\"curl\":\"curl -sS -F token=abc123 -F file=@<path> https://upload.example.com/...\"}"
+  uploadDescriptor("https://upload.example.com/...", "abc123", "mcp-file://server/file_01HXYZ", "report.pdf", "application/pdf", 1776709800, 248123) == "{\"file\":{\"uri\":\"mcp-file://server/file_01HXYZ\",\"name\":\"report.pdf\",\"mimeType\":\"application/pdf\"},\"upload\":{\"transport\":\"https\",\"method\":\"POST\",\"url\":\"https://upload.example.com/...\",\"headers\":{},\"multipart\":{\"fileField\":\"file\",\"fields\":{\"token\":\"abc123\"}},\"expiresAt\":\"2026-04-20T18:30:00Z\"},\"fileRef\":\"mcp-file://server/file_01HXYZ\",\"maxBytes\":248123,\"curl\":\"curl -sS -F token=abc123 -F file=@<path> https://upload.example.com/...\",\"note\":\"One file per upload token: this token works once. For several files, call createUpload again for each file (one createUpload/token per file).\"}"
 }
 
 -- (Expected prefix in a function: `ailang test` v0.52.3 cuts a test body at

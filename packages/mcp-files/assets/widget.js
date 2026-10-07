@@ -8,7 +8,9 @@
 // States: the page starts blank (no picker). A tool result holding an upload
 // descriptor shows the picker; any other result shows one quiet line and no
 // picker ("No upload needed", or "Done." when this tool call was given a
-// fileRef). After an upload: "Uploaded <name> (<size>) - <CFG.afterUpload>".
+// fileRef). After an upload: "Uploaded <name> (<size>) - <CFG.afterUpload>",
+// then (0.1.3, CFG.onUploaded.tool set) the tool's outcome: "✓ Parsed — <summary>",
+// "✓ Done", or the error; see "after the upload" below.
 // ext-apps 2.0.3 delivers tool-result only for the call this widget is
 // attached to, so the later tool call that uses the file cannot update this
 // instance; that call renders its own instance, which says "Done.".
@@ -59,16 +61,27 @@ function useDescriptor(d) {
   ready.hidden = false; picker.disabled = false;
   say('Choose a file to upload.');
 }
-// A result without a descriptor: nothing to upload here, so no picker.
-function idle(isError) {
+// A result without a descriptor: nothing to upload here, so no picker. With
+// CFG.resultSummary (0.1.3) the card shows one compact line read from the
+// call's own result (resultLine), so a batch of cards stays readable:
+// "✓ Parsed a.docx · 68 blocks · 13 headings", "✗ <code>: <message>" or
+// "✓ <tool title> done · <file>" (+ a Download button for an https
+// download_url). Without anything to read: "Done." / "No upload needed.".
+function idle(isError, r) {
   if (settled) return;
   settled = true;
   ready.hidden = true;
+  const line = CFG.resultSummary && r ? resultLine(r, toolTitle()) : null;
+  if (line) {
+    say(line.text, line.ok ? 'quiet' : 'err');
+    if (line.download) showDownload(line.download);
+    return;
+  }
   say(gotRef && !isError ? 'Done.' : 'No upload needed.', 'quiet');
 }
 function onResult(r) {
   const d = fromToolResult(r);
-  if (d) useDescriptor(d); else idle(!!(r && r.isError));
+  if (d) useDescriptor(d); else idle(!!(r && r.isError), r);
 }
 function uploadUrl() { return (desc && desc.upload && desc.upload.url) || CFG.uploadUrl; }
 function isReceipt(b) { return !!b && typeof b.fileRef === 'string' && b.fileRef !== ''; }
@@ -106,15 +119,221 @@ async function viaHost(f) {
   return { ok: !(r && r.isError) && isReceipt(body), body: body, status: 0 };
 }
 
-async function report(rc, via) {
-  const text = 'The user uploaded ' + rc.name + ' (' + rc.sizeBytes + ' bytes, sha256 ' + rc.sha256 +
-    ') with the upload widget (' + via + '). fileRef: ' + rc.fileRef + '. ' + CFG.nextStep;
-  ready.hidden = true;
+// ---------- after the upload (0.1.3) ----------
+// A model context update starts no model turn (claude.ai, 2026-10-07: the
+// widget sat on "parsing..." until the user typed). So when CFG.onUploaded.tool
+// is set the widget runs that tool itself, as an app-initiated tools/call
+// through the host (ext-apps App.callServerTool; the host's serverTools
+// capability), then puts the result in the model's context. Without the
+// capability it reports the fileRef and asks the user to continue.
+const PLACEHOLDER = '{{fileRef}}';
+const MAX_CONTEXT_CHARS = 100000;
+const TOOL_TIMEOUT_MS = 300000;
+
+// The arguments: parse the JSON template, then replace the one string value
+// that is exactly "{{fileRef}}". Keys and other strings are never spliced.
+function fillArgs(template, fileRef) {
+  const t = JSON.parse(template);
+  if (!t || typeof t !== 'object' || Array.isArray(t)) throw new Error('the arguments template is not a JSON object');
+  let n = 0;
+  const walk = (v) => {
+    if (typeof v === 'string') {
+      if (v === PLACEHOLDER) { n++; return fileRef; }
+      if (v.indexOf(PLACEHOLDER) >= 0) throw new Error('"{{fileRef}}" must be a whole string value');
+      return v;
+    }
+    if (Array.isArray(v)) return v.map(walk);
+    if (v && typeof v === 'object') {
+      const o = {};
+      for (const k of Object.keys(v)) {
+        if (k.indexOf(PLACEHOLDER) >= 0) throw new Error('"{{fileRef}}" must be a value, not a key');
+        Object.defineProperty(o, k, { value: walk(v[k]), enumerable: true, writable: true, configurable: true });
+      }
+      return o;
+    }
+    return v;
+  };
+  const out = walk(t);
+  if (n !== 1) throw new Error('the arguments template must hold "{{fileRef}}" exactly once (found ' + n + ')');
+  return out;
+}
+
+function canCallTools() {
+  try { return !!(app && app.getHostCapabilities && (app.getHostCapabilities() || {}).serverTools); }
+  catch (e) { return false; }
+}
+
+function textOf(r) {
+  return ((r && r.content) || []).filter((c) => c && c.type === 'text').map((c) => c.text).join('\n');
+}
+// The result as an object: structuredContent, else text content holding JSON.
+function resultObject(r) {
+  if (r && r.structuredContent && typeof r.structuredContent === 'object') return r.structuredContent;
+  try { const v = JSON.parse(textOf(r)); if (v && typeof v === 'object') return v; } catch (e) {}
+  return null;
+}
+// The value under `key` at the top of v or up to two objects down
+// (docparse: document.summary, document.filename). Arrays are not searched.
+function findKey(v, key, depth) {
+  if (!v || typeof v !== 'object' || Array.isArray(v) || depth > 2) return undefined;
+  if (Object.prototype.hasOwnProperty.call(v, key)) return v[key];
+  for (const k of Object.keys(v)) {
+    const s = findKey(v[k], key, depth + 1);
+    if (s !== undefined) return s;
+  }
+  return undefined;
+}
+function findSummary(v) {
+  const s = findKey(v, 'summary', 0);
+  return s && typeof s === 'object' && !Array.isArray(s) ? s : null;
+}
+// Comment blocks (type "comment") in the result's block tree, walked
+// iteratively under a node budget.
+function countComments(v) {
+  const stack = [findKey(v, 'blocks', 0)];
+  let n = 0, budget = 5000;
+  while (stack.length && budget-- > 0) {
+    const x = stack.pop();
+    if (Array.isArray(x)) { for (const y of x) stack.push(y); continue; }
+    if (!x || typeof x !== 'object') continue;
+    if (x.type === 'comment') n++;
+    for (const k of ['blocks', 'children', 'items']) if (Array.isArray(x[k])) stack.push(x[k]);
+  }
+  return n;
+}
+const COUNT_WORDS = [['totalBlocks', 'blocks'], ['headings', 'headings'], ['tables', 'tables'], ['images', 'images'],
+  ['changes', 'tracked changes'], ['comments', 'comments']];
+// "68 blocks · 13 headings · 4 tracked changes · 2 comments": the known
+// counts in that order, then any other numeric field (camelCase split, a
+// leading "total" cut); zeros dropped, at most six.
+function countsLine(s, comments) {
+  const parts = [], known = {};
+  const add = (n, w) => { if (typeof n === 'number' && isFinite(n) && n !== 0) parts.push(n + ' ' + w); };
+  for (const [k, w] of COUNT_WORDS) {
+    known[k] = true;
+    add(k === 'comments' && typeof s.comments !== 'number' ? comments : s[k], w);
+  }
+  const word = (k) => k.replace(/^total(?=[A-Z])/, '').replace(/([a-z0-9])([A-Z])/g, '$1 $2').toLowerCase();
+  for (const k of Object.keys(s)) if (!known[k]) add(s[k], word(k));
+  return parts.slice(0, 6).join(' · ');
+}
+function summaryLine(r) {
+  const obj = resultObject(r);
+  const s = findSummary(obj);
+  return s ? countsLine(s, countComments(obj)) : '';
+}
+const ONE_LINE = 120;
+function clip(t, n) { t = String(t).replace(/\s+/g, ' ').trim(); return t.length > n ? t.slice(0, n - 1) + '…' : t; }
+// The last path segment of a filename, control characters dropped.
+function baseName(f) {
+  if (typeof f !== 'string') return '';
+  return clip(f.split(/[\\/]/).pop().replace(/[\u0000-\u001f\u007f]/g, ''), 80);
+}
+function httpsUrl(u) { return typeof u === 'string' && /^https:\/\/[^\s"'<>]+$/.test(u) ? u : ''; }
+// The tool this instance is attached to (MCP Apps host context toolInfo).
+function toolTitle() {
   try {
-    await app.updateModelContext({ content: [{ type: 'text', text: text }], structuredContent: rc });
-    say('Uploaded ' + rc.name + ' (' + size(rc.sizeBytes) + ') — ' + CFG.afterUpload, 'ok');
+    const ti = app && app.getHostContext && (app.getHostContext() || {}).toolInfo;
+    const t = ti && ti.tool;
+    return t ? clip(t.title || (t.annotations && t.annotations.title) || t.name || '', 40) : '';
+  } catch (e) { return ''; }
+}
+// One compact line for a result: {ok, text, download} or null (nothing to say).
+function resultLine(r, title) {
+  const obj = resultObject(r);
+  const err = obj && obj.error;
+  if (err && typeof err === 'object') {
+    return { ok: false, text: clip('✗ ' + (err.code || err.type || 'error') + ': ' + clip(err.message || err.error_description || err.description || 'failed', 80), ONE_LINE) };
+  }
+  if (typeof err === 'string' && err) {
+    return { ok: false, text: clip('✗ ' + err + (obj.error_description ? ': ' + clip(obj.error_description, 80) : ''), ONE_LINE) };
+  }
+  if (r && r.isError) return { ok: false, text: clip('✗ ' + (clip(textOf(r), 80) || 'the tool failed'), ONE_LINE) };
+  const name = baseName(findKey(obj, 'filename', 0));
+  const s = findSummary(obj);
+  if (s) {
+    const c = countsLine(s, countComments(obj));
+    return { ok: true, text: clip('✓ Parsed' + (name ? ' ' + name : '') + (c ? ' · ' + c : ''), ONE_LINE) };
+  }
+  const target = findKey(obj, 'target', 0);
+  const what = name || (typeof target === 'string' ? clip(target, 40) : '');
+  const download = httpsUrl(findKey(obj, 'download_url', 0)) || httpsUrl(findKey(obj, 'downloadUrl', 0));
+  if (!title && !what && !download) return null;
+  return { ok: true, text: clip('✓ ' + (title || 'Tool') + ' done' + (what ? ' · ' + what : ''), ONE_LINE), download: download };
+}
+function showDownload(url) {
+  const b = el('dl');
+  b.hidden = false;
+  b.addEventListener('click', () => openExternal(url));
+}
+
+function uploadedText(rc, via) {
+  return 'The user uploaded ' + rc.name + ' (' + rc.sizeBytes + ' bytes, sha256 ' + rc.sha256 +
+    ') with the upload widget (' + via + '). fileRef: ' + rc.fileRef + '.';
+}
+
+async function tell(text, structured) {
+  await app.updateModelContext({ content: [{ type: 'text', text: text }], structuredContent: structured });
+}
+
+// The 0.1.2 behaviour: the fileRef (and CFG.nextStep) into the model's context.
+async function reportOnly(rc, via, statusTail) {
+  try {
+    await tell(uploadedText(rc, via) + ' ' + CFG.nextStep, rc);
+    say('Uploaded ' + rc.name + ' (' + size(rc.sizeBytes) + ') — ' + statusTail, 'ok');
   } catch (e) {
     say('Uploaded ' + rc.name + ', but the assistant could not be told. Tell it: fileRef ' + rc.fileRef, 'err');
+  }
+}
+
+async function runTool(rc, via) {
+  const tool = CFG.onUploaded.tool;
+  say('Uploaded ' + rc.name + ' (' + size(rc.sizeBytes) + ') — ' + CFG.afterUpload);
+  let r = null, failure = '';
+  try {
+    const args = fillArgs(CFG.onUploaded.argsJson, rc.fileRef);
+    r = await app.callServerTool({ name: tool, arguments: args }, { timeout: TOOL_TIMEOUT_MS });
+    if (!r || r.isError) failure = (textOf(r) || 'the tool reported an error').slice(0, 2000);
+  } catch (e) {
+    failure = String((e && e.message) || e).slice(0, 2000);
+  }
+  if (failure) {
+    say('Uploaded ' + rc.name + ', but ' + tool + ' failed: ' + failure.slice(0, 300), 'err');
+    try {
+      await tell(uploadedText(rc, via) + ' The widget then called ' + tool + ' with it, which failed: ' + failure +
+        ' Retry by calling ' + tool + ' with this fileRef; if it says the fileRef is unknown or used, ask the user to upload the file again.',
+        Object.assign({}, rc, { tool: tool, toolError: failure }));
+    } catch (e) {}
+    return;
+  }
+  const line = summaryLine(r);
+  const parsed = !!findSummary(resultObject(r));
+  const download = httpsUrl(findKey(resultObject(r), 'download_url', 0));
+  const body = r.structuredContent ? JSON.stringify(r.structuredContent) : textOf(r);
+  const head = uploadedText(rc, via) + ' The widget called ' + tool + ' with it' + (line ? ' (' + line + ')' : '') + '.';
+  const text = head.length + body.length + 40 <= MAX_CONTEXT_CHARS
+    ? head + ' The ' + tool + ' result:\n' + body
+    : head + ' The result is ' + body.length + ' characters, too large to include here: call ' + tool +
+      ' yourself for the full result (the fileRef may now be used up; if so, ask the user to upload again).';
+  const done = parsed ? clip('✓ Parsed ' + baseName(rc.name) + (line ? ' · ' + line : ''), ONE_LINE) : '✓ Done';
+  if (download) showDownload(download);
+  try {
+    await tell(text, Object.assign({}, rc, { tool: tool, toolSummary: line }));
+    say(done, 'ok');
+  } catch (e) {
+    say(done + ', but the assistant could not be told. Tell it to continue.', 'err');
+  }
+}
+
+async function report(rc, via) {
+  ready.hidden = true;
+  if (!CFG.onUploaded || !CFG.onUploaded.tool) {
+    if (CFG.onUploadedProblem) console.warn('mcp_files widget: onUploaded ignored: ' + CFG.onUploadedProblem);
+    await reportOnly(rc, via, CFG.afterUpload);
+  } else if (!canCallTools()) {
+    await reportOnly(rc, via, 'tell the assistant to continue.');
+  } else {
+    await runTool(rc, via);
   }
 }
 
@@ -181,7 +400,7 @@ picker.addEventListener('change', (ev) => { const f = ev.target.files && ev.targ
 
 try {
   const { App, PostMessageTransport } = window.__extApps;
-  app = new App({ name: 'sunholo-mcp-files', version: '0.1.2' }, {});
+  app = new App({ name: 'sunholo-mcp-files', version: '0.1.3' }, {});
   app.addEventListener('hostcontextchanged', () => applyHost(app.getHostContext()));
   app.ontoolinput = (p) => { gotRef = hasFileRef(p && p.arguments); };
   app.ontoolresult = onResult;
@@ -197,5 +416,5 @@ window.addEventListener('openai:set_globals', applyOpenAiTheme);
 if (!settled && window.openai && window.openai.toolOutput) {
   gotRef = hasFileRef(window.openai.toolInput);
   const d = asDescriptor(window.openai.toolOutput);
-  if (d) useDescriptor(d); else idle(false);
+  if (d) useDescriptor(d); else idle(false, { structuredContent: window.openai.toolOutput });
 }
