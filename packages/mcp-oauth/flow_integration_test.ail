@@ -53,7 +53,7 @@ func tRevoke(d: string) -> bool ! {IO, FS, Env, Net, Clock, SharedMem} {
   true
 }
 
-func hooks() -> Hooks = { authenticate: tAuthenticate, mint: tMint, put: tPut, get: tGet, del: tDel, revoke: tRevoke, accessTtlSec: 3600 }
+func hooks() -> Hooks = { authenticate: tAuthenticate, mint: tMint, put: tPut, get: tGet, del: tDel, revoke: tRevoke, accessTtlSec: 3600, issuer: "https://svc.example" }
 
 -- ---------------- fixtures ----------------
 
@@ -191,6 +191,16 @@ export func main() -> unit ! {IO, FS, Env, Net, Clock, SharedMem, Rand[mode=cryp
     Ok(b) => contains(b, "\"expires_in\":3600"),
     Err(_) => false
   }, "no expires_in")
+  -- sign-in redirect carries iss (RFC 9207)
+  let issUrl = beginAuthorize(h, "https://svc.example/login", client(), regs(), cb(), "code", challenge(), "S256", "si", now())
+  let issLoc = match issUrl {
+    Ok(u) => match completeLogin(h, param(u, "handle"), "good-id-token", now()) {
+      Ok(loc) => loc,
+      Err(_) => ""
+    },
+    Err(_) => ""
+  }
+  check("redirect carries iss", startsWith(issLoc, "${cb()}?code=") && contains(issLoc, "&state=si&iss=https%3A%2F%2Fsvc.example"), "location=${issLoc}")
   -- refresh reuse revokes family
   let reuse = refreshTokens(h, rt1, client(), now() + 20)
   let afterReuse = refreshTokens(h, rt2, client(), now() + 21)

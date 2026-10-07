@@ -27,6 +27,8 @@ Copy `routes_template.ail` into your service and fill in a `Hooks` record:
 | `mint(account, clientId)` | A fresh access token **your `@mcp_token_verifier` accepts** (Parse: a scoped `dp_` key) |
 | `put/get/del(key, json, expiresAtSec)` | Storage with expiry (Parse: `sunholo/firestore`). Values hold digests only, never secrets |
 | `revoke(tokenDigest)` | Invalidate the access token whose `sha256Hex` is `tokenDigest` |
+| `accessTtlSec` | Lifetime of a minted access token, in seconds. Sent as `expires_in`; must match what your verifier enforces |
+| `issuer` | Your issuer identifier: the same value you pass to `core.asMetadata`. Returned as `iss` with every authorization code (RFC 9207) |
 
 ## Adopter security checklist
 1. Run serve-api with **`AILANG_TRACE_VALUES=off`**. Traces render arguments verbatim.

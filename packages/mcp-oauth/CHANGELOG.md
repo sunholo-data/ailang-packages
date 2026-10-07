@@ -1,5 +1,17 @@
 # Changelog — sunholo/mcp_oauth
 
+## 0.1.1 — 2026-10-07
+
+- **Authorization responses carry `iss`** (RFC 9207). The redirect is now
+  `…?code=…&state=…&iss=<issuer>`, and the metadata advertises
+  `authorization_response_iss_parameter_supported: true`. This defends clients that talk to more
+  than one authorization server against mix-up attacks. It is also what makes ChatGPT use its stable
+  redirect URI (`https://chatgpt.com/connector_platform_oauth_redirect`) rather than a per-connector one.
+- **Breaking (pre-1.0):** `Hooks` gains `issuer: string`. Set it to the issuer identifier you pass to
+  `core.asMetadata`. New pure helper `core.authResponseUrl`.
+- Tests: 3 new core tests and the integration check "redirect carries iss". A mutant that drops `iss`
+  compiles and fails 3 checks.
+
 ## 0.1.0 — 2026-10-02
 
 **First release.** An OAuth 2.1 authorization server for MCP services listed in the Anthropic and
