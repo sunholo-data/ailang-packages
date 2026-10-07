@@ -1,0 +1,162 @@
+-- Tests for sunholo/mcp_files/brand: the logo sanitiser refuses every
+-- known SVG script/exfiltration shape and accepts the AILANG and Parse
+-- logos; the accent check is exactly #rgb/#rrggbb; footer links are https;
+-- the effective brand falls back to AILANG's values.
+
+module sunholo/mcp_files/brand_test
+import ./brand (Brand, FooterLink, defaultBrand, brandWith, ailangLogoSvg, ailangAccent, svgLogoOk, svgFrameOk, svgTagsOk, svgNoHandlers, svgHrefsOk, svgUrlsOk, accentOk, isHexDigit, onAccent, linkUrlOk, brandLogo, brandAccent, brandLinks, brandName, maxFooterLinks)
+import std/string (length, toLower, contains)
+import std/list (any, length as listLen)
+
+-- The Parse logo (docparse docs/img/docparse-logo.svg) made static: the
+-- <animate> children are dropped, everything else is as drawn.
+pure func parseLogo() -> string =
+  "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 32 32\" width=\"18\" height=\"18\" fill=\"none\" role=\"img\" aria-label=\"Parse\"><defs><radialGradient id=\"parseGlow\" cx=\"0.5\" cy=\"0.5\" r=\"0.5\"><stop offset=\"0\" stop-color=\"#2563eb\" stop-opacity=\"0.3\"/><stop offset=\"1\" stop-color=\"#2563eb\" stop-opacity=\"0\"/></radialGradient></defs><circle cx=\"16\" cy=\"16\" r=\"14\" fill=\"url(#parseGlow)\" opacity=\"0.4\"/><path d=\"M9 5a1.5 1.5 0 011.5-1.5h7.086a1.5 1.5 0 011.06.44l4.414 4.414a1.5 1.5 0 01.44 1.06V27a1.5 1.5 0 01-1.5 1.5h-12A1.5 1.5 0 019 27V5z\" fill=\"#0c1d3a\" stroke=\"#2563eb\" stroke-width=\"1.2\"/><path d=\"M17.5 3.5V8a1 1 0 001 1H23\" stroke=\"#2563eb\" stroke-width=\"1\" stroke-linecap=\"round\" opacity=\"0.6\"/><rect x=\"12\" y=\"12\" width=\"8\" height=\"1.8\" rx=\"0.9\" fill=\"#2563eb\" opacity=\"0.95\"/><rect x=\"12\" y=\"15.5\" width=\"6\" height=\"1.8\" rx=\"0.9\" fill=\"#3b82f6\" opacity=\"0.75\"/><rect x=\"12\" y=\"19\" width=\"9\" height=\"1.8\" rx=\"0.9\" fill=\"#60a5fa\" opacity=\"0.55\"/><rect x=\"12\" y=\"22.5\" width=\"5\" height=\"1.8\" rx=\"0.9\" fill=\"#93c5fd\" opacity=\"0.35\"/><path d=\"M21 15l2 2-2 2\" stroke=\"#2563eb\" stroke-width=\"1.2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" opacity=\"0.8\"/></svg>"
+
+pure func simple() -> string = "<svg viewBox='0 0 10 10'><rect width='10' height='10' fill='#123'/></svg>"
+
+-- ---------- good logos ----------
+
+test "ailang logo passes and is under 2 KB" { svgLogoOk(ailangLogoSvg()) && length(ailangLogoSvg()) < 2048 }
+
+test "parse logo passes" { svgLogoOk(parseLogo()) }
+
+test "simple logo passes" { svgLogoOk(simple()) }
+
+test "fragment href and raster data image pass" {
+  svgLogoOk("<svg><defs><path id='a' d='M0 0'/></defs><use href='#a'/><use xlink:href=\"#a\"/><image href='data:image/png;base64,AAAA' width='4' height='4'/></svg>")
+}
+
+test "uppercase tags and surrounding whitespace pass" { svgLogoOk("  <SVG viewBox='0 0 1 1'><Path d='M0 0'/></SVG>\n") }
+
+-- ---------- script ----------
+
+test "script element refused" { svgLogoOk("<svg><script>alert(1)</script></svg>") == false }
+
+test "uppercase script refused" { svgLogoOk("<svg><SCRIPT>alert(1)</SCRIPT></svg>") == false }
+
+test "namespaced script refused" { svgLogoOk("<svg><svg:script>alert(1)</svg:script></svg>") == false }
+
+-- ---------- event handlers ----------
+
+test "onload refused" { svgLogoOk("<svg onload='alert(1)'><rect/></svg>") == false }
+
+test "uppercase onLoad refused" { svgLogoOk("<svg OnLoad='alert(1)'><rect/></svg>") == false }
+
+test "slash-separated onload refused" { svgLogoOk("<svg/onload=alert(1)><rect/></svg>") == false }
+
+test "tab or newline before an handler refused" {
+  svgLogoOk("<svg\tonload=alert(1)><rect/></svg>") == false && svgLogoOk("<svg viewBox='0 0 1 1'\nonclick=x><rect/></svg>") == false
+}
+
+test "handler right after a quoted value refused" { svgLogoOk("<svg><rect x='1'onmouseover='x'/></svg>") == false }
+
+test "handler on an inner element refused" { svgLogoOk("<svg><circle r='1' onfocus='x'/></svg>") == false }
+
+-- ---------- javascript: and external references ----------
+
+test "javascript href refused" { svgLogoOk("<svg><use href='javascript:alert(1)'/></svg>") == false }
+
+test "entity-encoded javascript refused" { svgLogoOk("<svg><use href='&#106;avascript:alert(1)'/></svg>") == false }
+
+test "external href refused" { svgLogoOk("<svg><use href='https://evil.example/x.svg#a'/></svg>") == false }
+
+test "external xlink href refused" { svgLogoOk("<svg><image xlink:href=\"https://evil.example/t.png\"/></svg>") == false }
+
+test "protocol-relative href refused" { svgLogoOk("<svg><image href='//evil.example/t.png'/></svg>") == false }
+
+test "spaced href refused" { svgLogoOk("<svg><use href = 'https://evil.example/x'/></svg>") == false }
+
+test "svg data url in use refused" { svgLogoOk("<svg><use href='data:image/svg+xml;base64,PHN2Zz4=#a'/></svg>") == false }
+
+test "external css url refused" { svgLogoOk("<svg><rect fill='url(https://evil.example/p)'/></svg>") == false }
+
+test "fragment css url accepted" { svgUrlsOk("<svg><rect fill='url(#g)'/><rect fill=\"url('#h')\"/></svg>") }
+
+test "xml base refused" { svgLogoOk("<svg xml:base='https://evil.example/'><use href='#a'/></svg>") == false }
+
+-- ---------- elements outside the allow-list ----------
+
+test "anchor refused" { svgLogoOk("<svg><a href='#x'><rect/></a></svg>") == false }
+
+test "foreignObject refused" { svgLogoOk("<svg><foreignObject><div>x</div></foreignObject></svg>") == false }
+
+test "style element refused" { svgLogoOk("<svg><style>body{display:none}</style></svg>") == false }
+
+test "animate and set refused" {
+  svgLogoOk("<svg><a><animate attributeName='href' to='x'/></a></svg>") == false && svgLogoOk("<svg><set attributeName='fill' to='red'/></svg>") == false
+}
+
+test "html breakout refused" { svgLogoOk("<svg><p></p><img src='https://evil.example/t.gif'></svg>") == false }
+
+test "iframe refused" { svgLogoOk("<svg><iframe></iframe></svg>") == false }
+
+test "comment and cdata refused" {
+  svgLogoOk("<svg><!-- x --><rect/></svg>") == false && svgLogoOk("<svg><![CDATA[x]]><rect/></svg>") == false
+}
+
+-- ---------- frame ----------
+
+test "not an svg refused" { svgLogoOk("<div></div>") == false && svgLogoOk("") == false && svgLogoOk("<svgx></svgx>") == false }
+
+test "content after the closing tag refused" { svgLogoOk("<svg><rect/></svg><img src=x></svg>") == false && svgLogoOk("<svg><rect/></svg>x") == false }
+
+test "frame parts" {
+  svgFrameOk("<svg></svg>") && svgTagsOk("<svg><g></g></svg>") && svgNoHandlers("<svg><polygon/></svg>") && svgHrefsOk("<svg></svg>")
+}
+
+-- ---------- accent ----------
+
+test "good accents" { accentOk("#fff") && accentOk("#d03614") && accentOk("#ABCDEF") && accentOk("#2563eb") }
+
+test "bad accents" {
+  accentOk("red") == false && accentOk("") == false && accentOk("#") == false && accentOk("#ffff") == false && accentOk("#ggg") == false && accentOk("#12345g") == false && accentOk("#1234567") == false && accentOk("d03614") == false
+}
+
+pure func cssBreak() -> string = "#f;}b"
+
+test "accents that could leave the css declaration refused" {
+  accentOk(cssBreak()) == false && accentOk("#f'0") == false && accentOk("#f 0") == false && accentOk("#f<0") == false && accentOk("#ff\"000") == false
+}
+
+test "hex digit" { isHexDigit("a") && isHexDigit("F") && isHexDigit("9") && isHexDigit("g") == false && isHexDigit("ab") == false && isHexDigit("") == false }
+
+test "text colour on the accent" {
+  onAccent("#d03614") == "#ffffff" && onAccent("#2563eb") == "#ffffff" && onAccent("#ffff00") == "#111111" && onAccent("#fff") == "#111111" && onAccent("bad") == "#ffffff"
+}
+
+-- ---------- links ----------
+
+test "https links accepted" { linkUrlOk("https://ailang.sunholo.com/docs") && linkUrlOk("https://x.example/a?b=c#d") }
+
+test "non-https or unsafe links refused" {
+  linkUrlOk("http://x.example") == false && linkUrlOk("javascript:alert(1)") == false && linkUrlOk("https://") == false && linkUrlOk("https://a.example@evil.example") == false && linkUrlOk("https://x.example/'><b>") == false && linkUrlOk("https://x.example/ a") == false && linkUrlOk("//x.example") == false
+}
+
+-- ---------- effective brand ----------
+
+test "default brand" {
+  defaultBrand().name == "AILANG" && defaultBrand().poweredBy && defaultBrand().accent == "#d03614" && listLen(defaultBrand().footerLinks) == 0 && brandLogo(defaultBrand()) == ailangLogoSvg()
+}
+
+test "brandWith keeps a good brand" {
+  brandLogo(brandWith("Parse", parseLogo(), "#2563eb", [])) == parseLogo() && brandAccent(brandWith("Parse", parseLogo(), "#2563eb", [])) == "#2563eb" && brandWith("Parse", "", "#2563eb", []).poweredBy
+}
+
+test "bad logo falls back to the AILANG logo" { brandLogo(brandWith("X", "<svg onload=x></svg>", "#fff", [])) == ailangLogoSvg() }
+
+test "empty logo means no logo" { brandLogo(brandWith("X", "", "#fff", [])) == "" }
+
+test "bad accent falls back to the AILANG accent" { brandAccent(brandWith("X", "", "red", [])) == ailangAccent() }
+
+test "name trimmed and capped" {
+  brandName(brandWith("  Parse  ", "", "", [])) == "Parse" && length(brandName(brandWith("abcdefghijabcdefghijabcdefghijabcdefghijabcdefghij", "", "", []))) == 40
+}
+
+pure func links() -> [FooterLink] =
+  [{label: "Docs", url: "https://a.example/docs"}, {label: "Bad", url: "http://a.example"}, {label: "  ", url: "https://a.example/blank"},
+   {label: "Two", url: "https://a.example/2"}, {label: "Three", url: "https://a.example/3"}, {label: "Four", url: "https://a.example/4"}, {label: "Five", url: "https://a.example/5"}]
+
+test "links filtered and capped" {
+  listLen(brandLinks(brandWith("X", "", "", links()))) == maxFooterLinks() && any(\l. linkUrlOk(l.url) == false || l.label == "  ", brandLinks(brandWith("X", "", "", links()))) == false
+}

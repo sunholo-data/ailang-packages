@@ -1,6 +1,6 @@
 """Widget HTML sanity: well-formed (every non-void element closed, in order),
 exactly one file picker, exactly two inline module scripts and no external
-resource (src/href/@import/<link>). Writes each script to <outdir>/script<N>.mjs
+resource (src, a non-link href, @import, <link>). Writes each script to <outdir>/script<N>.mjs
 for `node --check`. Usage: python3 -I widget_check.py <html> <outdir>"""
 import sys
 from html.parser import HTMLParser
@@ -15,9 +15,11 @@ class Check(HTMLParser):
 
     def handle_starttag(self, tag, attrs):
         a = dict(attrs)
-        for bad in ("src", "href"):
-            if bad in a:
-                self.errors.append(f"<{tag}> has {bad}={a[bad]!r}")
+        if "src" in a:
+            self.errors.append(f"<{tag}> has src={a['src']!r}")
+        # Only footer links carry an href: https, opened through the host.
+        if "href" in a and not (tag == "a" and a["href"].startswith("https://") and "noopener" in (a.get("rel") or "")):
+            self.errors.append(f"<{tag}> has href={a['href']!r}")
         if tag == "link":
             self.errors.append("<link> element")
         if tag == "input":

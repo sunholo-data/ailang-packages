@@ -16,18 +16,23 @@
 --     to the widget-only tool cfg.hostToolName with {ticket, filename, base64};
 --   * it reports the receipt with ui/update-model-context (never the host's
 --     message request, which drafts a user message under a caution banner).
+--   * a brand (brand.ail, 0.1.2): header logo + name, accent on the primary
+--     button and focus ring, footer links; every value checked there. The
+--     host's theme, style variables and fonts are applied from the MCP Apps
+--     host context (prefers-color-scheme without one).
 -- No external script, stylesheet or font. The page, script and styles live in
 -- assets/ (readable sources) and reach this module through the generated
 -- widget_assets.ail.
 
 module sunholo/mcp_files/widget
 
-import std/string (replaceMany, substring)
+import std/string (replaceMany, substring, trim, join)
 import std/crypto (sha256Hex)
 import std/json (encode, jo, kv, js, ja, jint, jb)
 import std/list (map)
 import ./extapps_bundle (extAppsBundle, extAppsVersion)
 import ./widget_assets (widgetHtmlTemplate, widgetJs, widgetCss)
+import ./brand (Brand, FooterLink, defaultBrand, brandName, brandLogo, brandAccent, brandLinks, onAccent)
 
 -- title            heading shown above the picker
 -- uploadUrl        POST target when the descriptor carries none (normally the same)
@@ -37,11 +42,12 @@ import ./widget_assets (widgetHtmlTemplate, widgetJs, widgetCss)
 -- nextStep         appended to the model-context message, e.g.
 --                  "Call mcpParse with this fileRef."
 -- afterUpload      shown after "Uploaded <name> (<size>) — ", e.g. "parsing…"
-export type WidgetConfig = {title: string, uploadUrl: string, hostToolName: string, maxViaHostBytes: int, accept: string, nextStep: string, afterUpload: string}
+-- brand            header logo + name, accent, footer (brand.ail; 0.1.2)
+export type WidgetConfig = {title: string, uploadUrl: string, hostToolName: string, maxViaHostBytes: int, accept: string, nextStep: string, afterUpload: string, brand: Brand}
 
 export pure func defaultWidgetConfig(uploadUrl: string, hostToolName: string) -> WidgetConfig =
   {title: "Upload a file", uploadUrl: uploadUrl, hostToolName: hostToolName, maxViaHostBytes: 1048576, accept: "",
-   nextStep: "Continue the user's request with this fileRef.", afterUpload: "processing…"}
+   nextStep: "Continue the user's request with this fileRef.", afterUpload: "processing…", brand: defaultBrand()}
 
 -- The MCP Apps resource mime type (ext-apps 2026-01-26).
 export pure func widgetMimeType() -> string = "text/html;profile=mcp-app"
@@ -82,14 +88,37 @@ export pure func configJson(cfg: WidgetConfig) -> string =
     kv("extAppsVersion", js(extAppsVersion()))
   ])), [("<", "\\u003c"), (">", "\\u003e")])
 
+-- The widget header: the checked logo (brand.svgLogoOk) and the escaped name.
+export pure func brandHeaderHtml(b: Brand) -> string {
+  let logo = brandLogo(b);
+  let name = brandName(b);
+  let logoHtml = if logo == "" then "" else "<span class='logo' aria-hidden='true'>${logo}</span>";
+  let nameHtml = if name == "" then "" else "<span class='name'>${htmlEscape(name)}</span>";
+  "${logoHtml}${nameHtml}"
+}
+
+-- The footer: https links (brand.linkUrlOk; opened through the host by the
+-- widget script) with escaped labels, then "Powered by AILANG".
+export pure func brandFooterHtml(b: Brand) -> string {
+  let links = map(\l. "<a href='${htmlEscape(l.url)}' rel='noopener noreferrer' target='_blank'>${htmlEscape(trim(l.label))}</a>", brandLinks(b));
+  let parts = if b.poweredBy then links ++ ["<span class='powered'>Powered by AILANG</span>"] else links;
+  join(" <span aria-hidden='true'>·</span> ", parts)
+}
+
 -- The complete widget document: assets/widget.html with its placeholders
--- filled in one pass (inserted text is never re-scanned).
+-- filled in one pass (inserted text is never re-scanned). The accent and its
+-- text colour are checked hex colours (brand.accentOk).
 export pure func uploadWidgetHtml(cfg: WidgetConfig) -> string {
   let title = htmlEscape(cfg.title);
   let accept = if cfg.accept == "" then "" else " accept='${htmlEscape(cfg.accept)}'";
+  let accent = brandAccent(cfg.brand);
   replaceMany(widgetHtmlTemplate(), [
     ("{{TITLE}}", title),
     ("{{ACCEPT}}", accept),
+    ("{{ACCENT}}", accent),
+    ("{{ON_ACCENT}}", onAccent(accent)),
+    ("{{BRAND}}", brandHeaderHtml(cfg.brand)),
+    ("{{FOOTER}}", brandFooterHtml(cfg.brand)),
     ("{{STYLE}}", widgetCss()),
     ("{{EXTAPPS}}", extAppsBundle()),
     ("{{CONFIG}}", configJson(cfg)),

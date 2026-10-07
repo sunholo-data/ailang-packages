@@ -34,6 +34,7 @@ uploads, serving routes (serve-api does), and the `@mcp_ui`/`@mcp_app_only` wiri
 import pkg/sunholo/mcp_files/core (errorStatus, openAiFileSchema)
 import pkg/sunholo/mcp_files/flow (Hooks, StoredFile, createUpload, acceptUploadFile, serveApiTempDir, receiveViaHost, resolveFileRef, fetchFileParam)
 import pkg/sunholo/mcp_files/widget (defaultWidgetConfig, uploadWidgetHtml, widgetCspMeta, widgetMimeType, claudeWidgetOrigin)
+import pkg/sunholo/mcp_files/brand (Brand, FooterLink, defaultBrand, brandWith)   -- optional: your own branding
 ```
 Copy `routes_template.ail` into your service and replace `fileHooks()` and `accountOf()`.
 
@@ -48,6 +49,7 @@ Copy `routes_template.ail` into your service and replace `fileHooks()` and `acco
 | `resolveFileRef(h, account, fileRef, nowSec)` | hooks | `Ok(StoredFile)` once, for the owner; then bytes and record are deleted |
 | `fetchFileParam(fileObj: Json, maxBytes)` | `Net[scope=public] @limit=1` | `Ok(StoredFile)` (`fileRef` = the OpenAI `file_id`); nothing stored |
 | `uploadWidgetHtml(cfg)` | pure | the widget document |
+| `brandWith(name, logoSvg, accent, footerLinks)` / `defaultBrand()` | pure | a `Brand` for `cfg.brand` (see "Branding") |
 
 Every `Err` is `{"error", "error_description", "status"}`; `core.errorStatus(err)` gives the HTTP
 status: 400 bad input, 401 unknown/expired token or no account, 404 unknown or another account's
@@ -154,19 +156,124 @@ readable sources live in `assets/` and are generated into `widget_assets.ail` an
 `extapps_bundle.ail` (`tools/gen_bundle.sh`, `--bundle` to refetch ext-apps). Edit the assets, never
 the generated modules; `tests/assets_check.sh` fails when they drift.
 
+## Branding
+The widget carries a small brand: a header (an 18px logo and a name), an accent colour, and a footer
+(up to 4 links and "Powered by AILANG"). `defaultWidgetConfig` uses `defaultBrand()`, AILANG's:
+
+| Field | Default | Rule (checked in `brand.ail`; a failing value is replaced, never rendered) |
+|---|---|---|
+| `name` | `"AILANG"` | trimmed, at most 40 characters, html-escaped. `""` = no name |
+| `logoSvg` | `ailangLogoSvg()`: the AILANG hexagon + lambda, inline, ~0.6 KB | `svgLogoOk`, else the AILANG logo. `""` = no logo |
+| `accent` | `#d03614` (AILANG docs `--ifm-color-primary-dark`) | `accentOk`: exactly `#rgb` or `#rrggbb`, else `#d03614` |
+| `footerLinks` | `[]` | `linkUrlOk`: https, no userinfo, quotes, spaces or angle brackets, else dropped. Labels html-escaped |
+| `poweredBy` | `true` | plain text "Powered by AILANG" in the footer, no link |
+
+**Where the brand shows.** The header and footer appear with the picker and stay after the upload.
+An idle instance (a tool result that holds no descriptor) shows only its quiet line. The accent colours
+**only** the primary button (the picker's `::file-selector-button`) and the focus ring. Its text colour
+is white or near-black, whichever contrasts more (`onAccent`). AILANG's primary `#e73c17` would give
+white text 4.15:1, below WCAG AA; `#d03614` gives 4.98:1. Text, borders, fonts and radii use the
+host's MCP Apps style variables. The background stays transparent. In ChatGPT (`window.openai`) the
+header is hidden, because ChatGPT draws the app's logo and name itself.
+
+**Host theming.** After `connect`, the widget applies the host context with the ext-apps 2.0.3
+helpers already in the bundle: `applyDocumentTheme(theme)` (`data-theme` + `color-scheme`),
+`applyHostStyleVariables(styles.variables)` and `applyHostFonts(styles.css.fonts)`. It re-applies them
+on `hostcontextchanged` (`app.addEventListener`; `getHostContext()` holds the merged context). In
+ChatGPT it follows `window.openai.theme` and `openai:set_globals`. Without a host theme, the CSS
+falls back to `prefers-color-scheme`. Every variable has a light/dark fallback, because a host may
+send any subset of the variables, or none. Footer links open through the host (`app.openLink`, which
+is `ui/open-link`; ChatGPT `openExternal`): a sandboxed iframe cannot navigate on its own.
+
+**The logo sanitiser (`svgLogoOk`).** It runs on the lowercased, trimmed logo, so `<SCRIPT` and
+`OnLoad` are caught too.
+- **Frame** (`svgFrameOk`, Z3-proved): one `<svg …>` element that closes exactly at the end. No
+  `script` anywhere, which covers script elements and javascript:/vbscript: URLs. No `&#` (an encoded
+  `javascript:`), no `<!` (comments, CDATA), no `<?`, no `xml:base`, at most 16 KB.
+- **Elements** (`svgTagsOk`): every `<` opens or closes an allowed element: svg, g, path, rect,
+  circle, ellipse, line, polyline, polygon, text, tspan, defs, linearGradient, radialGradient, stop,
+  title, desc, clipPath, mask, use, symbol, image. So no `<script>`, `<style>` (it would restyle the
+  whole widget), `<foreignObject>`, `<a>`, `<animate>`/`<set>` (the animate-href trick), `<iframe>`,
+  or HTML breakout elements.
+- **Handlers** (`svgNoHandlers`): every `on` must follow a name character, as in `polygon` or
+  `none`. After whitespace, `/`, a quote or `=` (anywhere an attribute name can start) it is refused.
+- **References** (`svgHrefsOk`, `svgUrlsOk`): every `href`/`xlink:href` is `="#…"` or a raster
+  `data:image/png|jpeg|gif|webp`. `data:image/svg+xml` (a `<use>` XSS vector), any scheme and a spaced
+  `href =` are refused. Every CSS `url(` is a fragment, `url(#id)`.
+
+It errs toward refusing: a logo whose text starts with "on", or that contains the word "script",
+is refused. Export your logo as plain paths, drop animations, and give gradient ids a unique prefix
+(the widget page holds one document). The logo is inserted as markup, server-side, after this check.
+The widget script never writes config values with `innerHTML` (`tests/lint.sh`).
+
+**Customising.** A downstream service passes its own brand:
+```ailang
+import pkg/sunholo/mcp_files/widget (WidgetConfig, defaultWidgetConfig)
+import pkg/sunholo/mcp_files/brand (brandWith)
+
+pure func widgetCfg() -> WidgetConfig =
+  { defaultWidgetConfig("https://svc.example.com/uploads", "uploadViaHost") |
+    brand: brandWith("Acme Files", "<svg viewBox='0 0 16 16'><rect width='16' height='16' rx='3' fill='#0b6e4f'/></svg>",
+                     "#0b6e4f", [{label: "Help", url: "https://svc.example.com/help"}]) }
+```
+`brandWith` keeps `poweredBy: true`; `{ brandWith(…) | poweredBy: false }` drops the line. Pick an
+accent with at least 3:1 against both a white and a dark (`#262624`) background, so the focus ring
+stays visible in both themes.
+
+**Vendor rules this default follows** (fetched 2026-10-07):
+- **OpenAI**, ChatGPT apps UI guidelines (https://developers.openai.com/plugins/concepts/ui-guidelines,
+  formerly `/apps-sdk/concepts/ui-guidelines`):
+  - "Partners can add branding through accents, icons, or inline imagery, but should not redefine
+    system colors."
+  - "Use brand accent colors on primary buttons inside app display modes."
+  - "Partner brand accents such as logos or icons should not override backgrounds or text colors."
+  - "Avoid custom gradients or patterns that break ChatGPT's minimal look."
+  - "Don't use custom fonts, even in full screen modes. Use system font variables wherever possible."
+  - "Do not include your logo as part of the response. ChatGPT will always append your logo and app
+    name before the widget is rendered." This is why the header hides under `window.openai`.
+  - "Text and background must maintain a minimum contrast ratio (WCAG AA)."
+  - Plugin guidelines (https://developers.openai.com/plugins/plugin-guidelines): "Plugins must not
+    serve advertisements". So footer links are informational, never checkout or upgrade pages. Neither
+    vendor mentions a "powered by" line; ours is plain secondary text with no call to action.
+- **Anthropic**, MCP Apps design guidelines
+  (https://claude.com/docs/connectors/building/mcp-apps/design-guidelines):
+  - "Use host tokens for all structural elements: backgrounds, text, borders, and icons. You can use
+    your own brand colors for accents and identity, but the core UI should use the provided palette."
+  - "All views must support both light and dark themes. Use the host's style tokens, which adapt
+    automatically, and never hardcode colors."
+  - Transparent theming (https://claude.com/docs/connectors/building/mcp-apps/transparent-theming):
+    "Any opaque background on `<html>` or `<body>` hides the chat surface behind it. Explicitly set
+    both to `transparent`". The `styles.css.fonts` it describes (Anthropic Sans) is served from
+    `https://assets.claude.ai`. To load that font rather than fall back to the system stack, add that
+    origin to `resourceDomains` in your own `_meta` (`widgetCspMeta` leaves it empty).
+  - External links (https://claude.com/docs/connectors/building/mcp-apps/external-links): `ui/open-link`
+    shows an "Open external link" confirmation for custom connectors.
+- **MCP Apps 2026-01-26**
+  (https://github.com/modelcontextprotocol/ext-apps/blob/main/specification/2026-01-26/apps.mdx):
+  - `HostContext.theme` is `"light" | "dark"`.
+  - `styles.variables` holds the standard keys: `--color-{background,text,border,ring}-*`,
+    `--font-sans`, `--font-mono`, `--font-weight-*`, `--font-text-*-size`, `--font-heading-*-size`,
+    `--border-radius-*`, `--border-width-regular`, `--shadow-*`. There is no brand or accent key.
+  - `styles.css.fonts` is font CSS.
+  - `ui/notifications/host-context-changed` carries a partial update: "the View SHOULD merge received
+    fields with its current context state".
+  - "Hosts can provide any subset of standardized variables, or not pass `styles` at all", and
+    "Views should set default fallback values".
+
 ## How the guarantees are checked
 | Check | What it shows |
 |---|---|
 | `ailang verify core.ail` (`tests/verify_check.sh`) | Z3: `uploadVerdict` (single use + expiry + size), `isExpired`, `tokenExpiresAt`, `sizeOk`, `effectiveMaxBytes`, `ownerMatches`, `refVerdict`, `mimeAllowed`, `refFrameOk`, `downloadUrlOk` |
+| `ailang verify brand.ail` (same script) | Z3: `svgFrameOk` (one svg element, no `script`/`&#`/`<!`/`xml:base`, size), `accentOk` (`#` + length 4 or 7), `isHexDigit`, `linkUrlOk` (https, no userinfo or quotes). Proving "no `;` in an accepted accent" as a contract times the solver out, so tests pin it |
 | `tests/broken_single_use.ail`, `tests/broken_expiry.ail` | must be **refuted** (a forgotten claim; an off-by-one expiry; an empty-owner match) |
-| `ailang test --package .` | core (SEP-2631 descriptor golden, OpenAI schema golden, codec, sanitiser, properties) and widget tests |
+| `ailang test --package .` | core (SEP-2631 descriptor golden, OpenAI schema golden, codec, sanitiser, properties), brand (48: hostile logos refused, the AILANG and Parse logos accepted, accents, links, fallbacks) and widget tests (default and custom brand rendered, hostile brand escaped or replaced, accent only on the button and ring, host theming) |
 | `tests/flow_check.sh` | flow over SharedMem hooks: single use, expiry, size cap, cross-account, sha256 round trip, delete after use, tamper, mime, via host, paths outside the temp dir refused |
 | `tests/e2e_uploads.sh` | real serve-api: curl multipart of a 1.5 MB binary, sha256 round trip, replay 409, cross-account 404, CORS for the widget origin, 413 above `--max-upload-size`, `-F file=/etc/hosts` / `../../x` / a temp-dir escape refused with the token unspent |
 | `tests/fetch_check.sh` | `fetchFileParam`: http/userinfo refused; metadata IP and a name resolving to loopback refused with permissive Net flags on; a pinned public file fetched byte-exact; size cap (network) |
 | `tests/ifc_leaks.sh` | logging or storing a token in the real `flow.ail` fails to compile |
-| `tests/widget_check.sh` | widget HTML parses, one picker, two inline module scripts, nothing external; `node --check` on both scripts |
-| `tests/lint.sh`, `tests/assets_check.sh` | source rules the types cannot express; generated modules in sync |
-| `tests/mutation.sh` | 25 mutants of the key checks (including the temp-file guard and the widget states), each killed |
+| `tests/widget_check.sh` | widget HTML (default brand + a footer link) parses, one picker, two inline module scripts, nothing external (the only href is an https footer link with `rel=noopener`); `node --check` on both scripts |
+| `tests/lint.sh`, `tests/assets_check.sh` | source rules the types cannot express (no `innerHTML`/`eval`/`ui/message` in the widget); generated modules in sync |
+| `tests/mutation.sh` | 47 mutants of the key checks (the temp-file guard, the widget states, and 22 for branding: the logo sanitiser, the accent check, link filtering, escaping, host theming), each killed (one fetch mutant needs the network) |
 
 ## Design
 `sunholo-data/ailang` `design_docs/planned/v0_53_0/m-mcp-file-handoff.md` (F2). SEP-2631:

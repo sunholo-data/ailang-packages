@@ -1,0 +1,208 @@
+-- sunholo/mcp_files/brand: the upload widget's branding (AGENT.md "Branding").
+--
+-- A Brand is a name, a small inline SVG logo, an accent colour, footer links
+-- and a "Powered by AILANG" switch. defaultBrand() is AILANG's; a downstream
+-- service builds its own with brandWith(...). Every value is checked here,
+-- in pure functions, before the widget renders it:
+--   * logoSvg: svgLogoOk, a plain <svg>…</svg> built from an allow-list of
+--     shape elements, with no script, no on* attribute, no javascript:, no
+--     external href/url() (fragments, raster data: images only). A logo that
+--     fails falls back to the AILANG logo; "" means no logo;
+--   * accent: accentOk, exactly #rgb or #rrggbb, else the AILANG accent;
+--   * footer links: linkUrlOk, https only (no userinfo, quotes, spaces or
+--     angle brackets), else the link is dropped. Labels are html-escaped by
+--     the widget, never inserted as markup.
+-- svgFrameOk, accentOk and linkUrlOk carry Z3 contracts (ailang verify).
+
+module sunholo/mcp_files/brand
+
+import std/string (length, substring, find, startsWith, endsWith, contains, toLower, split, chars, trim)
+import std/list (any, filter, take, length as listLen)
+import std/math (pow, intToFloat)
+
+-- label  link text (html-escaped when rendered)
+-- url    https URL, opened with the host's ui/open-link
+export type FooterLink = {label: string, url: string}
+
+-- name        shown next to the logo in the widget header ("" = none)
+-- logoSvg     inline <svg>…</svg>, rendered at 18px ("" = no logo)
+-- accent      #rgb / #rrggbb: the primary button and the focus ring only
+-- footerLinks at most maxFooterLinks(), https only
+-- poweredBy   "Powered by AILANG" in the footer
+export type Brand = {name: string, logoSvg: string, accent: string, footerLinks: [FooterLink], poweredBy: bool}
+
+-- ============================================================
+-- Defaults
+-- ============================================================
+
+-- AILANG's mark (docs/static/img/ailang-logo.svg in sunholo-data/ailang),
+-- simplified: the gradient hexagon, the dark inner hexagon and the lambda
+-- drawn as a path (no font dependency, no entity).
+export pure func ailangLogoSvg() -> string =
+  "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 512 512\" width=\"18\" height=\"18\" role=\"img\" aria-label=\"AILANG\"><defs><linearGradient id=\"mfAilangG\" x1=\"0\" y1=\"0\" x2=\"1\" y2=\"1\"><stop offset=\"0\" stop-color=\"#e73c17\"/><stop offset=\"1\" stop-color=\"#c08015\"/></linearGradient></defs><polygon points=\"488,256 372,457 140,457 24,256 140,55 372,55\" fill=\"url(#mfAilangG)\"/><polygon points=\"456,256 356,429 156,429 56,256 156,83 356,83\" fill=\"#0f1420\"/><path d=\"M180 140H236L342 372H292L252 290L210 372H160L232 246Z\" fill=\"#fff\"/></svg>"
+
+-- The AILANG docs primary-dark (--ifm-color-primary-dark, docs/src/css/
+-- custom.css). The primary #e73c17 gives white text 4.15:1, under WCAG AA's
+-- 4.5:1; #d03614 gives 4.98:1, and 3.05:1 as a focus ring on a dark host.
+export pure func ailangAccent() -> string = "#d03614"
+
+export pure func maxFooterLinks() -> int = 4
+
+export pure func maxNameChars() -> int = 40
+
+export pure func maxLogoChars() -> int = 16384
+
+export pure func defaultBrand() -> Brand =
+  {name: "AILANG", logoSvg: ailangLogoSvg(), accent: ailangAccent(), footerLinks: [], poweredBy: true}
+
+-- A downstream brand. poweredBy stays true; turn it off with
+-- {brandWith(...) | poweredBy: false}.
+export pure func brandWith(name: string, logoSvg: string, accent: string, footerLinks: [FooterLink]) -> Brand =
+  {name: name, logoSvg: logoSvg, accent: accent, footerLinks: footerLinks, poweredBy: true}
+
+-- ============================================================
+-- What the widget renders (always checked values)
+-- ============================================================
+
+export pure func brandName(b: Brand) -> string {
+  let n = trim(b.name);
+  if length(n) > maxNameChars() then substring(n, 0, maxNameChars()) else n
+}
+
+-- "" stays "" (no logo); anything else must pass svgLogoOk or the AILANG
+-- logo is used.
+export pure func brandLogo(b: Brand) -> string =
+  if trim(b.logoSvg) == "" then "" else if svgLogoOk(b.logoSvg) then trim(b.logoSvg) else ailangLogoSvg()
+
+export pure func brandAccent(b: Brand) -> string =
+  if accentOk(b.accent) then b.accent else ailangAccent()
+
+export pure func brandLinks(b: Brand) -> [FooterLink] =
+  take(maxFooterLinks(), filter(\l. linkUrlOk(l.url) && trim(l.label) != "", b.footerLinks))
+
+-- ============================================================
+-- Accent colour (Z3)
+-- ============================================================
+
+export pure func isHexDigit(c: string) -> bool
+ensures { result == (length(c) == 1 && contains("0123456789abcdefABCDEF", c)) } {
+  length(c) == 1 && contains("0123456789abcdefABCDEF", c)
+}
+
+-- Position i is a hex digit, or past the end of a.
+pure func hexAt(a: string, i: int) -> bool =
+  i >= length(a) || isHexDigit(substring(a, i, i + 1))
+
+-- Exactly #rgb or #rrggbb: "#", then hex digits at every later position
+-- (isHexDigit's contract), so nothing that could leave a CSS declaration
+-- (; } < quotes whitespace) fits. Z3 proves the shape; the "no ;" corollary
+-- as a contract times the solver out, so the tests pin it.
+export pure func accentOk(a: string) -> bool
+ensures { result == false || (startsWith(a, "#") && (length(a) == 4 || length(a) == 7)) } {
+  (length(a) == 4 || length(a) == 7) && startsWith(a, "#") && hexAt(a, 1) && hexAt(a, 2) && hexAt(a, 3) && hexAt(a, 4) && hexAt(a, 5) && hexAt(a, 6)
+}
+
+-- The text colour on the accent button: white or near-black, whichever has
+-- the higher WCAG contrast against the accent.
+export pure func onAccent(accent: string) -> string {
+  let a = if accentOk(accent) then accent else ailangAccent();
+  let full = if length(a) == 4 then "#${substring(a, 1, 2)}${substring(a, 1, 2)}${substring(a, 2, 3)}${substring(a, 2, 3)}${substring(a, 3, 4)}${substring(a, 3, 4)}" else a;
+  let l = 0.2126 * linChannel(full, 1) + 0.7152 * linChannel(full, 3) + 0.0722 * linChannel(full, 5);
+  -- contrast(white) = 1.05 / (l + 0.05); contrast(black) = (l + 0.05) / 0.05
+  if 1.05 / (l + 0.05) >= (l + 0.05) / 0.05 then "#ffffff" else "#111111"
+}
+
+pure func hexVal(c: string) -> int = find("0123456789abcdef", toLower(c))
+
+-- sRGB channel at position i of #rrggbb, linearised.
+pure func linChannel(full: string, i: int) -> float {
+  let v = intToFloat(hexVal(substring(full, i, i + 1)) * 16 + hexVal(substring(full, i + 1, i + 2))) / 255.0;
+  if v <= 0.03928 then v / 12.92 else pow((v + 0.055) / 1.055, 2.4)
+}
+
+-- ============================================================
+-- Footer link URLs (Z3)
+-- ============================================================
+
+export pure func linkUrlOk(u: string) -> bool
+ensures { result == false || (startsWith(u, "https://") && contains(u, "@") == false && contains(u, "\"") == false && contains(u, "<") == false) } {
+  startsWith(u, "https://") && length(u) > 8 && length(u) <= 2048 && contains(u, "@") == false && contains(u, "\"") == false && contains(u, "'") == false && contains(u, "<") == false && contains(u, ">") == false && contains(u, " ") == false && contains(u, "\\") == false && contains(u, "\n") == false && contains(u, "\t") == false
+}
+
+-- ============================================================
+-- Logo SVG sanitiser
+-- ============================================================
+
+-- Elements a logo may use: shapes, gradients, text, groups, clips, <use>
+-- and raster <image>. Everything else (script, style, foreignObject, a,
+-- animate, set, iframe, any HTML element, <! and <?) is refused.
+export pure func svgAllowedTags() -> [string] =
+  ["svg", "g", "path", "rect", "circle", "ellipse", "line", "polyline", "polygon", "text", "tspan",
+   "defs", "lineargradient", "radialgradient", "stop", "title", "desc", "clippath", "mask", "use", "symbol", "image"]
+
+-- The whole-document frame of a lowercased logo (Z3): one <svg …> element
+-- that closes exactly at the end, no "script" anywhere (script elements,
+-- javascript:/vbscript: URLs), no numeric character reference (the encoded
+-- javascript: trick), no comment/doctype/CDATA, no xml:base, bounded size.
+export pure func svgFrameOk(t: string) -> bool
+ensures {
+  result == false || startsWith(t, "<svg ") || startsWith(t, "<svg>"),
+  result == false || (endsWith(t, "</svg>") && find(t, "</svg>") == length(t) - 6),
+  result == false || (contains(t, "script") == false && contains(t, "&#") == false && contains(t, "<!") == false && contains(t, "xml:base") == false),
+  result == false || length(t) <= 16384
+} {
+  (startsWith(t, "<svg ") || startsWith(t, "<svg>")) && endsWith(t, "</svg>") && find(t, "</svg>") == length(t) - 6
+    && contains(t, "script") == false && contains(t, "&#") == false && contains(t, "<!") == false && contains(t, "<?") == false
+    && contains(t, "xml:base") == false && length(t) <= 16384
+}
+
+-- std/list has `any` but no `all`.
+pure func every(p: a -> bool, xs: [a]) -> bool = any(\x. p(x) == false, xs) == false
+
+pure func isNameChar(c: string) -> bool = contains("abcdefghijklmnopqrstuvwxyz0123456789", c)
+
+func takeName(cs: [string]) -> string = match cs {
+  c :: rest => if isNameChar(c) then "${c}${takeName(rest)}" else "",
+  [] => ""
+}
+
+-- The element name a "<"-piece opens or closes.
+pure func tagNameOf(piece: string) -> string =
+  takeName(chars(if startsWith(piece, "/") then substring(piece, 1, length(piece)) else piece))
+
+-- Every "<" opens or closes an allowed element.
+export pure func svgTagsOk(t: string) -> bool = match split(t, "<") {
+  first :: pieces => first == "" && every(\p. any(\n. n == tagNameOf(p), svgAllowedTags()), pieces),
+  [] => false
+}
+
+-- No event-handler attribute: every "on" must follow a name character
+-- (polygon, stop-color…). Whitespace, "/", quotes or "=" before it (where
+-- an attribute name could start) is refused, so is text starting with "on".
+export pure func svgNoHandlers(t: string) -> bool = match split(t, "on") {
+  [_] => true,
+  pieces => every(\p. p == "" || isNameChar(substring(p, length(p) - 1, length(p))), take(listLen(pieces) - 1, pieces))
+}
+
+pure func refOk(rest: string) -> bool =
+  any(\q. any(\v. startsWith(rest, "=${q}${v}"), ["#", "data:image/png", "data:image/jpeg", "data:image/gif", "data:image/webp"]), ["\"", "'"])
+
+-- Every href / xlink:href is `="#…"` or a raster data: image. Spaces around
+-- "=", other schemes and data:image/svg+xml (a <use> XSS vector) are refused.
+export pure func svgHrefsOk(t: string) -> bool = match split(t, "href") {
+  _ :: rest => every(refOk, rest),
+  [] => true
+}
+
+-- Every CSS url( … ) is a fragment: url(#id), url('#id'), url("#id").
+export pure func svgUrlsOk(t: string) -> bool = match split(t, "url(") {
+  _ :: rest => every(\r. startsWith(r, "#") || startsWith(r, "'#") || startsWith(r, "\"#"), rest),
+  [] => true
+}
+
+-- The predicate. Lowercased first, so <SCRIPT, OnLoad and JavaScript: are
+-- caught the same as their lowercase forms.
+export pure func svgLogoOk(s: string) -> bool {
+  let t = toLower(trim(s));
+  svgFrameOk(t) && svgTagsOk(t) && svgNoHandlers(t) && svgHrefsOk(t) && svgUrlsOk(t)
+}
