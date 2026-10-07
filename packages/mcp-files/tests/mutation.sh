@@ -4,6 +4,7 @@
 # of the checks listed for it. Exit 1 if any mutant survives.
 #   checks: check (ailang check --package), verify (Z3 on core.ail),
 #   bverify (Z3 on brand.ail), core / brand / widget (ailang test), flow (tests/flow_check.sh),
+#   sim (tests/widget_sim.sh: the widget's after-upload flow under node, mocked App),
 #   fetch (tests/fetch_check.sh, network),
 #   e2e (tests/e2e_uploads.sh: real serve-api on a random local port)
 # MUTATION_SKIP_NET=1 skips the fetch-only mutants (reported as SKIPPED).
@@ -21,6 +22,7 @@ run_check() {  # $1 = check name, cwd = mutant copy; returns 0 if the check PASS
     brand)  out=$(ailang test brand_test.ail 2>&1); grep -q " 0 failed" <<<"$out" ;;
     bverify) out=$(ailang verify brand.ail 2>&1); ! grep -qE "VIOLATION|ERROR" <<<"$out" ;;
     widget) ./tools/gen_bundle.sh >/dev/null 2>&1; out=$(ailang test widget_test.ail 2>&1); grep -q " 0 failed" <<<"$out" ;;
+    sim)    ./tests/widget_sim.sh >/dev/null 2>&1 ;;
     flow)   ./tests/flow_check.sh >/dev/null 2>&1 ;;
     fetch)  ./tests/fetch_check.sh >/dev/null 2>&1 ;;
     e2e)    E2E_PORT=$((18900 + RANDOM % 90)) ./tests/e2e_uploads.sh >/dev/null 2>&1 ;;
@@ -67,8 +69,8 @@ mutant "temp-path depth loosened"        core.ail '    [dir, name] =>' '    dir 
 mutant "temp-path dot names allowed"     core.ail '&& name != "" && name != "." && name != ".."' '&& name != ""' core e2e
 mutant "serve-api dir prefix dropped"    core.ail 'startsWith(dir, uploadTempDirPrefix()) && length(dir) > length(uploadTempDirPrefix())' 'true' core
 mutant "widget picker shown when idle"   assets/widget.js '  ready.hidden = true;
-  say(gotRef' '  ready.hidden = false;
-  say(gotRef' widget
+  const line = CFG.resultSummary' '  ready.hidden = false;
+  const line = CFG.resultSummary' widget
 mutant "via-host arg named token again"  assets/widget.js 'arguments: { ticket: desc' 'arguments: { token: desc' widget
 mutant "widget oversize guard dropped"   assets/widget.js 'if (desc.maxBytes && f.size > desc.maxBytes) {' 'if (false) {' widget
 
@@ -101,6 +103,39 @@ mutant "host context change ignored"       assets/widget.js "  app.addEventListe
 " "" widget
 mutant "logo shown in chatgpt"             assets/widget.js "if (window.openai) el('brand').hidden = true;" "" widget
 mutant "accent leaks onto body text"       assets/widget.css 'color:var(--color-text-primary,var(--mf-fg))}' 'color:var(--mf-accent)}' widget
+
+# 0.1.3 after-upload tool call: the widget runs it, substitutes safely, falls back, reports.
+mutant "after-upload: auto-call skipped"     assets/widget.js "    await runTool(rc, via);" "    await reportOnly(rc, via, CFG.afterUpload);" sim
+mutant "after-upload: string concatenation"  assets/widget.js "const args = fillArgs(CFG.onUploaded.argsJson, rc.fileRef);" "const args = JSON.parse(CFG.onUploaded.argsJson.split(PLACEHOLDER).join(rc.fileRef));" sim
+mutant "after-upload: capability fallback dropped" assets/widget.js "  } else if (!canCallTools()) {" "  } else if (false) {" sim
+mutant "after-upload: capability not checked" assets/widget.js "(app.getHostCapabilities() || {}).serverTools" "(app.getHostCapabilities() || {})" sim widget
+mutant "after-upload: substring placeholder filled" assets/widget.js "      if (v.indexOf(PLACEHOLDER) >= 0) throw" "      if (false) throw" sim
+mutant "after-upload: placeholder key allowed"  assets/widget.js "        if (k.indexOf(PLACEHOLDER) >= 0) throw" "        if (false) throw" sim
+mutant "after-upload: placeholder count unchecked" assets/widget.js "  if (n !== 1) throw" "  if (n < 1) throw" sim
+mutant "after-upload: context size cap dropped" assets/widget.js "  const text = head.length + body.length + 40 <= MAX_CONTEXT_CHARS" "  const text = true" sim
+mutant "after-upload: error not told to the model" assets/widget.js "    try {
+      await tell(uploadedText(rc, via) + ' The widget then called '" "    try { return;
+      await tell(uploadedText(rc, via) + ' The widget then called '" sim
+mutant "after-upload: summary not shown"     assets/widget.js "  const done = parsed ? clip(" "  const done = false ? clip(" sim
+mutant "template: key check dropped"         widget.ail "        else if placeholderKeys(j) != 0 then" "        else if false then" widget
+mutant "template: whole-value check dropped" widget.ail "        else if wholePlaceholders(j) != 1 then" "        else if false then" widget
+mutant "template: raw count dropped"         widget.ail "        if occurrences(t, fileRefPlaceholder()) != 1 then" "        if false then" widget
+mutant "template: non-object allowed"        widget.ail '      _ => "argsJson must be a JSON object"' '      _ => ""' widget
+mutant "tool name: any character"            widget.ail "  length(t) >= 1 && length(t) <= 64 && toolCharsFrom(t, 0)" "  length(t) >= 1 && length(t) <= 64" widget
+mutant "tool name: no length cap"            widget.ail "  length(t) >= 1 && length(t) <= 64 && toolCharsFrom(t, 0)" "  length(t) >= 1 && toolCharsFrom(t, 0)" widget
+mutant "invalid onUploaded rendered anyway"  widget.ail "  if o.tool != \"\" && onUploadedProblem(o) == \"\" then o else noAutoCall()" "  o" widget
+# 0.1.3 result cards and batches: one line from the result; one token per file.
+mutant "result card: resultSummary ignored"   assets/widget.js "const line = CFG.resultSummary && r ? resultLine(" "const line = r ? resultLine(" sim
+mutant "result card: line never shown"        assets/widget.js "const line = CFG.resultSummary && r ? resultLine(r, toolTitle()) : null;" "const line = null;" sim widget
+mutant "result card: full path shown"         assets/widget.js "return clip(f.split(/[\\\\/]/).pop()" "return clip(f" sim
+mutant "result card: http download offered"   assets/widget.js "/^https:" "/^https?:" sim
+mutant "result card: no 120-character cap"    assets/widget.js "const ONE_LINE = 120;" "const ONE_LINE = 1000;" sim
+mutant "result card: comments not counted"    assets/widget.js "    if (x.type === 'comment') n++;" "" sim
+mutant "result card: zero counts shown"       assets/widget.js "isFinite(n) && n !== 0) parts.push" "isFinite(n)) parts.push" sim
+mutant "result card: error object ignored"    assets/widget.js "  if (err && typeof err === 'object') {" "  if (false) {" sim
+mutant "batch: count cap dropped"             flow.ail "  if count < 1 || count > maxBatchUploads()" "  if count < 1" flow
+mutant "batch: note dropped from descriptor"  core.ail ', kv("note", js(singleUseNote()))])' '])' core flow
+mutant "409 no longer says one per file"      flow.ail "already used — call createUpload again for each file" "already used; ask for a new one" flow
 
 echo "mutants: $killed killed, $survived survived, $skipped skipped"
 [ $survived -eq 0 ]
