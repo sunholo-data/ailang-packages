@@ -7,11 +7,13 @@
 --   * the official ext-apps client (@modelcontextprotocol/ext-apps 2.0.3
 --     app-with-deps.js, the bundle the spike ran) inlined from the generated
 --     module extapps_bundle.ail (tools/gen_bundle.sh; sha256-pinned);
---   * a file picker; on pick it POSTs multipart {token, file} to the
---     descriptor's upload.url (the token comes from the tool result's
---     structuredContent, or its text content as JSON);
+--   * a file picker, shown only when the tool result holds an upload
+--     descriptor (any other result gets one quiet line: "No upload needed",
+--     or "Done." when the call was given a fileRef); on pick it POSTs
+--     multipart {token, file} to the descriptor's upload.url (the token comes
+--     from the tool result's structuredContent, or its text content as JSON);
 --   * if that fetch cannot leave the iframe (CSP, CORS, network) it falls back
---     to the widget-only tool cfg.hostToolName with {token, filename, base64};
+--     to the widget-only tool cfg.hostToolName with {ticket, filename, base64};
 --   * it reports the receipt with ui/update-model-context (never the host's
 --     message request, which drafts a user message under a caution banner).
 -- No external script, stylesheet or font. The page, script and styles live in
@@ -34,11 +36,12 @@ import ./widget_assets (widgetHtmlTemplate, widgetJs, widgetCss)
 -- accept           the picker's accept attribute (".docx,.pdf", or "" for any)
 -- nextStep         appended to the model-context message, e.g.
 --                  "Call mcpParse with this fileRef."
-export type WidgetConfig = {title: string, uploadUrl: string, hostToolName: string, maxViaHostBytes: int, accept: string, nextStep: string}
+-- afterUpload      shown after "Uploaded <name> (<size>) — ", e.g. "parsing…"
+export type WidgetConfig = {title: string, uploadUrl: string, hostToolName: string, maxViaHostBytes: int, accept: string, nextStep: string, afterUpload: string}
 
 export pure func defaultWidgetConfig(uploadUrl: string, hostToolName: string) -> WidgetConfig =
   {title: "Upload a file", uploadUrl: uploadUrl, hostToolName: hostToolName, maxViaHostBytes: 1048576, accept: "",
-   nextStep: "Continue the user's request with this fileRef."}
+   nextStep: "Continue the user's request with this fileRef.", afterUpload: "processing…"}
 
 -- The MCP Apps resource mime type (ext-apps 2026-01-26).
 export pure func widgetMimeType() -> string = "text/html;profile=mcp-app"
@@ -75,6 +78,7 @@ export pure func configJson(cfg: WidgetConfig) -> string =
     kv("hostToolName", js(cfg.hostToolName)),
     kv("maxViaHostBytes", jint(cfg.maxViaHostBytes)),
     kv("nextStep", js(cfg.nextStep)),
+    kv("afterUpload", js(cfg.afterUpload)),
     kv("extAppsVersion", js(extAppsVersion()))
   ])), [("<", "\\u003c"), (">", "\\u003e")])
 

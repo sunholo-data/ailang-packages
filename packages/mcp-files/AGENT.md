@@ -32,7 +32,7 @@ uploads, serving routes (serve-api does), and the `@mcp_ui`/`@mcp_app_only` wiri
 ## Quick start
 ```ailang
 import pkg/sunholo/mcp_files/core (errorStatus, openAiFileSchema)
-import pkg/sunholo/mcp_files/flow (Hooks, StoredFile, createUpload, acceptUploadFile, receiveViaHost, resolveFileRef, fetchFileParam)
+import pkg/sunholo/mcp_files/flow (Hooks, StoredFile, createUpload, acceptUploadFile, serveApiTempDir, receiveViaHost, resolveFileRef, fetchFileParam)
 import pkg/sunholo/mcp_files/widget (defaultWidgetConfig, uploadWidgetHtml, widgetCspMeta, widgetMimeType, claudeWidgetOrigin)
 ```
 Copy `routes_template.ail` into your service and replace `fileHooks()` and `accountOf()`.
@@ -42,8 +42,9 @@ Copy `routes_template.ail` into your service and replace `fileHooks()` and `acco
 |---|---|---|
 | `createUpload(h, account, filename, mime, maxBytes, nowSec)` | hooks + `Rand[mode=crypto]`, `Declassify` | `Ok(descriptor JSON)` / `Err(error JSON)`. `filename`/`mime` may be `""` (widget path); `maxBytes <= 0` = the ceiling |
 | `acceptUpload(h, tokenRaw, filename, data: bytes, nowSec)` | hooks + `Declassify` | `Ok(receipt JSON)`: SEP-2631 `file` (uri, name, mimeType, size, sha-256 digest) + `fileRef`, `sizeBytes`, `sha256` |
-| `acceptUploadFile(h, tokenRaw, filename, path, nowSec)` | same | as above, from serve-api's multipart temp file |
-| `receiveViaHost(h, tokenRaw, filename, base64, nowSec)` | same | as above; bad base64 is refused **before** the token is spent |
+| `acceptUploadFile(h, tokenRaw, filename, path, tempDir, nowSec)` | same | as above, from serve-api's multipart temp file. `path` must be `<tempDir>/ailang-upload-<x>/<name>`, else 400 before the path is read or the token spent (see "The temp-file guard"). Pass `serveApiTempDir()`; `""` = 500 |
+| `serveApiTempDir()` | `Env` | the dir serve-api writes multipart parts under: `$TMPDIR`, else `/tmp` (Go's `os.TempDir()`) |
+| `receiveViaHost(h, ticket, filename, base64, nowSec)` | same | as above; `ticket` is the descriptor's upload token. Bad base64 is refused **before** the token is spent |
 | `resolveFileRef(h, account, fileRef, nowSec)` | hooks | `Ok(StoredFile)` once, for the owner; then bytes and record are deleted |
 | `fetchFileParam(fileObj: Json, maxBytes)` | `Net[scope=public] @limit=1` | `Ok(StoredFile)` (`fileRef` = the OpenAI `file_id`); nothing stored |
 | `uploadWidgetHtml(cfg)` | pure | the widget document |
@@ -81,9 +82,10 @@ never hold a token. The flow reaches the hooks only through wrappers whose key/v
      descriptor as structured content. Parse: `mcpParse`/`mcpConvert`/`editDocument` called without
      a document, or a `createUpload` tool;
    - `POST /uploads` (`@nomcp`), multipart `token` + `file`. Declare `file: string` so serve-api
-     streams it to a temp file, then call `acceptUploadFile(h, token, file, file, now)` and answer
-     `{_body: receipt-or-error, _status: errorStatus(err)}`;
-   - the **widget-only tool** (`uploadViaHost(token, filename, base64)` → `receiveViaHost`);
+     streams it to a temp file, then call `acceptUploadFile(h, token, file, file, serveApiTempDir(), now)`
+     and answer `{_body: receipt-or-error, _status: errorStatus(err)}`. Never read `file` yourself;
+   - the **widget-only tool** (`uploadViaHost(ticket, filename, base64)` → `receiveViaHost`). The
+     parameter must be named `ticket`: that is what the widget sends;
    - the widget resource `ui://<svc>/upload`: body `uploadWidgetHtml(cfg)`, mime `widgetMimeType()`,
      `_meta` `widgetCspMeta([<your origin>])`;
    - `fileRef` parameters on your file tools, resolved with `resolveFileRef(h, account, ref, now)`;
@@ -100,23 +102,51 @@ never hold a token. The flow reaches the hooks only through wrappers whose key/v
    to the host tool (files up to `maxViaHostBytes`, default 1 MB).
 4. **`--max-upload-size` above `maxBytesCeiling`.** A body over serve-api's limit is refused with 413
    before your handler runs (measured: `tests/e2e_uploads.sh`), so keep the ceiling below it.
-5. **Never log** the `token` argument, request bodies, or `createUpload`'s result (they carry the
-   token). Run serve-api with `AILANG_TRACE_VALUES=off`; traces render arguments verbatim.
+5. **Never log** the `token` / `ticket` arguments, request bodies, or `createUpload`'s result (they
+   carry the token). Run serve-api with `AILANG_TRACE_VALUES=off`; traces render arguments verbatim.
 6. **No silent fallbacks.** If an upload fails, tell the user what to do (allow network access to your
    domain, use the widget, or send a link). Never let the model parse the file itself.
 7. Use seconds for `nowSec` (`std/clock.now()` is milliseconds; so are `std/datetime` timestamps).
+
+## The temp-file guard
+serve-api hands a `file: string` param the path of the temp file it streamed the multipart part to,
+`os.MkdirTemp("", "ailang-upload-*")` + the part's base name. But a client can also send `file` as a
+plain form value (`curl -F file=/etc/hosts`, no `@`), and serve-api passes that string through
+unchanged. Before 0.1.1 the package read whatever path it named, stored it, and handed it back on
+resolve. Now `acceptUploadFile` requires `core.isUploadTempPath(path, tempDir)`: exactly
+`<tempDir>/ailang-upload-<suffix>/<name>`, an absolute `tempDir`, a non-empty suffix and a name that
+is not `.` or `..`. Anything else gets 400 `invalid_request` with the same answer whether or not the
+path exists. The path is not read and the token is not spent.
+
+`tempDir` must be the `TMPDIR` serve-api runs with. Call `serveApiTempDir()` inside the route (same
+process). Paths are compared as given: no symlink resolution. What remains: a client holding a valid
+token could name *another* in-flight upload's temp file if it guessed the 32-bit random directory
+suffix and the filename during that request. serve-api deletes the directory when the request ends.
+
+## Renamed in 0.1.1: `token` to `ticket` on the via-host tool
+The widget calls the widget-only tool with `{ticket, filename, base64}`. A tool parameter named
+`token` reads as a credential to `ailang mcp check`, and possibly to directory scanners, even on an
+app-only tool. The multipart field on `POST /uploads` and the descriptor's
+`upload.multipart.fields.token` keep their SEP-2631 names. An adopter on 0.1.0 must rename the tool's
+parameter when it upgrades. The 0.1.1 widget sends `ticket`, so a tool that still declares `token`
+never receives the token and the via-host upload fails.
 
 ## The widget
 `uploadWidgetHtml(cfg)` inlines the official `@modelcontextprotocol/ext-apps` 2.0.3 client
 (`app-with-deps.js`, the build the F1 spike ran in claude.ai; sha256-pinned in
 `tools/gen_bundle.sh`) as a module script, then the widget logic from `assets/widget.js`:
-1. waits for the tool result (`ui/notifications/tool-result`; also reads `window.openai.toolOutput`)
-   and takes the descriptor from `structuredContent` (or from text content holding the JSON);
+1. renders nothing until the tool result arrives (`ui/notifications/tool-result`; also reads
+   `window.openai.toolOutput`), then takes the descriptor from `structuredContent` (or from text
+   content holding the JSON). Only a descriptor shows the picker. Any other result (an error, a
+   parse result) gets one quiet line, "No upload needed.", or "Done." when the tool call's arguments
+   held an `mcp-file://` fileRef. ext-apps 2.0.3 sends a widget only its own call's result, so the
+   instance that took the upload cannot see the later call that uses the file;
 2. on pick, refuses an empty or oversize file **before** spending the token, then POSTs multipart
    `{token, file}` to `upload.url`;
-3. if the fetch cannot leave the iframe, calls `cfg.hostToolName` with `{token, filename, base64}`;
-4. reports with `ui/update-model-context` (text + the receipt as structured content). It never uses
-   `ui/message`, which drafts a user message under a "Use caution" banner.
+3. if the fetch cannot leave the iframe, calls `cfg.hostToolName` with `{ticket, filename, base64}`;
+4. reports with `ui/update-model-context` (text + the receipt as structured content), hides the
+   picker and shows "Uploaded <name> (<size>) — `cfg.afterUpload`" (default `processing…`; Parse:
+   `parsing…`). It never uses `ui/message`, which drafts a user message under a "Use caution" banner.
 
 **Why an inlined bundle.** AILANG string literals carry the 400 KB bundle without trouble (check,
 test and serve are unaffected). `ailang fmt` rewrites multi-line literals onto one line, so the
@@ -130,13 +160,13 @@ the generated modules; `tests/assets_check.sh` fails when they drift.
 | `ailang verify core.ail` (`tests/verify_check.sh`) | Z3: `uploadVerdict` (single use + expiry + size), `isExpired`, `tokenExpiresAt`, `sizeOk`, `effectiveMaxBytes`, `ownerMatches`, `refVerdict`, `mimeAllowed`, `refFrameOk`, `downloadUrlOk` |
 | `tests/broken_single_use.ail`, `tests/broken_expiry.ail` | must be **refuted** (a forgotten claim; an off-by-one expiry; an empty-owner match) |
 | `ailang test --package .` | core (SEP-2631 descriptor golden, OpenAI schema golden, codec, sanitiser, properties) and widget tests |
-| `tests/flow_check.sh` | flow over SharedMem hooks: single use, expiry, size cap, cross-account, sha256 round trip, delete after use, tamper, mime, via host |
-| `tests/e2e_uploads.sh` | real serve-api: curl multipart of a 1.5 MB binary, sha256 round trip, replay 409, cross-account 404, CORS for the widget origin, 413 above `--max-upload-size` |
+| `tests/flow_check.sh` | flow over SharedMem hooks: single use, expiry, size cap, cross-account, sha256 round trip, delete after use, tamper, mime, via host, paths outside the temp dir refused |
+| `tests/e2e_uploads.sh` | real serve-api: curl multipart of a 1.5 MB binary, sha256 round trip, replay 409, cross-account 404, CORS for the widget origin, 413 above `--max-upload-size`, `-F file=/etc/hosts` / `../../x` / a temp-dir escape refused with the token unspent |
 | `tests/fetch_check.sh` | `fetchFileParam`: http/userinfo refused; metadata IP and a name resolving to loopback refused with permissive Net flags on; a pinned public file fetched byte-exact; size cap (network) |
 | `tests/ifc_leaks.sh` | logging or storing a token in the real `flow.ail` fails to compile |
 | `tests/widget_check.sh` | widget HTML parses, one picker, two inline module scripts, nothing external; `node --check` on both scripts |
 | `tests/lint.sh`, `tests/assets_check.sh` | source rules the types cannot express; generated modules in sync |
-| `tests/mutation.sh` | 16 mutants of the key checks, each killed |
+| `tests/mutation.sh` | 25 mutants of the key checks (including the temp-file guard and the widget states), each killed |
 
 ## Design
 `sunholo-data/ailang` `design_docs/planned/v0_53_0/m-mcp-file-handoff.md` (F2). SEP-2631:

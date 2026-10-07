@@ -34,7 +34,30 @@ test "widget is one html document" {
 }
 
 test "widget has the file picker" {
-  contains(html(), "<input type='file' id='file'>") && contains(html(), "id='status'")
+  contains(html(), "<input type='file' id='file' disabled>") && contains(html(), "id='status'")
+}
+
+-- The picker shows only under a tool result that holds an upload descriptor;
+-- any other result gets one quiet line ("No upload needed" / "Done.").
+test "widget starts with the picker hidden and no waiting text" {
+  contains(html(), "<div id='ready' hidden>") && contains(html(), "Waiting for the upload token") == false && contains(html(), "<p id='status' role='status' aria-live='polite'></p>")
+}
+
+test "widget idles on a result without a descriptor" {
+  contains(appScript(), "if (d) useDescriptor(d); else idle(") && contains(appScript(), "'No upload needed.'") && contains(appScript(), "'Done.'") && count(appScript(), "ready.hidden = false") == 1
+}
+
+test "widget reports the upload with size and the after-upload text" {
+  contains(appScript(), "size(rc.sizeBytes) + ') — ' + CFG.afterUpload") && contains(configJson(cfg()), "\"afterUpload\":\"processing")
+}
+
+-- In functions for the same reason as globalsMarker (an unbalanced brace).
+pure func ticketArg() -> string = "arguments: { ticket: desc.upload.multipart.fields.token,"
+
+pure func tokenArg() -> string = "arguments: { token"
+
+test "widget sends the token to the host tool as ticket" {
+  contains(appScript(), ticketArg()) && contains(appScript(), tokenArg()) == false
 }
 
 test "widget has exactly two inline scripts" {

@@ -18,5 +18,5 @@ export func main() -> () ! {IO} {
   expect("fileRef round trip", parseFileRef("svc", fileUri("svc", id)) == Some(id) && parseFileRef("svc", "mcpfile:${id}") == None);
   expect("filename sanitised", safeName("../../.env") == "env");
   expect("sep-2631 descriptor", startsWith(uploadDescriptor("https://u.example/uploads", "t", fileUri("svc", id), "a.pdf", "application/pdf", 0, 10), "{\"file\":"));
-  expect("widget html", contains(uploadWidgetHtml(defaultWidgetConfig("https://u.example/uploads", "uploadViaHost")), "<input type='file' id='file'>"))
+  expect("widget html", contains(uploadWidgetHtml(defaultWidgetConfig("https://u.example/uploads", "uploadViaHost")), "<input type='file' id='file' disabled>"))
 }

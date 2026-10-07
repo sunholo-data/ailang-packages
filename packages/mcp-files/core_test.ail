@@ -3,7 +3,7 @@
 -- file-object schema golden and its parser.
 
 module sunholo/mcp_files/core_test
-import ./core (UploadVerdict, Accept, Replayed, Expired, Empty, TooLarge, RefVerdict, Found, NotFound, Gone, tokenExpiresAt, isExpired, sizeOk, effectiveMaxBytes, uploadVerdict, ownerMatches, refVerdict, isFileId, serverNameOk, fileUri, parseFileRef, safeName, extensionOf, mimeFromName, effectiveMime, mimeAllowed, uploadPart, uploadDescriptor, uploadReceipt, digestB64Url, fileError, errorStatus, openAiFileSchema, openAiFileParamsMeta, parseFileParam, downloadUrlOk)
+import ./core (UploadVerdict, Accept, Replayed, Expired, Empty, TooLarge, RefVerdict, Found, NotFound, Gone, tokenExpiresAt, isExpired, sizeOk, effectiveMaxBytes, uploadVerdict, ownerMatches, refVerdict, isFileId, serverNameOk, fileUri, parseFileRef, safeName, extensionOf, mimeFromName, effectiveMime, mimeAllowed, uploadPart, uploadDescriptor, uploadReceipt, digestB64Url, fileError, errorStatus, openAiFileSchema, openAiFileParamsMeta, parseFileParam, downloadUrlOk, isUploadTempPath, uploadTempDirPrefix)
 import std/string (repeat, contains, startsWith, length)
 import std/json (encode, decode)
 import std/option (Option, Some, None)
@@ -127,6 +127,35 @@ test "file id is 32 lowercase hex" {
 }
 
 -- ---------------- filenames and mime ----------------
+-- ---------------- serve-api multipart temp files ----------------
+test "temp path accepts serve-api's own file" {
+  isUploadTempPath("/tmp/ailang-upload-12345/AGM.docx", "/tmp") && isUploadTempPath("/var/folders/x/T/ailang-upload-9/a b.pdf", "/var/folders/x/T/")
+}
+
+test "temp path refuses absolute server paths" {
+  isUploadTempPath("/etc/hosts", "/tmp") == false && isUploadTempPath("/tmp/hosts", "/tmp") == false && isUploadTempPath("/tmpx/ailang-upload-1/a", "/tmp") == false && isUploadTempPath("/etc/ailang-upload-1/hosts", "/tmp") == false
+}
+
+test "temp path refuses relative paths" {
+  isUploadTempPath("../../x", "/tmp") == false && isUploadTempPath("ailang-upload-1/a", "/tmp") == false && isUploadTempPath("tmp/ailang-upload-1/a", "tmp") == false
+}
+
+test "temp path refuses dot segments" {
+  isUploadTempPath("/tmp/ailang-upload-1/..", "/tmp") == false && isUploadTempPath("/tmp/ailang-upload-1/.", "/tmp") == false && isUploadTempPath("/tmp/ailang-upload-1/../../etc/hosts", "/tmp") == false
+}
+
+test "temp path needs exactly two segments" {
+  isUploadTempPath("/tmp/ailang-upload-1", "/tmp") == false && isUploadTempPath("/tmp/ailang-upload-1/", "/tmp") == false && isUploadTempPath("/tmp/ailang-upload-1/a/b", "/tmp") == false && isUploadTempPath("/tmp//ailang-upload-1/a", "/tmp") == false
+}
+
+test "temp path needs serve-api's prefix and a suffix" {
+  isUploadTempPath("/tmp/other-1/a", "/tmp") == false && isUploadTempPath("/tmp/ailang-upload-/a", "/tmp") == false && uploadTempDirPrefix() == "ailang-upload-"
+}
+
+test "temp path refuses an empty or root temp dir" {
+  isUploadTempPath("/ailang-upload-1/a", "") == false && isUploadTempPath("/ailang-upload-1/a", "/") == false
+}
+
 test "safe name keeps last segment" {
   safeName("/etc/passwd") == "passwd" && safeName("C:\\Users\\me\\AGM.docx") == "AGM.docx"
 }
