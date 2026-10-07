@@ -1,0 +1,275 @@
+-- sunholo/mcp_files/core: the pure policy of the MCP file handoff (design:
+-- ailang design_docs/planned/v0_53_0/m-mcp-file-handoff.md, "Design" and
+-- the sunholo/mcp_files row of "Lanes").
+--
+-- Everything here is pure, so `ailang verify` proves the contracts with Z3
+-- and the flow module relies on them:
+--   * upload-token policy: lifetime, expiry, single use, size cap (uploadVerdict);
+--   * fileRef codec: mcp-file://<server>/file_<32 hex>, parsed strictly;
+--   * filename sanitiser and the mime allow-list;
+--   * the SEP-2631-shaped upload descriptor and receipt;
+--   * the OpenAI `openai/fileParams` file-object schema and its parser.
+-- Tokens pass through here only as arguments to the descriptor builder; the
+-- IFC label they carry in flow.ail propagates into its result.
+
+module sunholo/mcp_files/core
+import std/string (length, substring, find, startsWith, endsWith, chars, toLower, split, trim, join, contains as strContains)
+import std/list (contains, any, map, foldl, length as listLen)
+import std/json (Json, encode, decode, jo, kv, js, ja, jint, getString, getInt)
+import std/datetime (formatRFC3339)
+import std/bytes (fromInts, toBase64URL)
+import std/option (Option, Some, None)
+import std/result (Result, Ok, Err)
+
+-- ============================================================
+-- Upload-token policy (Z3)
+-- ============================================================
+
+-- Default token lifetime: 10 minutes (design: "valid 10 minutes").
+export pure func defaultTokenTtlSec() -> int = 600
+
+export pure func tokenExpiresAt(nowSec: int, ttlSec: int) -> int
+requires { ttlSec > 0 }
+ensures { result == nowSec + ttlSec, result > nowSec } {
+  nowSec + ttlSec
+}
+
+-- Expired AT the expiry second, not after it.
+export pure func isExpired(nowSec: int, expiresAt: int) -> bool
+ensures { result == nowSec >= expiresAt } {
+  nowSec >= expiresAt
+}
+
+-- An upload must hold at least one byte and at most maxBytes.
+export pure func sizeOk(size: int, maxBytes: int) -> bool
+ensures { result == (size > 0 && size <= maxBytes) } {
+  size > 0 && size <= maxBytes
+}
+
+-- The cap bound to a token: what the tool asked for, never above the
+-- service ceiling; 0 or less means "the ceiling".
+export pure func effectiveMaxBytes(requested: int, ceiling: int) -> int
+requires { ceiling > 0 }
+ensures { result > 0, result <= ceiling, requested <= 0 || requested > ceiling || result == requested } {
+  if requested <= 0 || requested > ceiling then ceiling else requested
+}
+
+export type UploadVerdict = Accept | Replayed | Expired | Empty | TooLarge deriving (Eq)
+
+-- The whole admission rule for one upload attempt. firstUse is the result of
+-- the atomic claim on the token digest (flow.ail): a token admits ONE attempt.
+-- Z3 proves: Accept exactly when first use, unexpired and within the cap.
+export pure func uploadVerdict(firstUse: bool, nowSec: int, expiresAt: int, size: int, maxBytes: int) -> UploadVerdict
+ensures { result == Accept == (firstUse && nowSec < expiresAt && size > 0 && size <= maxBytes) } {
+  if firstUse == false then Replayed else if isExpired(nowSec, expiresAt) then Expired else if size <= 0 then Empty else if size > maxBytes then TooLarge else Accept
+}
+
+-- ============================================================
+-- Stored files: account binding (Z3)
+-- ============================================================
+
+export pure func ownerMatches(owner: string, caller: string) -> bool
+ensures { result == (owner != "" && owner == caller) } {
+  owner != "" && owner == caller
+}
+
+-- Found | NotFound (unknown, or another account's: indistinguishable to the
+-- caller) | Gone (the caller's own, but expired).
+export type RefVerdict = Found | NotFound | Gone deriving (Eq)
+
+export pure func refVerdict(owner: string, caller: string, nowSec: int, expiresAt: int) -> RefVerdict
+ensures { result == Found == (owner != "" && owner == caller && nowSec < expiresAt), result == NotFound == (owner == "" || owner != caller) } {
+  if ownerMatches(owner, caller) == false then NotFound else if isExpired(nowSec, expiresAt) then Gone else Found
+}
+
+-- ============================================================
+-- fileRef codec: mcp-file://<server>/file_<id>
+-- ============================================================
+-- SEP-2631 file URI shape ("mcp-file://server/file_01HXYZ"), so a future
+-- files/authorizeUpload returns the same string. <id> is 32 lowercase hex
+-- characters (a crypto uuid4 without dashes).
+
+pure func isHexChar(c: string) -> bool = find("0123456789abcdef", c) >= 0
+
+export pure func isFileId(id: string) -> bool = length(id) == 32 && not any(\c. not isHexChar(c), chars(id))
+
+-- A server authority: 1..63 of [a-z0-9.-], not starting with '.' or '-'.
+export pure func serverNameOk(server: string) -> bool =
+  length(server) > 0 && length(server) <= 63 && not startsWith(server, ".") && not startsWith(server, "-") && not any(\c. find("abcdefghijklmnopqrstuvwxyz0123456789.-", c) < 0, chars(server))
+
+export pure func fileRefPrefix(server: string) -> string = "mcp-file://${server}/file_"
+
+-- The frame of a reference: the exact prefix (fileRefPrefix(server)) and
+-- exactly 32 more characters.
+export pure func refFrameOk(prefix: string, ref: string) -> bool
+  ensures { result == (startsWith(ref, prefix) && length(ref) == length(prefix) + 32) }
+{
+  startsWith(ref, prefix) && length(ref) == length(prefix) + 32
+}
+
+export pure func fileUri(server: string, id: string) -> string = "${fileRefPrefix(server)}${id}"
+
+-- Strict: the exact frame for THIS server, then a 32-hex id. No trimming, no
+-- case folding, no query or fragment. Returns the id.
+export pure func parseFileRef(server: string, ref: string) -> Option[string] =
+  if serverNameOk(server) && refFrameOk(fileRefPrefix(server), ref) then {
+    let id = substring(ref, length(fileRefPrefix(server)), length(ref))
+    if isFileId(id) then Some(id) else None
+  } else None
+
+-- ============================================================
+-- Filenames and mime types
+-- ============================================================
+
+pure func lastSegment(parts: [string]) -> string = foldl(\acc p. p, "", parts)
+
+pure func safeChar(c: string) -> bool =
+  find("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._-", c) >= 0
+
+pure func stripLeadingDots(s: string) -> string =
+  if startsWith(s, ".") then stripLeadingDots(substring(s, 1, length(s))) else s
+
+-- The last path segment (after / and \), [A-Za-z0-9._-] only (anything else
+-- becomes "_"), no leading dots, at most 120 characters keeping the tail (the
+-- extension picks the parser), "upload.bin" when nothing is left.
+-- From docparse mcp_input.ail mcpInputSafeName.
+export pure func safeName(filename: string) -> string {
+  let a = lastSegment(split(trim(filename), "/"))
+  let b = lastSegment(split(a, "\\"))
+  let cleaned = join("", map(\c. if safeChar(c) then c else "_", chars(b)))
+  let noDots = stripLeadingDots(cleaned)
+  let capped = if length(noDots) > 120 then substring(noDots, length(noDots) - 120, length(noDots)) else noDots
+  if length(capped) == 0 then "upload.bin" else capped
+}
+
+-- Lower-case extension without the dot ("" when none).
+export pure func extensionOf(name: string) -> string {
+  let parts = split(name, ".")
+  if listLen(parts) < 2 then "" else toLower(lastSegment(parts))
+}
+
+pure func mimeTable() -> [(string, string)] =
+  [("pdf", "application/pdf"), ("docx", "application/vnd.openxmlformats-officedocument.wordprocessingml.document"), ("xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"), ("pptx", "application/vnd.openxmlformats-officedocument.presentationml.presentation"), ("doc", "application/msword"), ("xls", "application/vnd.ms-excel"), ("ppt", "application/vnd.ms-powerpoint"), ("odt", "application/vnd.oasis.opendocument.text"), ("ods", "application/vnd.oasis.opendocument.spreadsheet"), ("odp", "application/vnd.oasis.opendocument.presentation"), ("rtf", "application/rtf"), ("epub", "application/epub+zip"), ("eml", "message/rfc822"), ("csv", "text/csv"), ("tsv", "text/tab-separated-values"), ("txt", "text/plain"), ("md", "text/markdown"), ("html", "text/html"), ("htm", "text/html"), ("json", "application/json"), ("xml", "application/xml"), ("zip", "application/zip"), ("png", "image/png"), ("jpg", "image/jpeg"), ("jpeg", "image/jpeg"), ("gif", "image/gif"), ("webp", "image/webp"), ("mp3", "audio/mpeg"), ("wav", "audio/wav"), ("mp4", "video/mp4")]
+
+pure func lookupMime(ext: string, table: [(string, string)]) -> string = match table {
+  [] => "application/octet-stream",
+  (e, m) :: rest => if e == ext then m else lookupMime(ext, rest)
+}
+
+-- Mime type from a filename's extension; application/octet-stream if unknown.
+export pure func mimeFromName(name: string) -> string = lookupMime(extensionOf(name), mimeTable())
+
+-- The declared mime when there is one, else the one the name implies.
+export pure func effectiveMime(declared: string, name: string) -> string =
+  if trim(declared) == "" then mimeFromName(name) else toLower(trim(declared))
+
+-- An empty allow-list allows every type.
+export pure func mimeAllowed(mime: string, allowed: [string]) -> bool
+ensures { result == (listLen(allowed) == 0 || contains(allowed, mime)) } {
+  listLen(allowed) == 0 || contains(allowed, mime)
+}
+
+-- ============================================================
+-- SEP-2631 descriptor and receipt
+-- https://github.com/modelcontextprotocol/modelcontextprotocol/pull/2631
+-- (draft "SEP-2631: File Objects and Transfer", head 8799c5c, 2026-10-02):
+-- files/authorizeUpload returns {file: FileValue, upload: {transport, method,
+-- url, headers, multipart: {fileField, fields: {token}}, expiresAt}}.
+-- ============================================================
+
+-- SEP-2631 FileValue: uri plus optional name / mimeType / size / digest.
+-- Empty name or mime and size <= 0 are omitted.
+export pure func fileValue(uri: string, name: string, mime: string, size: int, sha256HexDigest: string) -> Json {
+  let base = [kv("uri", js(uri))]
+  let withName = if name == "" then base else base ++ [kv("name", js(name))]
+  let withMime = if mime == "" then withName else withName ++ [kv("mimeType", js(mime))]
+  let withSize = if size <= 0 then withMime else withMime ++ [kv("size", jint(size))]
+  let withDigest = if sha256HexDigest == "" then withSize else withSize ++ [kv("digest", jo([kv("algorithm", js("sha-256")), kv("value", js(digestB64Url(sha256HexDigest)))]))]
+  jo(withDigest)
+}
+
+-- The SEP-2631 HTTPS multipart upload descriptor. expiresAt is RFC 3339; std/datetime takes milliseconds.
+export pure func uploadPart(uploadUrl: string, token: string, expiresAtSec: int) -> Json =
+  jo([kv("transport", js("https")), kv("method", js("POST")), kv("url", js(uploadUrl)), kv("headers", jo([])), kv("multipart", jo([kv("fileField", js("file")), kv("fields", jo([kv("token", js(token))]))])), kv("expiresAt", js(formatRFC3339(expiresAtSec * 1000)))])
+
+-- One-line upload for clients that run code (Claude Code, Codex, a sandbox
+-- with network access). The model replaces <path>.
+export pure func curlLine(uploadUrl: string, token: string) -> string =
+  "curl -sS -F token=${token} -F file=@<path> ${uploadUrl}"
+
+-- The descriptor createUpload returns: SEP-2631's {file, upload} exactly,
+-- plus three extras for today's clients: fileRef (= file.uri, what the tools
+-- take), maxBytes (so a widget can refuse an oversized file before it spends
+-- the token) and curl.
+export pure func uploadDescriptor(uploadUrl: string, token: string, uri: string, name: string, mime: string, expiresAtSec: int, maxBytes: int) -> string =
+  encode(jo([kv("file", fileValue(uri, name, mime, 0, "")), kv("upload", uploadPart(uploadUrl, token, expiresAtSec)), kv("fileRef", js(uri)), kv("maxBytes", jint(maxBytes)), kv("curl", js(curlLine(uploadUrl, token)))]))
+
+-- What POST /uploads (and the via-host tool) return: the SEP-2631 FileValue
+-- with size and digest, plus flat fileRef / sizeBytes / sha256 (hex).
+export pure func uploadReceipt(uri: string, name: string, mime: string, size: int, sha256HexDigest: string) -> string =
+  encode(jo([kv("file", fileValue(uri, name, mime, size, sha256HexDigest)), kv("fileRef", js(uri)), kv("name", js(name)), kv("mimeType", js(mime)), kv("sizeBytes", jint(size)), kv("sha256", js(sha256HexDigest))]))
+
+pure func hexVal(c: string) -> int = find("0123456789abcdef", c)
+
+pure func hexInts(h: string, i: int, n: int) -> [int] =
+  if i + 1 >= n then [] else hexVal(substring(h, i, i + 1)) * 16 + hexVal(substring(h, i + 1, i + 2)) :: hexInts(h, i + 2, n)
+
+-- SEP-2631 digests are base64url without padding of the raw sha-256.
+export pure func digestB64Url(sha256HexDigest: string) -> string
+  tests [
+    ("e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855", "47DEQpj8HBSa-_TImW-5JCeuQeRkm5NMpJWZG3hSuFU")
+  ] {
+  toBase64URL(fromInts(hexInts(sha256HexDigest, 0, length(sha256HexDigest))))
+}
+
+-- ============================================================
+-- Errors: one JSON shape for every refusal
+-- ============================================================
+
+-- {"error": code, "error_description": message, "status": httpStatus}
+export pure func fileError(code: string, status: int, message: string) -> string =
+  encode(jo([kv("error", js(code)), kv("error_description", js(message)), kv("status", jint(status))]))
+
+-- The HTTP status a route should answer with for an Err value (400 if absent).
+export pure func errorStatus(errJson: string) -> int =
+  match decode(errJson) {
+    Ok(j) => match getInt(j, "status") {
+      Some(n) => n,
+      None => 400
+    },
+    Err(_) => 400
+  }
+
+-- ============================================================
+-- OpenAI `openai/fileParams` (ChatGPT): schema and parser
+-- https://developers.openai.com/plugins/reference: "Every file object schema
+-- must declare all four supported properties: download_url (required),
+-- file_id (required), mime_type, file_name".
+-- ============================================================
+
+export pure func openAiFileSchema() -> string =
+  encode(jo([kv("type", js("object")), kv("properties", jo([kv("download_url", jo([kv("type", js("string"))])), kv("file_id", jo([kv("type", js("string"))])), kv("mime_type", jo([kv("type", js("string"))])), kv("file_name", jo([kv("type", js("string"))]))])), kv("required", ja([js("download_url"), js("file_id")]))]))
+
+-- The tool `_meta` entry that lists file-valued parameters.
+export pure func openAiFileParamsMeta(params: [string]) -> string =
+  encode(jo([kv("openai/fileParams", ja(map(js, params)))]))
+
+export type FileParam = { downloadUrl: string, fileId: string, mimeType: string, fileName: string }
+
+pure func strOr(j: Json, k: string) -> string = match getString(j, k) {
+  Some(s) => s,
+  None => ""
+}
+
+-- A ChatGPT file object, checked: download_url and file_id present, the URL
+-- https (the connect-time layer is Net[scope=public] in flow.fetchFileParam).
+export pure func parseFileParam(obj: Json) -> Result[FileParam, string] {
+  let url = strOr(obj, "download_url")
+  let fid = strOr(obj, "file_id")
+  if url == "" then Err("file object has no download_url") else if fid == "" then Err("file object has no file_id") else if downloadUrlOk(url) == false then Err("download_url must be an https URL without userinfo") else Ok({ downloadUrl: url, fileId: fid, mimeType: strOr(obj, "mime_type"), fileName: strOr(obj, "file_name") })
+}
+
+export pure func downloadUrlOk(url: string) -> bool
+ensures { result == (startsWith(url, "https://") && length(url) > 8 && strContains(url, "@") == false) } {
+  startsWith(url, "https://") && length(url) > 8 && strContains(url, "@") == false
+}

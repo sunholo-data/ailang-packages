@@ -1,0 +1,50 @@
+-- Network checks for sunholo/mcp_files/flow.fetchFileParam (run with
+-- ailang run; prints PASS/FAIL lines; tests/fetch_check.sh asserts them and
+-- runs with serve-api-style permissive Net flags ON, to show that
+-- Net[scope=public] refuses private and metadata addresses anyway).
+module sunholo/mcp_files/fetch_integration_test
+
+import std/io (println)
+import std/string (contains)
+import std/result (Ok, Err)
+import std/json (decode, jo, kv, js)
+import pkg/sunholo/mcp_files/core (errorStatus)
+import pkg/sunholo/mcp_files/flow (fetchFileParam)
+
+-- SEP-2631 text pinned to a commit: immutable bytes with a known sha256.
+pure func pinnedUrl() -> string = "https://raw.githubusercontent.com/modelcontextprotocol/modelcontextprotocol/8799c5c1e0eaedd91d4f0d63e3f6cfa5554e3b87/seps/2631-file-objects-and-transfer.md"
+
+pure func pinnedSha() -> string = "4c0ee2429ff6b919e45ec2bb0addcd3ad92ccaa522d13715b3645a56f9309d37"
+
+pure func fileObj(url: string) -> Json = jo([kv("download_url", js(url)), kv("file_id", js("file_test")), kv("mime_type", js("text/markdown")), kv("file_name", js("sep-2631.md"))])
+
+func refused(name: string, url: string, status: int, needle: string) -> () ! {IO, Net[scope=public]} =
+  match fetchFileParam(fileObj(url), 1000000) {
+    Ok(_) => println("FAIL ${name}: fetched"),
+    Err(e) => if errorStatus(e) == status && contains(e, needle) then println("PASS ${name}") else println("FAIL ${name}: ${e}")
+  }
+
+export func main() -> () ! {IO, Net[scope=public]} {
+  -- string layer: refused before any fetch
+  refused("fetch refuses http", "http://files.example/f", 400, "https");
+  refused("fetch refuses userinfo", "https://user@files.example/f", 400, "https");
+  match fetchFileParam(jo([kv("download_url", js(pinnedUrl()))]), 1000000) {
+    Ok(_) => println("FAIL fetch needs file_id: fetched"),
+    Err(e) => if errorStatus(e) == 400 then println("PASS fetch needs file_id") else println("FAIL fetch needs file_id: ${e}")
+  };
+  -- connect-time layer (Net[scope=public]): metadata IP, and a public name
+  -- that RESOLVES to 127.0.0.1
+  refused("fetch refuses metadata ip", "https://169.254.169.254/latest/meta-data", 502, "E_NET_IP_BLOCKED: link-local");
+  refused("fetch refuses private resolution", "https://localtest.me/f", 502, "E_NET_DNS_REBINDING");
+  -- a real public fetch: bytes and sha256 exact, name sanitised, mime kept
+  match fetchFileParam(fileObj(pinnedUrl()), 1000000) {
+    Ok(f) => if f.sha256 == pinnedSha() && f.fileRef == "file_test" && f.name == "sep-2631.md" && f.mimeType == "text/markdown"
+             then println("PASS fetch public file sha256") else println("FAIL fetch public file sha256: ${f.sha256} ${f.name}"),
+    Err(e) => println("FAIL fetch public file sha256: ${e}")
+  };
+  -- size cap
+  match fetchFileParam(fileObj(pinnedUrl()), 100) {
+    Ok(_) => println("FAIL fetch size cap: fetched"),
+    Err(e) => if errorStatus(e) == 413 then println("PASS fetch size cap") else println("FAIL fetch size cap: ${e}")
+  }
+}

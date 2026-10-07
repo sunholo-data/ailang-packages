@@ -1,0 +1,87 @@
+-- Integration fixture: sunholo/mcp_files behind real serve-api routes, with
+-- SharedMem storage hooks. tests/e2e_uploads.sh drives it with curl:
+-- create -> multipart POST /uploads -> resolve, sha256 round trip, replay,
+-- cross-account, via-host. The account comes from an x-account header here;
+-- a real service takes it from its @mcp_auth token verifier.
+module sunholo/mcp_files_example/svc
+
+import std/clock (now)
+import std/json (Json, encode, decode, jo, kv, js, jint, getString)
+import std/option (Option, Some, None)
+import std/result (Result, Ok, Err)
+import std/bytes (fromString, toString)
+import std/sharedmem (get as smGet, put as smPut, delete as smDelete, put_if_absent)
+import pkg/sunholo/mcp_files/core (errorStatus)
+import pkg/sunholo/mcp_files/flow (Hooks, createUpload, acceptUploadFile, receiveViaHost, resolveFileRef)
+
+func tPutBytes(k: string, v: bytes, exp: int) -> bool ! {IO, FS, Env, Net, Clock, SharedMem} {
+  smPut("b:${k}", v);
+  true
+}
+
+func tGetBytes(k: string) -> Option[bytes] ! {IO, FS, Env, Net, Clock, SharedMem} = smGet("b:${k}")
+
+func tDelBytes(k: string) -> bool ! {IO, FS, Env, Net, Clock, SharedMem} {
+  smDelete("b:${k}");
+  true
+}
+
+func tPutMeta(k: string, v: string, exp: int) -> bool ! {IO, FS, Env, Net, Clock, SharedMem} {
+  smPut("m:${k}", fromString(v));
+  true
+}
+
+func tClaimMeta(k: string, v: string, exp: int) -> bool ! {IO, FS, Env, Net, Clock, SharedMem} = put_if_absent("m:${k}", fromString(v))
+
+func tGetMeta(k: string) -> Option[string] ! {IO, FS, Env, Net, Clock, SharedMem} = match smGet("m:${k}") {
+  Some(b) => Some(toString(b)),
+  None => None
+}
+
+func tDelMeta(k: string) -> bool ! {IO, FS, Env, Net, Clock, SharedMem} {
+  smDelete("m:${k}");
+  true
+}
+
+pure func hooks() -> Hooks =
+  {putBytes: tPutBytes, getBytes: tGetBytes, delBytes: tDelBytes, putMeta: tPutMeta, claimMeta: tClaimMeta,
+   getMeta: tGetMeta, delMeta: tDelMeta, server: "svc.example", uploadUrl: "http://localhost/uploads",
+   tokenTtlSec: 600, objectTtlSec: 86400, maxBytesCeiling: 2000000, allowedMimes: []}
+
+func nowSec() -> int ! {Clock} = now() / 1000
+
+-- serve-api passes canonical header names (X-Account); accept both spellings.
+pure func hdr(h: Json, k: string) -> string = match getString(h, k) {
+  Some(s) => s,
+  None => match getString(h, "X-Account") { Some(s) => s, None => "" }
+}
+
+pure func asJson(s: string) -> Json = match decode(s) {
+  Ok(j) => j,
+  Err(_) => jo([])
+}
+
+pure func reply(r: Result[string, string]) -> {_body: string, _status: int} = match r {
+  Ok(b) => {_body: b, _status: 200},
+  Err(e) => {_body: e, _status: errorStatus(e)}
+}
+
+@route("POST", "/api/create")
+export func create(filename: string, maxBytes: int, _headers: Json) -> {_body: string, _status: int} ! {IO, FS, Env, Net, Clock, SharedMem, Rand[mode=crypto], Declassify} =
+  reply(createUpload(hooks(), hdr(_headers, "x-account"), filename, "", maxBytes, nowSec()))
+
+@route("POST", "/uploads")
+export func uploads(token: string, file: string) -> {_body: string, _status: int} ! {IO, FS, Env, Net, Clock, SharedMem, Declassify} =
+  reply(acceptUploadFile(hooks(), token, file, file, nowSec()))
+
+@route("POST", "/api/viaHost")
+export func viaHost(token: string, filename: string, base64: string) -> {_body: string, _status: int} ! {IO, FS, Env, Net, Clock, SharedMem, Declassify} =
+  reply(receiveViaHost(hooks(), token, filename, base64, nowSec()))
+
+-- The resolved file's name, size and sha256 (the bytes stay server-side).
+@route("POST", "/api/resolve")
+export func resolve(fileRef: string, _headers: Json) -> {_body: string, _status: int} ! {IO, FS, Env, Net, Clock, SharedMem} =
+  match resolveFileRef(hooks(), hdr(_headers, "x-account"), fileRef, nowSec()) {
+    Ok(f) => {_body: encode(jo([kv("name", js(f.name)), kv("sizeBytes", jint(f.sizeBytes)), kv("sha256", js(f.sha256))])), _status: 200},
+    Err(e) => {_body: e, _status: errorStatus(e)}
+  }

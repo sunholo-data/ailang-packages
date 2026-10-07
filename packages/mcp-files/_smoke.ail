@@ -1,0 +1,22 @@
+-- Boot probe for sunholo/mcp_files (offline, pure modules only). `ailang pkg
+-- quality` executes this under `ailang run`; it prints OK: or FAIL: lines.
+-- The effectful flow is covered by tests/flow_check.sh (SharedMem hooks),
+-- tests/e2e_uploads.sh (real serve-api) and tests/fetch_check.sh (network).
+module _smoke
+
+import std/io (println)
+import std/string (contains, startsWith)
+import pkg/sunholo/mcp_files/core (uploadVerdict, Accept, Replayed, fileUri, parseFileRef, safeName, uploadDescriptor)
+import pkg/sunholo/mcp_files/widget (defaultWidgetConfig, uploadWidgetHtml)
+
+func expect(name: string, ok: bool) -> () ! {IO} =
+  if ok then println("OK: ${name}") else println("FAIL: ${name}")
+
+export func main() -> () ! {IO} {
+  let id = "0123456789abcdef0123456789abcdef";
+  expect("admission rule", uploadVerdict(true, 1, 2, 3, 4) == Accept && uploadVerdict(false, 1, 2, 3, 4) == Replayed);
+  expect("fileRef round trip", parseFileRef("svc", fileUri("svc", id)) == Some(id) && parseFileRef("svc", "mcpfile:${id}") == None);
+  expect("filename sanitised", safeName("../../.env") == "env");
+  expect("sep-2631 descriptor", startsWith(uploadDescriptor("https://u.example/uploads", "t", fileUri("svc", id), "a.pdf", "application/pdf", 0, 10), "{\"file\":"));
+  expect("widget html", contains(uploadWidgetHtml(defaultWidgetConfig("https://u.example/uploads", "uploadViaHost")), "<input type='file' id='file'>"))
+}

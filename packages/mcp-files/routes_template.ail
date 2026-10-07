@@ -1,0 +1,82 @@
+-- Route template for adopters: copy into YOUR service module (serve-api
+-- serves only the service's own @route functions), replace fileHooks() and
+-- accountOf() with your storage and your signed-in account (see AGENT.md).
+-- Never log request bodies, the token argument or createUpload's result:
+-- they carry the upload token. Run serve-api with AILANG_TRACE_VALUES=off.
+--
+-- This file is documentation that compiles; it is not exported.
+module sunholo/mcp_files/routes_template
+
+import std/clock (now)
+import std/json (Json, decode, jo)
+import std/option (Option, None)
+import std/result (Result, Ok, Err)
+import pkg/sunholo/mcp_files/core (errorStatus)
+import pkg/sunholo/mcp_files/flow (Hooks, createUpload, acceptUploadFile, receiveViaHost)
+import pkg/sunholo/mcp_files/widget (WidgetConfig, defaultWidgetConfig, uploadWidgetHtml)
+
+-- REPLACE: your storage (Parse: temp GCS bucket + Firestore). These stubs
+-- store nothing, so every call fails loudly with a 500.
+func noBytes(k: string, v: bytes, e: int) -> bool ! {IO, FS, Env, Net, Clock, SharedMem} = false
+func noGetBytes(k: string) -> Option[bytes] ! {IO, FS, Env, Net, Clock, SharedMem} = None
+func noDel(k: string) -> bool ! {IO, FS, Env, Net, Clock, SharedMem} = false
+func noMeta(k: string, v: string, e: int) -> bool ! {IO, FS, Env, Net, Clock, SharedMem} = false
+func noGetMeta(k: string) -> Option[string] ! {IO, FS, Env, Net, Clock, SharedMem} = None
+
+pure func fileHooks() -> Hooks =
+  {putBytes: noBytes, getBytes: noGetBytes, delBytes: noDel, putMeta: noMeta, claimMeta: noMeta, getMeta: noGetMeta,
+   delMeta: noDel, server: "svc.example.com", uploadUrl: "https://svc.example.com/uploads",
+   tokenTtlSec: 600, objectTtlSec: 86400, maxBytesCeiling: 31457280, allowedMimes: []}
+
+-- REPLACE: the account your @mcp_auth("oauth2") token verifier signed in.
+pure func accountOf(headers: Json) -> string = ""
+
+-- Seconds since the epoch (std/clock is milliseconds).
+func nowSec() -> int ! {Clock} = now() / 1000
+
+-- A tool result for the error path: the error JSON, decoded.
+pure func asJson(s: string) -> Json = match decode(s) {
+  Ok(j) => j,
+  Err(_) => jo([])
+}
+
+-- The tool (signed in). Its result (structuredContent) is the descriptor the
+-- widget and the curl path read. Add @mcp_ui("ui://svc/upload") once serve-api
+-- F1c ships so claude.ai renders uploadWidget() next to it.
+@route("POST", "/mcp/v1/createUpload")
+export func createUploadTool(filename: string, mimeType: string, _headers: Json)
+  -> Json ! {IO, FS, Env, Net, Clock, SharedMem, Rand[mode=crypto], Declassify} =
+  match createUpload(fileHooks(), accountOf(_headers), filename, mimeType, 0, nowSec()) {
+    Ok(desc) => asJson(desc),
+    Err(e) => asJson(e)
+  }
+
+-- POST /uploads (multipart: token, file). serve-api writes a `string` file
+-- part to a temp file named after the upload and passes its path; the path's
+-- last segment is the original filename. Set --max-upload-size ABOVE
+-- maxBytesCeiling, so an oversized file reaches the size check instead of
+-- being cut at the serve-api limit. Needs CORS for the widget origin.
+@route("POST", "/uploads")
+@nomcp
+export func uploads(token: string, file: string) -> {_body: string, _status: int} ! {IO, FS, Env, Net, Clock, SharedMem, Declassify} =
+  match acceptUploadFile(fileHooks(), token, file, file, nowSec()) {
+    Ok(receipt) => {_body: receipt, _status: 200},
+    Err(e) => {_body: e, _status: errorStatus(e)}
+  }
+
+-- The widget-only tool (via-host fallback). Mark it @mcp_app_only once
+-- serve-api F1c ships; until then the model can see it (harmless: it needs a
+-- live token, which the model never has a reason to send).
+@route("POST", "/mcp/v1/uploadViaHost")
+export func uploadViaHost(token: string, filename: string, base64: string) -> Json ! {IO, FS, Env, Net, Clock, SharedMem, Declassify} =
+  match receiveViaHost(fileHooks(), token, filename, base64, nowSec()) {
+    Ok(receipt) => asJson(receipt),
+    Err(e) => asJson(e)
+  }
+
+-- The widget resource body (ui://svc/upload, mime widget.widgetMimeType(),
+-- _meta widget.widgetCspMeta(["https://svc.example.com"])). Serve it with
+-- @mcp_ui_resource once serve-api F1c ships.
+export pure func uploadWidget() -> string =
+  uploadWidgetHtml({defaultWidgetConfig("https://svc.example.com/uploads", "uploadViaHost") | title: "Upload a document", accept: ".pdf,.docx,.xlsx,.pptx",
+                    nextStep: "Call the tool the user asked for with this fileRef."})
