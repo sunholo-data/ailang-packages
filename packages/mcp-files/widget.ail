@@ -1,0 +1,94 @@
+-- sunholo/mcp_files/widget: the standard MCP Apps upload widget (design:
+-- m-mcp-file-handoff.md "The upload widget"; F1 spike, claude.ai web,
+-- 2026-10-07: a picker + fetch to a declared connectDomain works, and a
+-- widget-only tools/call carries the bytes through the host without the model).
+--
+-- uploadWidgetHtml(cfg) returns ONE self-contained HTML document:
+--   * the official ext-apps client (@modelcontextprotocol/ext-apps 2.0.3
+--     app-with-deps.js, the bundle the spike ran) inlined from the generated
+--     module extapps_bundle.ail (tools/gen_bundle.sh; sha256-pinned);
+--   * a file picker; on pick it POSTs multipart {token, file} to the
+--     descriptor's upload.url (the token comes from the tool result's
+--     structuredContent, or its text content as JSON);
+--   * if that fetch cannot leave the iframe (CSP, CORS, network) it falls back
+--     to the widget-only tool cfg.hostToolName with {token, filename, base64};
+--   * it reports the receipt with ui/update-model-context (never the host's
+--     message request, which drafts a user message under a caution banner).
+-- No external script, stylesheet or font. The page, script and styles live in
+-- assets/ (readable sources) and reach this module through the generated
+-- widget_assets.ail.
+
+module sunholo/mcp_files/widget
+
+import std/string (replaceMany, substring)
+import std/crypto (sha256Hex)
+import std/json (encode, jo, kv, js, ja, jint, jb)
+import std/list (map)
+import ./extapps_bundle (extAppsBundle, extAppsVersion)
+import ./widget_assets (widgetHtmlTemplate, widgetJs, widgetCss)
+
+-- title            heading shown above the picker
+-- uploadUrl        POST target when the descriptor carries none (normally the same)
+-- hostToolName     the widget-only tool for the via-host fallback ("" = no fallback)
+-- maxViaHostBytes  largest file sent through the host (the spike proved <= 1 MB)
+-- accept           the picker's accept attribute (".docx,.pdf", or "" for any)
+-- nextStep         appended to the model-context message, e.g.
+--                  "Call mcpParse with this fileRef."
+export type WidgetConfig = {title: string, uploadUrl: string, hostToolName: string, maxViaHostBytes: int, accept: string, nextStep: string}
+
+export pure func defaultWidgetConfig(uploadUrl: string, hostToolName: string) -> WidgetConfig =
+  {title: "Upload a file", uploadUrl: uploadUrl, hostToolName: hostToolName, maxViaHostBytes: 1048576, accept: "",
+   nextStep: "Continue the user's request with this fileRef."}
+
+-- The MCP Apps resource mime type (ext-apps 2026-01-26).
+export pure func widgetMimeType() -> string = "text/html;profile=mcp-app"
+
+-- The resource _meta a host needs to let the widget fetch the upload origin
+-- (MCP Apps ui.csp.connectDomains, plus ChatGPT's legacy openai/widgetCSP).
+-- serve-api F1c (@mcp_ui_resource) is meant to emit this; until then a
+-- service can serve it itself.
+export pure func widgetCspMeta(connectDomains: [string]) -> string =
+  encode(jo([
+    kv("ui", jo([kv("csp", jo([kv("connectDomains", ja(map(js, connectDomains))), kv("resourceDomains", ja([]))])),
+                 kv("prefersBorder", jb(true))])),
+    kv("openai/widgetCSP", jo([kv("connect_domains", ja(map(js, connectDomains))), kv("resource_domains", ja([]))]))
+  ]))
+
+-- The origin claude.ai serves this server's widgets from: "the first 32 hex
+-- characters of the SHA-256 of your server URL, followed by
+-- .claudemcpcontent.com" (claude.com/docs/connectors/building/mcp-apps/
+-- getting-started). serve-api's CORS allowlist is exact-origin, so pass this
+-- to --cors-origin for the upload route. mcpServerUrl is the connector URL
+-- exactly as users add it (e.g. https://svc.example.com/mcp/connect/); confirm
+-- it against the Origin header in your request log.
+export pure func claudeWidgetOrigin(mcpServerUrl: string) -> string =
+  "https://${substring(sha256Hex(mcpServerUrl), 0, 32)}.claudemcpcontent.com"
+
+export pure func htmlEscape(s: string) -> string =
+  replaceMany(s, [("&", "&amp;"), ("<", "&lt;"), (">", "&gt;"), ("\"", "&quot;"), ("'", "&#39;")])
+
+-- cfg as a JS object literal. JSON is valid JS; < and > are escaped so no
+-- value can close the <script> element.
+export pure func configJson(cfg: WidgetConfig) -> string =
+  replaceMany(encode(jo([
+    kv("uploadUrl", js(cfg.uploadUrl)),
+    kv("hostToolName", js(cfg.hostToolName)),
+    kv("maxViaHostBytes", jint(cfg.maxViaHostBytes)),
+    kv("nextStep", js(cfg.nextStep)),
+    kv("extAppsVersion", js(extAppsVersion()))
+  ])), [("<", "\\u003c"), (">", "\\u003e")])
+
+-- The complete widget document: assets/widget.html with its placeholders
+-- filled in one pass (inserted text is never re-scanned).
+export pure func uploadWidgetHtml(cfg: WidgetConfig) -> string {
+  let title = htmlEscape(cfg.title);
+  let accept = if cfg.accept == "" then "" else " accept='${htmlEscape(cfg.accept)}'";
+  replaceMany(widgetHtmlTemplate(), [
+    ("{{TITLE}}", title),
+    ("{{ACCEPT}}", accept),
+    ("{{STYLE}}", widgetCss()),
+    ("{{EXTAPPS}}", extAppsBundle()),
+    ("{{CONFIG}}", configJson(cfg)),
+    ("{{SCRIPT}}", widgetJs())
+  ])
+}

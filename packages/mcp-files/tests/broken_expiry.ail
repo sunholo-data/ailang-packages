@@ -1,0 +1,16 @@
+-- Negative contract fixture. `ailang verify` MUST report a VIOLATION: an
+-- off-by-one expiry (still valid AT the expiry second) and a cross-account
+-- check that lets an empty owner through.
+module sunholo/mcp_files/tests/broken_expiry
+
+export pure func isExpiredBroken(nowSec: int, expiresAt: int) -> bool
+  ensures { result == (nowSec >= expiresAt) }
+{
+  nowSec > expiresAt
+}
+
+export pure func ownerMatchesBroken(owner: string, caller: string) -> bool
+  ensures { result == (owner != "" && owner == caller) }
+{
+  owner == caller
+}

@@ -1,0 +1,36 @@
+[package]
+name = "sunholo/mcp_files"
+version = "0.1.0"
+edition = "1"
+ailang = ">=0.52.3"
+description = "MCP file handoff: single-use upload tokens, SEP-2631 upload descriptors, account-bound fileRefs, ChatGPT fileParams fetch, and an MCP Apps upload widget"
+license = "Apache-2.0"
+
+[release]
+kind = "feature"
+
+[exports]
+modules = [
+  "sunholo/mcp_files/core",
+  "sunholo/mcp_files/flow",
+  "sunholo/mcp_files/widget",
+  "sunholo/mcp_files/extapps_bundle",
+  "sunholo/mcp_files/widget_assets"
+]
+
+# Ceiling for the whole package. core and widget are pure; flow needs these.
+[effects]
+max = ["Net", "Clock", "Rand", "IO", "FS", "Env", "Declassify", "SharedMem"]
+
+[metadata]
+tags = ["mcp", "files", "upload", "security", "mcp-apps", "sep-2631"]
+ai_summary = "Moves a user's file to a remote AILANG MCP service with code, never through model output: single-use, account-bound, size-capped upload tokens stored as digests (Z3-proved admission rule), a SEP-2631-shaped upload descriptor, mcp-file:// fileRefs resolved once for their owner, a Net[scope=public] fetch for ChatGPT openai/fileParams, and a self-contained MCP Apps upload widget (direct POST, via-host fallback, ui/update-model-context). Service plugs in byte/metadata storage hooks."
+repository = "https://github.com/sunholo-data/ailang-packages/tree/main/packages/mcp-files"
+homepage = "https://ailang.sunholo.com/docs/packages/sunholo/mcp_files"
+license_url = "https://github.com/sunholo-data/ailang-packages/blob/main/LICENSE"
+
+[cascade]
+max_cost_usd = 1.00
+
+[stability]
+level = "experimental"

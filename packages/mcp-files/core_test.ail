@@ -1,0 +1,272 @@
+-- Tests for sunholo/mcp_files/core: token policy, fileRef codec, filename
+-- sanitiser, mime allow-list, the SEP-2631 descriptor golden, the OpenAI
+-- file-object schema golden and its parser.
+
+module sunholo/mcp_files/core_test
+import ./core (UploadVerdict, Accept, Replayed, Expired, Empty, TooLarge, RefVerdict, Found, NotFound, Gone, tokenExpiresAt, isExpired, sizeOk, effectiveMaxBytes, uploadVerdict, ownerMatches, refVerdict, isFileId, serverNameOk, fileUri, parseFileRef, safeName, extensionOf, mimeFromName, effectiveMime, mimeAllowed, uploadPart, uploadDescriptor, uploadReceipt, digestB64Url, fileError, errorStatus, openAiFileSchema, openAiFileParamsMeta, parseFileParam, downloadUrlOk)
+import std/string (repeat, contains, startsWith, length)
+import std/json (encode, decode)
+import std/option (Option, Some, None)
+import std/result (Result, Ok, Err)
+
+pure func hexId() -> string = "0123456789abcdef0123456789abcdef"
+
+-- ---------------- token policy ----------------
+test "token expires after its ttl" {
+  tokenExpiresAt(1000, 600) == 1600
+}
+
+test "token valid one second before expiry" {
+  isExpired(1599, 1600) == false
+}
+
+test "token expired at expiry" {
+  isExpired(1600, 1600)
+}
+
+test "size cap inclusive" {
+  sizeOk(10, 10) && sizeOk(11, 10) == false
+}
+
+test "empty upload refused" {
+  sizeOk(0, 10) == false
+}
+
+test "max bytes clamps to ceiling" {
+  effectiveMaxBytes(50, 10) == 10 && effectiveMaxBytes(0, 10) == 10 && effectiveMaxBytes(-1, 10) == 10
+}
+
+test "max bytes keeps a smaller request" {
+  effectiveMaxBytes(4, 10) == 4
+}
+
+test "verdict accepts first use in time and size" {
+  uploadVerdict(true, 100, 200, 5, 10) == Accept
+}
+
+test "verdict refuses replay first" {
+  uploadVerdict(false, 100, 200, 5, 10) == Replayed && uploadVerdict(false, 300, 200, 50, 10) == Replayed
+}
+
+test "verdict refuses expired" {
+  uploadVerdict(true, 200, 200, 5, 10) == Expired
+}
+
+test "verdict refuses too large" {
+  uploadVerdict(true, 100, 200, 11, 10) == TooLarge
+}
+
+test "verdict refuses empty" {
+  uploadVerdict(true, 100, 200, 0, 10) == Empty
+}
+
+-- ---------------- account binding ----------------
+test "owner must match caller" {
+  ownerMatches("a", "a") && ownerMatches("a", "b") == false
+}
+
+test "empty owner never matches" {
+  ownerMatches("", "") == false
+}
+
+test "ref verdict found" {
+  refVerdict("a", "a", 10, 20) == Found
+}
+
+test "ref verdict other account is not found" {
+  refVerdict("a", "b", 10, 20) == NotFound && refVerdict("a", "b", 30, 20) == NotFound
+}
+
+test "ref verdict own expired is gone" {
+  refVerdict("a", "a", 20, 20) == Gone
+}
+
+-- ---------------- fileRef codec ----------------
+test "file uri shape is sep-2631" {
+  fileUri("docparse", hexId()) == "mcp-file://docparse/file_0123456789abcdef0123456789abcdef"
+}
+
+test "file ref round trip" {
+  parseFileRef("docparse", fileUri("docparse", hexId())) == Some(hexId())
+}
+
+test "file ref other server refused" {
+  parseFileRef("docparse", fileUri("other", hexId())) == None
+}
+
+test "file ref upper hex refused" {
+  parseFileRef("docparse", "mcp-file://docparse/file_0123456789ABCDEF0123456789abcdef") == None
+}
+
+test "file ref short id refused" {
+  parseFileRef("docparse", "mcp-file://docparse/file_0123") == None
+}
+
+test "file ref long id refused" {
+  parseFileRef("docparse", "${fileUri("docparse", hexId())}0") == None
+}
+
+test "file ref query refused" {
+  parseFileRef("docparse", "${fileUri("docparse", "0123456789abcdef0123456789abcde")}?") == None
+}
+
+test "file ref whitespace refused" {
+  parseFileRef("docparse", " ${fileUri("docparse", hexId())}") == None
+}
+
+test "file ref other scheme refused" {
+  parseFileRef("docparse", "mcpfile:${hexId()}") == None && parseFileRef("docparse", "https://docparse/file_${hexId()}") == None
+}
+
+test "file ref bad server refused" {
+  parseFileRef("", fileUri("", hexId())) == None && serverNameOk("Docparse") == false && serverNameOk("-x") == false
+}
+
+test "file id is 32 lowercase hex" {
+  isFileId(hexId()) && isFileId("${hexId()}0") == false && isFileId(repeat("g", 32)) == false
+}
+
+-- ---------------- filenames and mime ----------------
+test "safe name keeps last segment" {
+  safeName("/etc/passwd") == "passwd" && safeName("C:\\Users\\me\\AGM.docx") == "AGM.docx"
+}
+
+test "safe name replaces unsafe characters" {
+  safeName("AGM announcement (final).docx") == "AGM_announcement__final_.docx"
+}
+
+test "safe name strips leading dots" {
+  safeName("../../.env") == "env" && safeName("...") == "upload.bin"
+}
+
+test "safe name empty falls back" {
+  safeName("") == "upload.bin" && safeName("  ") == "upload.bin"
+}
+
+test "safe name caps length keeping extension" {
+  length(safeName("${repeat("a", 200)}.docx")) == 120 && contains(safeName("${repeat("a", 200)}.docx"), ".docx")
+}
+
+test "extension lower cased" {
+  extensionOf("Report.PDF") == "pdf" && extensionOf("README") == ""
+}
+
+test "mime from name" {
+  mimeFromName("a.docx") == "application/vnd.openxmlformats-officedocument.wordprocessingml.document" && mimeFromName("a.xyz") == "application/octet-stream"
+}
+
+test "declared mime wins" {
+  effectiveMime("Application/PDF", "a.docx") == "application/pdf" && effectiveMime("", "a.pdf") == "application/pdf"
+}
+
+test "mime allow list" {
+  mimeAllowed("application/pdf", ["application/pdf"]) && mimeAllowed("image/png", ["application/pdf"]) == false && mimeAllowed("x/y", [])
+}
+
+-- ---------------- SEP-2631 descriptor golden ----------------
+-- SEP-2631 "File Objects and Transfer", draft PR
+-- https://github.com/modelcontextprotocol/modelcontextprotocol/pull/2631
+-- (head 8799c5c, 2026-10-02), §6 Upload Negotiation, server response:
+--   "upload": {
+--     "transport": "https",
+--     "method": "POST",
+--     "url": "https://upload.example.com/...",
+--     "headers": { "Content-Type": "multipart/form-data" },
+--     "multipart": { "fileField": "file", "fields": { "token": "abc123" } },
+--     "expiresAt": "2026-04-20T18:30:00Z"
+--   }
+-- Field for field, in the SEP's order, with the SEP's example values. One
+-- deliberate value difference: headers is {} (the field is present; a client
+-- that copied "Content-Type: multipart/form-data" onto fetch(FormData) would
+-- drop the multipart boundary). 1776709800 = 2026-04-20T18:30:00Z.
+test "descriptor upload matches sep-2631 field for field" {
+  encode(uploadPart("https://upload.example.com/...", "abc123", 1776709800)) == "{\"transport\":\"https\",\"method\":\"POST\",\"url\":\"https://upload.example.com/...\",\"headers\":{},\"multipart\":{\"fileField\":\"file\",\"fields\":{\"token\":\"abc123\"}},\"expiresAt\":\"2026-04-20T18:30:00Z\"}"
+}
+
+-- The whole createUpload result: SEP-2631's {file: FileValue, upload} plus
+-- fileRef (= file.uri), maxBytes and curl.
+test "descriptor golden" {
+  uploadDescriptor("https://upload.example.com/...", "abc123", "mcp-file://server/file_01HXYZ", "report.pdf", "application/pdf", 1776709800, 248123) == "{\"file\":{\"uri\":\"mcp-file://server/file_01HXYZ\",\"name\":\"report.pdf\",\"mimeType\":\"application/pdf\"},\"upload\":{\"transport\":\"https\",\"method\":\"POST\",\"url\":\"https://upload.example.com/...\",\"headers\":{},\"multipart\":{\"fileField\":\"file\",\"fields\":{\"token\":\"abc123\"}},\"expiresAt\":\"2026-04-20T18:30:00Z\"},\"fileRef\":\"mcp-file://server/file_01HXYZ\",\"maxBytes\":248123,\"curl\":\"curl -sS -F token=abc123 -F file=@<path> https://upload.example.com/...\"}"
+}
+
+-- (Expected prefix in a function: `ailang test` v0.52.3 cuts a test body at
+-- the first unbalanced brace, even inside a string literal.)
+pure func bareFilePrefix() -> string = "{\"file\":{\"uri\":\"mcp-file://s/file_x\"},\"upload\":"
+
+test "descriptor omits unknown name and mime" {
+  startsWith(uploadDescriptor("https://u.example/uploads", "t", "mcp-file://s/file_x", "", "", 0, 1), bareFilePrefix())
+}
+
+-- SEP-2631 FileValue with size and a sha-256 digest (base64url, no padding).
+test "receipt carries sep-2631 file value" {
+  uploadReceipt("mcp-file://server/file_01HYZA", "report.pdf", "application/pdf", 248123, "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855") == "{\"file\":{\"uri\":\"mcp-file://server/file_01HYZA\",\"name\":\"report.pdf\",\"mimeType\":\"application/pdf\",\"size\":248123,\"digest\":{\"algorithm\":\"sha-256\",\"value\":\"47DEQpj8HBSa-_TImW-5JCeuQeRkm5NMpJWZG3hSuFU\"}},\"fileRef\":\"mcp-file://server/file_01HYZA\",\"name\":\"report.pdf\",\"mimeType\":\"application/pdf\",\"sizeBytes\":248123,\"sha256\":\"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\"}"
+}
+
+test "digest of empty input" {
+  digestB64Url("e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855") == "47DEQpj8HBSa-_TImW-5JCeuQeRkm5NMpJWZG3hSuFU"
+}
+
+-- ---------------- errors ----------------
+test "error carries status" {
+  errorStatus(fileError("too_large", 413, "x")) == 413 && errorStatus("not json") == 400
+}
+
+test "error json shape" {
+  fileError("token_used", 409, "m") == "{\"error\":\"token_used\",\"error_description\":\"m\",\"status\":409}"
+}
+
+-- ---------------- OpenAI fileParams ----------------
+-- https://developers.openai.com/plugins/reference: all four properties
+-- declared; download_url and file_id required; the optional two not required.
+test "openai file schema golden" {
+  openAiFileSchema() == "{\"type\":\"object\",\"properties\":{\"download_url\":{\"type\":\"string\"},\"file_id\":{\"type\":\"string\"},\"mime_type\":{\"type\":\"string\"},\"file_name\":{\"type\":\"string\"}},\"required\":[\"download_url\",\"file_id\"]}"
+}
+
+test "openai file params meta" {
+  openAiFileParamsMeta(["file"]) == "{\"openai/fileParams\":[\"file\"]}"
+}
+
+pure func fp(s: string) -> Result[string, string] = match decode(s) {
+  Ok(j) => match parseFileParam(j) {
+    Ok(p) => Ok("${p.downloadUrl}|${p.fileId}|${p.mimeType}|${p.fileName}"),
+    Err(e) => Err(e)
+  },
+  Err(e) => Err(e)
+}
+
+test "file param parses chatgpt shape" {
+  fp("{\"download_url\":\"https://files.example/f\",\"file_id\":\"file_1\",\"mime_type\":\"image/png\",\"file_name\":\"input.png\"}") == Ok("https://files.example/f|file_1|image/png|input.png")
+}
+
+test "file param optional fields may be absent" {
+  fp("{\"download_url\":\"https://files.example/f\",\"file_id\":\"file_1\"}") == Ok("https://files.example/f|file_1||")
+}
+
+test "file param needs download url and file id" {
+  fp("{\"file_id\":\"file_1\"}") == Err("file object has no download_url") && fp("{\"download_url\":\"https://f.example/x\"}") == Err("file object has no file_id")
+}
+
+test "file param refuses http and userinfo" {
+  downloadUrlOk("http://files.example/f") == false && downloadUrlOk("https://u@files.example/f") == false && downloadUrlOk("https://") == false
+}
+
+-- ---------------- properties ----------------
+property "safe name has no path or leading dot" {
+  forall(s: string) => contains(safeName(s), "/") == false && contains(safeName(s), "\\") == false && startsWith(safeName(s), ".") == false && length(safeName(s)) > 0 && length(safeName(s)) <= 120
+}
+
+property "safe name is idempotent" {
+  forall(s: string) => safeName(safeName(s)) == safeName(s)
+}
+
+property "only this server's frame parses" {
+  forall(s: string) => parseFileRef("docparse", s) == None || startsWith(s, "mcp-file://docparse/file_")
+}
+
+property "max bytes stays within the ceiling" {
+  forall(r: int, c: int) => if c <= 0 then true else effectiveMaxBytes(r, c) > 0 && effectiveMaxBytes(r, c) <= c
+}
+
+property "verdict accepts exactly the admissible attempt" {
+  forall(u: bool, n: int, e: int, s: int, m: int) => uploadVerdict(u, n, e, s, m) == Accept == (u && n < e && s > 0 && s <= m)
+}

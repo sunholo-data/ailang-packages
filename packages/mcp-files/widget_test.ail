@@ -1,0 +1,101 @@
+-- Tests for sunholo/mcp_files/widget: the HTML is one self-contained
+-- document with the picker, no external resources, the ext-apps client
+-- inlined, config values escaped, and model reporting via
+-- ui/update-model-context only. tests/widget_check.sh adds an HTML parse
+-- and a JavaScript syntax check (node --check) of both inline scripts.
+
+module sunholo/mcp_files/widget_test
+import ./widget (claudeWidgetOrigin, WidgetConfig, defaultWidgetConfig, uploadWidgetHtml, htmlEscape, configJson, widgetCspMeta, widgetMimeType)
+import ./extapps_bundle (extAppsBundle, extAppsVersion, extAppsSourceSha256)
+import std/string (contains, startsWith, endsWith, split, length, find, substring)
+import std/list (length as listLen)
+
+pure func cfg() -> WidgetConfig = defaultWidgetConfig("https://svc.example/uploads", "uploadViaHost")
+
+pure func html() -> string = uploadWidgetHtml(cfg())
+
+-- In a function: `ailang test` v0.52.3 cuts a test body at an unbalanced
+-- brace even inside a string literal.
+pure func globalsMarker() -> string = "window.__extApps={"
+
+pure func count(s: string, needle: string) -> int = listLen(split(s, needle)) - 1
+
+-- The widget's own script: everything after the second module <script>.
+pure func appScript() -> string {
+  let parts = split(html(), "<script type='module'>")
+  if listLen(parts) != 3 then "" else match parts {
+    [_, _, app] => app,
+    _ => ""
+  }
+}
+
+test "widget is one html document" {
+  startsWith(html(), "<!doctype html>") && endsWith(html(), "</html>\n") && count(html(), "<html") == 1
+}
+
+test "widget has the file picker" {
+  contains(html(), "<input type='file' id='file'>") && contains(html(), "id='status'")
+}
+
+test "widget has exactly two inline scripts" {
+  count(html(), "<script") == 2 && count(html(), "</script>") == 2
+}
+
+-- The only URL in the widget script is the configured upload URL in CFG.
+test "widget loads nothing external" {
+  contains(html(), "src=") == false && contains(html(), "<link") == false && contains(html(), "@import") == false && contains(html(), "<iframe") == false && count(appScript(), "http") == 1 && contains(appScript(), "import ") == false
+}
+
+test "widget inlines the ext-apps client" {
+  contains(html(), extAppsBundle()) && contains(extAppsBundle(), globalsMarker()) && contains(extAppsBundle(), "\"App\":") && contains(extAppsBundle(), "\"PostMessageTransport\":") && extAppsVersion() == "2.0.3" && length(extAppsSourceSha256()) == 64
+}
+
+test "widget reports with update-model-context, never ui/message" {
+  contains(appScript(), "app.updateModelContext(") && contains(appScript(), "sendMessage") == false && contains(appScript(), "ui/message") == false
+}
+
+test "widget posts multipart with the descriptor token" {
+  contains(appScript(), "new FormData()") && contains(appScript(), "mp.fields") && contains(appScript(), "method: 'POST'")
+}
+
+test "widget falls back to the host tool" {
+  contains(appScript(), "app.callServerTool(") && contains(appScript(), "CFG.hostToolName")
+}
+
+test "widget refuses oversize before spending the token" {
+  contains(appScript(), "f.size > desc.maxBytes")
+}
+
+test "widget uses no innerHTML" {
+  contains(appScript(), "innerHTML") == false && contains(appScript(), "eval(") == false
+}
+
+pure func hostile() -> WidgetConfig =
+  { cfg() | title: "<script>alert(1)</script>", nextStep: "</script><script>alert(2)</script>", accept: "'><x" }
+
+test "title is html escaped" {
+  contains(uploadWidgetHtml(hostile()), "<script>alert(1)") == false && contains(uploadWidgetHtml(hostile()), "&lt;script&gt;alert(1)")
+}
+
+test "config cannot close the script" {
+  contains(configJson(hostile()), "</script") == false && contains(uploadWidgetHtml(hostile()), "alert(2)</script>") == false
+}
+
+test "accept attribute escaped" {
+  contains(uploadWidgetHtml(hostile()), "accept='&#39;&gt;&lt;x'")
+}
+
+test "html escape" {
+  htmlEscape("<a href=\"x\">'&'</a>") == "&lt;a href=&quot;x&quot;&gt;&#39;&amp;&#39;&lt;/a&gt;"
+}
+
+test "csp meta declares connect domains" {
+  widgetCspMeta(["https://svc.example"]) == "{\"ui\":{\"csp\":{\"connectDomains\":[\"https://svc.example\"],\"resourceDomains\":[]},\"prefersBorder\":true},\"openai/widgetCSP\":{\"connect_domains\":[\"https://svc.example\"],\"resource_domains\":[]}}"
+}
+
+test "mcp app mime type" {
+  widgetMimeType() == "text/html;profile=mcp-app"
+}
+
+-- sha256("https://svc.example/mcp/") = 9dec637978aa9ef7a891f7d3e41385f3… (computed independently with shasum).
+test "claude widget origin" { claudeWidgetOrigin("https://svc.example/mcp/") == "https://9dec637978aa9ef7a891f7d3e41385f3.claudemcpcontent.com" }

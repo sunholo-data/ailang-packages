@@ -1,0 +1,16 @@
+-- Negative contract fixture. `ailang verify` MUST report a VIOLATION: this
+-- admission rule forgets the single-use claim (a real class of bug: "the
+-- token is valid and in time, so accept it"). If this ever verifies, the
+-- uploadVerdict proof in core.ail has stopped meaning anything.
+module sunholo/mcp_files/tests/broken_single_use
+
+export type UploadVerdict = Accept | Replayed | Expired | Empty | TooLarge deriving (Eq)
+
+export pure func uploadVerdictBroken(firstUse: bool, nowSec: int, expiresAt: int, size: int, maxBytes: int) -> UploadVerdict
+  ensures { (result == Accept) == (firstUse && nowSec < expiresAt && size > 0 && size <= maxBytes) }
+{
+  if nowSec >= expiresAt then Expired
+  else if size <= 0 then Empty
+  else if size > maxBytes then TooLarge
+  else Accept
+}

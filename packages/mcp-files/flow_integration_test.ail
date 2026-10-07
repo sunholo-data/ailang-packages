@@ -1,0 +1,258 @@
+-- Integration checks for sunholo/mcp_files/flow over SharedMem-backed hooks
+-- (effectful, so run with `ailang run`, not `ailang test`; the mcp_oauth
+-- pattern). Each case prints "PASS <name>" or "FAIL <name>: <why>";
+-- tests/flow_check.sh fails on any FAIL or a missing PASS.
+--
+--   ailang run --caps IO,SharedMem,Rand,Clock,FS,Env,Net --entry main flow_integration_test.ail
+
+module sunholo/mcp_files/flow_integration_test
+
+import std/io (println)
+import std/sharedmem (get as smGet, put as smPut, delete as smDelete, put_if_absent, has_key, keys as smKeys)
+import std/bytes (fromString, toString, fromInts, toInts, toBase64, length as bytesLen)
+import std/option (Option, Some, None)
+import std/result (Result, Ok, Err)
+import std/json (decode, getString, getInt, getObject)
+import std/string (contains, length, startsWith)
+import std/list (any, range, map)
+import std/crypto (sha256Hex, sha256Bytes)
+import std/fs (writeFileBytes, mkdirAll)
+import std/env (getEnvOr)
+import pkg/sunholo/mcp_files/core (errorStatus, parseFileRef)
+import pkg/sunholo/mcp_files/flow (Hooks, StoredFile, createUpload, acceptUpload, acceptUploadFile, receiveViaHost, resolveFileRef)
+
+-- ---------------- test hooks: SharedMem store ----------------
+
+func tPutBytes(k: string, v: bytes, exp: int) -> bool ! {IO, FS, Env, Net, Clock, SharedMem} {
+  smPut("b:${k}", v);
+  true
+}
+
+func tGetBytes(k: string) -> Option[bytes] ! {IO, FS, Env, Net, Clock, SharedMem} = smGet("b:${k}")
+
+func tDelBytes(k: string) -> bool ! {IO, FS, Env, Net, Clock, SharedMem} {
+  smDelete("b:${k}");
+  true
+}
+
+func tPutMeta(k: string, v: string, exp: int) -> bool ! {IO, FS, Env, Net, Clock, SharedMem} {
+  smPut("m:${k}", fromString(v));
+  true
+}
+
+func tClaimMeta(k: string, v: string, exp: int) -> bool ! {IO, FS, Env, Net, Clock, SharedMem} = put_if_absent("m:${k}", fromString(v))
+
+func tGetMeta(k: string) -> Option[string] ! {IO, FS, Env, Net, Clock, SharedMem} = match smGet("m:${k}") {
+  Some(b) => Some(toString(b)),
+  None => None
+}
+
+func tDelMeta(k: string) -> bool ! {IO, FS, Env, Net, Clock, SharedMem} {
+  smDelete("m:${k}");
+  true
+}
+
+pure func hooksWith(mimes: [string]) -> Hooks =
+  {putBytes: tPutBytes, getBytes: tGetBytes, delBytes: tDelBytes, putMeta: tPutMeta, claimMeta: tClaimMeta,
+   getMeta: tGetMeta, delMeta: tDelMeta, server: "svc.example", uploadUrl: "https://svc.example/uploads",
+   tokenTtlSec: 600, objectTtlSec: 86400, maxBytesCeiling: 1000, allowedMimes: mimes}
+
+pure func hooks() -> Hooks = hooksWith([])
+
+-- ---------------- fixtures ----------------
+
+pure func now() -> int = 1800000000
+
+-- 256 bytes 0..255: every byte value, so a lossy UTF-8 path would show.
+pure func payload() -> bytes = fromInts(range(0, 256))
+
+func check(name: string, ok: bool, why: string) -> unit ! {IO} =
+  if ok then println("PASS ${name}") else println("FAIL ${name}: ${why}")
+
+pure func jstr(body: string, path: [string]) -> string = match decode(body) {
+  Ok(j) => match path {
+    [k] => match getString(j, k) { Some(s) => s, None => "" },
+    [o, k] => match getObject(j, o) {
+      Some(inner) => match getString(inner, k) { Some(s) => s, None => "" },
+      None => ""
+    },
+    _ => ""
+  },
+  Err(_) => ""
+}
+
+pure func jint(body: string, k: string) -> int = match decode(body) {
+  Ok(j) => match getInt(j, k) { Some(n) => n, None => 0 - 1 },
+  Err(_) => 0 - 1
+}
+
+-- the token inside a descriptor (upload.multipart.fields.token)
+pure func tokenOf(desc: string) -> string = match decode(desc) {
+  Ok(j) => match getObject(j, "upload") {
+    Some(u) => match getObject(u, "multipart") {
+      Some(m) => match getObject(m, "fields") {
+        Some(f) => match getString(f, "token") { Some(t) => t, None => "" },
+        None => ""
+      },
+      None => ""
+    },
+    None => ""
+  },
+  Err(_) => ""
+}
+
+pure func status(r: Result[string, string]) -> int = match r {
+  Ok(_) => 200,
+  Err(e) => errorStatus(e)
+}
+
+pure func statusF(r: Result[StoredFile, string]) -> int = match r {
+  Ok(_) => 200,
+  Err(e) => errorStatus(e)
+}
+
+-- create + accept: the receipt JSON ("" on failure)
+func uploaded(h: Hooks, account: string, name: string, data: bytes) -> string ! {IO, FS, Env, Net, Clock, SharedMem, Rand[mode=crypto], Declassify} =
+  match createUpload(h, account, name, "", 0, now()) {
+    Err(_) => "",
+    Ok(d) => match acceptUpload(h, tokenOf(d), name, data, now() + 5) {
+      Ok(r) => r,
+      Err(_) => ""
+    }
+  }
+
+func anyKeyOrValueHas(needle: string) -> bool ! {SharedMem} =
+  any(\k. contains(k, needle) || (match smGet(k) { Some(b) => contains(toString(b), needle), None => false }), smKeys(()))
+
+-- ---------------- cases ----------------
+
+export func main() -> unit ! {IO, FS, Env, Net, Clock, SharedMem, Rand[mode=crypto], Declassify} {
+  let h = hooks();
+  -- create returns a SEP-2631 descriptor
+  let created = createUpload(h, "acct-1", "AGM announcement.docx", "", 0, now());
+  let desc = match created { Ok(d) => d, Err(e) => e };
+  let tok = tokenOf(desc);
+  check("create returns sep-2631 descriptor",
+    jstr(desc, ["upload", "url"]) == "https://svc.example/uploads" && jstr(desc, ["upload", "transport"]) == "https"
+      && jstr(desc, ["upload", "method"]) == "POST" && length(tok) == 64
+      && parseFileRef("svc.example", jstr(desc, ["fileRef"])) != None && jstr(desc, ["file", "uri"]) == jstr(desc, ["fileRef"])
+      && jstr(desc, ["file", "name"]) == "AGM_announcement.docx" && jstr(desc, ["upload", "expiresAt"]) == "2027-01-15T08:10:00Z"
+      && jint(desc, "maxBytes") == 1000,
+    desc);
+  -- the token is stored as a digest only
+  check("token stored as digest only",
+    has_key("m:tok:${sha256Hex(tok)}") && anyKeyOrValueHas(tok) == false, "raw token found in the store, or no digest key");
+  -- upload round trip, sha256 intact
+  let receipt = match acceptUpload(h, tok, "AGM announcement.docx", payload(), now() + 5) { Ok(r) => r, Err(e) => e };
+  let ref = jstr(receipt, ["fileRef"]);
+  let resolved = resolveFileRef(h, "acct-1", ref, now() + 10);
+  check("upload round trip sha256", match resolved {
+    Ok(f) => toInts(f.data) == range(0, 256) && f.sha256 == sha256Bytes(payload()) && jstr(receipt, ["sha256"]) == sha256Bytes(payload())
+      && f.sizeBytes == 256 && jint(receipt, "sizeBytes") == 256 && f.name == "AGM_announcement.docx"
+      && f.mimeType == "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+      && ref == jstr(desc, ["fileRef"]) && jstr(receipt, ["file", "uri"]) == ref,
+    Err(e) => false
+  }, receipt);
+  -- a token admits one upload
+  let replay = acceptUpload(h, tok, "again.docx", payload(), now() + 6);
+  check("token is single use", status(replay) == 409, "status=${show(status(replay))}");
+  -- fileRef is deleted after one read
+  let again = resolveFileRef(h, "acct-1", ref, now() + 11);
+  check("fileRef deleted after use", statusF(again) == 404 && anyKeyOrValueHas("b:obj:") == false, "status=${show(statusF(again))}");
+  -- expired token
+  let late = match createUpload(h, "acct-1", "a.pdf", "", 0, now()) {
+    Ok(d) => acceptUpload(h, tokenOf(d), "a.pdf", payload(), now() + 600),
+    Err(e) => Err(e)
+  };
+  check("expired token refused", status(late) == 401 && (match late { Err(e) => contains(e, "token_expired"), Ok(_) => false }), "status=${show(status(late))}");
+  -- size cap: the token's own cap, and the ceiling clamp
+  let capped = match createUpload(h, "acct-1", "a.pdf", "", 10, now()) {
+    Ok(d) => acceptUpload(h, tokenOf(d), "a.pdf", fromInts(range(0, 11)), now() + 1),
+    Err(e) => Err(e)
+  };
+  let clamp = match createUpload(h, "acct-1", "a.pdf", "", 999999, now()) { Ok(d) => jint(d, "maxBytes"), Err(_) => 0 };
+  let overCeiling = match createUpload(h, "acct-1", "a.pdf", "", 0, now()) {
+    Ok(d) => acceptUpload(h, tokenOf(d), "a.pdf", fromInts(map(\i. i % 256, range(0, 1001))), now() + 1),
+    Err(e) => Err(e)
+  };
+  check("size cap enforced", status(capped) == 413 && clamp == 1000 && status(overCeiling) == 413,
+    "capped=${show(status(capped))} clamp=${show(clamp)} over=${show(status(overCeiling))}");
+  -- a refused attempt spends the token (one attempt per token, via the claim)
+  let spent = match createUpload(h, "acct-1", "a.pdf", "", 10, now()) {
+    Ok(d) => {
+      let first = acceptUpload(h, tokenOf(d), "a.pdf", fromInts(range(0, 11)), now() + 1);
+      let second = acceptUpload(h, tokenOf(d), "a.pdf", fromInts(range(0, 5)), now() + 2);
+      (status(first), status(second))
+    },
+    Err(_) => (0, 0)
+  };
+  check("refused attempt spends the token", spent == (413, 409), "statuses=${show(spent)}");
+  -- empty upload
+  let empty = match createUpload(h, "acct-1", "a.pdf", "", 0, now()) {
+    Ok(d) => acceptUpload(h, tokenOf(d), "a.pdf", fromInts([]), now() + 1),
+    Err(e) => Err(e)
+  };
+  check("empty upload refused", status(empty) == 400, "status=${show(status(empty))}");
+  -- unknown token
+  let unknown = acceptUpload(h, "not-a-token", "a.pdf", payload(), now());
+  check("unknown token refused", status(unknown) == 401, "status=${show(status(unknown))}");
+  -- cross-account
+  let r2 = uploaded(h, "acct-1", "b.pdf", payload());
+  let ref2 = jstr(r2, ["fileRef"]);
+  let stolen = resolveFileRef(h, "acct-2", ref2, now() + 10);
+  let owner = resolveFileRef(h, "acct-1", ref2, now() + 11);
+  check("cross-account refusal", ref2 != "" && statusF(stolen) == 404 && statusF(owner) == 200,
+    "stolen=${show(statusF(stolen))} owner=${show(statusF(owner))}");
+  -- expired fileRef
+  let r3 = uploaded(h, "acct-1", "c.pdf", payload());
+  let gone = resolveFileRef(h, "acct-1", jstr(r3, ["fileRef"]), now() + 5 + 86400);
+  check("expired fileRef gone", statusF(gone) == 410 && anyKeyOrValueHas("b:obj:") == false, "status=${show(statusF(gone))}");
+  -- stored bytes that no longer match their sha256 are refused
+  let r4 = uploaded(h, "acct-1", "d.pdf", payload());
+  let ref4 = jstr(r4, ["fileRef"]);
+  let id4 = match parseFileRef("svc.example", ref4) { Some(i) => i, None => "" };
+  smPut("b:obj:${id4}", fromString("tampered"));
+  let tampered = resolveFileRef(h, "acct-1", ref4, now() + 6);
+  check("tampered bytes refused", id4 != "" && statusF(tampered) == 500, "status=${show(statusF(tampered))}");
+  -- a ref from another server, or malformed
+  let foreign = resolveFileRef(h, "acct-1", "mcp-file://other.example/file_0123456789abcdef0123456789abcdef", now());
+  check("foreign fileRef refused", statusF(foreign) == 400, "status=${show(statusF(foreign))}");
+  -- mime allow-list
+  let pdfOnly = hooksWith(["application/pdf"]);
+  let badDecl = createUpload(pdfOnly, "acct-1", "tool.exe", "", 0, now());
+  let badPick = match createUpload(pdfOnly, "acct-1", "", "", 0, now()) {
+    Ok(d) => acceptUpload(pdfOnly, tokenOf(d), "tool.exe", payload(), now() + 1),
+    Err(e) => Err(e)
+  };
+  let goodPick = match createUpload(pdfOnly, "acct-1", "", "", 0, now()) {
+    Ok(d) => acceptUpload(pdfOnly, tokenOf(d), "report.pdf", payload(), now() + 1),
+    Err(e) => Err(e)
+  };
+  check("mime allow-list enforced", status(badDecl) == 415 && status(badPick) == 415 && status(goodPick) == 200,
+    "decl=${show(status(badDecl))} pick=${show(status(badPick))} good=${show(status(goodPick))}");
+  -- via host: bad base64 is refused without spending the token; then it works
+  let vh = match createUpload(h, "acct-1", "", "", 0, now()) { Ok(d) => tokenOf(d), Err(_) => "" };
+  let badB64 = receiveViaHost(h, vh, "x.docx", "@@not base64@@", now() + 1);
+  let viaHost = receiveViaHost(h, vh, "x.docx", toBase64(payload()), now() + 2);
+  let viaRef = match viaHost { Ok(r) => jstr(r, ["fileRef"]), Err(_) => "" };
+  check("receive via host round trip", status(badB64) == 400 && (match resolveFileRef(h, "acct-1", viaRef, now() + 3) {
+    Ok(f) => sha256Bytes(f.data) == sha256Bytes(payload()) && f.name == "x.docx",
+    Err(_) => false
+  }), "bad=${show(status(badB64))} via=${show(status(viaHost))}");
+  -- multipart temp file
+  let dir = "${getEnvOr("TMPDIR", "/tmp")}/mcp-files-test";
+  mkdirAll(dir);
+  writeFileBytes("${dir}/upload.part", payload());
+  let fromFile = match createUpload(h, "acct-1", "", "", 0, now()) {
+    Ok(d) => acceptUploadFile(h, tokenOf(d), "notes.md", "${dir}/upload.part", now() + 1),
+    Err(e) => Err(e)
+  };
+  check("accept upload file", match fromFile { Ok(r) => jstr(r, ["sha256"]) == sha256Bytes(payload()) && jstr(r, ["mimeType"]) == "text/markdown", Err(_) => false },
+    match fromFile { Ok(r) => r, Err(e) => e });
+  -- account required, config checked
+  let anon = createUpload(h, "", "a.pdf", "", 0, now());
+  let broken = createUpload({hooks() | server: "Bad Server"}, "acct-1", "a.pdf", "", 0, now());
+  check("create needs account and sane config", status(anon) == 401 && status(broken) == 500, "anon=${show(status(anon))} broken=${show(status(broken))}");
+  -- nothing in the store ever held a raw token
+  check("no raw token in store", anyKeyOrValueHas(tok) == false && anyKeyOrValueHas(vh) == false, "raw token found")
+}

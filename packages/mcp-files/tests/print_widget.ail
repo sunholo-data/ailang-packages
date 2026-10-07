@@ -1,0 +1,7 @@
+-- Prints the default upload widget HTML (tests/widget_check.sh parses it).
+module sunholo/mcp_files/tests/print_widget
+
+import std/io (print)
+import pkg/sunholo/mcp_files/widget (defaultWidgetConfig, uploadWidgetHtml)
+
+export func main() -> () ! {IO} = print(uploadWidgetHtml({defaultWidgetConfig("https://svc.example/uploads", "uploadViaHost") | accept: ".pdf,.docx"}))

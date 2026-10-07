@@ -1,0 +1,327 @@
+-- sunholo/mcp_files/flow: the effectful file handoff, and the ONLY module
+-- that holds upload tokens (design: ailang design_docs/planned/v0_53_0/
+-- m-mcp-file-handoff.md, "The upload handoff" and "The upload widget").
+--
+--   createUpload    tool side: mint a single-use token, store its DIGEST,
+--                   return the SEP-2631-shaped descriptor (+ fileRef, curl);
+--   acceptUpload    POST /uploads: token -> stored bytes -> receipt (fileRef);
+--   receiveViaHost  the widget-only tool: the same, with base64 bytes;
+--   resolveFileRef  a tool given a fileRef: the bytes, for their owner only,
+--                   deleted after this one read;
+--   fetchFileParam  ChatGPT openai/fileParams: one public-network fetch.
+--
+-- Secret handling (tests/lint.sh and tests/ifc_leaks.sh enforce it):
+--   * a token is string<secret>: minted under Rand[mode=crypto] or classified
+--     on receipt (asSecret);
+--   * the only label-lowering function is digestOf (! {Declassify}); storage
+--     keys and records hold digests only;
+--   * no declared record type holds a <secret> (ailang #1523);
+--   * audit() refuses <secret> at compile time;
+--   * the token leaves only inside createUpload's return value (the
+--     descriptor the tool returns); the caller must not log it.
+
+module sunholo/mcp_files/flow
+
+import std/crypto (sha256Hex, sha256Bytes)
+import std/rand (uuid4)
+import std/string (replace, trim, startsWith)
+import std/bytes (length as bytesLen, fromBase64)
+import std/fs (readFileRaw)
+import std/net (httpRequest)
+import std/json (Json, encode, decode, jo, kv, js, jint, getString, getInt)
+import std/option (Option, Some, None)
+import std/result (Result, Ok, Err)
+import std/io (println)
+import ./core (UploadVerdict, Accept, Replayed, Expired, Empty, TooLarge, RefVerdict, Found, NotFound, Gone,
+  tokenExpiresAt, effectiveMaxBytes, uploadVerdict, refVerdict, sizeOk, serverNameOk, fileUri, parseFileRef,
+  safeName, effectiveMime, mimeFromName, mimeAllowed, uploadDescriptor, uploadReceipt, fileError, parseFileParam)
+
+-- ============================================================
+-- Service hooks. One effect row for every hook.
+-- ============================================================
+
+-- Storage hooks (Parse: the temp GCS bucket for bytes, Firestore for metadata):
+--   putBytes(objectKey, data, expiresAtSec)  -> stored?
+--   getBytes(objectKey)                      -> the bytes, None if absent
+--   delBytes(objectKey)                      -> deleted? (absent counts as true)
+--   putMeta(key, json, expiresAtSec)         -> stored? (create or replace)
+--   claimMeta(key, json, expiresAtSec)       -> true ONLY if this call created the
+--                                               key (create-if-absent; atomic, e.g.
+--                                               Firestore create()). Single use rests
+--                                               on this being atomic.
+--   getMeta(key) / delMeta(key)
+-- Expiry: the flow checks every expiry itself from the record; the store's
+-- TTL is cleanup only, so a lazy TTL (Firestore, GCS lifecycle) is fine.
+-- Keys: "tok:<sha256 of token>", "used:<sha256 of token>", "ref:<id>",
+-- object "obj:<id>". Values never contain a token.
+-- Config:
+--   server           authority of mcp-file://<server>/file_<id> ([a-z0-9.-])
+--   uploadUrl        the POST /uploads URL the descriptor names (https)
+--   tokenTtlSec      token lifetime (core.defaultTokenTtlSec() = 600)
+--   objectTtlSec     how long an uploaded, unread file is kept (Parse: 86400)
+--   maxBytesCeiling  the hard cap every token is bound under
+--   allowedMimes     mime allow-list ([] = any)
+export type Hooks = {
+  putBytes: (string, bytes, int) -> bool ! {IO, FS, Env, Net, Clock, SharedMem},
+  getBytes: (string) -> Option[bytes] ! {IO, FS, Env, Net, Clock, SharedMem},
+  delBytes: (string) -> bool ! {IO, FS, Env, Net, Clock, SharedMem},
+  putMeta: (string, string, int) -> bool ! {IO, FS, Env, Net, Clock, SharedMem},
+  claimMeta: (string, string, int) -> bool ! {IO, FS, Env, Net, Clock, SharedMem},
+  getMeta: (string) -> Option[string] ! {IO, FS, Env, Net, Clock, SharedMem},
+  delMeta: (string) -> bool ! {IO, FS, Env, Net, Clock, SharedMem},
+  server: string,
+  uploadUrl: string,
+  tokenTtlSec: int,
+  objectTtlSec: int,
+  maxBytesCeiling: int,
+  allowedMimes: [string]
+}
+
+-- A file handed to a tool: from resolveFileRef (fileRef = the mcp-file URI)
+-- or fetchFileParam (fileRef = the OpenAI file_id).
+export type StoredFile = {fileRef: string, name: string, mimeType: string, sizeBytes: int, sha256: string, data: bytes}
+
+-- ============================================================
+-- Secrets: mint, classify, digest
+-- ============================================================
+
+-- 244 bits from two crypto UUIDv4s.
+func newSecret() -> string<secret> ! {Rand[mode=crypto]} {
+  let a = replace(uuid4(), "-", "");
+  let b = replace(uuid4(), "-", "");
+  "${a}${b}"
+}
+
+-- 122 bits; not a secret (fileRefs are account-bound), but unguessable.
+func newFileId() -> string ! {Rand[mode=crypto]} = replace(uuid4(), "-", "")
+
+-- Classify a value that arrives unlabelled (a form field, a tool argument).
+pure func asSecret(raw: string) -> string<secret> = raw
+
+-- The ONE label-lowering function: tokens are stored and compared as digests.
+func digestOf(s: string<secret>) -> string ! {Declassify} = sha256Hex(s)
+
+-- Audit log: refuses secrets at compile time.
+func audit(event: string{not secret}) -> unit ! {IO} = println("[mcp_files] ${event}")
+
+-- ============================================================
+-- Storage gate: the flow reaches the hooks ONLY through these wrappers,
+-- whose key and value parameters refuse <secret> (IFC sink rule). A record
+-- field's function type cannot carry {not secret} (#1523: labels on declared
+-- record fields are dropped), so the guarantee lives here; tests/lint.sh
+-- forbids calling h.putMeta(...) etc. directly.
+-- ============================================================
+
+func putBytes(h: Hooks, key: string{not secret}, data: bytes, exp: int) -> bool ! {IO, FS, Env, Net, Clock, SharedMem} = h.putBytes(key, data, exp)
+func getBytes(h: Hooks, key: string{not secret}) -> Option[bytes] ! {IO, FS, Env, Net, Clock, SharedMem} = h.getBytes(key)
+func delBytes(h: Hooks, key: string{not secret}) -> bool ! {IO, FS, Env, Net, Clock, SharedMem} = h.delBytes(key)
+func putMeta(h: Hooks, key: string{not secret}, json: string{not secret}, exp: int) -> bool ! {IO, FS, Env, Net, Clock, SharedMem} = h.putMeta(key, json, exp)
+func claimMeta(h: Hooks, key: string{not secret}, json: string{not secret}, exp: int) -> bool ! {IO, FS, Env, Net, Clock, SharedMem} = h.claimMeta(key, json, exp)
+func getMeta(h: Hooks, key: string{not secret}) -> Option[string] ! {IO, FS, Env, Net, Clock, SharedMem} = h.getMeta(key)
+func delMeta(h: Hooks, key: string{not secret}) -> bool ! {IO, FS, Env, Net, Clock, SharedMem} = h.delMeta(key)
+
+pure func strOr(j: Json, k: string) -> string = match getString(j, k) { Some(s) => s, None => "" }
+
+pure func intOr(j: Json, k: string) -> int = match getInt(j, k) { Some(n) => n, None => 0 }
+
+pure func uploadUrlOk(u: string) -> bool =
+  startsWith(u, "https://") || startsWith(u, "http://localhost") || startsWith(u, "http://127.0.0.1")
+
+-- ============================================================
+-- 1. createUpload (a signed-in tool)
+-- ============================================================
+
+-- Ok(descriptor JSON: {file, upload, fileRef, maxBytes, curl}) or Err(error JSON).
+-- filename and mime may be "" (the widget path: the user has not picked yet).
+-- maxBytes <= 0 means the service ceiling; above it is clamped to it.
+export func createUpload(h: Hooks, account: string, filename: string, mime: string, maxBytes: int, nowSec: int)
+  -> Result[string, string] ! {IO, FS, Env, Net, Clock, SharedMem, Rand[mode=crypto], Declassify} {
+  let name = if trim(filename) == "" then "" else safeName(filename);
+  let declared = if trim(mime) == "" && name == "" then "" else effectiveMime(mime, name);
+  if account == "" then Err(fileError("unauthorized", 401, "createUpload needs a signed-in account"))
+  else if serverNameOk(h.server) == false || uploadUrlOk(h.uploadUrl) == false || h.maxBytesCeiling <= 0 || h.tokenTtlSec <= 0 || h.objectTtlSec <= 0
+  then Err(fileError("server_error", 500, "mcp_files hooks are misconfigured (server, uploadUrl, ceilings or TTLs)"))
+  else if declared != "" && mimeAllowed(declared, h.allowedMimes) == false
+  then Err(fileError("unsupported_media_type", 415, "this service does not accept ${declared}"))
+  else {
+    let cap = effectiveMaxBytes(maxBytes, h.maxBytesCeiling);
+    let token = newSecret();
+    let id = newFileId();
+    let exp = tokenExpiresAt(nowSec, h.tokenTtlSec);
+    let rec = encode(jo([kv("account", js(account)), kv("name", js(name)), kv("mime", js(declared)),
+                         kv("max_bytes", jint(cap)), kv("expires_at", jint(exp)), kv("file_id", js(id))]));
+    if putMeta(h, "tok:${digestOf(token)}", rec, exp) then {
+      audit("upload token issued file=${id} max_bytes=${show(cap)}");
+      Ok(uploadDescriptor(h.uploadUrl, token, fileUri(h.server, id), name, declared, exp, cap))
+    } else Err(fileError("server_error", 500, "could not store the upload token"))
+  }
+}
+
+-- ============================================================
+-- 2. acceptUpload (POST /uploads) and its variants
+-- ============================================================
+
+pure func verdictError(v: UploadVerdict, size: int, cap: int) -> string =
+  match v {
+    Replayed => fileError("token_used", 409, "this upload token was already used; ask for a new one"),
+    Expired => fileError("token_expired", 401, "this upload token has expired; ask for a new one"),
+    Empty => fileError("empty_file", 400, "the upload is empty"),
+    TooLarge => fileError("too_large", 413, "the file is ${show(size)} bytes; this upload allows at most ${show(cap)}"),
+    Accept => fileError("server_error", 500, "unreachable")
+  }
+
+-- Ok(receipt JSON: {file, fileRef, name, mimeType, sizeBytes, sha256}) or
+-- Err(error JSON with "status"). filename is the uploaded part's name ("" =
+-- the one given to createUpload). A token admits ONE attempt: the claim on
+-- its digest happens before the size check.
+export func acceptUpload(h: Hooks, tokenRaw: string, filename: string, data: bytes, nowSec: int)
+  -> Result[string, string] ! {IO, FS, Env, Net, Clock, SharedMem, Declassify} {
+  let d = digestOf(asSecret(tokenRaw));
+  match getMeta(h, "tok:${d}") {
+    None => match getMeta(h, "used:${d}") {
+      Some(_) => Err(verdictError(Replayed, 0, 0)),
+      None => Err(fileError("invalid_token", 401, "unknown or expired upload token"))
+    },
+    Some(raw) => match decode(raw) {
+      Err(_) => Err(fileError("server_error", 500, "corrupt upload token record")),
+      Ok(rec) => {
+        let exp = intOr(rec, "expires_at");
+        let cap = intOr(rec, "max_bytes");
+        let size = bytesLen(data);
+        let firstUse = claimMeta(h, "used:${d}", "{}", exp);
+        let v = uploadVerdict(firstUse, nowSec, exp, size, cap);
+        if v != Accept then {
+          audit("upload refused verdict=${show(v)}");
+          Err(verdictError(v, size, cap))
+        } else storeUpload(h, rec, d, filename, data, nowSec)
+      }
+    }
+  }
+}
+
+func storeUpload(h: Hooks, rec: Json, d: string, filename: string, data: bytes, nowSec: int)
+  -> Result[string, string] ! {IO, FS, Env, Net, Clock, SharedMem} {
+  let id = strOr(rec, "file_id");
+  let declaredName = strOr(rec, "name");
+  let name = if trim(filename) != "" then safeName(filename) else if declaredName != "" then declaredName else "upload.bin";
+  let declaredMime = strOr(rec, "mime");
+  -- The uploaded name decides the type when there is one (the user may pick a
+  -- different file than createUpload was told about); else the declared type.
+  let mime = if trim(filename) != "" || declaredMime == "" then mimeFromName(name) else declaredMime;
+  let size = bytesLen(data);
+  let sha = sha256Bytes(data);
+  let refExp = nowSec + h.objectTtlSec;
+  if mimeAllowed(mime, h.allowedMimes) == false then Err(fileError("unsupported_media_type", 415, "this service does not accept ${mime}"))
+  else if putBytes(h, "obj:${id}", data, refExp) == false then Err(fileError("server_error", 500, "could not store the file"))
+  else {
+    let meta = encode(jo([kv("account", js(strOr(rec, "account"))), kv("name", js(name)), kv("mime", js(mime)),
+                          kv("size", jint(size)), kv("sha256", js(sha)), kv("expires_at", jint(refExp))]));
+    if putMeta(h, "ref:${id}", meta, refExp) then {
+      let _ = delMeta(h, "tok:${d}");
+      audit("upload accepted file=${id} size=${show(size)}");
+      Ok(uploadReceipt(fileUri(h.server, id), name, mime, size, sha))
+    } else {
+      let _ = delBytes(h, "obj:${id}");
+      Err(fileError("server_error", 500, "could not store the file record"))
+    }
+  }
+}
+
+-- serve-api's multipart route hands the file part over as a temp-file path.
+export func acceptUploadFile(h: Hooks, tokenRaw: string, filename: string, path: string, nowSec: int)
+  -> Result[string, string] ! {IO, FS, Env, Net, Clock, SharedMem, Declassify} =
+  match readFileRaw(path) {
+    Err(_) => Err(fileError("invalid_request", 400, "the upload has no readable file part")),
+    Ok(data) => acceptUpload(h, tokenRaw, filename, data, nowSec)
+  }
+
+-- The widget-only tool: the widget relays the bytes as base64 through the
+-- host (no model output involved). Bad base64 is refused BEFORE the token
+-- is claimed.
+export func receiveViaHost(h: Hooks, tokenRaw: string, filename: string, base64: string, nowSec: int)
+  -> Result[string, string] ! {IO, FS, Env, Net, Clock, SharedMem, Declassify} =
+  match fromBase64(trim(base64)) {
+    None => Err(fileError("invalid_request", 400, "base64 is not valid base64")),
+    Some(data) => acceptUpload(h, tokenRaw, filename, data, nowSec)
+  }
+
+-- ============================================================
+-- 3. resolveFileRef (a tool given fileRef)
+-- ============================================================
+
+-- The file behind fileRef, for `account` only, deleted after this read
+-- (bytes and record). Another account's ref answers exactly like an unknown
+-- one (404) and is NOT deleted. The bytes are checked against the stored
+-- sha256.
+export func resolveFileRef(h: Hooks, account: string, fileRef: string, nowSec: int)
+  -> Result[StoredFile, string] ! {IO, FS, Env, Net, Clock, SharedMem} =
+  match parseFileRef(h.server, fileRef) {
+    None => Err(fileError("invalid_request", 400, "not a fileRef issued by this service (expected mcp-file://${h.server}/file_<id>)")),
+    Some(id) => match getMeta(h, "ref:${id}") {
+      None => Err(fileError("not_found", 404, "unknown fileRef (files are kept until first use, then deleted)")),
+      Some(raw) => match decode(raw) {
+        Err(_) => Err(fileError("server_error", 500, "corrupt file record")),
+        Ok(rec) => {
+          let v = refVerdict(strOr(rec, "account"), account, nowSec, intOr(rec, "expires_at"));
+          match v {
+            NotFound => Err(fileError("not_found", 404, "unknown fileRef (files are kept until first use, then deleted)")),
+            Gone => {
+              let _ = forget(h, id);
+              Err(fileError("gone", 410, "this upload has expired; upload the file again"))
+            },
+            Found => match getBytes(h, "obj:${id}") {
+              None => {
+                let _ = forget(h, id);
+                Err(fileError("not_found", 404, "the uploaded bytes are gone; upload the file again"))
+              },
+              Some(data) => {
+                let sha = sha256Bytes(data);
+                let _ = forget(h, id);
+                if sha != strOr(rec, "sha256") then Err(fileError("server_error", 500, "stored file failed its sha256 check"))
+                else {
+                  audit("fileRef resolved file=${id}");
+                  Ok({fileRef: fileRef, name: strOr(rec, "name"), mimeType: strOr(rec, "mime"),
+                      sizeBytes: bytesLen(data), sha256: sha, data: data})
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+
+func forget(h: Hooks, id: string) -> bool ! {IO, FS, Env, Net, Clock, SharedMem} {
+  let a = delBytes(h, "obj:${id}");
+  let b = delMeta(h, "ref:${id}");
+  a && b
+}
+
+-- ============================================================
+-- 4. fetchFileParam (ChatGPT openai/fileParams)
+-- ============================================================
+
+-- One GET of the file object's download_url, public network only
+-- (Net[scope=public], ailang >= 0.52.0: loopback / link-local / private
+-- addresses are refused at connect time and on every redirect hop), capped
+-- at maxBytes. Nothing is stored.
+export func fetchFileParam(fileObj: Json, maxBytes: int) -> Result[StoredFile, string] ! {Net[scope=public] @limit=1} =
+  match parseFileParam(fileObj) {
+    Err(e) => Err(fileError("invalid_request", 400, e)),
+    Ok(fp) => match httpRequest("GET", fp.downloadUrl, [], "") {
+      Err(e) => Err(fileError("fetch_failed", 502, "could not fetch download_url: ${show(e)}")),
+      Ok(resp) =>
+        if resp.status != 200 then Err(fileError("fetch_failed", 502, "download_url returned HTTP ${show(resp.status)}"))
+        else {
+          let size = bytesLen(resp.bodyBytes);
+          if sizeOk(size, maxBytes) == false then
+            (if size <= 0 then Err(fileError("empty_file", 400, "download_url returned no bytes"))
+             else Err(fileError("too_large", 413, "the file is ${show(size)} bytes; at most ${show(maxBytes)} allowed")))
+          else {
+            let name = if trim(fp.fileName) == "" then "upload.bin" else safeName(fp.fileName);
+            Ok({fileRef: fp.fileId, name: name, mimeType: effectiveMime(fp.mimeType, name),
+                sizeBytes: size, sha256: sha256Bytes(resp.bodyBytes), data: resp.bodyBytes})
+          }
+        }
+    }
+  }
