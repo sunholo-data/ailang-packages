@@ -3,7 +3,7 @@
 # the package (never to the working tree) and must be KILLED by at least one
 # of the checks listed for it. Exit 1 if any mutant survives.
 #   checks: check (ailang check --package), verify (Z3 on core.ail),
-#   core / widget (ailang test), flow (tests/flow_check.sh),
+#   bverify (Z3 on brand.ail), core / brand / widget (ailang test), flow (tests/flow_check.sh),
 #   fetch (tests/fetch_check.sh, network),
 #   e2e (tests/e2e_uploads.sh: real serve-api on a random local port)
 # MUTATION_SKIP_NET=1 skips the fetch-only mutants (reported as SKIPPED).
@@ -18,6 +18,8 @@ run_check() {  # $1 = check name, cwd = mutant copy; returns 0 if the check PASS
     check)  out=$(ailang check --package . 2>&1); grep -q "all passed" <<<"$out" ;;
     verify) out=$(ailang verify core.ail 2>&1); ! grep -qE "VIOLATION|ERROR" <<<"$out" ;;
     core)   out=$(ailang test core_test.ail 2>&1); grep -q " 0 failed" <<<"$out" ;;
+    brand)  out=$(ailang test brand_test.ail 2>&1); grep -q " 0 failed" <<<"$out" ;;
+    bverify) out=$(ailang verify brand.ail 2>&1); ! grep -qE "VIOLATION|ERROR" <<<"$out" ;;
     widget) ./tools/gen_bundle.sh >/dev/null 2>&1; out=$(ailang test widget_test.ail 2>&1); grep -q " 0 failed" <<<"$out" ;;
     flow)   ./tests/flow_check.sh >/dev/null 2>&1 ;;
     fetch)  ./tests/fetch_check.sh >/dev/null 2>&1 ;;
@@ -69,6 +71,36 @@ mutant "widget picker shown when idle"   assets/widget.js '  ready.hidden = true
   say(gotRef' widget
 mutant "via-host arg named token again"  assets/widget.js 'arguments: { ticket: desc' 'arguments: { token: desc' widget
 mutant "widget oversize guard dropped"   assets/widget.js 'if (desc.maxBytes && f.size > desc.maxBytes) {' 'if (false) {' widget
+
+# 0.1.2 branding: the logo sanitiser, the accent check, links, rendering, theming.
+mutant "logo: script frame check dropped"  brand.ail '&& contains(t, "script") == false && contains(t, "&#") == false && contains(t, "<!") == false && contains(t, "<?") == false' '&& contains(t, "&#") == false && contains(t, "<!") == false && contains(t, "<?") == false' bverify brand
+mutant "logo: handler check dropped"       brand.ail 'svgFrameOk(t) && svgTagsOk(t) && svgNoHandlers(t) &&' 'svgFrameOk(t) && svgTagsOk(t) &&' brand widget
+mutant "logo: handler after whitespace"    brand.ail 'contains("abcdefghijklmnopqrstuvwxyz0123456789", c)' 'contains("abcdefghijklmnopqrstuvwxyz0123456789 ", c)' brand
+mutant "logo: element allow-list dropped"  brand.ail 'svgFrameOk(t) && svgTagsOk(t) &&' 'svgFrameOk(t) &&' brand
+mutant "logo: any href allowed"            brand.ail 'startsWith(rest, "=${q}${v}")' 'startsWith(rest, "=")' brand
+mutant "logo: svg data url allowed"        brand.ail '["#", "data:image/png",' '["#", "data:image/svg", "data:image/png",' brand
+mutant "logo: external url() allowed"      brand.ail '&& svgHrefsOk(t) && svgUrlsOk(t)' '&& svgHrefsOk(t)' brand
+mutant "logo: not lowercased"              brand.ail 'let t = toLower(trim(s));' 'let t = trim(s);' brand
+mutant "logo: trailing content allowed"    brand.ail '&& endsWith(t, "</svg>") && find(t, "</svg>") == length(t) - 6
+    &&' '&& endsWith(t, "</svg>")
+    &&' bverify brand
+mutant "logo: bad logo used as given"      brand.ail 'else if svgLogoOk(b.logoSvg) then trim(b.logoSvg) else ailangLogoSvg()' 'else trim(b.logoSvg)' brand widget
+mutant "accent: any length up to 7"        brand.ail '  (length(a) == 4 || length(a) == 7) && startsWith(a, "#") && hexAt' '  length(a) <= 7 && startsWith(a, "#") && hexAt' bverify brand
+mutant "accent: wider digit set"           brand.ail '  length(c) == 1 && contains("0123456789abcdefABCDEF", c)
+}' '  length(c) == 1 && contains("0123456789abcdefABCDEF;} ", c)
+}' bverify brand
+mutant "accent: last digit unchecked"      brand.ail '&& hexAt(a, 5) && hexAt(a, 6)' '&& hexAt(a, 5)' brand
+mutant "accent: fallback dropped"          brand.ail 'if accentOk(b.accent) then b.accent else' 'if true then b.accent else' brand widget
+mutant "link: http allowed"                brand.ail '  startsWith(u, "https://") && length(u) > 8' '  length(u) > 8' bverify brand
+mutant "link: filter dropped"              brand.ail 'filter(\l. linkUrlOk(l.url) && trim(l.label) != "", b.footerLinks)' 'b.footerLinks' brand widget
+mutant "footer label not escaped"          widget.ail '${htmlEscape(trim(l.label))}</a>' '${trim(l.label)}</a>' widget
+mutant "brand name not escaped"            widget.ail "<span class='name'>\${htmlEscape(name)}</span>" "<span class='name'>\${name}</span>" widget
+mutant "host theme not applied"            assets/widget.js "    if (ctx.theme === 'light' || ctx.theme === 'dark') x.applyDocumentTheme(ctx.theme);
+" "" widget
+mutant "host context change ignored"       assets/widget.js "  app.addEventListener('hostcontextchanged', () => applyHost(app.getHostContext()));
+" "" widget
+mutant "logo shown in chatgpt"             assets/widget.js "if (window.openai) el('brand').hidden = true;" "" widget
+mutant "accent leaks onto body text"       assets/widget.css 'color:var(--color-text-primary,var(--mf-fg))}' 'color:var(--mf-accent)}' widget
 
 echo "mutants: $killed killed, $survived survived, $skipped skipped"
 [ $survived -eq 0 ]

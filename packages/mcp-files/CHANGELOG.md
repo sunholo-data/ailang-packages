@@ -1,5 +1,45 @@
 # Changelog — sunholo/mcp_files
 
+## 0.1.2 — 2026-10-07
+
+**Widget branding: AILANG by default, adjustable downstream.** One breaking change, for literal
+constructions only (pre-1.0).
+
+- **New module `brand`:**
+  - `Brand {name, logoSvg, accent, footerLinks: [FooterLink {label, url}], poweredBy}`;
+  - `defaultBrand()`: "AILANG", the AILANG hexagon-and-lambda mark as a ~0.6 KB inline SVG, accent
+    `#d03614` and "Powered by AILANG";
+  - `brandWith(name, logoSvg, accent, footerLinks)` for a downstream service.
+- **`WidgetConfig` gains `brand: Brand`.** `defaultWidgetConfig` sets `defaultBrand()`, so
+  `defaultWidgetConfig(…)` and `{ cfg | … }` updates keep working. **Breaking:** a literal
+  `WidgetConfig` record (all fields spelled out) must add `brand: defaultBrand()`.
+- **Checked values.** A value that fails a check is replaced, never rendered:
+  - the logo must pass `svgLogoOk`: an allow-list of SVG elements, no `script`, no `on*` handler,
+    no `javascript:` or `&#`, no external `href`/`xlink:href`/`url()`. Fragments and raster `data:`
+    images only. Otherwise the AILANG logo is used, and `""` means no logo;
+  - the accent must pass `accentOk` (`#rgb`/`#rrggbb`), else `#d03614`;
+  - footer links must pass `linkUrlOk` (https), else they are dropped;
+  - labels and the name are html-escaped.
+  `svgFrameOk`, `accentOk`, `isHexDigit` and `linkUrlOk` are proved by Z3.
+- **Host theming.** The widget applies the MCP Apps host context (`theme`, `styles.variables`,
+  `styles.css.fonts`) with the bundled ext-apps helpers, and re-applies it on `hostcontextchanged`.
+  ChatGPT's `window.openai.theme` is followed too. Without a host theme it falls back to
+  `prefers-color-scheme`. Text, borders, fonts and radii use host variables with light/dark
+  fallbacks. The background is transparent.
+- **Accent placement.** The accent colours only the primary button and the focus ring, with
+  WCAG-contrasting text.
+- **Header and footer.** They show with the picker. The header is hidden in ChatGPT, which draws
+  the app's logo itself. Footer links open via `app.openLink` / `openai.openExternal`. The rules
+  followed, with quotes and URLs, are in AGENT.md "Branding".
+- **Tests:**
+  - 48 brand tests: hostile SVGs refused (script, handlers incl. tab/slash/quote-adjacent,
+    javascript:, encoded, external and svg-data hrefs, `url()`, xml:base, style, foreignObject,
+    animate/set, HTML breakout, comments), the AILANG and Parse logos accepted, accents, links and
+    fallbacks;
+  - 11 widget tests;
+  - `widget_check` now parses a footer link;
+  - 22 new mutants (47 in all).
+
 ## 0.1.1 — 2026-10-07
 
 **Security fix, with two breaking changes (pre-1.0).**

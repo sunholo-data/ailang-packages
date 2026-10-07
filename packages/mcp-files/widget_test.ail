@@ -7,6 +7,8 @@
 module sunholo/mcp_files/widget_test
 import ./widget (claudeWidgetOrigin, WidgetConfig, defaultWidgetConfig, uploadWidgetHtml, htmlEscape, configJson, widgetCspMeta, widgetMimeType)
 import ./extapps_bundle (extAppsBundle, extAppsVersion, extAppsSourceSha256)
+import ./widget_assets (widgetCss)
+import ./brand (Brand, brandWith, defaultBrand, ailangLogoSvg)
 import std/string (contains, startsWith, endsWith, split, length, find, substring)
 import std/list (length as listLen)
 
@@ -122,3 +124,67 @@ test "mcp app mime type" {
 
 -- sha256("https://svc.example/mcp/") = 9dec637978aa9ef7a891f7d3e41385f3… (computed independently with shasum).
 test "claude widget origin" { claudeWidgetOrigin("https://svc.example/mcp/") == "https://9dec637978aa9ef7a891f7d3e41385f3.claudemcpcontent.com" }
+
+-- ---------- branding (0.1.2) ----------
+
+pure func accentRule(a: string, on: string) -> string = ":root{--mf-accent:${a};--mf-on-accent:${on}}"
+
+test "default brand renders" {
+  contains(html(), "<span class='logo' aria-hidden='true'>${ailangLogoSvg()}</span>") && contains(html(), "<span class='name'>AILANG</span>") && contains(html(), "<span class='powered'>Powered by AILANG</span>") && contains(html(), accentRule("#d03614", "#ffffff"))
+}
+
+pure func parseLogo() -> string = "<svg viewBox='0 0 32 32'><rect width='8' height='2' fill='#2563eb'/></svg>"
+
+pure func parseCfg() -> WidgetConfig =
+  { cfg() | brand: brandWith("Parse", parseLogo(), "#2563eb", [{label: "Docs", url: "https://docparse.ailang.sunholo.com/docs"}]) }
+
+test "custom brand renders" {
+  contains(uploadWidgetHtml(parseCfg()), "<span class='logo' aria-hidden='true'>${parseLogo()}</span><span class='name'>Parse</span>") && contains(uploadWidgetHtml(parseCfg()), accentRule("#2563eb", "#ffffff")) && contains(uploadWidgetHtml(parseCfg()), "<a href='https://docparse.ailang.sunholo.com/docs' rel='noopener noreferrer' target='_blank'>Docs</a>") && contains(uploadWidgetHtml(parseCfg()), ailangLogoSvg()) == false
+}
+
+pure func hostileBrand() -> WidgetConfig =
+  { cfg() | brand: brandWith("<b>X</b>", "<svg onload='alert(3)'><rect/></svg>", "red;}body{background:red", [{label: "<img src=x onerror=alert(4)>", url: "https://a.example/?q='><script>"}, {label: "<i>ok</i>", url: "https://a.example/ok"}, {label: "js", url: "javascript:alert(5)"}]) }
+
+test "hostile brand is escaped or replaced" {
+  contains(uploadWidgetHtml(hostileBrand()), "alert(3)") == false && contains(uploadWidgetHtml(hostileBrand()), ailangLogoSvg()) && contains(uploadWidgetHtml(hostileBrand()), "<span class='name'>&lt;b&gt;X&lt;/b&gt;</span>") && contains(uploadWidgetHtml(hostileBrand()), accentRule("#d03614", "#ffffff")) && contains(uploadWidgetHtml(hostileBrand()), "background:red") == false
+}
+
+test "footer labels escaped, unsafe urls dropped" {
+  contains(uploadWidgetHtml(hostileBrand()), ">&lt;i&gt;ok&lt;/i&gt;</a>") && contains(uploadWidgetHtml(hostileBrand()), "alert(4)") == false && contains(uploadWidgetHtml(hostileBrand()), "alert(5)") == false && contains(uploadWidgetHtml(hostileBrand()), "<script>") == false
+}
+
+test "powered-by can be turned off" {
+  contains(uploadWidgetHtml({ cfg() | brand: { defaultBrand() | poweredBy: false } }), "Powered by AILANG") == false
+}
+
+test "brand header and footer start hidden and show with the picker" {
+  contains(html(), "<div id='card' hidden>") && contains(html(), "<footer id='foot' hidden>") && contains(appScript(), "card.hidden = false; foot.hidden = false;")
+}
+
+-- The accent colours the primary (file picker) button and the focus ring,
+-- nothing else; there is no background colour, gradient or font.
+pure func buttonRule() -> string = "::file-selector-button{font:inherit;font-weight:var(--font-weight-semibold,600);background:var(--mf-accent)"
+
+pure func transparentRule() -> string = "html,body{background:transparent}"
+
+pure func darkMedia() -> string = "@media (prefers-color-scheme: dark){:root:not([data-theme=light])"
+
+test "accent only on the button and the focus ring" {
+  count(widgetCss(), "var(--mf-accent)") == 2 && contains(widgetCss(), buttonRule()) && contains(widgetCss(), "outline:2px solid var(--mf-accent)") && contains(widgetCss(), transparentRule()) && contains(widgetCss(), "-gradient(") == false && contains(widgetCss(), "@font-face") == false
+}
+
+test "widget follows the host theme" {
+  contains(appScript(), "x.applyDocumentTheme(ctx.theme)") && contains(appScript(), "x.applyHostStyleVariables(ctx.styles.variables)") && contains(appScript(), "x.applyHostFonts(ctx.styles.css.fonts)") && contains(appScript(), "app.addEventListener('hostcontextchanged'") && contains(appScript(), "applyHost(app.getHostContext());") && contains(appScript(), "openai:set_globals")
+}
+
+test "widget css falls back to prefers-color-scheme and host variables" {
+  contains(widgetCss(), darkMedia()) && contains(widgetCss(), ":root[data-theme=dark]") && contains(widgetCss(), "var(--font-sans,") && contains(widgetCss(), "var(--color-text-primary,")
+}
+
+test "chatgpt draws its own logo, so the header hides there" {
+  contains(appScript(), "if (window.openai) el('brand').hidden = true;")
+}
+
+test "footer links open through the host" {
+  contains(appScript(), "app.openLink({ url: url })") && contains(appScript(), "window.openai.openExternal({ href: url })")
+}

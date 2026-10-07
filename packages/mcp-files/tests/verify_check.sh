@@ -10,6 +10,11 @@ grep -E "VERIFIED|VIOLATION|ERROR|SKIPPED|exported functions" <<<"$OUT"
 if grep -qE "VIOLATION|ERROR|SKIPPED" <<<"$OUT"; then echo "FAIL: core.ail has an unproved contract"; rc=1; fi
 n=$(grep -c "VERIFIED" <<<"$OUT")
 [ "$n" -ge 10 ] && echo "ok: core.ail $n contracts verified" || { echo "FAIL: expected >= 10 verified, got $n"; rc=1; }
+BOUT=$(ailang verify brand.ail 2>&1)
+grep -E "VERIFIED|VIOLATION|ERROR|SKIPPED" <<<"$BOUT"
+if grep -qE "VIOLATION|ERROR|SKIPPED" <<<"$BOUT"; then echo "FAIL: brand.ail has an unproved contract"; rc=1; fi
+b=$(grep -c "VERIFIED" <<<"$BOUT")
+[ "$b" -ge 4 ] && echo "ok: brand.ail $b contracts verified (svgFrameOk, accentOk, isHexDigit, linkUrlOk)" || { echo "FAIL: expected >= 4 verified in brand.ail, got $b"; rc=1; }
 for f in tests/broken_single_use.ail:uploadVerdictBroken tests/broken_expiry.ail:isExpiredBroken tests/broken_expiry.ail:ownerMatchesBroken; do
   file=${f%%:*}; fn=${f##*:}
   vout=$(ailang verify "$file" 2>&1)

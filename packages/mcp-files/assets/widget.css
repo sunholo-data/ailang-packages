@@ -1,11 +1,30 @@
-/* sunholo/mcp_files upload widget styles (inlined; no external fonts). */
-body{font:14px/1.4 system-ui,-apple-system,sans-serif;margin:12px;color:#1f1f1f;background:transparent}
-h1{font-size:15px;margin:0 0 8px}
-input[type=file]{margin:4px 0 8px}
+/* sunholo/mcp_files upload widget styles (inlined; no external fonts).
+   Structure (text, borders, fonts, radii) uses the host's MCP Apps style
+   variables when the host sends them, with light/dark fallbacks: the
+   host's theme (data-theme, set from the host context) wins, otherwise
+   prefers-color-scheme. The brand accent (--mf-accent, set from the
+   checked Brand) colours ONLY the primary button and the focus ring.
+   Background stays transparent: no brand backgrounds, gradients or fonts. */
+:root{--mf-fg:#1f1f1f;--mf-muted:#6b6b6b;--mf-err:#b3261e;--mf-ok:#1e6b34}
+@media (prefers-color-scheme: dark){:root:not([data-theme=light]){--mf-fg:#e6e6e6;--mf-muted:#a8a8a8;--mf-err:#f2b8b5;--mf-ok:#9fd8a8}}
+:root[data-theme=dark]{--mf-fg:#e6e6e6;--mf-muted:#a8a8a8;--mf-err:#f2b8b5;--mf-ok:#9fd8a8}
+html,body{background:transparent}
+body{font-family:var(--font-sans,system-ui,-apple-system,sans-serif);font-size:var(--font-text-sm-size,14px);line-height:1.4;margin:12px;color:var(--color-text-primary,var(--mf-fg))}
+#brand{display:flex;align-items:center;gap:6px;margin:0 0 6px;color:var(--color-text-secondary,var(--mf-muted));font-size:var(--font-text-xs-size,12px);font-weight:var(--font-weight-medium,500)}
+#brand:empty{display:none}
+#brand .logo{display:inline-flex;width:18px;height:18px;overflow:hidden;flex:none}
+#brand .logo svg{width:18px;height:18px;display:block}
+h1{font-size:var(--font-heading-sm-size,15px);font-weight:var(--font-weight-semibold,600);margin:0 0 8px}
+input[type=file]{margin:4px 0 8px;font:inherit;color:inherit;border-radius:var(--border-radius-md,6px)}
+input[type=file]::file-selector-button{font:inherit;font-weight:var(--font-weight-semibold,600);background:var(--mf-accent);color:var(--mf-on-accent);border:0;border-radius:var(--border-radius-md,6px);padding:6px 12px;margin-right:8px;cursor:pointer}
+input[type=file]:disabled::file-selector-button{opacity:.5;cursor:default}
+input[type=file]:focus-visible,#foot a:focus-visible{outline:2px solid var(--mf-accent);outline-offset:2px}
 #status{margin:4px 0;white-space:pre-wrap;word-break:break-word}
-#status.err{color:#b3261e}
-#status.ok{color:#1e6b34}
-#status.quiet{color:#6b6b6b;font-size:13px}
+#status.err{color:var(--color-text-danger,var(--mf-err))}
+#status.ok{color:var(--color-text-success,var(--mf-ok))}
+#status.quiet{color:var(--color-text-secondary,var(--mf-muted));font-size:13px}
 #status:empty{display:none}
+#foot{margin:6px 0 0;color:var(--color-text-tertiary,var(--mf-muted));font-size:var(--font-text-xs-size,12px)}
+#foot:empty{display:none}
+#foot a{color:inherit;text-decoration:underline}
 [hidden]{display:none!important}
-@media (prefers-color-scheme: dark){body{color:#e6e6e6}#status.err{color:#f2b8b5}#status.ok{color:#9fd8a8}#status.quiet{color:#a8a8a8}}

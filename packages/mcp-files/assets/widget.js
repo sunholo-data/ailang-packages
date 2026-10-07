@@ -12,9 +12,20 @@
 // ext-apps 2.0.3 delivers tool-result only for the call this widget is
 // attached to, so the later tool call that uses the file cannot update this
 // instance; that call renders its own instance, which says "Done.".
+//
+// Branding (0.1.2): the header (logo + name) and footer are rendered by
+// widget.uploadWidgetHtml from a checked Brand; they show with the picker.
+// In ChatGPT (window.openai) the header stays hidden: "ChatGPT will always
+// append your logo and app name before the widget is rendered" (OpenAI UI
+// guidelines). The host's theme, style variables and fonts are applied from
+// the MCP Apps host context and re-applied on hostcontextchanged; without a
+// host context the CSS falls back to prefers-color-scheme.
 const el = (id) => document.getElementById(id);
 const picker = el('file');
 const ready = el('ready');
+const card = el('card');
+const foot = el('foot');
+if (window.openai) el('brand').hidden = true;
 function say(m, cls) { const s = el('status'); s.textContent = m; s.className = cls || ''; }
 let app = null, desc = null, busy = false, spent = false, settled = false, gotRef = false;
 
@@ -44,6 +55,7 @@ function hasFileRef(args) {
 function useDescriptor(d) {
   if (desc) return;
   desc = d; settled = true;
+  card.hidden = false; foot.hidden = false;
   ready.hidden = false; picker.disabled = false;
   say('Choose a file to upload.');
 }
@@ -134,18 +146,53 @@ async function upload(f) {
   picker.disabled = spent;
 }
 
+// Host theme: data-theme + color-scheme, the host's style variables and its
+// font CSS (ext-apps helpers). A host may send any subset, or none.
+function applyHost(ctx) {
+  if (!ctx) return;
+  const x = window.__extApps;
+  try {
+    if (ctx.theme === 'light' || ctx.theme === 'dark') x.applyDocumentTheme(ctx.theme);
+    if (ctx.styles && ctx.styles.variables) x.applyHostStyleVariables(ctx.styles.variables);
+    if (ctx.styles && ctx.styles.css && ctx.styles.css.fonts) x.applyHostFonts(ctx.styles.css.fonts);
+  } catch (e) {}
+}
+// ChatGPT exposes only window.openai.theme (and openai:set_globals on change).
+function applyOpenAiTheme() {
+  const t = window.openai && window.openai.theme;
+  if (t === 'light' || t === 'dark') applyHost({ theme: t });
+}
+
+// Footer links open through the host (ui/open-link; ChatGPT openExternal):
+// a sandboxed iframe cannot navigate or pop up on its own. The hrefs are
+// TLS URLs checked by brand.linkUrlOk on the server.
+async function openExternal(url) {
+  try {
+    if (app && app.getHostCapabilities && (app.getHostCapabilities() || {}).openLinks) { await app.openLink({ url: url }); return; }
+    if (window.openai && window.openai.openExternal) { window.openai.openExternal({ href: url }); return; }
+  } catch (e) {}
+  window.open(url, '_blank', 'noopener,noreferrer');
+}
+for (const a of foot.querySelectorAll('a')) {
+  a.addEventListener('click', (ev) => { ev.preventDefault(); openExternal(a.href); });
+}
+
 picker.addEventListener('change', (ev) => { const f = ev.target.files && ev.target.files[0]; if (f) upload(f); });
 
 try {
   const { App, PostMessageTransport } = window.__extApps;
-  app = new App({ name: 'sunholo-mcp-files', version: '0.1.1' }, {});
+  app = new App({ name: 'sunholo-mcp-files', version: '0.1.2' }, {});
+  app.addEventListener('hostcontextchanged', () => applyHost(app.getHostContext()));
   app.ontoolinput = (p) => { gotRef = hasFileRef(p && p.arguments); };
   app.ontoolresult = onResult;
   app.ontoolcancelled = () => idle(true);
   await app.connect(new PostMessageTransport(window.parent, window.parent));
+  applyHost(app.getHostContext());
 } catch (e) {
   say('Could not connect to the host: ' + e, 'err');
 }
+applyOpenAiTheme();
+window.addEventListener('openai:set_globals', applyOpenAiTheme);
 // ChatGPT (Apps SDK) also exposes the result as window.openai.toolOutput.
 if (!settled && window.openai && window.openai.toolOutput) {
   gotRef = hasFileRef(window.openai.toolInput);
