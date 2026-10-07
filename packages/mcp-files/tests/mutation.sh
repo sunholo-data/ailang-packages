@@ -4,7 +4,8 @@
 # of the checks listed for it. Exit 1 if any mutant survives.
 #   checks: check (ailang check --package), verify (Z3 on core.ail),
 #   core / widget (ailang test), flow (tests/flow_check.sh),
-#   fetch (tests/fetch_check.sh, network)
+#   fetch (tests/fetch_check.sh, network),
+#   e2e (tests/e2e_uploads.sh: real serve-api on a random local port)
 # MUTATION_SKIP_NET=1 skips the fetch-only mutants (reported as SKIPPED).
 set -uo pipefail
 PKG="$(cd "$(dirname "$0")/.." && pwd)"
@@ -20,6 +21,7 @@ run_check() {  # $1 = check name, cwd = mutant copy; returns 0 if the check PASS
     widget) ./tools/gen_bundle.sh >/dev/null 2>&1; out=$(ailang test widget_test.ail 2>&1); grep -q " 0 failed" <<<"$out" ;;
     flow)   ./tests/flow_check.sh >/dev/null 2>&1 ;;
     fetch)  ./tests/fetch_check.sh >/dev/null 2>&1 ;;
+    e2e)    E2E_PORT=$((18900 + RANDOM % 90)) ./tests/e2e_uploads.sh >/dev/null 2>&1 ;;
   esac
 }
 
@@ -55,6 +57,17 @@ mutant "sha256 integrity check dropped"  flow.ail 'if sha != strOr(rec, "sha256"
 mutant "mime allow-list at accept dropped" flow.ail 'if mimeAllowed(mime, h.allowedMimes) == false then Err' 'if false then Err' flow
 mutant "token key stored raw"            flow.ail 'putMeta(h, "tok:${digestOf(token)}"' 'putMeta(h, "tok:${token}"' check
 mutant "fetch size cap dropped"          flow.ail 'if sizeOk(size, maxBytes) == false then' 'if false then' fetch
+mutant "temp-path guard dropped"         flow.ail 'else if isUploadTempPath(path, tempDir) == false then {' 'else if false then {' flow e2e
+mutant "unwired temp dir accepted"       flow.ail 'if trim(tempDir) == "" then Err(' 'if false then Err(' flow
+mutant "temp-path prefix check dropped"  core.ail 'if startsWith(base, "/") == false || startsWith(path, prefix) == false then false' 'if startsWith(base, "/") == false then false' core flow e2e
+mutant "relative temp dir allowed"       core.ail 'if startsWith(base, "/") == false || startsWith(path, prefix)' 'if startsWith(path, prefix)' core
+mutant "temp-path depth loosened"        core.ail '    [dir, name] =>' '    dir :: name :: _ =>' core
+mutant "temp-path dot names allowed"     core.ail '&& name != "" && name != "." && name != ".."' '&& name != ""' core e2e
+mutant "serve-api dir prefix dropped"    core.ail 'startsWith(dir, uploadTempDirPrefix()) && length(dir) > length(uploadTempDirPrefix())' 'true' core
+mutant "widget picker shown when idle"   assets/widget.js '  ready.hidden = true;
+  say(gotRef' '  ready.hidden = false;
+  say(gotRef' widget
+mutant "via-host arg named token again"  assets/widget.js 'arguments: { ticket: desc' 'arguments: { token: desc' widget
 mutant "widget oversize guard dropped"   assets/widget.js 'if (desc.maxBytes && f.size > desc.maxBytes) {' 'if (false) {' widget
 
 echo "mutants: $killed killed, $survived survived, $skipped skipped"

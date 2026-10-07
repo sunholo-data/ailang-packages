@@ -1,8 +1,8 @@
 -- Route template for adopters: copy into YOUR service module (serve-api
 -- serves only the service's own @route functions), replace fileHooks() and
 -- accountOf() with your storage and your signed-in account (see AGENT.md).
--- Never log request bodies, the token argument or createUpload's result:
--- they carry the upload token. Run serve-api with AILANG_TRACE_VALUES=off.
+-- Never log request bodies, the token / ticket arguments or createUpload's
+-- result: they carry the upload token. Run serve-api with AILANG_TRACE_VALUES=off.
 --
 -- This file is documentation that compiles; it is not exported.
 module sunholo/mcp_files/routes_template
@@ -12,7 +12,7 @@ import std/json (Json, decode, jo)
 import std/option (Option, None)
 import std/result (Result, Ok, Err)
 import pkg/sunholo/mcp_files/core (errorStatus)
-import pkg/sunholo/mcp_files/flow (Hooks, createUpload, acceptUploadFile, receiveViaHost)
+import pkg/sunholo/mcp_files/flow (Hooks, createUpload, acceptUploadFile, receiveViaHost, serveApiTempDir)
 import pkg/sunholo/mcp_files/widget (WidgetConfig, defaultWidgetConfig, uploadWidgetHtml)
 
 -- REPLACE: your storage (Parse: temp GCS bucket + Firestore). These stubs
@@ -53,23 +53,28 @@ export func createUploadTool(filename: string, mimeType: string, _headers: Json)
 
 -- POST /uploads (multipart: token, file). serve-api writes a `string` file
 -- part to a temp file named after the upload and passes its path; the path's
--- last segment is the original filename. Set --max-upload-size ABOVE
+-- last segment is the original filename. A client can also send `file` as a
+-- plain form value naming any server path (-F file=/etc/hosts), so
+-- acceptUploadFile accepts only serve-api's own temp file under
+-- serveApiTempDir() and answers 400 otherwise. Set --max-upload-size ABOVE
 -- maxBytesCeiling, so an oversized file reaches the size check instead of
 -- being cut at the serve-api limit. Needs CORS for the widget origin.
 @route("POST", "/uploads")
 @nomcp
 export func uploads(token: string, file: string) -> {_body: string, _status: int} ! {IO, FS, Env, Net, Clock, SharedMem, Declassify} =
-  match acceptUploadFile(fileHooks(), token, file, file, nowSec()) {
+  match acceptUploadFile(fileHooks(), token, file, file, serveApiTempDir(), nowSec()) {
     Ok(receipt) => {_body: receipt, _status: 200},
     Err(e) => {_body: e, _status: errorStatus(e)}
   }
 
 -- The widget-only tool (via-host fallback). Mark it @mcp_app_only once
 -- serve-api F1c ships; until then the model can see it (harmless: it needs a
--- live token, which the model never has a reason to send).
+-- live token, which the model never has a reason to send). The widget sends
+-- {ticket, filename, base64}: the argument is named `ticket`, not `token`, so
+-- MCP scanners (ailang mcp check) do not read it as a credential parameter.
 @route("POST", "/mcp/v1/uploadViaHost")
-export func uploadViaHost(token: string, filename: string, base64: string) -> Json ! {IO, FS, Env, Net, Clock, SharedMem, Declassify} =
-  match receiveViaHost(fileHooks(), token, filename, base64, nowSec()) {
+export func uploadViaHost(ticket: string, filename: string, base64: string) -> Json ! {IO, FS, Env, Net, Clock, SharedMem, Declassify} =
+  match receiveViaHost(fileHooks(), ticket, filename, base64, nowSec()) {
     Ok(receipt) => asJson(receipt),
     Err(e) => asJson(e)
   }

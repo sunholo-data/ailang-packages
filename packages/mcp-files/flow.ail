@@ -5,7 +5,10 @@
 --   createUpload    tool side: mint a single-use token, store its DIGEST,
 --                   return the SEP-2631-shaped descriptor (+ fileRef, curl);
 --   acceptUpload    POST /uploads: token -> stored bytes -> receipt (fileRef);
---   receiveViaHost  the widget-only tool: the same, with base64 bytes;
+--   acceptUploadFile  the same from serve-api's multipart temp file, refusing
+--                   any other path (a client-chosen server path);
+--   receiveViaHost  the widget-only tool: the same, with base64 bytes and the
+--                   token passed as `ticket`;
 --   resolveFileRef  a tool given a fileRef: the bytes, for their owner only,
 --                   deleted after this one read;
 --   fetchFileParam  ChatGPT openai/fileParams: one public-network fetch.
@@ -27,6 +30,7 @@ import std/rand (uuid4)
 import std/string (replace, trim, startsWith)
 import std/bytes (length as bytesLen, fromBase64)
 import std/fs (readFileRaw)
+import std/env (getEnvOr)
 import std/net (httpRequest)
 import std/json (Json, encode, decode, jo, kv, js, jint, getString, getInt)
 import std/option (Option, Some, None)
@@ -34,7 +38,8 @@ import std/result (Result, Ok, Err)
 import std/io (println)
 import ./core (UploadVerdict, Accept, Replayed, Expired, Empty, TooLarge, RefVerdict, Found, NotFound, Gone,
   tokenExpiresAt, effectiveMaxBytes, uploadVerdict, refVerdict, sizeOk, serverNameOk, fileUri, parseFileRef,
-  safeName, effectiveMime, mimeFromName, mimeAllowed, uploadDescriptor, uploadReceipt, fileError, parseFileParam)
+  safeName, effectiveMime, mimeFromName, mimeAllowed, uploadDescriptor, uploadReceipt, fileError, parseFileParam,
+  isUploadTempPath)
 
 -- ============================================================
 -- Service hooks. One effect row for every hook.
@@ -227,22 +232,42 @@ func storeUpload(h: Hooks, rec: Json, d: string, filename: string, data: bytes, 
   }
 }
 
--- serve-api's multipart route hands the file part over as a temp-file path.
-export func acceptUploadFile(h: Hooks, tokenRaw: string, filename: string, path: string, nowSec: int)
+-- The directory serve-api writes multipart temp files under: what Go's
+-- os.TempDir() answers on Unix ($TMPDIR, else /tmp). Call it in the route,
+-- which runs in serve-api's own process and environment.
+export func serveApiTempDir() -> string ! {Env} {
+  let t = getEnvOr("TMPDIR", "");
+  if trim(t) == "" then "/tmp" else t
+}
+
+-- serve-api's multipart route hands the file part over as a temp-file path,
+-- but a client can send `file` as a plain form value instead and name any
+-- server path (-F file=/etc/hosts). So `path` must be serve-api's own temp
+-- file, <tempDir>/ailang-upload-<suffix>/<name> (core.isUploadTempPath; pass
+-- serveApiTempDir()); anything else is refused with 400 before the file is
+-- read or the token is spent, with the same answer whether or not the path
+-- exists. tempDir "" is a wiring error (500).
+export func acceptUploadFile(h: Hooks, tokenRaw: string, filename: string, path: string, tempDir: string, nowSec: int)
   -> Result[string, string] ! {IO, FS, Env, Net, Clock, SharedMem, Declassify} =
-  match readFileRaw(path) {
+  if trim(tempDir) == "" then Err(fileError("server_error", 500, "acceptUploadFile needs serve-api's temp dir (flow.serveApiTempDir())"))
+  else if isUploadTempPath(path, tempDir) == false then {
+    audit("upload refused: file is not a multipart file part");
+    Err(fileError("invalid_request", 400, "send the file as a multipart file part named file (curl -F 'file=@<path>')"))
+  } else match readFileRaw(path) {
     Err(_) => Err(fileError("invalid_request", 400, "the upload has no readable file part")),
     Ok(data) => acceptUpload(h, tokenRaw, filename, data, nowSec)
   }
 
 -- The widget-only tool: the widget relays the bytes as base64 through the
--- host (no model output involved). Bad base64 is refused BEFORE the token
--- is claimed.
-export func receiveViaHost(h: Hooks, tokenRaw: string, filename: string, base64: string, nowSec: int)
+-- host (no model output involved). `ticket` is the descriptor's upload token
+-- under a name MCP scanners do not read as a credential parameter; declare the
+-- tool's argument as `ticket` too (the widget sends {ticket, filename, base64}).
+-- Bad base64 is refused BEFORE the token is claimed.
+export func receiveViaHost(h: Hooks, ticket: string, filename: string, base64: string, nowSec: int)
   -> Result[string, string] ! {IO, FS, Env, Net, Clock, SharedMem, Declassify} =
   match fromBase64(trim(base64)) {
     None => Err(fileError("invalid_request", 400, "base64 is not valid base64")),
-    Some(data) => acceptUpload(h, tokenRaw, filename, data, nowSec)
+    Some(data) => acceptUpload(h, ticket, filename, data, nowSec)
   }
 
 -- ============================================================

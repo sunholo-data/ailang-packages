@@ -13,13 +13,12 @@ import std/bytes (fromString, toString, fromInts, toInts, toBase64, length as by
 import std/option (Option, Some, None)
 import std/result (Result, Ok, Err)
 import std/json (decode, getString, getInt, getObject)
-import std/string (contains, length, startsWith)
+import std/string (contains, length, startsWith, endsWith, substring)
 import std/list (any, range, map)
 import std/crypto (sha256Hex, sha256Bytes)
 import std/fs (writeFileBytes, mkdirAll)
-import std/env (getEnvOr)
 import pkg/sunholo/mcp_files/core (errorStatus, parseFileRef)
-import pkg/sunholo/mcp_files/flow (Hooks, StoredFile, createUpload, acceptUpload, acceptUploadFile, receiveViaHost, resolveFileRef)
+import pkg/sunholo/mcp_files/flow (Hooks, StoredFile, createUpload, acceptUpload, acceptUploadFile, receiveViaHost, resolveFileRef, serveApiTempDir)
 
 -- ---------------- test hooks: SharedMem store ----------------
 
@@ -239,14 +238,25 @@ export func main() -> unit ! {IO, FS, Env, Net, Clock, SharedMem, Rand[mode=cryp
     Ok(f) => sha256Bytes(f.data) == sha256Bytes(payload()) && f.name == "x.docx",
     Err(_) => false
   }), "bad=${show(status(badB64))} via=${show(status(viaHost))}");
-  -- multipart temp file
-  let dir = "${getEnvOr("TMPDIR", "/tmp")}/mcp-files-test";
+  -- multipart temp file: only serve-api's own <tmp>/ailang-upload-<x>/<name>
+  let tmp = serveApiTempDir();
+  -- as Go's filepath.Join builds it: no doubled / when TMPDIR ends in one
+  let base = if endsWith(tmp, "/") then substring(tmp, 0, length(tmp) - 1) else tmp;
+  let dir = "${base}/ailang-upload-mcpfilestest";
+  let outside = "${base}/mcp-files-test";
   mkdirAll(dir);
-  writeFileBytes("${dir}/upload.part", payload());
-  let fromFile = match createUpload(h, "acct-1", "", "", 0, now()) {
-    Ok(d) => acceptUploadFile(h, tokenOf(d), "notes.md", "${dir}/upload.part", now() + 1),
-    Err(e) => Err(e)
-  };
+  mkdirAll(outside);
+  writeFileBytes("${dir}/notes.md", payload());
+  writeFileBytes("${outside}/upload.part", payload());
+  let ft = match createUpload(h, "acct-1", "", "", 0, now()) { Ok(d) => tokenOf(d), Err(_) => "" };
+  let refused = [acceptUploadFile(h, ft, "x", "/etc/hosts", tmp, now() + 1),
+                 acceptUploadFile(h, ft, "x", "${outside}/upload.part", tmp, now() + 1),
+                 acceptUploadFile(h, ft, "x", "${dir}/../mcp-files-test/upload.part", tmp, now() + 1),
+                 acceptUploadFile(h, ft, "x", "../../x", tmp, now() + 1)];
+  let unwired = acceptUploadFile(h, ft, "x", "${dir}/notes.md", "", now() + 1);
+  let fromFile = acceptUploadFile(h, ft, "notes.md", "${dir}/notes.md", tmp, now() + 2);
+  check("upload file outside the temp dir refused", any(\r. status(r) != 400, refused) == false && status(unwired) == 500,
+    "statuses=${show(map(status, refused))} unwired=${show(status(unwired))}");
   check("accept upload file", match fromFile { Ok(r) => jstr(r, ["sha256"]) == sha256Bytes(payload()) && jstr(r, ["mimeType"]) == "text/markdown", Err(_) => false },
     match fromFile { Ok(r) => r, Err(e) => e });
   -- account required, config checked

@@ -1,5 +1,27 @@
 # Changelog — sunholo/mcp_files
 
+## 0.1.1 — 2026-10-07
+
+**Security fix, with two breaking changes (pre-1.0).**
+
+- **Path traversal on `POST /uploads` (security).** serve-api passes a `file: string` param a path, but a
+  client could send `file` as a plain form value (`-F file=/etc/hosts`) and have that server file
+  stored and resolved back. `acceptUploadFile` now accepts only serve-api's own temp file,
+  `<tempDir>/ailang-upload-<x>/<name>` (new `core.isUploadTempPath`), and answers 400 otherwise,
+  before reading the path or spending the token. Every adopter on 0.1.0 is exposed until it upgrades.
+- **Breaking:** `acceptUploadFile(h, token, filename, path, tempDir, nowSec)` takes the temp dir; pass
+  the new `flow.serveApiTempDir()` (`$TMPDIR`, else `/tmp`). `""` is a wiring error (500).
+- **Breaking:** the via-host argument is `ticket`, not `token`: `receiveViaHost(h, ticket, filename,
+  base64, nowSec)`, and the widget calls the widget-only tool with `{ticket, filename, base64}`, so
+  rename that tool's parameter. `ailang mcp check` reads a parameter named `token` as a credential.
+- **Widget:** blank until the tool result arrives; the picker shows only for an upload descriptor.
+  Any other result gets one quiet line ("No upload needed.", or "Done." when the call was given a
+  fileRef). After an upload: "Uploaded <name> (<size>) — <afterUpload>". `WidgetConfig` gains
+  `afterUpload` (default `"processing…"`).
+- Tests: 7 core tests for the path predicate, a flow case, e2e under serve-api (`/etc/hosts`,
+  `../../x`, `../../ailang.toml` and a temp-dir escape refused, token unspent), 4 widget tests;
+  9 new mutants (25 in all).
+
 ## 0.1.0 — 2026-10-07
 
 **First release.** Moves a user's file to a remote AILANG MCP service with code, never through

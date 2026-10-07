@@ -118,6 +118,34 @@ export pure func parseFileRef(server: string, ref: string) -> Option[string] =
   } else None
 
 -- ============================================================
+-- serve-api multipart temp files
+-- ============================================================
+
+-- The prefix of the directory serve-api writes each multipart file part into
+-- (os.MkdirTemp(tempDir, "ailang-upload-*"); the file keeps its uploaded name).
+export pure func uploadTempDirPrefix() -> string = "ailang-upload-"
+
+-- True only for <tempDir>/ailang-upload-<suffix>/<name>: exactly two segments
+-- below an absolute tempDir (a trailing / is ignored), the first with
+-- serve-api's prefix and a non-empty suffix, the second neither "" nor "."
+-- nor "..". A `file` field sent as a plain form value (curl -F file=/etc/hosts)
+-- arrives as a string too, so anything else names a server path the client
+-- chose. Paths are compared as given (no symlink resolution); tempDir must be
+-- the TMPDIR serve-api itself runs with (flow.serveApiTempDir()).
+-- From docparse api_response.ail apiIsUploadTempPath.
+export pure func isUploadTempPath(path: string, tempDir: string) -> bool {
+  let base = if endsWith(tempDir, "/") then substring(tempDir, 0, length(tempDir) - 1) else tempDir
+  let prefix = "${base}/"
+  if startsWith(base, "/") == false || startsWith(path, prefix) == false then false
+  else match split(substring(path, length(prefix), length(path)), "/") {
+    [dir, name] =>
+      startsWith(dir, uploadTempDirPrefix()) && length(dir) > length(uploadTempDirPrefix())
+        && name != "" && name != "." && name != "..",
+    _ => false
+  }
+}
+
+-- ============================================================
 -- Filenames and mime types
 -- ============================================================
 

@@ -12,7 +12,7 @@ import std/result (Result, Ok, Err)
 import std/bytes (fromString, toString)
 import std/sharedmem (get as smGet, put as smPut, delete as smDelete, put_if_absent)
 import pkg/sunholo/mcp_files/core (errorStatus)
-import pkg/sunholo/mcp_files/flow (Hooks, createUpload, acceptUploadFile, receiveViaHost, resolveFileRef)
+import pkg/sunholo/mcp_files/flow (Hooks, createUpload, acceptUploadFile, receiveViaHost, resolveFileRef, serveApiTempDir)
 
 func tPutBytes(k: string, v: bytes, exp: int) -> bool ! {IO, FS, Env, Net, Clock, SharedMem} {
   smPut("b:${k}", v);
@@ -72,11 +72,11 @@ export func create(filename: string, maxBytes: int, _headers: Json) -> {_body: s
 
 @route("POST", "/uploads")
 export func uploads(token: string, file: string) -> {_body: string, _status: int} ! {IO, FS, Env, Net, Clock, SharedMem, Declassify} =
-  reply(acceptUploadFile(hooks(), token, file, file, nowSec()))
+  reply(acceptUploadFile(hooks(), token, file, file, serveApiTempDir(), nowSec()))
 
 @route("POST", "/api/viaHost")
-export func viaHost(token: string, filename: string, base64: string) -> {_body: string, _status: int} ! {IO, FS, Env, Net, Clock, SharedMem, Declassify} =
-  reply(receiveViaHost(hooks(), token, filename, base64, nowSec()))
+export func viaHost(ticket: string, filename: string, base64: string) -> {_body: string, _status: int} ! {IO, FS, Env, Net, Clock, SharedMem, Declassify} =
+  reply(receiveViaHost(hooks(), ticket, filename, base64, nowSec()))
 
 -- The resolved file's name, size and sha256 (the bytes stay server-side).
 @route("POST", "/api/resolve")

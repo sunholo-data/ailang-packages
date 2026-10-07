@@ -2,8 +2,10 @@
 # End-to-end under real serve-api (tests/example/svc.ail, SharedMem hooks):
 #   create -> multipart POST /uploads (curl -F, the descriptor's own curl line)
 #   -> resolve: sha256 of a binary file round-trips; replay 409; another
-#   account 404; second resolve 404; via-host base64 round trip; expired-cap
-#   refusal; and what happens to a file above serve-api's --max-upload-size.
+#   account 404; second resolve 404; via-host base64 round trip (ticket);
+#   size-cap refusal; what happens to a file above serve-api's
+#   --max-upload-size; CORS; and `file` sent as a plain form value naming a
+#   server path (/etc/hosts, ../../x, an escape from a temp dir) refused.
 set -uo pipefail
 cd "$(dirname "$0")/example"
 P=${E2E_PORT:-18997}
@@ -14,7 +16,7 @@ WIDGET_ORIGIN="https://$(printf '%s' "$BASE/mcp/" | shasum -a 256 | cut -c1-32).
 AILANG_TRACE_VALUES=off ailang serve-api --port "$P" --max-upload-size 3000000 --cors-origin "$WIDGET_ORIGIN" \
   --caps IO,SharedMem,Rand,Clock,Env,FS,Net . >"$LOG" 2>&1 &
 SRV=$!
-trap 'kill $SRV 2>/dev/null; rm -rf "$LOG" "$WORK"' EXIT
+trap 'kill $SRV 2>/dev/null; rm -rf "$LOG" "$WORK" "${FAKE:-}"' EXIT
 for _ in $(seq 1 60); do curl -s -o /dev/null "$BASE/api/_health" && break; sleep 1; done
 
 rc=0
@@ -60,7 +62,7 @@ L=$(upload "$T2" "$WORK/big.docx" "small.pdf")
 D3=$(create acct-1 ""); T3=$(jget upload multipart fields token <<<"$D3")
 B64=$(head -c 4096 "$WORK/big.docx" | base64 | tr -d '\n')
 V=$(curl -s -w '\n%{http_code}' -X POST "$BASE/api/viaHost" -H 'content-type: application/json' \
-  -d "{\"token\":\"$T3\",\"filename\":\"via.bin\",\"base64\":\"$B64\"}")
+  -d "{\"ticket\":\"$T3\",\"filename\":\"via.bin\",\"base64\":\"$B64\"}")
 [ "$(code "$V")" = 200 ] && [ "$(body "$V" | jget sha256)" = "$(head -c 4096 "$WORK/big.docx" | shasum -a 256 | cut -d' ' -f1)" ] \
   && pass "via-host base64 round trip" || fail "via-host base64 round trip" "$(head -c 300 <<<"$V")"
 
@@ -81,6 +83,22 @@ grep -qi "^access-control-allow-origin: $WIDGET_ORIGIN" <<<"$HDRS" && pass "widg
 D6=$(create acct-1 "c.txt"); T6=$(jget upload multipart fields token <<<"$D6")
 EV=$(curl -s -o /dev/null -w '%{http_code}' -H "Origin: https://evil.example" -F "token=$T6" -F "file=@$WORK/c.txt" "$BASE/uploads")
 [ "$EV" = 403 ] && pass "other origins refused before the handler" || fail "other origins refused before the handler" "HTTP $EV"
+
+# Path traversal: `file` sent as a plain form field (no @) arrives as a string,
+# so a client could name any server path and get it stored and resolved back.
+# Only serve-api's own multipart temp file is accepted, and a refusal does not
+# spend the token. The tmp-dir cases are the shape of a real temp path, escaped.
+TMPD=${TMPDIR:-/tmp}; TMPD=${TMPD%/}
+FAKE="$TMPD/ailang-upload-e2e$$"; mkdir -p "$FAKE"; UP=$(printf '../%.0s' $(seq 1 24))
+for p in /etc/hosts ../../x ../../ailang.toml "$FAKE/${UP}etc/hosts" "$FAKE/.." "$TMPD/x/hosts"; do
+  D7=$(create acct-1 "x.txt"); T7=$(jget upload multipart fields token <<<"$D7"); REF7=$(jget fileRef <<<"$D7")
+  PT=$(curl -s -w '\n%{http_code}' -F "token=$T7" -F "file=$p" "$BASE/uploads")
+  X7=$(resolve acct-1 "$REF7")
+  OK7=$(upload "$T7" "$WORK/c.txt" "x.txt")
+  if [ "$(code "$PT")" = 400 ] && ! grep -q fileRef <<<"$PT" && [ "$(code "$X7")" = 404 ] && [ "$(code "$OK7")" = 200 ]; then
+    pass "server path refused, token unspent: $p"
+  else fail "server path refused, token unspent: $p" "path HTTP $(code "$PT") $(body "$PT" | head -c 160); resolve HTTP $(code "$X7"); real upload HTTP $(code "$OK7")"; fi
+done
 
 [ -n "$TOKEN" ] && grep -qF "$TOKEN" "$LOG" && fail "server log has no token" "token found in log" || pass "server log has no token"
 [ $rc -eq 0 ] && echo "ok: e2e uploads"
