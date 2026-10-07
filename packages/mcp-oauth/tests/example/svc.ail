@@ -37,7 +37,7 @@ func hGet(k: string) -> Option[string] ! {IO, FS, Env, Net, Clock, SharedMem} =
 func hDel(k: string) -> bool ! {IO, FS, Env, Net, Clock, SharedMem} { smDelete("s:${k}"); true }
 func hRevoke(d: string) -> bool ! {IO, FS, Env, Net, Clock, SharedMem} { smDelete("valid:${d}"); true }
 
-func hooks() -> Hooks = { authenticate: hAuth, mint: hMint, put: hPut, get: hGet, del: hDel, revoke: hRevoke, accessTtlSec: 3600 }
+func hooks() -> Hooks ! {Env} = { authenticate: hAuth, mint: hMint, put: hPut, get: hGet, del: hDel, revoke: hRevoke, accessTtlSec: 3600, issuer: issuer() }
 
 func issuer() -> string ! {Env} = getEnvOr("OAUTH_ISSUER", "http://localhost:8080")
 func nowSec() -> int ! {Clock} = now() / 1000

@@ -3,7 +3,7 @@
 
 module sunholo/mcp_oauth/core_test
 
-import ./core (formGet, formUnescape, s256, pkceOk, verifierOk, verifierLengthOk, challengeMethodOk,
+import ./core (authResponseUrl, formGet, formUnescape, s256, pkceOk, verifierOk, verifierLengthOk, challengeMethodOk,
   redirectAllowed, loopbackRedirectOk, redirectOk, stripLoopbackPort, cimdUrlOk,
   httpsHost, codeExpiresAt, isExpired, asMetadata)
 import std/string (repeat, contains)
@@ -69,3 +69,16 @@ test "form get finds key" {
 }
 test "form get missing key empty" { formGet("a=1&b=2", "c") == "" }
 test "form get first match wins" { formGet("code=first&code=second", "code") == "first" }
+
+test "auth response carries iss (rfc9207)" {
+  authResponseUrl("https://claude.ai/api/mcp/auth_callback", "c0de", "st", "https://docparse.ailang.sunholo.com")
+    == "https://claude.ai/api/mcp/auth_callback?code=c0de&state=st&iss=https%3A%2F%2Fdocparse.ailang.sunholo.com"
+}
+test "auth response appends to an existing query" {
+  authResponseUrl("http://127.0.0.1:5000/cb?x=1", "c", "s", "https://a.example")
+    == "http://127.0.0.1:5000/cb?x=1&code=c&state=s&iss=https%3A%2F%2Fa.example"
+}
+test "metadata advertises iss support" {
+  contains(asMetadata("https://a.example"), "\"authorization_response_iss_parameter_supported\":true")
+}
+

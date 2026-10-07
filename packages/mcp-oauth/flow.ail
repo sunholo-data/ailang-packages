@@ -25,7 +25,7 @@ import std/result (Result, Ok, Err)
 import std/list (mapE, map, length as listLen)
 import std/io (println)
 import std/math (intToFloat)
-import ./core (challengeMethodOk, pkceOk, redirectOk, codeExpiresAt, isExpired, verifierCharsOk)
+import ./core (challengeMethodOk, pkceOk, redirectOk, codeExpiresAt, isExpired, verifierCharsOk, authResponseUrl)
 
 -- ============================================================
 -- Service hooks (design D3). One effect row for every hook.
@@ -46,6 +46,8 @@ import ./core (challengeMethodOk, pkceOk, redirectOk, codeExpiresAt, isExpired, 
 --   put(key, json, expiresAtSec) / get(key) / del(key) -> storage
 --   revoke(tokenDigest)          -> invalidate the access token with that sha256Hex
 --   accessTtlSec                 -> lifetime of a minted access token (sent as expires_in)
+--   issuer                       -> this server's issuer identifier (asMetadata's), returned as
+--                                   `iss` in the authorization response (RFC 9207)
 -- mint may use Declassify (e.g. to hash the key it stores); it must still return
 -- the raw token only as its result, never log or persist it unhashed.
 export type Hooks = {
@@ -55,7 +57,8 @@ export type Hooks = {
   get: (string) -> Option[string] ! {IO, FS, Env, Net, Clock, SharedMem},
   del: (string) -> bool ! {IO, FS, Env, Net, Clock, SharedMem},
   revoke: (string) -> bool ! {IO, FS, Env, Net, Clock, SharedMem},
-  accessTtlSec: int
+  accessTtlSec: int,
+  issuer: string
 }
 
 -- ============================================================
@@ -136,7 +139,7 @@ export func describeRequest(h: Hooks, handleRaw: string)
 -- 2. login complete: the service's login page posts handle + ID token
 -- ============================================================
 
--- Returns Ok(redirect Location with ?code=&state=) or Err(error JSON).
+-- Returns Ok(redirect Location with ?code=&state=&iss=) or Err(error JSON).
 export func completeLogin(h: Hooks, handleRaw: string, idToken: string, nowSec: int)
   -> Result[string, string] ! {IO, FS, Env, Net, Clock, SharedMem, Rand[mode=crypto], Declassify} {
   let reqKey = "req:${digestOf(asSecret(handleRaw))}";
@@ -157,8 +160,7 @@ export func completeLogin(h: Hooks, handleRaw: string, idToken: string, nowSec: 
                                kv("token_digest", js("")), kv("family", js(""))]));
           if h.put("code:${digestOf(code)}", rec, codeExpiresAt(nowSec) + 3600) then {
             audit("code issued client=${clientId}");
-            let sep = if strContains(redirectUri, "?") then "&" else "?";
-            Ok("${redirectUri}${sep}code=${code}&state=${getStringOr(req, "state")}")
+            Ok(authResponseUrl(redirectUri, code, getStringOr(req, "state"), h.issuer))
           } else Err(oauthError("server_error", "could not store the authorization code"))
         }
       }

@@ -17,6 +17,7 @@ import std/bytes (fromInts, toInts, fromString, toString, toBase64URL)
 import std/string (length, substring, find, startsWith, endsWith, contains as strContains, chars, toLower, split)
 import std/list (contains, any)
 import std/json (encode, jo, kv, js, ja, jb)
+import std/net (urlEncode)
 
 -- ============================================================
 -- PKCE (RFC 7636), S256 only (T1)
@@ -177,6 +178,17 @@ export pure func isExpired(nowSec: int, expiresAt: int) -> bool
 -- RFC 8414 authorization-server metadata
 -- ============================================================
 
+-- The authorization response Location (RFC 6749 §4.1.2 + RFC 9207 §2):
+-- code, state and the issuer identifier `iss`, so a client talking to more
+-- than one authorization server can reject a response from the wrong one
+-- (mix-up attacks). Appends with & when the redirect URI already has a query.
+-- code is hex and state is checked to unreserved characters (stateOk), so
+-- only iss needs percent-encoding.
+export pure func authResponseUrl(redirectUri: string, code: string, state: string, issuer: string) -> string {
+  let sep = if strContains(redirectUri, "?") then "&" else "?";
+  "${redirectUri}${sep}code=${code}&state=${state}&iss=${urlEncode(issuer)}"
+}
+
 export pure func asMetadata(issuer: string) -> string =
   encode(jo([
     kv("issuer", js(issuer)),
@@ -186,7 +198,8 @@ export pure func asMetadata(issuer: string) -> string =
     kv("grant_types_supported", ja([js("authorization_code"), js("refresh_token")])),
     kv("code_challenge_methods_supported", ja([js("S256")])),
     kv("token_endpoint_auth_methods_supported", ja([js("none")])),
-    kv("client_id_metadata_document_supported", jb(true))
+    kv("client_id_metadata_document_supported", jb(true)),
+    kv("authorization_response_iss_parameter_supported", jb(true))
   ]))
 
 -- ============================================================
