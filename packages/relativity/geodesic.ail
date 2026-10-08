@@ -227,7 +227,10 @@ pure func glSum(ns: [Node], mid: float, b: float, acc: float) -> float =
   }
 
 -- Outgoing with b <= b_c: integral_0^{1/r} b du / sqrt(1 - b^2 u^2 (1 - u)). P has
--- no real root on [0, 1/r] (r >= 1.5), so the integrand is smooth.
+-- no real root on [0, 1/r]; for r >= 2 its near-double root at u = 2/3 stays far
+-- from the interval, so the integrand is smooth (closer to the photon sphere it is
+-- not: the exact-form functions therefore require r >= 2, the M3 domain; the
+-- integrator has no such limit).
 pure func outgoingNoRoot(r: float, b: float) -> float {
   let mid = 0.5 / r;
   glSum(glNodes(), mid, b, 0.0) * mid
@@ -236,7 +239,7 @@ pure func outgoingNoRoot(r: float, b: float) -> float {
 -- Exact counterpart of `escapeAzimuth` (the oracle): ingoing 2 I(0,u2) - I(0,1/r),
 -- outgoing I(0,1/r), by Carlson when P has three real roots, else Gauss-Legendre.
 export pure func escapeAzimuthExact(r: float, psi: float) -> Ray
-  requires { r > 1.5 }
+  requires { r >= 2.0 }
 {
   let b = impactFromStaticAngle(r, psi);
   let ingoing = psi < halfPi();
@@ -252,7 +255,7 @@ export pure func escapeAzimuthExact(r: float, psi: float) -> Ray
 
 -- Exact deflection seen at r (NaN for a captured ray).
 export pure func deflectionExactAt(r: float, psi: float) -> float
-  requires { r > 1.5 }
+  requires { r >= 2.0 }
 {
   let ray = escapeAzimuthExact(r, psi);
   if ray.escaped then ray.dphi - (pi() - psi) else nan()
@@ -284,7 +287,7 @@ pure func imageLoop(i: int, lo: float, hi: float, r: float, target: float) -> fl
 -- secondary image on the far side) on (alpha_sh, pi] by 64 bisections of the
 -- exact form. Orders >= 2 hug the shadow edge and are not separated.
 export pure func imageAngle(r: float, beta: float, order: int) -> float
-  requires { r > 1.5 }
+  requires { r >= 2.0 }
 {
   let a = shadowAngularRadius(r);
   imageLoop(0, a + a * 0.000000000001, pi(), r, if order == 0 then beta else 0.0 - beta)
@@ -292,7 +295,7 @@ export pure func imageAngle(r: float, beta: float, order: int) -> float
 
 -- The Einstein ring: a source exactly behind the hole (beta = 0).
 export pure func einsteinAngle(r: float) -> float
-  requires { r > 1.5 }
+  requires { r >= 2.0 }
 {
   imageAngle(r, 0.0, 0)
 }
@@ -300,7 +303,7 @@ export pure func einsteinAngle(r: float) -> float
 -- Magnification of the image at psi: (sin psi / |sin F|) |dpsi/dF|, F = psi - delta,
 -- by a central difference of the exact form (psi strictly inside (alpha_sh, pi)).
 export pure func imageMagnification(r: float, psi: float) -> float
-  requires { r > 1.5 }
+  requires { r >= 2.0 }
 {
   let a = shadowAngularRadius(r);
   let m0 = if psi - a < pi() - psi then psi - a else pi() - psi;
@@ -405,7 +408,7 @@ pure func outputs(k: int, nOut: int, fa: Array[float], ya: Array[float], ma: Arr
 -- (16384 for a table). F is strictly increasing in psi there, so the result is
 -- monotone. Lists are built tail-recursively and indexed through arrays.
 export pure func inverseRow(r: float, nFwd: int, nOut: int) -> [InvSample]
-  requires { r > 1.5 && nFwd >= 3 && nOut >= 2 }
+  requires { r >= 2.0 && nFwd >= 3 && nOut >= 2 }
 {
   let a = shadowAngularRadius(r);
   let x0 = inverseRowLogMin();

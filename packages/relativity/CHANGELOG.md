@@ -4,7 +4,7 @@
 
 Feature: Schwarzschild null geodesics and the closed forms for a crewed visit
 (stapledons R1 milestone M3, ledger D-11/D-13/D-53). Additive: every existing
-function and digest is bit-identical to 0.9.0, except `hyper.tanh` beyond
+function and digest is value-identical to 0.9.0, except `hyper.tanh` beyond
 |u| ~ 355 (fix below).
 
 - **geodesic (new module).** Rays traced back from a static observer at r,

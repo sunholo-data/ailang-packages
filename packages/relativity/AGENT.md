@@ -279,8 +279,10 @@ V is good to about +-0.1 mag. Treat results as approximate.
   (RK4, step h in azimuth) is the general method the spec names; use it in
   offline tools (h = 0.005 is about 5e-7 rad worst case). The exact form
   (`escapeAzimuthExact`, `deflectionExact`, `deflectionExactAt`) is the
-  oracle: use it in checks, image solving and inverse rows. Never call either
-  per frame or per pixel.
+  oracle: use it in checks, image solving and inverse rows; it and everything
+  built on it (images, magnification, inverse rows) require r >= 2. Never call
+  either per frame or per pixel (an integrator call is up to thousands of RK4
+  steps, capped at 4e6).
 - **Capture is analytic.** `escapes(r, psi)`: outgoing rays escape, ingoing
   rays escape iff b > b_c (valid for r >= 1.5). A captured ray has
   `escaped = false`; `lensDeflection` and `deflectionExactAt` are NaN there.
