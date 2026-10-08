@@ -17,7 +17,8 @@ near a black hole and the numbers must be physically right:
 - Schwarzschild black holes: shadow size, deflection, gravitational shift,
   clocks and circular orbits, tides across a length, hover acceleration and
   power (closed forms), and exact null geodesics seen by a static observer at
-  any radius: the lens map, image positions, Einstein angle, magnification,
+  r >= 2 r_s (the exact form and images require r >= 2; the integrator alone
+  works for r > 1.5): the lens map, image positions, Einstein angle, magnification,
   inverse lens-table rows (`geodesic`, 0.10.0).
 
 It is pure: no effects, deterministic, and the same results on the VM and the
