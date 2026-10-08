@@ -54,9 +54,14 @@ mutant "http download_url allowed"       core.ail '  startsWith(url, "https://")
 }' verify core fetch
 mutant "claim result ignored"            flow.ail 'let firstUse = claimMeta(h, "used:${d}", "{}", exp);' 'let firstUse = claimMeta(h, "used:${d}", "{}", exp) || true;' flow
 mutant "token expiry extended"           flow.ail 'let exp = intOr(rec, "expires_at");' 'let exp = intOr(rec, "expires_at") + 600;' flow
-mutant "fileRef not deleted after use"   flow.ail '                let _ = forget(h, id);
-                if sha' '                let _ = true;
-                if sha' flow
+mutant "single-use mode ignored"         flow.ail '  if h.reuseTtlSec <= 0 then forget(h, id)' '  if false then forget(h, id)' flow
+mutant "reuse window never narrowed"     flow.ail '  else if intOr(rec, "first_read_at") > 0 then true' '  else if true then true' flow
+# (A mutant that drops the first_read_at guard is EQUIVALENT: each read is
+# capped by the record's stored expiry, which the first read already narrowed,
+# so re-narrowing can never extend the window. The guard only saves writes.)
+mutant "window ignores the upload expiry" flow.ail '    let until = reuseUntil(nowSec, h.reuseTtlSec, intOr(rec, "expires_at"));' '    let until = nowSec + h.reuseTtlSec;' flow
+mutant "reuse window not capped"         core.ail '  if firstReadSec + reuseTtlSec < expiresAt then firstReadSec + reuseTtlSec else expiresAt' '  firstReadSec + reuseTtlSec' verify flow
+mutant "release ignores the owner"       flow.ail '          if ownerMatches(strOr(rec, "account"), account) == false then Err' '          if false then Err' flow
 mutant "sha256 integrity check dropped"  flow.ail 'if sha != strOr(rec, "sha256") then' 'if false then' flow
 mutant "mime allow-list at accept dropped" flow.ail 'if mimeAllowed(mime, h.allowedMimes) == false then Err' 'if false then Err' flow
 mutant "token key stored raw"            flow.ail 'putMeta(h, "tok:${digestOf(token)}"' 'putMeta(h, "tok:${token}"' check
@@ -72,6 +77,9 @@ mutant "widget picker shown when idle"   assets/widget.js '  ready.hidden = true
   const line = CFG.resultSummary' '  ready.hidden = false;
   const line = CFG.resultSummary' widget
 mutant "via-host arg named token again"  assets/widget.js 'arguments: { ticket: desc' 'arguments: { token: desc' widget
+mutant "widget waits on the tool call"  assets/widget.js 'r = await withTimeout(app.callServerTool({ name: tool, arguments: args }, { timeout: TOOL_TIMEOUT_MS }), TOOL_TIMEOUT_MS);' 'r = await app.callServerTool({ name: tool, arguments: args }, { timeout: TOOL_TIMEOUT_MS });' sim
+mutant "widget hand-off text dropped"   assets/widget.js "(CFG.askNextText || 'ask the assistant to continue')" "'parsing…'" sim
+mutant "widget success suffix dropped"  assets/widget.js "const suffix = String(CFG.successSuffix || '')" "const suffix = String('')" sim
 mutant "widget oversize guard dropped"   assets/widget.js 'if (desc.maxBytes && f.size > desc.maxBytes) {' 'if (false) {' widget
 
 # 0.1.2 branding: the logo sanitiser, the accent check, links, rendering, theming.
@@ -113,10 +121,10 @@ mutant "after-upload: substring placeholder filled" assets/widget.js "      if (
 mutant "after-upload: placeholder key allowed"  assets/widget.js "        if (k.indexOf(PLACEHOLDER) >= 0) throw" "        if (false) throw" sim
 mutant "after-upload: placeholder count unchecked" assets/widget.js "  if (n !== 1) throw" "  if (n < 1) throw" sim
 mutant "after-upload: context size cap dropped" assets/widget.js "  const text = head.length + body.length + 40 <= MAX_CONTEXT_CHARS" "  const text = true" sim
-mutant "after-upload: error not told to the model" assets/widget.js "    try {
-      await tell(uploadedText(rc, via) + ' The widget then called '" "    try { return;
-      await tell(uploadedText(rc, via) + ' The widget then called '" sim
-mutant "after-upload: summary not shown"     assets/widget.js "  const done = parsed ? clip(" "  const done = false ? clip(" sim
+mutant "after-upload: hand-off not told to the model" assets/widget.js "  try {
+    await tell('The user uploaded '" "  try { return;
+    await tell('The user uploaded '" sim
+mutant "after-upload: summary not shown"     assets/widget.js "  const done = (parsed ? clip(" "  const done = (false ? clip(" sim
 mutant "template: key check dropped"         widget.ail "        else if placeholderKeys(j) != 0 then" "        else if false then" widget
 mutant "template: whole-value check dropped" widget.ail "        else if wholePlaceholders(j) != 1 then" "        else if false then" widget
 mutant "template: raw count dropped"         widget.ail "        if occurrences(t, fileRefPlaceholder()) != 1 then" "        if false then" widget

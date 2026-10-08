@@ -3,7 +3,7 @@
 -- file-object schema golden and its parser.
 
 module sunholo/mcp_files/core_test
-import ./core (UploadVerdict, Accept, Replayed, Expired, Empty, TooLarge, RefVerdict, Found, NotFound, Gone, tokenExpiresAt, isExpired, sizeOk, effectiveMaxBytes, uploadVerdict, ownerMatches, refVerdict, isFileId, serverNameOk, fileUri, parseFileRef, safeName, extensionOf, mimeFromName, effectiveMime, mimeAllowed, uploadPart, uploadDescriptor, uploadReceipt, digestB64Url, fileError, errorStatus, openAiFileSchema, openAiFileParamsMeta, parseFileParam, downloadUrlOk, isUploadTempPath, uploadTempDirPrefix)
+import ./core (UploadVerdict, Accept, Replayed, Expired, Empty, TooLarge, RefVerdict, Found, NotFound, Gone, tokenExpiresAt, isExpired, reuseUntil, defaultReuseTtlSec, sizeOk, effectiveMaxBytes, uploadVerdict, ownerMatches, refVerdict, isFileId, serverNameOk, fileUri, parseFileRef, safeName, extensionOf, mimeFromName, effectiveMime, mimeAllowed, uploadPart, uploadDescriptor, uploadReceipt, digestB64Url, fileError, errorStatus, openAiFileSchema, openAiFileParamsMeta, parseFileParam, downloadUrlOk, isUploadTempPath, uploadTempDirPrefix)
 import std/string (repeat, contains, startsWith, length)
 import std/json (encode, decode)
 import std/option (Option, Some, None)
@@ -12,6 +12,18 @@ import std/result (Result, Ok, Err)
 pure func hexId() -> string = "0123456789abcdef0123456789abcdef"
 
 -- ---------------- token policy ----------------
+test "reuse window: 30 minutes after the first read by default" {
+  defaultReuseTtlSec() == 1800 && reuseUntil(1000, 1800, 100000) == 2800
+}
+
+test "reuse window never outlives the object" {
+  reuseUntil(99000, 1800, 100000) == 100000
+}
+
+property "reuse window is capped by both bounds" {
+  forall(t: int, ttl: int, exp: int) => reuseUntil(t, ttl, exp) <= exp && reuseUntil(t, ttl, exp) <= t + ttl
+}
+
 test "token expires after its ttl" {
   tokenExpiresAt(1000, 600) == 1600
 }

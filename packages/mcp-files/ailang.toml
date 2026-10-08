@@ -1,13 +1,13 @@
 [package]
 name = "sunholo/mcp_files"
-version = "0.1.3"
+version = "0.1.4"
 edition = "1"
 ailang = ">=0.52.3"
 description = "MCP file handoff: single-use upload tokens, SEP-2631 upload descriptors, account-bound fileRefs, ChatGPT fileParams fetch, and an MCP Apps upload widget"
 license = "Apache-2.0"
 
 [release]
-kind = "breaking"   # security | fix | feature | breaking — 0.1.3: the widget calls a configured server tool after the upload; WidgetConfig gains `onUploaded` and `resultSummary`, which breaks a literal WidgetConfig construction (not defaultWidgetConfig or a { cfg | … } update)
+kind = "breaking"   # security | fix | feature | breaking — 0.1.4: Hooks gains reuseTtlSec (fileRefs reusable by their owner for a window, a behaviour change) and WidgetConfig gains askNextText, successSuffix, autoCallTimeoutMs; both break literal constructions
 
 [exports]
 modules = [

@@ -52,8 +52,11 @@ O=$(resolve acct-1 "$REF")
 [ "$(code "$O")" = 200 ] && [ "$(body "$O" | jget sha256)" = "$SHA" ] && [ "$(body "$O" | jget sizeBytes)" = 1536000 ] \
   && pass "owner resolves identical bytes" || fail "owner resolves identical bytes" "$O"
 
+# 0.1.4: the owner may read it again inside the reuse window (Hooks.reuseTtlSec).
 A=$(resolve acct-1 "$REF")
-[ "$(code "$A")" = 404 ] && pass "fileRef single read" || fail "fileRef single read" "$A"
+[ "$(code "$A")" = 200 ] && [ "$(body "$A" | jget sha256)" = "$SHA" ] && pass "fileRef reusable by its owner" || fail "fileRef reusable by its owner" "$(head -c 300 <<<"$A")"
+X2=$(resolve acct-2 "$REF")
+[ "$(code "$X2")" = 404 ] && pass "other account still 404 after the owner's reads" || fail "other account still 404 after the owner's reads" "$X2"
 
 D2=$(create acct-1 "small.pdf" 1000); T2=$(jget upload multipart fields token <<<"$D2")
 L=$(upload "$T2" "$WORK/big.docx" "small.pdf")

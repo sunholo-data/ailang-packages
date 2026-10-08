@@ -1,5 +1,47 @@
 # Changelog — sunholo/mcp_files
 
+## 0.1.4 — 2026-10-08
+
+**fileRefs are reusable by their owner for a while, and the widget never waits on its own tool
+call.** Behaviour change (privacy text) and one breaking change: `Hooks` gains `reuseTtlSec`, and
+`WidgetConfig` gains three fields, so a literal construction of either no longer compiles
+(`defaultWidgetConfig(...)` / `{ cfg | ... }` updates are unaffected).
+
+- **Why.** Live in claude.ai (prod, 2026-10-08):
+  - a 2.37 MB upload was accepted, but the widget's `callServerTool(mcpParse, {fileRef})` to an
+    OAuth-gated tool never reached the server. The card sat on "parsing…" until the user typed
+    "continue";
+  - the parse then returned 183 601 bytes; the model saw about 100 k characters and could not fetch
+    the rest, because the fileRef had been deleted on its first read.
+- **Reusable fileRef.** New `Hooks.reuseTtlSec`, default `core.defaultReuseTtlSec()` = 1800.
+  - `resolveFileRef` no longer deletes on the first read. That read opens a window,
+    `core.reuseUntil(firstRead, reuseTtlSec, uploadExpiry)` (Z3: never past either bound), and the
+    owner may read the same file again until it closes. A later read never extends it.
+  - After the window: 410, and the bytes and record are deleted. The store's TTL and lifecycle still
+    clean up files nobody reads again.
+  - The sha256 check runs on every read. Cross-account reads are still 404 and delete nothing.
+  - If the narrowed record cannot be written, the file is deleted (fail closed).
+  - `reuseTtlSec <= 0` restores the 0.1.3 single use.
+- **`releaseFileRef(h, account, fileRef)`.** The owner deletes a file early; another account's ref
+  is 404.
+- **The widget hands off instead of waiting.**
+  - The after-upload `tools/call` gets `cfg.autoCallTimeoutMs`, default 10 000 (was 5 minutes),
+    enforced with the widget's own timer.
+  - On a timeout, a rejected call, an `isError` result, a bad template, or a host without
+    `serverTools`, the card says "✓ Uploaded <name> (<size>) — <cfg.askNextText>" (default "ask the
+    assistant to continue"). The model gets "The user uploaded <name>; call <tool> with
+    fileRef=<ref>." and why.
+  - On success, `cfg.successSuffix` (default "") is appended whole to the "✓ Parsed …" line.
+  - Never `ui/message`.
+- **Tests.**
+  - Flow: reusable by the owner within the window, refused (410) and deleted after it, cross-account
+    refused during reuse, window capped by the upload's expiry, single-use mode, `releaseFileRef`.
+  - Unit: `reuseUntil` (Z3 + a property).
+  - Widget sim: the timeout hand-off, still waiting before it, error / rejected / no-capability
+    hand-offs, a custom `askNextText`, `successSuffix` (and kept whole on a long line).
+  - New mutants for the reuse window, release, the timeout, the hand-off text and the suffix.
+- **AGENT.md.** "After the upload" rewritten; a new section, "What to tell users (privacy)".
+
 ## 0.1.3 — 2026-10-07
 
 **The widget finishes the job: after the upload it calls a configured server tool itself; result

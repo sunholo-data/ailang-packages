@@ -273,8 +273,23 @@ test "widget calls the configured tool after the upload, with substituted args" 
   contains(appScript(), autoCallJs()) && contains(appScript(), "fillArgs(CFG.onUploaded.argsJson, rc.fileRef)") && contains(appScript(), substituteJs())
 }
 
-test "widget falls back when the host cannot call tools" {
-  contains(appScript(), capabilityJs()) && contains(appScript(), "'tell the assistant to continue.'")
+test "widget hands off when the host cannot call tools" {
+  contains(appScript(), capabilityJs()) && contains(appScript(), "await handOff(rc, via, CFG.onUploaded.tool, 'the host does not offer widget tool calls (serverTools)');")
+}
+
+test "0.1.4 defaults: hand-off text, no suffix, 10 s auto-call timeout" {
+  cfg().askNextText == "ask the assistant to continue" && cfg().successSuffix == "" && cfg().autoCallTimeoutMs == 10000
+    && contains(configJson(cfg()), "\"askNextText\":\"ask the assistant to continue\"") && contains(configJson(cfg()), "\"successSuffix\":\"\"")
+    && contains(configJson(cfg()), "\"autoCallTimeoutMs\":10000")
+}
+
+test "0.1.4 config: suffix and hand-off text reach the widget; a non-positive timeout is the default" {
+  contains(configJson({ cfg() | successSuffix: " — ask Claude about it", askNextText: "ask Claude to parse it", autoCallTimeoutMs: 0 }),
+    "\"askNextText\":\"ask Claude to parse it\",\"successSuffix\":\" — ask Claude about it\",\"autoCallTimeoutMs\":10000")
+}
+
+test "the widget never waits on the tool call longer than its timeout" {
+  contains(appScript(), "r = await withTimeout(app.callServerTool({ name: tool, arguments: args }, { timeout: TOOL_TIMEOUT_MS }), TOOL_TIMEOUT_MS);")
 }
 
 test "result cards summarise by default, and can be turned off" {

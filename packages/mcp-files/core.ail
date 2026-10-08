@@ -73,6 +73,16 @@ ensures { result == (owner != "" && owner == caller) } {
   owner != "" && owner == caller
 }
 
+-- Reuse window (0.1.4): after its first read a fileRef stays readable by its
+-- owner until reuseUntil(firstReadSec, reuseTtlSec, expiresAt), never past
+-- the object's own expiry and never more than reuseTtlSec after that read.
+export pure func defaultReuseTtlSec() -> int = 1800
+
+export pure func reuseUntil(firstReadSec: int, reuseTtlSec: int, expiresAt: int) -> int
+ensures { result <= expiresAt, result <= firstReadSec + reuseTtlSec, result == expiresAt || result == firstReadSec + reuseTtlSec } {
+  if firstReadSec + reuseTtlSec < expiresAt then firstReadSec + reuseTtlSec else expiresAt
+}
+
 -- Found | NotFound (unknown, or another account's: indistinguishable to the
 -- caller) | Gone (the caller's own, but expired).
 export type RefVerdict = Found | NotFound | Gone deriving (Eq)

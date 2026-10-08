@@ -78,6 +78,10 @@ async function run(opts) {
   const file = { name: 'AGM.docx', size: 13211, arrayBuffer: async () => new ArrayBuffer(13211) };
   els.file.listeners.change({ target: { files: [file] } });
   for (let i = 0; i < 200; i++) await new Promise((r) => setImmediate(r));
+  if (opts.wait) {
+    await new Promise((r) => setTimeout(r, opts.wait));
+    for (let i = 0; i < 200; i++) await new Promise((r) => setImmediate(r));
+  }
   log.status = els.status.textContent; log.cls = els.status.className;
   log.text = log.contexts.map((c) => c.content[0].text).join('\n---\n');
   return log;
@@ -103,7 +107,7 @@ await check('upload ok: calls the tool with the substituted args, then tells the
   const c = log.calls[0];
   expect(c && c.params.name === 'mcpParse', 'tool name');
   expect(c && JSON.stringify(c.params.arguments) === JSON.stringify({ fileRef: REF, outputFormat: 'blocks' }), 'arguments substituted');
-  expect(c && c.options && c.options.timeout >= 60000, 'a timeout above the 60 s default');
+  expect(c && c.options && c.options.timeout === 10000, 'the 0.1.4 short timeout (10 s) by default');
   expect(log.contexts.length === 1, 'one model-context update');
   expect(log.text.includes('fileRef: ' + REF), 'context names the fileRef');
   expect(log.text.includes('68 blocks · 13 headings · 4 tracked changes'), 'context carries the summary');
@@ -128,31 +132,68 @@ await check('large result: summary and fileRef only, model told to call the tool
   expect(log.text.length < 100000, 'context under 100k characters (' + log.text.length + ')');
   expect(!log.text.includes('xxxxxxxxxx'), 'result body left out');
   expect(log.text.includes('9000 blocks') && log.text.includes(REF), 'summary and fileRef kept');
-  expect(log.text.includes('call mcpParse yourself'), 'model told to call the tool');
+  expect(log.text.includes('call mcpParse yourself with fileRef=' + REF), 'model told to call the tool with the fileRef');
   expect(log.status === '✓ Parsed AGM.docx · 9000 blocks', 'status');
 });
 
-await check('tool error: shown to the user and told to the model', { tools: { mcpParse: () => ({ isError: true, content: [{ type: 'text', text: 'unsupported format' }] }) } }, (log, expect) => {
+// 0.1.4: the card never waits on the tool call. Every way it can fail ends in
+// the same hand-off: "✓ Uploaded … — <askNextText>" and the model told exactly
+// which tool to call with which fileRef.
+const handedOff = (log, expect, reason) => {
+  expect(log.status === '✓ Uploaded AGM.docx (12.9 KB) — ask the assistant to continue', 'hand-off status: ' + JSON.stringify(log.status));
+  expect(log.cls === 'ok', 'ok class');
+  expect(log.contexts.length === 1, 'one model-context update');
+  expect(log.text.startsWith('The user uploaded AGM.docx; call mcpParse with fileRef=' + REF + '.'), 'model told which tool and fileRef');
+  if (reason) expect(log.text.includes(reason), 'model told why: ' + reason);
+};
+
+await check('tool never answers: hand-off after the short timeout', { cfg: { autoCallTimeoutMs: 50 }, wait: 120,
+  tools: { mcpParse: () => new Promise(() => {}) } }, (log, expect) => {
+  expect(log.calls.length === 1 && log.calls[0].options.timeout === 50, 'one call with the configured timeout');
+  handedOff(log, expect, 'no answer within');
+});
+
+await check('tool still running before the timeout: card shows afterUpload, nothing told yet', { cfg: { autoCallTimeoutMs: 5000 },
+  tools: { mcpParse: () => new Promise(() => {}) } }, (log, expect) => {
+  expect(log.status === 'Uploaded AGM.docx (12.9 KB) — parsing…', 'waiting status');
+  expect(log.contexts.length === 0, 'nothing told yet');
+});
+
+await check('tool error result: hand-off', { tools: { mcpParse: () => ({ isError: true, content: [{ type: 'text', text: 'unsupported format' }] }) } }, (log, expect) => {
   expect(log.calls.length === 1, 'one tools/call');
-  expect(log.cls === 'err' && log.status.includes('mcpParse failed: unsupported format'), 'error shown');
-  expect(log.contexts.length === 1 && log.text.includes('failed: unsupported format') && log.text.includes('Retry by calling mcpParse'), 'model told it can retry');
-  expect(log.text.includes(REF), 'model has the fileRef');
+  handedOff(log, expect, 'unsupported format');
 });
 
-await check('tool call rejected (timeout/transport): shown and told', { tools: { mcpParse: () => { throw new Error('Request timed out'); } } }, (log, expect) => {
-  expect(log.cls === 'err' && log.status.includes('Request timed out'), 'error shown');
-  expect(log.contexts.length === 1 && log.text.includes('Request timed out'), 'model told');
+await check('tool call rejected (transport): hand-off', { tools: { mcpParse: () => { throw new Error('Request failed'); } } }, (log, expect) => {
+  handedOff(log, expect, 'Request failed');
 });
 
-await check('host without serverTools: no call, fileRef reported, user asked to continue', { caps: {}, tools: parseTool }, (log, expect) => {
+await check('host without serverTools: no call, hand-off', { caps: {}, tools: parseTool }, (log, expect) => {
   expect(log.calls.length === 0, 'no tools/call');
-  expect(log.contexts.length === 1 && log.text.includes(REF), 'fileRef reported');
-  expect(log.status === 'Uploaded AGM.docx (12.9 KB) — tell the assistant to continue.', 'status asks the user to continue');
+  handedOff(log, expect, 'serverTools');
 });
 
-await check('host without capabilities at all: same fallback', { caps: null, tools: parseTool }, (log, expect) => {
+await check('host without capabilities at all: same hand-off', { caps: null, tools: parseTool }, (log, expect) => {
   expect(log.calls.length === 0, 'no tools/call');
-  expect(log.status.endsWith('tell the assistant to continue.'), 'fallback status');
+  handedOff(log, expect);
+});
+
+await check('askNextText is configurable', { caps: {}, cfg: { askNextText: 'ask Claude to parse it' }, tools: parseTool }, (log, expect) => {
+  expect(log.status === '✓ Uploaded AGM.docx (12.9 KB) — ask Claude to parse it', 'custom hand-off text');
+});
+
+await check('successSuffix is appended to the success line', { cfg: { successSuffix: ' — ask Claude about it' }, tools: parseTool }, (log, expect) => {
+  expect(log.status === '✓ Parsed AGM.docx · 68 blocks · 13 headings · 4 tracked changes — ask Claude about it', 'suffix: ' + JSON.stringify(log.status));
+});
+
+await check('successSuffix survives a long summary (summary cut, suffix whole)', { cfg: { successSuffix: ' — ask Claude about it' },
+  receipt: Object.assign({}, RECEIPT, { name: 'y'.repeat(90) + '.docx' }), tools: parseTool }, (log, expect) => {
+  expect(log.status.length <= 120, 'one line (' + log.status.length + ')');
+  expect(log.status.endsWith('… — ask Claude about it'), 'suffix kept whole after the cut: ' + JSON.stringify(log.status));
+});
+
+await check('no successSuffix: unchanged 0.1.3 success line', { tools: parseTool }, (log, expect) => {
+  expect(log.status === '✓ Parsed AGM.docx · 68 blocks · 13 headings · 4 tracked changes', 'no suffix');
 });
 
 await check('no tool configured: the 0.1.2 behaviour', { cfg: { onUploaded: { tool: '', argsJson: '' }, afterUpload: 'processing…' }, tools: parseTool }, (log, expect) => {
@@ -192,8 +233,7 @@ const badTemplates = {
 for (const [what, tpl] of Object.entries(badTemplates)) {
   await check('template refused in the widget: ' + what, { cfg: { onUploaded: { tool: 'mcpParse', argsJson: tpl } }, tools: parseTool }, (log, expect) => {
     expect(toolCalls(log, 'mcpParse').length === 0, 'no tools/call');
-    expect(log.cls === 'err' && log.status.includes('mcpParse failed'), 'error shown');
-    expect(log.contexts.length === 1 && log.text.includes(REF), 'model told, with the fileRef');
+    handedOff(log, expect);
   });
 }
 

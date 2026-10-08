@@ -26,7 +26,7 @@ func noGetMeta(k: string) -> Option[string] ! {IO, FS, Env, Net, Clock, SharedMe
 pure func fileHooks() -> Hooks =
   {putBytes: noBytes, getBytes: noGetBytes, delBytes: noDel, putMeta: noMeta, claimMeta: noMeta, getMeta: noGetMeta,
    delMeta: noDel, server: "svc.example.com", uploadUrl: "https://svc.example.com/uploads",
-   tokenTtlSec: 600, objectTtlSec: 86400, maxBytesCeiling: 31457280, allowedMimes: []}
+   tokenTtlSec: 600, objectTtlSec: 86400, reuseTtlSec: 1800, maxBytesCeiling: 31457280, allowedMimes: []}
 
 -- REPLACE: the account your @mcp_auth("oauth2") token verifier signed in.
 pure func accountOf(headers: Json) -> string = ""

@@ -9,8 +9,10 @@
 --                   any other path (a client-chosen server path);
 --   receiveViaHost  the widget-only tool: the same, with base64 bytes and the
 --                   token passed as `ticket`;
---   resolveFileRef  a tool given a fileRef: the bytes, for their owner only,
---                   deleted after this one read;
+--   resolveFileRef  a tool given a fileRef: the bytes, for their owner only;
+--                   readable again until the reuse window closes (0.1.4,
+--                   Hooks.reuseTtlSec; 0 = deleted after this one read);
+--   releaseFileRef  the owner deletes a fileRef early;
 --   fetchFileParam  ChatGPT openai/fileParams: one public-network fetch.
 --
 -- Secret handling (tests/lint.sh and tests/ifc_leaks.sh enforce it):
@@ -36,7 +38,7 @@ import std/json (Json, encode, decode, jo, kv, js, ja, jint, getString, getInt)
 import std/option (Option, Some, None)
 import std/result (Result, Ok, Err)
 import std/io (println)
-import ./core (UploadVerdict, Accept, Replayed, Expired, Empty, TooLarge, RefVerdict, Found, NotFound, Gone,
+import ./core (reuseUntil, ownerMatches, UploadVerdict, Accept, Replayed, Expired, Empty, TooLarge, RefVerdict, Found, NotFound, Gone,
   tokenExpiresAt, effectiveMaxBytes, uploadVerdict, refVerdict, sizeOk, serverNameOk, fileUri, parseFileRef,
   safeName, effectiveMime, mimeFromName, mimeAllowed, uploadDescriptor, uploadReceipt, fileError, parseFileParam,
   isUploadTempPath, singleUseNote, maxBatchUploads)
@@ -64,6 +66,10 @@ import ./core (UploadVerdict, Accept, Replayed, Expired, Empty, TooLarge, RefVer
 --   uploadUrl        the POST /uploads URL the descriptor names (https)
 --   tokenTtlSec      token lifetime (core.defaultTokenTtlSec() = 600)
 --   objectTtlSec     how long an uploaded, unread file is kept (Parse: 86400)
+--   reuseTtlSec      0.1.4: after the first read the owner may read the file
+--                    again for this long, capped by the object's expiry
+--                    (core.defaultReuseTtlSec() = 1800). <= 0 = the 0.1.3
+--                    behaviour: deleted on first read.
 --   maxBytesCeiling  the hard cap every token is bound under
 --   allowedMimes     mime allow-list ([] = any)
 export type Hooks = {
@@ -78,6 +84,7 @@ export type Hooks = {
   uploadUrl: string,
   tokenTtlSec: int,
   objectTtlSec: int,
+  reuseTtlSec: int,
   maxBytesCeiling: int,
   allowedMimes: [string]
 }
@@ -299,22 +306,25 @@ export func receiveViaHost(h: Hooks, ticket: string, filename: string, base64: s
 -- 3. resolveFileRef (a tool given fileRef)
 -- ============================================================
 
--- The file behind fileRef, for `account` only, deleted after this read
--- (bytes and record). Another account's ref answers exactly like an unknown
--- one (404) and is NOT deleted. The bytes are checked against the stored
--- sha256.
+-- The file behind fileRef, for `account` only. Another account's ref answers
+-- exactly like an unknown one (404) and is NOT deleted. The bytes are checked
+-- against the stored sha256 on every read.
+-- 0.1.4: the first read opens a reuse window (core.reuseUntil: at most
+-- h.reuseTtlSec, never past the object's expiry) and the record's expiry
+-- becomes its end; reads inside it return the same file, reads after it get
+-- 410 and delete it. h.reuseTtlSec <= 0 deletes on the first read (0.1.3).
 export func resolveFileRef(h: Hooks, account: string, fileRef: string, nowSec: int)
   -> Result[StoredFile, string] ! {IO, FS, Env, Net, Clock, SharedMem} =
   match parseFileRef(h.server, fileRef) {
     None => Err(fileError("invalid_request", 400, "not a fileRef issued by this service (expected mcp-file://${h.server}/file_<id>)")),
     Some(id) => match getMeta(h, "ref:${id}") {
-      None => Err(fileError("not_found", 404, "unknown fileRef (files are kept until first use, then deleted)")),
+      None => Err(fileError("not_found", 404, unknownRefText())),
       Some(raw) => match decode(raw) {
         Err(_) => Err(fileError("server_error", 500, "corrupt file record")),
         Ok(rec) => {
           let v = refVerdict(strOr(rec, "account"), account, nowSec, intOr(rec, "expires_at"));
           match v {
-            NotFound => Err(fileError("not_found", 404, "unknown fileRef (files are kept until first use, then deleted)")),
+            NotFound => Err(fileError("not_found", 404, unknownRefText())),
             Gone => {
               let _ = forget(h, id);
               Err(fileError("gone", 410, "this upload has expired; upload the file again"))
@@ -326,9 +336,11 @@ export func resolveFileRef(h: Hooks, account: string, fileRef: string, nowSec: i
               },
               Some(data) => {
                 let sha = sha256Bytes(data);
-                let _ = forget(h, id);
-                if sha != strOr(rec, "sha256") then Err(fileError("server_error", 500, "stored file failed its sha256 check"))
-                else {
+                if sha != strOr(rec, "sha256") then {
+                  let _ = forget(h, id);
+                  Err(fileError("server_error", 500, "stored file failed its sha256 check"))
+                } else {
+                  let _ = afterRead(h, id, rec, nowSec);
                   audit("fileRef resolved file=${id}");
                   Ok({fileRef: fileRef, name: strOr(rec, "name"), mimeType: strOr(rec, "mime"),
                       sizeBytes: bytesLen(data), sha256: sha, data: data})
@@ -337,6 +349,46 @@ export func resolveFileRef(h: Hooks, account: string, fileRef: string, nowSec: i
             }
           }
         }
+      }
+    }
+  }
+
+pure func unknownRefText() -> string =
+  "unknown fileRef (a file is kept for its owner for a limited time after upload, then deleted)"
+
+-- After a good read: single use (reuseTtlSec <= 0) deletes; otherwise the
+-- first read narrows the record's expiry to the reuse window. A later read
+-- leaves it alone, so reads never extend the window. If the narrowed record
+-- cannot be written, the file is deleted (fail closed: never a longer window).
+func afterRead(h: Hooks, id: string, rec: Json, nowSec: int) -> bool ! {IO, FS, Env, Net, Clock, SharedMem} =
+  if h.reuseTtlSec <= 0 then forget(h, id)
+  else if intOr(rec, "first_read_at") > 0 then true
+  else {
+    let until = reuseUntil(nowSec, h.reuseTtlSec, intOr(rec, "expires_at"));
+    let meta = encode(jo([kv("account", js(strOr(rec, "account"))), kv("name", js(strOr(rec, "name"))),
+                          kv("mime", js(strOr(rec, "mime"))), kv("size", jint(intOr(rec, "size"))),
+                          kv("sha256", js(strOr(rec, "sha256"))), kv("expires_at", jint(until)),
+                          kv("first_read_at", jint(nowSec))]));
+    if putMeta(h, "ref:${id}", meta, until) then true else forget(h, id)
+  }
+
+-- The owner deletes a fileRef (bytes and record) before its window closes.
+-- Another account's or an unknown ref: 404, nothing deleted.
+export func releaseFileRef(h: Hooks, account: string, fileRef: string)
+  -> Result[string, string] ! {IO, FS, Env, Net, Clock, SharedMem} =
+  match parseFileRef(h.server, fileRef) {
+    None => Err(fileError("invalid_request", 400, "not a fileRef issued by this service (expected mcp-file://${h.server}/file_<id>)")),
+    Some(id) => match getMeta(h, "ref:${id}") {
+      None => Err(fileError("not_found", 404, unknownRefText())),
+      Some(raw) => match decode(raw) {
+        Err(_) => Err(fileError("server_error", 500, "corrupt file record")),
+        Ok(rec) =>
+          if ownerMatches(strOr(rec, "account"), account) == false then Err(fileError("not_found", 404, unknownRefText()))
+          else {
+            let _ = forget(h, id);
+            audit("fileRef released file=${id}");
+            Ok(encode(jo([kv("released", js(fileRef))])))
+          }
       }
     }
   }
