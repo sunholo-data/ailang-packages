@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.10.1
+
+Fix (documentation only; no API or behaviour change, every function and digest
+is bit-identical to 0.10.0). The 0.10.0 `ai_summary` and AGENT.md said the
+exact null geodesics hold "for a static observer at any radius". They do not:
+`escapeAzimuthExact`, `deflectionExactAt`, `imageAngle`, `einsteinAngle`,
+`imageMagnification` and `inverseRow` require r >= 2 r_s (closer to the photon
+sphere the outgoing quadrature loses accuracy, 8.5e-6 rad at r = 1.51); the
+integrator (`escapeAzimuth`, `lensDeflection`, `lensRegular`) requires only
+r > 1.5. The summary and AGENT.md now say so.
+
+Known, unchanged: seven auto-generated property tests in older modules
+(`expm1`, `sinhc`, `kinematics.accelerate`, `optics.doppler`,
+`dopplerApparent`, `cmbSeenTemperature`, `cmbSeenTemperatureApparent`) fail
+under `ailang test <module>.ail` because the random generator reaches
+|rapidity| ~ 900 where cosh/exp overflow and an `ensures` sees Inf. They are
+not part of the package test suite (`pkg quality` 219/219) and predate 0.10.0;
+tightening those contracts is left to a later release.
+
 ## 0.10.0
 
 Feature: Schwarzschild null geodesics and the closed forms for a crewed visit
