@@ -1,5 +1,70 @@
 # Changelog
 
+## 0.10.0
+
+Feature: Schwarzschild null geodesics and the closed forms for a crewed visit
+(stapledons R1 milestone M3, ledger D-11/D-13/D-53). Additive: every existing
+function and digest is value-identical to 0.9.0, except `hyper.tanh` beyond
+|u| ~ 355 (fix below).
+
+- **geodesic (new module).** Rays traced back from a static observer at r,
+  at angle psi from the hole direction.
+  - The integrator (spec section 3): `binetStep` (one RK4 step of
+    u'' = -u + 1.5 u^2 in azimuth), `escapeAzimuth(r, psi, h)` (tail-recursive,
+    a cubic-Hermite root on the last step, steps shrink only for near-radial
+    rays so |du| <= 0.05), `lensDeflection` (delta = dphi - (pi - psi)),
+    `deflectionFromInfinity(b, h)`, and `integrateRay` (the integrator's own
+    capture verdict, for tests).
+  - Capture is analytic: `escapes(r, psi)` (outgoing, or ingoing with
+    b > b_c). `escapeAzimuth` takes the verdict from it; if the integrator
+    disagrees the azimuth is NaN, never a silent fallback.
+  - The exact form (the oracle, about 50x cheaper): `carlsonRF` (duplication,
+    a fixed 40 iterations, NaN in gives NaN out), `deflectionExact(b)`
+    (Darwin: 2 I(0, u2) - pi), `escapeAzimuthExact(r, psi)` (Carlson when the
+    cubic has three real roots; 20-point Gauss-Legendre on the smooth
+    outgoing integral otherwise) and `deflectionExactAt(r, psi)`. Roots for
+    b >= 4 get two Newton steps (the trig form alone is 1e-10 relative at
+    b = 1e6).
+  - The lens map: `lensRegular(r, psi, h)` = delta + ln tanh((psi -
+    alpha_sh)/alpha_sh), finite from 1e-8 alpha_sh to the antipode at every r
+    (what a table stores); `imageAngle(r, beta, order)` (order 0 primary,
+    order 1 secondary, 64 bisections), `einsteinAngle(r)`,
+    `imageMagnification(r, psi)`; `inverseRow(r, nFwd, nOut)`: one row of an
+    inverse lens table (psi - alpha_sh and dpsi/dF on F in [-pi, pi]) by
+    Fritsch-Carlson monotone inversion of nFwd exact forward samples
+    (`inverseRowLogMin` = ln 1e-8 is the first column).
+  - Accuracy (oracle: stapledons-godot tools/geodesic_ref.py, a Python RK4,
+    Carlson in float64 and a 50-digit Decimal truth): the exact form is
+    within 1e-15 of the truth at b = 100 and 1000; the integrator is within
+    3e-13 of it at h = 0.001 and 1.3e-11 at h = 0.005 (check45 rays).
+    Near the critical impact float64 conditioning sets the floor: at
+    b = b_c (1 + 1e-8) one ulp of the input moves the deflection by ~1e-9.
+  - **The weak-field fact.** At b = 100 r_s the exact deflection is
+    0.02029996623954 rad, 1.5 % above 2/b: the second-order term
+    15 pi/(16 b^2) is exactly that size. `weakDeflection2` (below) is within
+    2.7e-4 of it; at b = 1000 2/b is within 0.148 %.
+- **schwarzschild**: `impactFromStaticAngle`, `turningRadius`,
+  `weakDeflection2` (2/b + 15 pi/16b^2), `weakDeflectionFinite` ((1 + cos
+  psi)/b, finite observer), `strongDeflectionBbar` (Bozza 2002,
+  -0.400230039755), `circularOrbitSpeed` (local, sqrt(1/(2(r-1))),
+  `circularOrbitClockRate` (sqrt(1 - 1.5/r)), `orbitalAngularVelocity`,
+  `movingClockRate`, `radialCoordinateRate`, `hoverAcceleration`,
+  `rsPerSolarMassMetres` (2953.25008 m, IAU 2015 nominal GM_sun),
+  `tidalRadial` (1/r^3), `tidalTransverse`, `tidalRadialOrbit` (1.5 x static
+  at 3 r_s), `tidalAccelSI(mSun, r, lenM)` and `tidalOrbitAccelSI` (m/s^2;
+  the bubble wall does not shield tides), the inversions `tidalSafeRadius`
+  and `tidalMinMass`, `hoverAccelSI` and `hoverPowerPerKg` (via
+  `medium.hoverPower`). Sgr A* (4.297e6 Msun) with a 100 m lever: tide
+  5.691e-6 / 4.553e-5 / 2.108e-4 g at 10 / 5 / 3 r_s; hover 4.8189e5 m/s^2
+  and 1.4447e14 W per kg of m_eff at 3 r_s. Gaia BH1: 4.205e7 g at 3 r_s,
+  0.1 g only beyond 2247.6 r_s.
+- **hyper (fix)**: `tanh(u)` returns exactly +-1 for |u| > 20 (it already
+  rounded to 1 there); beyond |u| ~ 355 it was NaN (expm1 overflow, Inf/Inf).
+- Tests: `schwarzschild_ext_test.ail` (23: check49, check51 to check53 and the
+  canon rows HB-72 to HB-90) and `geodesic_test.ail` (19: check41 to check48,
+  check50, the inverse row, tanh). Smoke: `schwarzschildDigest`, `lensDigest`
+  (strict VM = interpreter bit for bit; the oracle agrees to 2e-14).
+
 ## 0.9.0
 
 Feature: a gentle final approach and timed legs (stapledons ledger D-46,

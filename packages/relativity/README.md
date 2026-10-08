@@ -3,7 +3,8 @@
 Pure special- and general-relativity maths for AILANG: trip times and
 phase-by-phase trip plans, exact relativistic motion, Higgs-bubble energetics
 (photon drive, interstellar-medium drag and glow, forward CMB), what a fast observer sees (aberration, Doppler colour and
-brightness), and closed-form Schwarzschild black-hole quantities.
+brightness), Schwarzschild black holes (closed forms for shadow, clocks, orbits,
+tides and hover, and exact null geodesics: lens map, images, Einstein rings).
 
 ```sh
 ailang install sunholo/relativity

@@ -5,7 +5,8 @@
 
 module sunholo/relativity/schwarzschild
 
-import std/math (sqrt, asin)
+import std/math (sqrt, asin, acos, cos, sin, log, pow)
+import ./medium (cSI, hoverPower)
 
 export pure func pi() -> float = 3.141592653589793
 
@@ -50,4 +51,191 @@ export pure func staticClockRate(r: float) -> float
   ensures { result > 0.0 && result <= 1.0 }
 {
   sqrt(1.0 - 1.0 / r)
+}
+
+-- ---------------------------------------------------------------------------
+-- 0.10.0: closed forms for a visit (stapledons M3, ledger D-11/D-13).
+-- Radii in r_s, angles in radians; the *SI forms take the mass in solar
+-- masses and return m/s^2 (or W/kg).
+
+-- Impact parameter of a ray seen by a static observer at r at angle psi from
+-- the direction toward the hole: b = r sin(psi) / sqrt(1 - 1/r).
+export pure func impactFromStaticAngle(r: float, psi: float) -> float
+  requires { r > 1.0 }
+{
+  r * sin(psi) / sqrt(1.0 - 1.0 / r)
+}
+
+-- Closest approach of a ray with impact b > b_c (largest root of
+-- r^3 - b^2 r + b^2 = 0): (2b/sqrt3) cos(acos(-3 sqrt3/(2b))/3).
+export pure func turningRadius(b: float) -> float
+  requires { b > 2.598076211353316 }
+  ensures { result >= 1.5 }
+{
+  let c = 0.0 - criticalImpact() / b;
+  let x = if c < -1.0 then -1.0 else c;
+  let rt = 2.0 * b / sqrt(3.0) * cos(acos(x) / 3.0);
+  if rt < 1.5 then 1.5 else rt
+}
+
+-- Second-order weak deflection from infinity: 2/b + 15 pi/(16 b^2). At
+-- b = 100 it is within 2.7e-4 of the exact value; 2/b alone is 1.5 % low.
+export pure func weakDeflection2(b: float) -> float
+  requires { b > 0.0 }
+  ensures { result > 0.0 }
+{
+  2.0 / b + 15.0 * pi() / (16.0 * b * b)
+}
+
+-- First-order deflection seen by a static observer at r looking at angle psi
+-- from the hole, source at infinity: (1 + cos psi) / b. It is the table's
+-- hand-off beyond r = 1e6 (within 1e-3 relative of the exact value there).
+export pure func weakDeflectionFinite(r: float, psi: float) -> float
+  requires { r > 1.0 }
+{
+  let b = impactFromStaticAngle(r, psi);
+  if b > 0.0 then (1.0 + cos(psi)) / b else 0.0
+}
+
+-- Strong-deflection constant (Bozza 2002): near b_c the deflection from
+-- infinity is -ln(b/b_c - 1) + bbar, bbar = ln(216(7 - 4 sqrt3)) - pi.
+export pure func strongDeflectionBbar() -> float = log(216.0 * (7.0 - 4.0 * sqrt(3.0))) - pi()
+
+-- Local speed of a circular orbit, measured by static observers:
+-- sqrt(1/(2(r - 1))); 0.5 at 3 r_s, 1 at the photon sphere.
+export pure func circularOrbitSpeed(r: float) -> float
+  requires { r > 1.5 }
+  ensures { result > 0.0 && result < 1.0 }
+{
+  sqrt(1.0 / (2.0 * (r - 1.0)))
+}
+
+-- Proper time of a circular-orbit clock per unit far-away time: sqrt(1 - 1.5/r).
+export pure func circularOrbitClockRate(r: float) -> float
+  requires { r > 1.5 }
+  ensures { result > 0.0 && result <= 1.0 }
+{
+  sqrt(1.0 - 1.5 / r)
+}
+
+-- Coordinate angular velocity of a circular orbit, dphi/dt = sqrt(1/(2 r^3)),
+-- in c/r_s (Kepler's law holds exactly in Schwarzschild coordinates).
+export pure func orbitalAngularVelocity(r: float) -> float
+  requires { r > 0.0 }
+  ensures { result > 0.0 }
+{
+  sqrt(1.0 / (2.0 * r * r * r))
+}
+
+-- Proper time per unit far-away time of a clock moving at local speed beta
+-- (measured by static observers) at r: sqrt(1 - 1/r) sqrt((1 - beta)(1 + beta)).
+-- For local speeds; near c pass the rapidity form instead.
+export pure func movingClockRate(r: float, betaLocal: float) -> float
+  requires { r > 1.0 }
+{
+  sqrt(1.0 - 1.0 / r) * sqrt((1.0 - betaLocal) * (1.0 + betaLocal))
+}
+
+-- dr/dt in Schwarzschild coordinates of a radial mover at local speed beta
+-- (positive outward): beta (1 - 1/r). 0 at the horizon.
+export pure func radialCoordinateRate(r: float, betaLocal: float) -> float
+  requires { r >= 1.0 }
+{
+  betaLocal * (1.0 - 1.0 / r)
+}
+
+-- Proper acceleration of a static observer: 1/(2 r^2 sqrt(1 - 1/r)), in c^2/r_s.
+export pure func hoverAcceleration(r: float) -> float
+  requires { r > 1.0 }
+  ensures { result > 0.0 }
+{
+  1.0 / (2.0 * r * r * sqrt(1.0 - 1.0 / r))
+}
+
+-- Schwarzschild radius per solar mass, 2 GM_sun / c^2 in metres, with the
+-- IAU 2015 nominal GM_sun = 1.3271244e20 m^3/s^2: 2953.25008 m.
+export pure func rsPerSolarMassMetres() -> float = 2.0 * 132712440000000000000.0 / (cSI() * cSI())
+
+pure func rsMetres(mSun: float) -> float = mSun * rsPerSolarMassMetres()
+
+-- Tidal stretch along the radius per unit proper separation, static (or
+-- radially moving) observer: 1/r^3 in c^2/r_s^2 (= 2GM/R^3).
+export pure func tidalRadial(r: float) -> float
+  requires { r > 0.0 }
+  ensures { result > 0.0 }
+{
+  1.0 / (r * r * r)
+}
+
+-- Transverse squeeze per unit separation: 1/(2 r^3) (= GM/R^3).
+export pure func tidalTransverse(r: float) -> float
+  requires { r > 0.0 }
+  ensures { result > 0.0 }
+{
+  1.0 / (2.0 * r * r * r)
+}
+
+-- Radial tidal eigenvalue in the comoving frame of a circular orbit:
+-- (1/(2 r^3))(2 + 3/(2r - 3)) = (GM/R^3)(2 + 3 gamma^2 beta^2); 1.5 x the
+-- static value at 3 r_s, divergent at the photon sphere.
+export pure func tidalRadialOrbit(r: float) -> float
+  requires { r > 1.5 }
+  ensures { result > 0.0 }
+{
+  (1.0 / (2.0 * r * r * r)) * (2.0 + 3.0 / (2.0 * r - 3.0))
+}
+
+-- Radial tidal acceleration (m/s^2) across lenM metres at r r_s from a hole
+-- of mSun solar masses: c^2 lenM tidalRadial(r) / r_s^2. Linear geodesic
+-- deviation (needs lenM << r r_s). The bubble wall does not shield it (D-11).
+export pure func tidalAccelSI(mSun: float, r: float, lenM: float) -> float
+  requires { mSun > 0.0 && r > 0.0 }
+{
+  let rs = rsMetres(mSun);
+  cSI() * cSI() * lenM * tidalRadial(r) / (rs * rs)
+}
+
+-- The same in a circular orbit (comoving frame): c^2 lenM tidalRadialOrbit(r) / r_s^2.
+export pure func tidalOrbitAccelSI(mSun: float, r: float, lenM: float) -> float
+  requires { mSun > 0.0 && r > 1.5 }
+{
+  let rs = rsMetres(mSun);
+  cSI() * cSI() * lenM * tidalRadialOrbit(r) / (rs * rs)
+}
+
+-- Inversion: the radius (r_s) beyond which the static tide across lenM is at
+-- most aMax m/s^2: (c^2 lenM / (aMax r_s^2))^(1/3).
+export pure func tidalSafeRadius(mSun: float, lenM: float, aMax: float) -> float
+  requires { mSun > 0.0 && lenM > 0.0 && aMax > 0.0 }
+  ensures { result > 0.0 }
+{
+  let rs = rsMetres(mSun);
+  pow(cSI() * cSI() * lenM / (aMax * rs * rs), 1.0 / 3.0)
+}
+
+-- Inversion: the smallest mass (solar masses) whose static tide across lenM
+-- at r r_s is at most aMax: sqrt(c^2 lenM / (r^3 k^2 aMax)), k = r_s per Msun.
+export pure func tidalMinMass(lenM: float, r: float, aMax: float) -> float
+  requires { lenM > 0.0 && r > 0.0 && aMax > 0.0 }
+  ensures { result > 0.0 }
+{
+  let k = rsPerSolarMassMetres();
+  sqrt(cSI() * cSI() * lenM / (r * r * r * k * k * aMax))
+}
+
+-- Proper acceleration (m/s^2) needed to hover at r r_s over mSun solar
+-- masses: hoverAcceleration(r) c^2 / r_s. The pocket does not feel it
+-- (higgs-bubble property 3); the drive pays for it.
+export pure func hoverAccelSI(mSun: float, r: float) -> float
+  requires { mSun > 0.0 && r > 1.0 }
+{
+  hoverAcceleration(r) * cSI() * cSI() / rsMetres(mSun)
+}
+
+-- Photon-drive power per kg of m_eff to hover: medium.hoverPower(1,
+-- hoverAccelSI) = a c (HB-90). Sgr A* at 3 r_s: 1.4447e14 W/kg.
+export pure func hoverPowerPerKg(mSun: float, r: float) -> float
+  requires { mSun > 0.0 && r > 1.0 }
+{
+  hoverPower(1.0, hoverAccelSI(mSun, r))
 }

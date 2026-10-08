@@ -1,0 +1,147 @@
+-- Check values for 0.10.0, part 1: Schwarzschild closed forms for a crewed
+-- visit (clocks, orbits, tides across the bubble, hover acceleration and
+-- power). Labels check49 and check51 to check53 are the stapledons M3
+-- design's (m3-black-holes.md), and HB-n the canon rows of
+-- stapledons-design physics/higgs-bubble.md; lore cites them.
+--
+-- Every expected number comes from stapledons-godot tools/geodesic_ref.py
+-- (float64 closed forms, an independent second language), never from the
+-- code under test. Formulas the oracle shares exactly are pinned to 1e-12
+-- relative; the design's rounded rows to their stated tolerance.
+-- Units: r in r_s = 2GM/c^2, SI for the *SI functions, g0 = 9.80665 m/s^2.
+
+module sunholo/relativity/schwarzschild_ext_test
+
+import ./hyper (absf)
+import ./schwarzschild (pi, criticalImpact, staticClockRate, impactFromStaticAngle, turningRadius, weakDeflection2, weakDeflectionFinite, strongDeflectionBbar, circularOrbitSpeed, circularOrbitClockRate, orbitalAngularVelocity, movingClockRate, radialCoordinateRate, hoverAcceleration, rsPerSolarMassMetres, tidalRadial, tidalTransverse, tidalRadialOrbit, tidalAccelSI, tidalOrbitAccelSI, tidalSafeRadius, tidalMinMass, hoverAccelSI, hoverPowerPerKg)
+
+pure func near(got: float, want: float, tol: float) -> bool = absf(got - want) <= tol
+pure func rel(got: float, want: float, tol: float) -> bool = absf(got - want) <= tol * absf(want)
+pure func r12(got: float, want: float) -> bool = rel(got, want, 0.000000000001)
+pure func g0() -> float = 9.80665
+pure func gaiaBH1() -> float = 9.62
+pure func sgrA() -> float = 4297000.0
+pure func lever() -> float = 100.0
+pure func tideG(m: float, r: float) -> float = tidalAccelSI(m, r, lever()) / g0()
+
+-- ---------- check49: clocks and orbits ----------
+
+pure func checkClocks() -> bool =
+  near(staticClockRate(10.0), 0.948683298050514, 0.000000000000001)
+  && near(staticClockRate(5.0), 0.894427190999916, 0.000000000000001)
+  && near(staticClockRate(3.0), 0.816496580927726, 0.000000000000001)
+test "check49 static clock at 10, 5, 3 r_s (1e-15)" { checkClocks() }
+
+pure func checkOrbitSpeed() -> bool =
+  near(circularOrbitSpeed(10.0), 0.235702260395516, 0.000000000000001)
+  && near(circularOrbitSpeed(5.0), 0.353553390593274, 0.000000000000001)
+  && near(circularOrbitSpeed(3.0), 0.5, 0.000000000000001)
+test "check49 circular-orbit local speed at 10, 5, 3 r_s (1e-15)" { checkOrbitSpeed() }
+
+pure func checkOrbitClock() -> bool =
+  near(circularOrbitClockRate(10.0), 0.921954445729289, 0.000000000000001)
+  && near(circularOrbitClockRate(5.0), 0.836660026534076, 0.000000000000001)
+  && near(circularOrbitClockRate(3.0), 0.707106781186548, 0.000000000000001)
+test "check49 circular-orbit clock at 10, 5, 3 r_s (1e-15)" { checkOrbitClock() }
+
+pure func idOrbit(r: float) -> bool = near(movingClockRate(r, circularOrbitSpeed(r)), circularOrbitClockRate(r), 0.000000000000001)
+pure func checkOrbitIdentity() -> bool = idOrbit(10.0) && idOrbit(5.0) && idOrbit(3.0) && idOrbit(1.6) && idOrbit(1000.0)
+test "check49 movingClockRate(r, orbit speed) = circularOrbitClockRate(r) (1e-15)" { checkOrbitIdentity() }
+
+pure func checkMovingClockRest() -> bool = movingClockRate(7.0, 0.0) == staticClockRate(7.0) && near(movingClockRate(1.0e12, 0.6), 0.8, 0.000000000001)
+test "movingClockRate: at rest it is the static clock; far away it is 1/gamma" { checkMovingClockRest() }
+
+pure func checkAngularVelocity() -> bool =
+  r12(orbitalAngularVelocity(3.0), 0.13608276348795434)
+  && r12(orbitalAngularVelocity(10.0) * 10.0 / staticClockRate(10.0), circularOrbitSpeed(10.0))
+test "orbitalAngularVelocity: Kepler sqrt(1/(2 r^3)) in c/r_s" { checkAngularVelocity() }
+
+pure func checkRadialRate() -> bool = r12(radialCoordinateRate(10.0, 0.1), 0.09) && radialCoordinateRate(1.0, 0.5) == 0.0 && r12(radialCoordinateRate(1.0e6, 0.1), 0.0999999)
+test "radialCoordinateRate: dr/dt = beta (1 - 1/r), 0 at the horizon" { checkRadialRate() }
+
+-- ---------- lensing closed forms ----------
+
+pure func checkImpact() -> bool =
+  r12(impactFromStaticAngle(3.0, pi() / 4.0), criticalImpact())
+  && r12(impactFromStaticAngle(10.0, 0.5), 5.053588901474214)
+test "impactFromStaticAngle: the shadow edge at 3 r_s has b = b_c" { checkImpact() }
+
+pure func checkTurning() -> bool =
+  r12(turningRadius(100.0), 99.49619916438812)
+  && rel(turningRadius(criticalImpact() * 1.000000000001), 1.5, 0.000001)
+test "turningRadius: r^3 - b^2 r + b^2 = 0; 1.5 at the critical impact" { checkTurning() }
+
+pure func checkWeak2() -> bool = r12(weakDeflection2(100.0), 0.020294524311274043)
+test "weakDeflection2(100) = 2/b + 15 pi/(16 b^2)" { checkWeak2() }
+
+pure func checkWeakFinite() -> bool =
+  r12(weakDeflectionFinite(1000000.0, 1.0), 0.000001830486806468362)
+  && weakDeflectionFinite(10.0, pi()) == 0.0
+test "weakDeflectionFinite: (1 + cos psi)/b; 0 looking straight away" { checkWeakFinite() }
+
+pure func checkBbar() -> bool = near(strongDeflectionBbar(), -0.400230039755, 0.000000000001)
+test "strongDeflectionBbar = ln(216(7 - 4 sqrt 3)) - pi = -0.400230039755 (Bozza 2002)" { checkBbar() }
+
+-- ---------- check51: tides across the 100 m bubble ----------
+
+pure func checkRsPerSun() -> bool = r12(rsPerSolarMassMetres(), 2953.2500761002498)
+test "rsPerSolarMassMetres = 2 GM_sun / c^2 (IAU 2015 nominal)" { checkRsPerSun() }
+
+pure func checkTideForms() -> bool =
+  tidalRadial(2.0) == 0.125 && tidalTransverse(2.0) == 0.0625
+  && near(tidalRadialOrbit(3.0) / tidalRadial(3.0), 1.5, 0.000000000000001)
+  && r12(tidalRadialOrbit(10.0) / tidalRadial(10.0), 1.0 + 1.5 / 17.0)
+test "check51 tidal eigenvalues: radial 1/r^3, transverse half, orbit/static = 1.5 at 3 r_s" { checkTideForms() }
+
+pure func checkTideGaia() -> bool =
+  r12(tideG(gaiaBH1(), 10.0), 1135455.5529031244) && r12(tideG(gaiaBH1(), 5.0), 9083644.423224995) && r12(tideG(gaiaBH1(), 3.0), 42053909.36678238)
+  && rel(tideG(gaiaBH1(), 10.0), 1135000.0, 0.001) && rel(tideG(gaiaBH1(), 5.0), 9084000.0, 0.001) && rel(tideG(gaiaBH1(), 3.0), 42050000.0, 0.001)
+test "check51 HB-72..74 Gaia BH1 (9.62 Msun) tide at 10, 5, 3 r_s: 1.135e6, 9.084e6, 4.205e7 g" { checkTideGaia() }
+
+pure func checkTide1000() -> bool =
+  r12(tideG(1000.0, 10.0), 105.08005287008791) && r12(tideG(1000.0, 5.0), 840.6404229607033) && r12(tideG(1000.0, 3.0), 3891.853810003255)
+  && rel(tideG(1000.0, 10.0), 105.1, 0.001) && rel(tideG(1000.0, 5.0), 840.6, 0.001) && rel(tideG(1000.0, 3.0), 3892.0, 0.001)
+test "check51 HB-78..80 1000 Msun tide at 10, 5, 3 r_s: 105.1, 840.6, 3892 g" { checkTide1000() }
+
+pure func checkTideSgrA() -> bool =
+  r12(tideG(sgrA(), 10.0), 0.000005691012968391329) && r12(tideG(sgrA(), 5.0), 0.00004552810374713063) && r12(tideG(sgrA(), 3.0), 0.00021077825808856772)
+  && rel(tideG(sgrA(), 10.0), 0.000005691, 0.001) && rel(tideG(sgrA(), 5.0), 0.00004553, 0.001) && rel(tideG(sgrA(), 3.0), 0.0002108, 0.001)
+test "check51 HB-84..86 Sgr A* (4.297e6 Msun) tide at 10, 5, 3 r_s: 5.691e-6, 4.553e-5, 2.108e-4 g" { checkTideSgrA() }
+
+pure func checkTideOrbit() -> bool =
+  r12(tidalOrbitAccelSI(sgrA(), 3.0, lever()) / g0(), 0.0003161673871328516)
+  && rel(tidalOrbitAccelSI(sgrA(), 3.0, lever()) / g0(), 0.0003162, 0.001)
+  && r12(tidalOrbitAccelSI(gaiaBH1(), 3.0, lever()) / g0(), 63080864.05017358)
+test "check51 orbit tide at 3 r_s: Sgr A* 3.162e-4 g, Gaia BH1 6.31e7 g" { checkTideOrbit() }
+
+-- ---------- check52: inversions ----------
+
+pure func checkSafeRadius() -> bool =
+  near(tidalSafeRadius(gaiaBH1(), lever(), 0.1 * g0()), 2247.6, 0.1)
+  && r12(tidalSafeRadius(gaiaBH1(), lever(), 0.1 * g0()), 2247.622544162605)
+  && rel(tidalSafeRadius(gaiaBH1(), lever(), 0.1 * g0()) * gaiaBH1() * rsPerSolarMassMetres() / 1000.0, 63900.0, 0.001)
+  && r12(tidalSafeRadius(1000.0, lever(), 0.1 * g0()), 101.66545942001457)
+  && rel(tideG(gaiaBH1(), tidalSafeRadius(gaiaBH1(), lever(), 0.1 * g0())), 0.1, 0.000000000001)
+test "check52 HB-75/76/81 tide = 0.1 g at 2247.6 r_s (63,900 km) for Gaia BH1, 102 r_s for 1000 Msun" { checkSafeRadius() }
+
+pure func checkMinMass() -> bool =
+  rel(tidalMinMass(lever(), 3.0, 0.1 * g0()), 197280.0, 0.001)
+  && r12(tidalMinMass(lever(), 3.0, 0.1 * g0()), 197277.81958454565)
+  && rel(tideG(tidalMinMass(lever(), 3.0, 0.1 * g0()), 3.0), 0.1, 0.000000000001)
+test "check52 HB-87 0.1 g at 3 r_s needs M >= 1.9728e5 Msun" { checkMinMass() }
+
+-- ---------- check53: hover at Sgr A* ----------
+
+pure func checkHoverForm() -> bool = r12(hoverAcceleration(3.0), 1.0 / (18.0 * staticClockRate(3.0)))
+test "hoverAcceleration = 1/(2 r^2 sqrt(1 - 1/r)) in c^2/r_s" { checkHoverForm() }
+
+pure func checkHoverSI() -> bool =
+  r12(hoverAccelSI(sgrA(), 10.0), 37327.128168301846) && r12(hoverAccelSI(sgrA(), 5.0), 158365.59270015373) && r12(hoverAccelSI(sgrA(), 3.0), 481891.152525276)
+  && rel(hoverAccelSI(sgrA(), 10.0), 37327.0, 0.0001) && rel(hoverAccelSI(sgrA(), 5.0), 158370.0, 0.0001) && rel(hoverAccelSI(sgrA(), 3.0), 481890.0, 0.0001)
+  && rel(hoverAccelSI(sgrA(), 3.0) / g0(), 49100.0, 0.001)
+test "check53 HB-88/89 Sgr A* hover at 10, 5, 3 r_s: 3.7327e4, 1.5837e5, 4.8189e5 m/s^2 (4.91e4 g)" { checkHoverSI() }
+
+pure func checkHoverPower() -> bool =
+  r12(hoverPowerPerKg(sgrA(), 10.0), 11190391503656.248) && r12(hoverPowerPerKg(sgrA(), 5.0), 47476810298205.945) && r12(hoverPowerPerKg(sgrA(), 3.0), 144467333104005.4)
+  && rel(hoverPowerPerKg(sgrA(), 10.0), 11190000000000.0, 0.0001) && rel(hoverPowerPerKg(sgrA(), 5.0), 47477000000000.0, 0.0001) && rel(hoverPowerPerKg(sgrA(), 3.0), 144470000000000.0, 0.0001)
+test "check53 HB-90 Sgr A* hover power per kg of m_eff: 1.1190e13, 4.7477e13, 1.4447e14 W/kg" { checkHoverPower() }

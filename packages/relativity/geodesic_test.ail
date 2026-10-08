@@ -1,0 +1,207 @@
+-- Check values for 0.10.0, part 2: Schwarzschild null geodesics (the Binet
+-- integrator, Darwin's exact form via Carlson R_F, the finite-observer lens
+-- map, images, the inverse row). Labels check41 to check48 and check50 are the
+-- stapledons M3 design's (m3-black-holes.md); lore cites them.
+--
+-- Every expected number comes from stapledons-godot tools/geodesic_ref.py: a
+-- Python RK4 integrator, Carlson R_F in float64 and a 50-digit Decimal truth
+-- (Newton-polished roots, Decimal R_F). Never from the code under test.
+-- Units: r and b in r_s, angles in radians.
+
+module sunholo/relativity/geodesic_test
+
+import std/math (intToFloat, log)
+import std/list (length)
+import ./hyper (absf, tanh)
+import ./schwarzschild (pi, criticalImpact, shadowAngularRadius, weakDeflection, weakDeflection2, strongDeflectionBbar, impactFromStaticAngle)
+import ./geodesic (Ray, InvSample, binetStep, escapes, integrateRay, escapeAzimuth, lensDeflection, deflectionFromInfinity, carlsonRF, deflectionExact, escapeAzimuthExact, deflectionExactAt, lensRegular, imageAngle, einsteinAngle, imageMagnification, inverseRow, inverseRowLogMin)
+
+pure func near(got: float, want: float, tol: float) -> bool = absf(got - want) <= tol
+pure func rel(got: float, want: float, tol: float) -> bool = absf(got - want) <= tol * absf(want)
+pure func deg(d: float) -> float = d * pi() / 180.0
+pure func finite(x: float) -> bool = x == x && x < 1.0e300 && x > -1.0e300
+
+-- ---------- building blocks ----------
+
+pure func checkCarlson() -> bool =
+  near(carlsonRF(0.0, 1.0, 2.0), 1.3110287771461, 0.0000000000001)
+  && near(carlsonRF(1.0, 1.0, 1.0), 1.0, 0.000000000000001)
+  && near(carlsonRF(0.5, 1.0, 0.0), 1.8540746773013719, 0.000000000000001)
+test "carlsonRF: R_F(0,1,2) = 1.3110287771461 (Carlson 1995), R_F(x,x,x) = 1/sqrt x, R_F(0.5,1,0) = K(1/sqrt2)" { checkCarlson() }
+
+pure func checkCarlsonNaN() -> bool {
+  let nan = 0.0 / 0.0;
+  let v = carlsonRF(nan, 1.0, 2.0);
+  v != v
+}
+test "carlsonRF: NaN in gives NaN out after the fixed iteration cap (no tolerance loop)" { checkCarlsonNaN() }
+
+pure func checkBinetStep() -> bool {
+  let s = binetStep(0.5, 0.0, 0.0);
+  let t = binetStep(0.001, 0.0, 0.01);
+  s.u == 0.5 && s.v == 0.0 && near(t.u, 0.001 * (1.0 - 0.00005), 0.000000001) && t.v < 0.0
+}
+test "binetStep: h = 0 is the identity; a small step follows u'' = -u + 1.5 u^2" { checkBinetStep() }
+
+-- ---------- check41-check44: deflection from infinity ----------
+
+pure func checkDeflection100() -> bool =
+  near(deflectionExact(100.0), 0.0202999662395031, 0.000000000001)
+  && near(deflectionExact(100.0), 0.02029996623954331, 0.000000000000001)
+  && near(deflectionFromInfinity(100.0, 0.001), deflectionExact(100.0), 0.00000000001)
+test "check41 alpha(100) = 0.0202999662395031 (1e-12; Decimal truth to 1e-15); integrator h = 0.001 within 1e-11" { checkDeflection100() }
+
+pure func checkDeflection1000() -> bool =
+  near(deflectionExact(1000.0), 0.00200295058718769, 0.000000000001)
+  && near(deflectionExact(1000.0), 0.0020029505870990095, 0.000000000000001)
+  && near(deflectionExact(1000.0) / weakDeflection(1000.0) - 1.0, 0.0014753, 0.000001)
+  && absf(deflectionExact(1000.0) / weakDeflection(1000.0) - 1.0) <= 0.01
+test "check42 AC-8 alpha(1000) = 0.00200295058718769; |alpha/(2/b) - 1| = 0.14753 % <= 1 %" { checkDeflection1000() }
+
+pure func checkSecondOrder() -> bool =
+  absf(deflectionExact(100.0) / weakDeflection2(100.0) - 1.0) <= 0.0003
+  && absf(deflectionExact(100.0) / weakDeflection(100.0) - 1.0) > 0.0149
+test "check43 AC-8 |alpha(100)/(2/b + 15 pi/16b^2) - 1| <= 3e-4 (2.68e-4); 2/b alone is 1.5 % low" { checkSecondOrder() }
+
+pure func nearCritical(e: float, truth: float, design: float, dtol: float, atol: float) -> bool {
+  let b = criticalImpact() * (1.0 + e);
+  let d = deflectionExact(b);
+  near(d, truth, 0.000000001) && near(d, design, dtol) && absf(d - (0.0 - log(e) + strongDeflectionBbar())) <= atol
+}
+
+-- At eps = 1e-8 one ulp of the acos argument moves the deflection by ~1.4e-9
+-- (float64 conditioning of the near-double root), so the truth is held to
+-- 3e-9 there; the design row 18.0204507723 carries 2.8e-9 of the prototype's
+-- own root error and is held to 4e-9.
+pure func nearCritical3(e: float, truth: float, design: float, dtol: float, atol: float) -> bool {
+  let b = criticalImpact() * (1.0 + e);
+  let d = deflectionExact(b);
+  near(d, truth, 0.000000003) && near(d, design, dtol) && absf(d - (0.0 - log(e) + strongDeflectionBbar())) <= atol
+}
+
+pure func checkNearCritical() -> bool =
+  nearCritical(0.0001, 8.810486354996266, 8.8104863550, 0.000000001, 0.0004)
+  && nearCritical(0.000001, 13.4152855578804, 13.4152855579, 0.000000001, 0.000006)
+  && nearCritical3(0.00000001, 18.02045076953216, 18.0204507723, 0.000000004, 0.0000001)
+test "check44 near-critical b = b_c(1 + eps), eps = 1e-4, 1e-6, 1e-8: exact to 1e-9, 1e-9, 3e-9 of the 50-digit truth; within 4e-4, 6e-6, 1e-7 of -ln eps + bbar" { checkNearCritical() }
+
+-- ---------- check45: the integrator against the exact form, finite observer ----------
+
+pure func agree(r: float, psi: float, exact: float) -> bool {
+  let ex = escapeAzimuthExact(r, psi);
+  let a = escapeAzimuth(r, psi, 0.001);
+  let b = escapeAzimuth(r, psi, 0.005);
+  ex.escaped && a.escaped && b.escaped && rel(ex.dphi, exact, 0.000000000001)
+  && near(a.dphi, ex.dphi, 0.000000001) && near(b.dphi, ex.dphi, 0.00001)
+}
+pure func checkIntegratorVsExact() -> bool =
+  agree(10.0, 0.5, 3.1947588798162605) && agree(3.0, 1.0, 3.4453145251885964)
+  && agree(5.0, 2.0, 1.2969414231071164) && agree(10.0, 0.26, 5.701107605230479)
+test "check45 escapeAzimuth vs escapeAzimuthExact at (10, 0.5), (3, 1), (5, 2), (10, 0.26): 1e-9 at h = 0.001, 1e-5 at h = 0.005" { checkIntegratorVsExact() }
+
+pure func checkDeflectionForms() -> bool =
+  near(lensDeflection(10.0, 0.5, 0.001), 3.1947588798162605 - (pi() - 0.5), 0.000000001)
+  && near(deflectionExactAt(10.0, 0.5), 3.1947588798162605 - (pi() - 0.5), 0.000000000001)
+test "lensDeflection = dphi - (pi - psi), integrator and exact" { checkDeflectionForms() }
+
+-- ---------- check46/check47: Einstein angles and images ----------
+
+pure func checkEinstein() -> bool =
+  near(einsteinAngle(10.0), deg(29.828317906), 0.0000001)
+  && near(einsteinAngle(5.0), deg(44.874561077), 0.0000001)
+  && near(einsteinAngle(3.0), deg(61.888756430), 0.0000001)
+  && near(einsteinAngle(100.0), deg(8.520443413), 0.0000001)
+  && near(einsteinAngle(1000.0), deg(2.604361342), 0.0000001)
+  && near(einsteinAngle(10.0), 0.5206023577867371, 0.000000000001)
+test "check46 Einstein angle at r = 10, 5, 3, 100, 1000: 29.828318, 44.874561, 61.888756, 8.520443, 2.604361 deg (1e-7 rad)" { checkEinstein() }
+
+pure func checkImages10() -> bool {
+  let p0 = imageAngle(10.0, deg(20.0), 0);
+  let p1 = imageAngle(10.0, deg(20.0), 1);
+  near(p0, deg(39.837659068), 0.0000001) && near(p1, deg(23.543122070), 0.0000001)
+  && rel(imageMagnification(10.0, p0), 1.118821, 0.0001) && rel(imageMagnification(10.0, p1), 0.276451, 0.0001)
+}
+test "check47 r = 10, beta = 20 deg: images at 39.837659 / 23.543122 deg, mu 1.118821 / 0.276451" { checkImages10() }
+
+pure func checkImages1000() -> bool {
+  let p0 = imageAngle(1000.0, deg(1.0), 0);
+  let p1 = imageAngle(1000.0, deg(1.0), 1);
+  near(p0, deg(3.144406661), 0.0000001) && near(p1, deg(2.160968686), 0.0000001)
+  && rel(imageMagnification(1000.0, p0), 1.847367, 0.0001) && rel(imageMagnification(1000.0, p1), 0.856138, 0.0001)
+}
+test "check47 r = 1000, beta = 1 deg: images at 3.144407 / 2.160969 deg, mu 1.847367 / 0.856138" { checkImages1000() }
+
+-- ---------- check48: capture is analytic, and the integrator agrees ----------
+
+pure func checkCaptureRule() -> bool {
+  let a = shadowAngularRadius(3.0);
+  not escapes(3.0, a * 0.999) && escapes(3.0, a * 1.001) && escapes(3.0, 2.0) && escapes(3.0, pi() / 2.0)
+  && not (escapeAzimuth(10.0, 0.2, 0.005)).escaped && not (escapeAzimuthExact(10.0, 0.2)).escaped
+  && (escapeAzimuth(3.0, 2.5, 0.005)).escaped
+}
+test "check48 ingoing b < b_c is captured; outgoing at r = 3 escapes" { checkCaptureRule() }
+
+pure func sweepRadius(r: float, k: int, ok: bool) -> bool =
+  if k >= 50 then ok
+  else {
+    let psi = shadowAngularRadius(r) * (1.0 + (intToFloat(k) - 24.5) * 0.002);
+    sweepRadius(r, k + 1, ok && (integrateRay(r, psi, 0.01)).escaped == escapes(r, psi))
+  }
+pure func checkCaptureSweep() -> bool = sweepRadius(2.0, 0, true) && sweepRadius(3.0, 0, true) && sweepRadius(10.0, 0, true) && sweepRadius(100.0, 0, true)
+test "check48 200-ray sweep across the shadow edge (r = 2, 3, 10, 100): the integrator's verdict = the analytic rule" { checkCaptureSweep() }
+
+-- ---------- check50: the regular part is finite at both ends ----------
+
+pure func regularEnds(r: float, edge: float, anti: float) -> bool {
+  let a = shadowAngularRadius(r);
+  let e = lensRegular(r, a + 0.00000001 * a, 0.005);
+  let f = lensRegular(r, pi() - 0.000000000001, 0.005);
+  finite(e) && finite(f) && near(e, edge, 0.0000001) && near(f, anti, 0.0000001)
+}
+pure func checkRegular() -> bool =
+  regularEnds(2.0, -0.3167966714423187, -0.06704014618046703)
+  && regularEnds(3.0, -0.3486167971445653, -0.004957514506477657)
+  && regularEnds(10.0, -0.39276950644978825, 0.0)
+  && regularEnds(1000000.0, -0.40036141122611113, 0.0)
+test "check50 lensRegular finite at psi - alpha_sh = 1e-8 alpha_sh and at psi = pi - 1e-12, r = 2, 3, 10, 1e6" { checkRegular() }
+
+-- ---------- the inverse row (orders 0 and 1) ----------
+
+pure func monotone(xs: [InvSample], prev: float, ok: bool) -> bool =
+  match xs {
+    [] => ok,
+    s :: rest => monotone(rest, s.dpsi, ok && finite(s.dpsi) && finite(s.slope) && s.dpsi >= prev && s.slope > 0.0 && s.dpsi > 0.0)
+  }
+
+pure func roundTrip(r: float, xs: [InvSample], k: int, n: int, worst: float) -> float =
+  match xs {
+    [] => worst,
+    s :: rest => {
+      let f = 0.0 - pi() + 2.0 * pi() * intToFloat(k) / intToFloat(n - 1);
+      let psi = shadowAngularRadius(r) + s.dpsi;
+      let back = psi - deflectionExactAt(r, psi);
+      let e = absf(back - f);
+      roundTrip(r, rest, k + 1, n, if e > worst then e else worst)
+    }
+  }
+
+pure func checkInverse(r: float) -> bool {
+  let row = inverseRow(r, 2048, 65);
+  monotone(row, 0.0, true) && roundTrip(r, row, 0, 65, 0.0) <= 0.0002 && length(row) == 65
+}
+test "inverseRow (2048 forward samples): 65 outputs on F in [-pi, pi], psi strictly increasing, slope > 0, finite, round trip within 2e-4 rad at r = 3, 10, 1000" { checkInverse(3.0) && checkInverse(10.0) && checkInverse(1000.0) }
+
+pure func checkInverseEinstein() -> bool {
+  let row = inverseRow(10.0, 4096, 3);
+  match row {
+    _ :: mid :: _ => near(shadowAngularRadius(10.0) + mid.dpsi, einsteinAngle(10.0), 0.00001),
+    _ => false
+  }
+}
+test "inverseRow: the F = 0 sample is the Einstein angle (r = 10, 1e-5 rad at 4096 samples)" { checkInverseEinstein() }
+
+pure func checkLogMin() -> bool = near(inverseRowLogMin(), 0.0 - 18.420680743952367, 0.000000000001)
+test "the forward row starts at psi - alpha_sh = 1e-8 alpha_sh" { checkLogMin() }
+
+pure func checkTanhLarge() -> bool = tanh(1000000.0) == 1.0 && tanh(-1000000.0) == -1.0 && tanh(400.0) == 1.0 && tanh(21.0) == 1.0 && tanh(0.5) < 0.5
+test "hyper.tanh is +-1 for huge arguments (0.10.0 fix: NaN beyond |u| ~ 355 before); lensRegular needs it at r = 1e6" { checkTanhLarge() }

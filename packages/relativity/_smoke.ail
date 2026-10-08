@@ -5,7 +5,9 @@
 -- trip with its energy ledger (journey plans, medium), and the sky
 -- photometry of 0.5.0 (forward CMB radiance, B-V temperature, threshold),
 -- the 0.6.0 glow pole (4 x the mean inward glow at 0.99c), and the 0.8.0
--- glow spectrum (pole temperature and luminance at 0.99c and the cap).
+-- glow spectrum (pole temperature and luminance at 0.99c and the cap), and
+-- the 0.10.0 geodesics and tides (Einstein ring at 10 r_s, Sgr A* tide and
+-- hover power at 3 r_s).
 module sunholo/relativity/_smoke
 
 import std/io (println)
@@ -24,6 +26,8 @@ import ./blackbody (photopicRadiance)
 import ./optics (cmbSeenTemperature, cmbSeenTemperatureApparent, apparentDisc)
 import ./medium (hoverPower, glowTemperatureAt, glowLuminanceAt, glowRadianceAt)
 import ./blackbody (luminousEfficacy)
+import ./geodesic (lensRegular, einsteinAngle)
+import ./schwarzschild (impactFromStaticAngle, turningRadius, weakDeflection2, weakDeflectionFinite, strongDeflectionBbar, circularOrbitSpeed, circularOrbitClockRate, orbitalAngularVelocity, movingClockRate, radialCoordinateRate, hoverAcceleration, tidalRadialOrbit, tidalAccelSI, tidalOrbitAccelSI, tidalSafeRadius, tidalMinMass, hoverAccelSI, hoverPowerPerKg)
 
 pure func wdNaN() -> float = 0.0 / 0.0
 pure func wdInf() -> float = 1.0e308 * 10.0
@@ -213,6 +217,39 @@ pure func approachSweep(i: int, n: int, acc: float) -> float =
 export pure func approachDigest(n: int) -> float =
   approachSweep(0, n, 0.0) + rapidityForTimedLeg(wdNaN(), 1.0, 1.0) + rapidityForTimedApproach(wdNaN(), 1.0)
 
+-- 0.10.0: the Schwarzschild closed forms (clocks, orbits, tides, hover),
+-- swept over radius; interpreter and strict VM must print the same bits.
+pure func bhSweep(i: int, n: int, acc: float) -> float =
+  if i > n then acc
+  else {
+    let r = 1.6 + 0.37 * intToFloat(i * i);
+    let psi = 0.05 + 3.0 * intToFloat(i) / intToFloat(n);
+    let b = 2.6 + 0.5 * intToFloat(i * i);
+    let v = circularOrbitSpeed(r);
+    bhSweep(i + 1, n, acc + impactFromStaticAngle(r, psi) + turningRadius(b) + weakDeflection2(b) + weakDeflectionFinite(r, psi)
+      + v + circularOrbitClockRate(r) + orbitalAngularVelocity(r) + movingClockRate(r, v) + radialCoordinateRate(r, -0.1)
+      + hoverAcceleration(r) + tidalRadialOrbit(r) + tidalAccelSI(4297000.0, r, 100.0) + tidalOrbitAccelSI(9.62, r, 100.0) / 1.0e6
+      + hoverAccelSI(4297000.0, r) / 1.0e5 + hoverPowerPerKg(4297000.0, r) / 1.0e14 + tidalSafeRadius(9.62, 100.0, 0.98) / 1.0e3
+      + tidalMinMass(100.0, r, 0.98) / 1.0e5)
+  }
+export pure func schwarzschildDigest(n: int) -> float = bhSweep(0, n, 0.0) + strongDeflectionBbar()
+
+-- 0.10.0: the geodesic lens map. Sum of lensRegular (the RK4 integrator,
+-- h = 0.005) over an n x n grid in (r, psi), r = 2 + i^3/2, psi spread over
+-- (alpha_sh, pi), plus the Einstein angle at 10 r_s (the exact form). Strict
+-- VM and interpreter must print the same bits; stapledons-godot
+-- tools/geodesic_ref.py digest n must agree to 1e-9.
+pure func lensCol(r: float, a: float, j: int, n: int, acc: float) -> float =
+  if j >= n then acc
+  else lensCol(r, a, j + 1, n, acc + lensRegular(r, a + (pi() - a) * (intToFloat(j) + 0.5) / intToFloat(n), 0.005))
+pure func lensRows(i: int, n: int, acc: float) -> float =
+  if i >= n then acc
+  else {
+    let r = 2.0 + 0.5 * intToFloat(i * i * i);
+    lensRows(i + 1, n, lensCol(r, shadowAngularRadius(r), 0, n, acc))
+  }
+export pure func lensDigest(n: int) -> float = lensRows(0, n, 0.0) + einsteinAngle(10.0)
+
 export func main() -> () ! {IO} {
   let trip = flipAndBurn(4.37, standardGravity());
   let fwd = { x: 0.0, y: 0.0, z: -1.0 };
@@ -235,7 +272,9 @@ export func main() -> () ! {IO} {
   let discOk = absf(disc.centre * 180.0 / pi() - 25.9277296298034) < 0.000000001 && absf(disc.radius * 180.0 / pi() - 2.18394056339431) < 0.000000001 && absf(hoverPower(1.0, 0.1254) - 37593974.2332) < 0.000001;
   let phiCapS = rapidityOfOneMinusBeta(0.000001);
   let specOk = absf(glowTemperatureAt(100000.0, phi099, 1.0) / 1357.5234659678836 - 1.0) < 0.000000000001 && absf(glowTemperatureAt(100000.0, phiCapS, 1.0) / 14114.023335759708 - 1.0) < 0.000000000001 && absf(glowLuminanceAt(100000.0, phi099, 0.00000000001, 0.5, 1.0) / 0.000000007143664288681881 - 1.0) < 0.000000000001 && absf(glowLuminanceAt(100000.0, phiCapS, 0.00000000001, 0.5, 1.0) / 0.15643160647071194 - 1.0) < 0.000000000001;
-  if tripOk && angleOk && shadowOk && photometryOk && photometryWdOk && cruiseOk && skyOk && glowOk && discOk && specOk
-  then println("OK: relativity alpha-Cen trip 3.5824 ship-yr / 6.0025 yr, 90deg star seen at 25.842deg at 0.9c, shadow at 3 r_s = pi/4, G2V = 5770 K, WD BP-RP 0.30 = 8941.6 K, alpha Cen at 1-beta = 1e-6 2.263 ship-days / 1.510e19 J, forward CMB at the cap 3853.7 K = 1.984e8 cd/m^2, Sun B-V 0.65 = 5770 K, naked-eye limit V 6.94 at 2e-4 cd/m^2, glow pole at 0.99c 9.6288e-5 W/m^2 = 4 x mean, 5 deg sphere at 90 deg seen at 25.928 deg radius 2.184 deg at 0.9c, hover at 0.1254 m/s^2 = 3.759e7 W/kg, glow at eps 1e-11 1357.5 K / 7.144e-9 cd/m^2 at 0.99c, 14114 K / 0.1564 cd/m^2 at the cap")
-  else println("FAIL: trip ${show(trip.shipTime)} / ${show(trip.galaxyTime)}, angle ${show(angle)}, shadow ${show(shadow)}, G2V ${show(teffFromBpRp(0.823))}, WD ${show(bbTeffFromBpRp(0.30))}, cruise ${show(cruise.trip.shipTime)}, CMB ${show(cmbPole)} K ${show(photopicRadiance(cmbPole))} cd/m^2, B-V ${show(teffFromBV(0.65))}, limit ${show(limitingMagnitude(0.0002, 1.0))}, glow pole ${show(glowEmittanceAt(100000.0, phi099, 0.000000001, 0.5, 1.0))}, disc ${show(disc.centre)} / ${show(disc.radius)}, hover ${show(hoverPower(1.0, 0.1254))}, glow T ${show(glowTemperatureAt(100000.0, phi099, 1.0))} lum ${show(glowLuminanceAt(100000.0, phi099, 0.00000000001, 0.5, 1.0))}")
+  let ringDeg = einsteinAngle(10.0) * 180.0 / pi();
+  let geoOk = absf(ringDeg - 29.828317906) < 0.000001 && absf(tidalAccelSI(4297000.0, 3.0, 100.0) / 9.80665 / 0.00021077825808856772 - 1.0) < 0.000000000001 && absf(hoverPowerPerKg(4297000.0, 3.0) / 144467333104005.4 - 1.0) < 0.000000000001;
+  if tripOk && angleOk && shadowOk && photometryOk && photometryWdOk && cruiseOk && skyOk && glowOk && discOk && specOk && geoOk
+  then println("OK: relativity alpha-Cen trip 3.5824 ship-yr / 6.0025 yr, 90deg star seen at 25.842deg at 0.9c, shadow at 3 r_s = pi/4, G2V = 5770 K, WD BP-RP 0.30 = 8941.6 K, alpha Cen at 1-beta = 1e-6 2.263 ship-days / 1.510e19 J, forward CMB at the cap 3853.7 K = 1.984e8 cd/m^2, Sun B-V 0.65 = 5770 K, naked-eye limit V 6.94 at 2e-4 cd/m^2, glow pole at 0.99c 9.6288e-5 W/m^2 = 4 x mean, 5 deg sphere at 90 deg seen at 25.928 deg radius 2.184 deg at 0.9c, hover at 0.1254 m/s^2 = 3.759e7 W/kg, glow at eps 1e-11 1357.5 K / 7.144e-9 cd/m^2 at 0.99c, 14114 K / 0.1564 cd/m^2 at the cap, Einstein ring at 10 r_s 29.8283 deg, Sgr A* at 3 r_s tide 2.108e-4 g over 100 m and hover 1.445e14 W/kg")
+  else println("FAIL: trip ${show(trip.shipTime)} / ${show(trip.galaxyTime)}, angle ${show(angle)}, shadow ${show(shadow)}, G2V ${show(teffFromBpRp(0.823))}, WD ${show(bbTeffFromBpRp(0.30))}, cruise ${show(cruise.trip.shipTime)}, CMB ${show(cmbPole)} K ${show(photopicRadiance(cmbPole))} cd/m^2, B-V ${show(teffFromBV(0.65))}, limit ${show(limitingMagnitude(0.0002, 1.0))}, glow pole ${show(glowEmittanceAt(100000.0, phi099, 0.000000001, 0.5, 1.0))}, disc ${show(disc.centre)} / ${show(disc.radius)}, hover ${show(hoverPower(1.0, 0.1254))}, glow T ${show(glowTemperatureAt(100000.0, phi099, 1.0))} lum ${show(glowLuminanceAt(100000.0, phi099, 0.00000000001, 0.5, 1.0))}, ring ${show(ringDeg)}, tide ${show(tidalAccelSI(4297000.0, 3.0, 100.0))}, hover ${show(hoverPowerPerKg(4297000.0, 3.0))}")
 }
