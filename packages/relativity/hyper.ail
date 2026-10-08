@@ -50,11 +50,16 @@ export pure func cosh(u: float) -> float
   (e + 1.0 / e) / 2.0
 }
 
+-- Above |u| = 20 the result rounds to exactly +-1 (0.10.0: it used to be NaN
+-- beyond |u| ~ 355, where expm1 overflows to Inf/Inf; bit-identical below).
 export pure func tanh(u: float) -> float
   ensures { result >= -1.0 && result <= 1.0 }
 {
-  let e = expm1(2.0 * absf(u));
-  let t = e / (e + 2.0);
+  let a = absf(u);
+  let t = if a > 20.0 then 1.0 else {
+    let e = expm1(2.0 * a);
+    e / (e + 2.0)
+  };
   if u < 0.0 then 0.0 - t else t
 }
 

@@ -1,0 +1,419 @@
+-- sunholo/relativity/geodesic: null geodesics around a non-rotating black hole.
+--
+-- Radii and impact parameters are in r_s = 2GM/c^2 (horizon at r = 1); angles
+-- in radians. The observer is static at radius r; psi is a ray's angle from
+-- the direction toward the hole, in the observer's orthonormal frame. A ray is
+-- traced backwards from the observer: dphi is the azimuth it sweeps around
+-- the hole on its way out to infinity.
+--
+-- Two independent methods (relativity spec section 3, as amended by stapledons
+-- ledger D-13: either may generate a table if the other cross-checks it):
+--   * the Binet integrator u'' = -u + 1.5 u^2, RK4 in azimuth with a fixed
+--     step h and a cubic-Hermite end root (`escapeAzimuth`). The ODE has no
+--     singularity at the turning point, so it is the robust general method.
+--   * Darwin's exact elliptic form through Carlson's R_F
+--     (`escapeAzimuthExact`, `deflectionExact`): about 50x cheaper, used as
+--     the oracle and for image solving.
+-- Capture is decided analytically (`escapes`), never by the integrator; the
+-- integrator's own verdict must agree, and a disagreement reads as NaN.
+-- Neither method belongs in a per-frame loop: bake tables offline.
+
+module sunholo/relativity/geodesic
+
+import std/math (sqrt, sin, cos, acos, exp, log, intToFloat)
+import std/array (fromList, get)
+import ./hyper (tanh, absf)
+import ./schwarzschild (pi, criticalImpact, shadowAngularRadius, impactFromStaticAngle)
+
+-- escaped: the ray reaches infinity; dphi: azimuth swept from the observer to
+-- infinity (0 when captured, NaN when the integrator disagrees with `escapes`).
+export type Ray = { escaped: bool, dphi: float }
+
+-- One integrator state: u = r_s/r and v = du/dphi.
+export type Binet = { u: float, v: float }
+
+-- One inverse-table sample: dpsi = psi - alpha_sh (radians), slope = dpsi/dF.
+export type InvSample = { dpsi: float, slope: float }
+
+pure func nan() -> float = 0.0 / 0.0
+pure func halfPi() -> float = pi() / 2.0
+
+-- ---------------------------------------------------------------- integrator
+
+pure func accel(u: float) -> float = 0.0 - u + 1.5 * u * u
+
+-- One classical RK4 step of u'' = -u + (3/2) u^2 (r_s = 1) by h in azimuth.
+export pure func binetStep(u: float, v: float, h: float) -> Binet {
+  let k1u = v;
+  let k1v = accel(u);
+  let k2u = v + 0.5 * h * k1v;
+  let k2v = accel(u + 0.5 * h * k1u);
+  let k3u = v + 0.5 * h * k2v;
+  let k3v = accel(u + 0.5 * h * k2u);
+  let k4u = v + h * k3v;
+  let k4v = accel(u + h * k3u);
+  { u: u + h / 6.0 * (k1u + 2.0 * k2u + 2.0 * k3u + k4u), v: v + h / 6.0 * (k1v + 2.0 * k2v + 2.0 * k3v + k4v) }
+}
+
+-- Steps stay at h unless the ray is so steep (near-radial) that one step would
+-- move u by more than 0.05; then the step shrinks to keep |du| <= 0.05.
+pure func duMax() -> float = 0.05
+pure func maxSteps() -> int = 4000000
+
+pure func stepSize(v: float, h: float) -> float {
+  let av = absf(v);
+  if av * h <= duMax() then h else duMax() / av
+}
+
+pure func hermite(t: float, u0: float, v0: float, u1: float, v1: float, s: float) -> float {
+  let t2 = t * t;
+  let t3 = t2 * t;
+  (2.0 * t3 - 3.0 * t2 + 1.0) * u0 + (t3 - 2.0 * t2 + t) * s * v0 + (0.0 - 2.0 * t3 + 3.0 * t2) * u1 + (t3 - t2) * s * v1
+}
+
+-- The zero of the cubic Hermite interpolant on the last step (u0 > 0 >= u1),
+-- by 60 fixed bisection halvings (VM = interpreter, no tolerance loop).
+pure func endRootLoop(i: int, lo: float, hi: float, u0: float, v0: float, u1: float, v1: float, s: float) -> float =
+  if i >= 60 then 0.5 * (lo + hi) * s
+  else {
+    let mid = 0.5 * (lo + hi);
+    if hermite(mid, u0, v0, u1, v1, s) > 0.0
+    then endRootLoop(i + 1, mid, hi, u0, v0, u1, v1, s)
+    else endRootLoop(i + 1, lo, mid, u0, v0, u1, v1, s)
+  }
+
+-- Step until u <= 0 (escape: Hermite root on the last step) or u >= 1
+-- (captured at the horizon). Tail-recursive; NaN or the step cap stop it.
+pure func integrate(u: float, v: float, phi: float, h: float, n: int) -> Ray =
+  if n >= maxSteps() then { escaped: false, dphi: nan() }
+  else {
+    let s = stepSize(v, h);
+    let nx = binetStep(u, v, s);
+    if nx.u != nx.u then { escaped: false, dphi: nan() }
+    else if nx.u <= 0.0 then { escaped: true, dphi: phi + endRootLoop(0, 0.0, 1.0, u, v, nx.u, nx.v, s) }
+    else if nx.u >= 1.0 then { escaped: false, dphi: phi + s }
+    else integrate(nx.u, nx.v, phi + s, h, n + 1)
+  }
+
+-- The integrator alone, with its own capture verdict (u reaches 1). Starts
+-- at u = 1/r with u' = +sqrt(1/b^2 - u^2 + u^3) for psi < pi/2 (ingoing),
+-- minus otherwise. Use `escapeAzimuth`; this exists so tests can compare the
+-- integrator's verdict with `escapes`.
+export pure func integrateRay(r: float, psi: float, h: float) -> Ray
+  requires { r > 1.0 && h > 0.0 }
+{
+  let u0 = 1.0 / r;
+  let b = impactFromStaticAngle(r, psi);
+  if not (b > 0.0) then { escaped: psi >= halfPi(), dphi: 0.0 }
+  else {
+    let w = 1.0 / (b * b) - u0 * u0 + u0 * u0 * u0;
+    let sq = if w > 0.0 then sqrt(w) else 0.0;
+    integrate(u0, if psi < halfPi() then sq else 0.0 - sq, 0.0, h, 0)
+  }
+}
+
+-- The capture rule (r >= 1.5): a ray escapes iff it is outgoing (psi >= pi/2)
+-- or ingoing with b > b_c.
+export pure func escapes(r: float, psi: float) -> bool =
+  psi >= halfPi() || impactFromStaticAngle(r, psi) > criticalImpact()
+
+-- THE integrator (spec section 3): capture from `escapes`, azimuth from RK4 at
+-- step h. h = 0.005 gives about 5e-7 rad worst case; 0.001 about 1e-9.
+export pure func escapeAzimuth(r: float, psi: float, h: float) -> Ray
+  requires { r > 1.5 && h > 0.0 }
+{
+  if not escapes(r, psi) then { escaped: false, dphi: 0.0 }
+  else {
+    let ray = integrateRay(r, psi, h);
+    { escaped: true, dphi: if ray.escaped then ray.dphi else nan() }
+  }
+}
+
+-- Deflection seen at r: delta = dphi - (pi - psi) (0 for a straight line).
+-- NaN for a captured ray.
+export pure func lensDeflection(r: float, psi: float, h: float) -> float
+  requires { r > 1.5 && h > 0.0 }
+{
+  let ray = escapeAzimuth(r, psi, h);
+  if ray.escaped then ray.dphi - (pi() - psi) else nan()
+}
+
+-- Observer at infinity: alpha(b) = total azimuth - pi, the spec's Delta-phi(b).
+export pure func deflectionFromInfinity(b: float, h: float) -> float
+  requires { b > 2.598076211353316 && h > 0.0 }
+{
+  let v0 = 1.0 / b;
+  let s0 = stepSize(v0, h);
+  let first = binetStep(0.0, v0, s0);
+  let ray = integrate(first.u, first.v, s0, h, 1);
+  ray.dphi - pi()
+}
+
+-- ---------------------------------------------------------------- exact form
+
+pure func rfSeries(x: float, y: float, z: float) -> float {
+  let a = (x + y + z) / 3.0;
+  let dx = 1.0 - x / a;
+  let dy = 1.0 - y / a;
+  let dz = 1.0 - z / a;
+  let e2 = dx * dy - dz * dz;
+  let e3 = dx * dy * dz;
+  (1.0 - e2 / 10.0 + e3 / 14.0 + e2 * e2 / 24.0 - 3.0 * e2 * e3 / 44.0) / sqrt(a)
+}
+
+pure func rfLoop(x: float, y: float, z: float, i: int) -> float =
+  if i >= 40 then rfSeries(x, y, z)
+  else {
+    let sx = sqrt(x);
+    let sy = sqrt(y);
+    let sz = sqrt(z);
+    let lam = sx * sy + sx * sz + sy * sz;
+    rfLoop((x + lam) * 0.25, (y + lam) * 0.25, (z + lam) * 0.25, i + 1)
+  }
+
+-- Carlson's symmetric elliptic integral R_F(x, y, z) (x, y, z >= 0, at most
+-- one zero) by duplication: a fixed 40 iterations (each shrinks the spread by
+-- 4), then the degree-5 series. No tolerance loop, so NaN cannot spin.
+export pure func carlsonRF(x: float, y: float, z: float) -> float = rfLoop(x, y, z, 0)
+
+type Roots = { u1: float, u2: float, u3: float }
+
+pure func polish(u: float, b: float) -> float = u - (u * u * u - u * u + 1.0 / (b * b)) / (3.0 * u * u - 2.0 * u)
+
+-- Roots of u^3 - u^2 + 1/b^2 for b > b_c: u1 < 0 < u2 <= 2/3 <= u3 (u2 is the
+-- turning point). For b >= 4 two Newton steps restore the small roots' full
+-- relative precision (the trig form leaves ~1e-16 absolute, 1e-10 relative at b = 1e6).
+pure func roots(b: float) -> Roots {
+  let c = 1.0 - 27.0 / (2.0 * b * b);
+  let th = acos(if c < -1.0 then -1.0 else c);
+  let u3 = 1.0 / 3.0 + (2.0 / 3.0) * cos(th / 3.0);
+  let u1 = 1.0 / 3.0 + (2.0 / 3.0) * cos(th / 3.0 + 2.0 * pi() / 3.0);
+  let u2 = 1.0 / 3.0 + (2.0 / 3.0) * cos(th / 3.0 - 2.0 * pi() / 3.0);
+  if b >= 4.0 then { u1: polish(polish(u1, b), b), u2: polish(polish(u2, b), b), u3: u3 }
+  else { u1: u1, u2: u2, u3: u3 }
+}
+
+-- integral_y^u2 du / sqrt(P(u)), P = (u - u1)(u2 - u)(u3 - u), upper limit at
+-- the root (Carlson 1988): 2 sqrt(u2 - y) R_F((y-u1)(u3-u2), (u2-u1)(u3-u2), (u3-y)(u2-u1)).
+pure func toRoot(y: float, rt: Roots) -> float {
+  let d = rt.u2 - y;
+  2.0 * sqrt(if d > 0.0 then d else 0.0) * carlsonRF((y - rt.u1) * (rt.u3 - rt.u2), (rt.u2 - rt.u1) * (rt.u3 - rt.u2), (rt.u3 - y) * (rt.u2 - rt.u1))
+}
+
+-- Exact deflection from infinity (Darwin): 2 I(0, u2) - pi.
+export pure func deflectionExact(b: float) -> float
+  requires { b > 2.598076211353316 }
+{
+  2.0 * toRoot(0.0, roots(b)) - pi()
+}
+
+-- 20-point Gauss-Legendre nodes on [-1, 1], as (+x, w) pairs (measured: 16 to
+-- 32 points all agree with 96 at 1e-15 on this integrand).
+type Node = { x: float, w: float }
+pure func glNodes() -> [Node] = [
+  { x: 0.07652652113349734, w: 0.15275338713072598 }, { x: 0.22778585114164507, w: 0.14917298647260382 },
+  { x: 0.37370608871541955, w: 0.14209610931838215 }, { x: 0.5108670019508271, w: 0.1316886384491765 },
+  { x: 0.636053680726515, w: 0.11819453196151831 }, { x: 0.7463319064601508, w: 0.10193011981724048 },
+  { x: 0.8391169718222189, w: 0.08327674157670474 }, { x: 0.912234428251326, w: 0.06267204833410904 },
+  { x: 0.9639719272779138, w: 0.04060142980038705 }, { x: 0.9931285991850949, w: 0.017614007139152264 }
+]
+
+pure func outInt(u: float, b: float) -> float = b / sqrt(1.0 - b * b * u * u * (1.0 - u))
+
+pure func glSum(ns: [Node], mid: float, b: float, acc: float) -> float =
+  match ns {
+    [] => acc,
+    n :: rest => glSum(rest, mid, b, acc + n.w * (outInt(mid + mid * n.x, b) + outInt(mid - mid * n.x, b)))
+  }
+
+-- Outgoing with b <= b_c: integral_0^{1/r} b du / sqrt(1 - b^2 u^2 (1 - u)). P has
+-- no real root on [0, 1/r] (r >= 1.5), so the integrand is smooth.
+pure func outgoingNoRoot(r: float, b: float) -> float {
+  let mid = 0.5 / r;
+  glSum(glNodes(), mid, b, 0.0) * mid
+}
+
+-- Exact counterpart of `escapeAzimuth` (the oracle): ingoing 2 I(0,u2) - I(0,1/r),
+-- outgoing I(0,1/r), by Carlson when P has three real roots, else Gauss-Legendre.
+export pure func escapeAzimuthExact(r: float, psi: float) -> Ray
+  requires { r > 1.5 }
+{
+  let b = impactFromStaticAngle(r, psi);
+  let ingoing = psi < halfPi();
+  if ingoing && b <= criticalImpact() then { escaped: false, dphi: 0.0 }
+  else if b > criticalImpact() then {
+    let rt = roots(b);
+    let full = toRoot(0.0, rt);
+    let part = toRoot(1.0 / r, rt);
+    { escaped: true, dphi: if ingoing then full + part else full - part }
+  }
+  else { escaped: true, dphi: outgoingNoRoot(r, b) }
+}
+
+-- Exact deflection seen at r (NaN for a captured ray).
+export pure func deflectionExactAt(r: float, psi: float) -> float
+  requires { r > 1.5 }
+{
+  let ray = escapeAzimuthExact(r, psi);
+  if ray.escaped then ray.dphi - (pi() - psi) else nan()
+}
+
+-- ---------------------------------------------------------------- the lens map
+
+-- What a deflection table stores: delta + ln tanh((psi - alpha_sh)/alpha_sh).
+-- delta diverges like -ln(psi - alpha_sh) at the shadow edge; this regular
+-- part is finite from 1e-8 alpha_sh out to the antipode (spec: every table
+-- finite over its range). Renderers add the singular part back analytically.
+export pure func lensRegular(r: float, psi: float, h: float) -> float
+  requires { r > 1.5 && h > 0.0 }
+{
+  let a = shadowAngularRadius(r);
+  lensDeflection(r, psi, h) + log(tanh((psi - a) / a))
+}
+
+pure func imageLoop(i: int, lo: float, hi: float, r: float, target: float) -> float =
+  if i >= 64 then 0.5 * (lo + hi)
+  else {
+    let mid = 0.5 * (lo + hi);
+    if mid - deflectionExactAt(r, mid) < target then imageLoop(i + 1, mid, hi, r, target)
+    else imageLoop(i + 1, lo, mid, r, target)
+  }
+
+-- Image of a source at infinity at angle beta from the hole direction: solves
+-- F(psi) = psi - delta(psi) = beta (order 0, primary) or -beta (order 1, the
+-- secondary image on the far side) on (alpha_sh, pi] by 64 bisections of the
+-- exact form. Orders >= 2 hug the shadow edge and are not separated.
+export pure func imageAngle(r: float, beta: float, order: int) -> float
+  requires { r > 1.5 }
+{
+  let a = shadowAngularRadius(r);
+  imageLoop(0, a + a * 0.000000000001, pi(), r, if order == 0 then beta else 0.0 - beta)
+}
+
+-- The Einstein ring: a source exactly behind the hole (beta = 0).
+export pure func einsteinAngle(r: float) -> float
+  requires { r > 1.5 }
+{
+  imageAngle(r, 0.0, 0)
+}
+
+-- Magnification of the image at psi: (sin psi / |sin F|) |dpsi/dF|, F = psi - delta,
+-- by a central difference of the exact form (psi strictly inside (alpha_sh, pi)).
+export pure func imageMagnification(r: float, psi: float) -> float
+  requires { r > 1.5 }
+{
+  let a = shadowAngularRadius(r);
+  let m0 = if psi - a < pi() - psi then psi - a else pi() - psi;
+  let d = 0.000001 * (if m0 < 1.0 then m0 else 1.0);
+  let fp = (psi + d) - deflectionExactAt(r, psi + d);
+  let fm = (psi - d) - deflectionExactAt(r, psi - d);
+  let f = psi - deflectionExactAt(r, psi);
+  (sin(psi) / absf(sin(f))) * absf(2.0 * d / (fp - fm))
+}
+
+-- ---------------------------------------------------------------- the inverse row
+
+-- The forward row's column coordinate: x = ln((psi - alpha_sh)/alpha_sh), from
+-- ln 1e-8 to ln((pi - alpha_sh)/alpha_sh).
+export pure func inverseRowLogMin() -> float = log(0.00000001)
+
+pure func fwdSamples(i: int, n: int, r: float, a: float, x0: float, x1: float, fs: [float], ys: [float]) -> { fs: [float], ys: [float] } =
+  if i < 0 then { fs: fs, ys: ys }
+  else {
+    let x = x0 + (x1 - x0) * intToFloat(i) / intToFloat(n - 1);
+    let dpsi = if i == n - 1 then pi() - a else a * exp(x);
+    let psi = a + dpsi;
+    fwdSamples(i - 1, n, r, a, x0, x1, (psi - deflectionExactAt(r, psi)) :: fs, dpsi :: ys)
+  }
+
+pure func secants(i: int, n: int, fa: Array[float], ya: Array[float], acc: [float]) -> [float] =
+  if i < 0 then acc
+  else secants(i - 1, n, fa, ya, (get(ya, i + 1) - get(ya, i)) / (get(fa, i + 1) - get(fa, i)) :: acc)
+
+pure func initTangent(i: int, n: int, da: Array[float]) -> float =
+  if i == 0 then get(da, 0)
+  else if i == n - 1 then get(da, n - 2)
+  else {
+    let dl = get(da, i - 1);
+    let dr = get(da, i);
+    if dl * dr <= 0.0 then 0.0 else 0.5 * (dl + dr)
+  }
+
+pure func revOnto(xs: [float], acc: [float]) -> [float] =
+  match xs {
+    [] => acc,
+    x :: rest => revOnto(rest, x :: acc)
+  }
+
+-- Fritsch-Carlson: walk the intervals in order, limiting (alpha, beta) to the
+-- circle of radius 3 so the cubic Hermite interpolant stays monotone.
+pure func fcSweep(i: int, n: int, da: Array[float], mi: float, accRev: [float]) -> [float] =
+  if i >= n - 1 then revOnto(mi :: accRev, [])
+  else {
+    let d = get(da, i);
+    let mn = initTangent(i + 1, n, da);
+    if d == 0.0 then fcSweep(i + 1, n, da, 0.0, 0.0 :: accRev)
+    else {
+      let al = mi / d;
+      let be = mn / d;
+      let s = al * al + be * be;
+      if s > 9.0 then {
+        let tau = 3.0 / sqrt(s);
+        fcSweep(i + 1, n, da, tau * be * d, (tau * al * d) :: accRev)
+      }
+      else fcSweep(i + 1, n, da, mn, mi :: accRev)
+    }
+  }
+
+-- Largest i in [lo, hi] with fa[i] <= f (lo when f is below fa[lo]).
+pure func findInterval(fa: Array[float], f: float, lo: int, hi: int) -> int =
+  if hi - lo <= 0 then lo
+  else {
+    let mid = (lo + hi + 1) / 2;
+    if get(fa, mid) <= f then findInterval(fa, f, mid, hi) else findInterval(fa, f, lo, mid - 1)
+  }
+
+pure func evalInv(f: float, fa: Array[float], ya: Array[float], ma: Array[float], n: int) -> InvSample {
+  let i = findInterval(fa, f, 0, n - 2);
+  let f0 = get(fa, i);
+  let dd = get(fa, i + 1) - f0;
+  let tr = (f - f0) / dd;
+  let t = if tr < 0.0 then 0.0 else if tr > 1.0 then 1.0 else tr;
+  let y0 = get(ya, i);
+  let y1 = get(ya, i + 1);
+  let m0 = get(ma, i);
+  let m1 = get(ma, i + 1);
+  let t2 = t * t;
+  let t3 = t2 * t;
+  let y = (2.0 * t3 - 3.0 * t2 + 1.0) * y0 + (t3 - 2.0 * t2 + t) * dd * m0 + (0.0 - 2.0 * t3 + 3.0 * t2) * y1 + (t3 - t2) * dd * m1;
+  let dy = (6.0 * t2 - 6.0 * t) * y0 + (3.0 * t2 - 4.0 * t + 1.0) * dd * m0 + (6.0 * t - 6.0 * t2) * y1 + (3.0 * t2 - 2.0 * t) * dd * m1;
+  { dpsi: y, slope: dy / dd }
+}
+
+pure func outputs(k: int, nOut: int, fa: Array[float], ya: Array[float], ma: Array[float], n: int, acc: [InvSample]) -> [InvSample] =
+  if k < 0 then acc
+  else {
+    let f = 0.0 - pi() + 2.0 * pi() * intToFloat(k) / intToFloat(nOut - 1);
+    outputs(k - 1, nOut, fa, ya, ma, n, evalInv(f, fa, ya, ma, n) :: acc)
+  }
+
+-- One row of the inverse lens table at radius r: nOut samples uniform in
+-- F = psi - delta on [-pi, pi] (F = beta finds order-0 images, F = -beta
+-- order-1), each giving psi - alpha_sh and dpsi/dF. Built by Fritsch-Carlson
+-- monotone inversion of nFwd forward samples of the exact form, uniform in
+-- x = ln((psi - alpha_sh)/alpha_sh) on [ln 1e-8, ln((pi - alpha_sh)/alpha_sh)]
+-- (16384 for a table). F is strictly increasing in psi there, so the result is
+-- monotone. Lists are built tail-recursively and indexed through arrays.
+export pure func inverseRow(r: float, nFwd: int, nOut: int) -> [InvSample]
+  requires { r > 1.5 && nFwd >= 3 && nOut >= 2 }
+{
+  let a = shadowAngularRadius(r);
+  let x0 = inverseRowLogMin();
+  let x1 = log((pi() - a) / a);
+  let s = fwdSamples(nFwd - 1, nFwd, r, a, x0, x1, [], []);
+  let fa = fromList(s.fs);
+  let ya = fromList(s.ys);
+  let da = fromList(secants(nFwd - 2, nFwd, fa, ya, []));
+  let ma = fromList(fcSweep(0, nFwd, da, initTangent(0, nFwd, da), []));
+  outputs(nOut - 1, nOut, fa, ya, ma, nFwd, [])
+}

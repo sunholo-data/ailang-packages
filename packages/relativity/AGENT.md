@@ -14,8 +14,11 @@ near a black hole and the numbers must be physically right:
 - What a fast-moving observer sees: aberration, Doppler shift, the colour and
   brightness of stars, the CMB in every direction, and absolute luminances
   (cd/m^2) and the naked-eye threshold for exposing a rendered sky.
-- Closed-form Schwarzschild quantities: shadow size, deflection, gravitational
-  shift.
+- Schwarzschild black holes: shadow size, deflection, gravitational shift,
+  clocks and circular orbits, tides across a length, hover acceleration and
+  power (closed forms), and exact null geodesics seen by a static observer at
+  any radius: the lens map, image positions, Einstein angle, magnification,
+  inverse lens-table rows (`geodesic`, 0.10.0).
 
 It is pure: no effects, deterministic, and the same results on the VM and the
 interpreter.
@@ -23,8 +26,9 @@ interpreter.
 Do NOT use it for:
 - Orbital mechanics or Newtonian gravity.
 - Rotating (Kerr) black holes.
-- Full ray tracing through curved spacetime. Only closed forms and weak-field
-  deflection are here; exact null-geodesic deflection is planned.
+- Per-frame ray tracing. `geodesic` integrates one ray per call (hundreds to
+  thousands of RK4 steps); bake a table offline and interpolate it per pixel.
+- Massive-particle geodesics (free fall), charged holes, accretion disks.
 
 ## Units and conventions
 
@@ -95,7 +99,8 @@ let vLim = limitingMagnitude(skyLum, 2.0);          -- faintest visible star, fi
 | `photometry_table` | Generated Gaia BP-RP, Teff, G-V and spectral-type node lists, and the Johnson B-V and Teff node lists |
 | `blackbody_photometry` | `bbTeffMin`, `bbTeffMax`, `bbBpRp`, `bbGMinusV`, `bbBpRpInvertible`, `bbClampTeff`, `bbTeffFromBpRp`, `bbTeffFromBpRpExact`, `bbGMinusVFromBpRp`, `bbVFromG` |
 | `blackbody_photometry_table` | Generated Gaia G/BP/RP and Bessell-Murphy V response samples, zero points and the 61-node colour table |
-| `schwarzschild` | `photonSphere` (1.5), `criticalImpact` (3√3/2), `shadowAngularRadius(r)`, `weakDeflection(b)`, `staticObserverBlueshift(r)`, `staticClockRate(r)`, `pi` |
+| `schwarzschild` | `photonSphere` (1.5), `criticalImpact` (3√3/2), `shadowAngularRadius(r)`, `weakDeflection(b)`, `staticObserverBlueshift(r)`, `staticClockRate(r)`, `pi`; 0.10.0: `impactFromStaticAngle(r, psi)`, `turningRadius(b)`, `weakDeflection2(b)`, `weakDeflectionFinite(r, psi)`, `strongDeflectionBbar`, `circularOrbitSpeed(r)`, `circularOrbitClockRate(r)`, `orbitalAngularVelocity(r)`, `movingClockRate(r, beta)`, `radialCoordinateRate(r, beta)`, `hoverAcceleration(r)`, `rsPerSolarMassMetres`, `tidalRadial(r)`, `tidalTransverse(r)`, `tidalRadialOrbit(r)`, `tidalAccelSI(mSun, r, lenM)`, `tidalOrbitAccelSI(mSun, r, lenM)`, `tidalSafeRadius(mSun, lenM, aMax)`, `tidalMinMass(lenM, r, aMax)`, `hoverAccelSI(mSun, r)`, `hoverPowerPerKg(mSun, r)` |
+| `geodesic` | 0.10.0. `Ray {escaped, dphi}`, `Binet {u, v}`, `InvSample {dpsi, slope}`; integrator `binetStep`, `escapeAzimuth(r, psi, h)`, `lensDeflection(r, psi, h)`, `deflectionFromInfinity(b, h)`, `integrateRay`; capture `escapes(r, psi)`; exact `carlsonRF(x, y, z)`, `deflectionExact(b)`, `escapeAzimuthExact(r, psi)`, `deflectionExactAt(r, psi)`; lens map `lensRegular(r, psi, h)`, `imageAngle(r, beta, order)`, `einsteinAngle(r)`, `imageMagnification(r, psi)`, `inverseRow(r, nFwd, nOut)`, `inverseRowLogMin` |
 
 ## Trip plans: `plan*` or the totals?
 
@@ -263,6 +268,45 @@ V is good to about +-0.1 mag. Treat results as approximate.
 - **Black-hole shadow size.** The shadow is about 2.6 r_s across in impact
   parameter, not r_s, and from r = 3 r_s it is exactly π/4.
 
+## Black holes: geodesics, tides, hover (0.10.0)
+
+- **Conventions.** r and b in r_s. The observer is static at r; psi is a
+  ray's angle from the direction **toward** the hole in the observer's frame;
+  b = r sin psi / sqrt(1 - 1/r) (`impactFromStaticAngle`). The deflection
+  seen at r is delta = dphi - (pi - psi); the source of the ray at psi lies at
+  F = psi - delta from the hole direction (negative: the far side).
+- **Integrator or exact form?** `escapeAzimuth`/`lensDeflection`/`lensRegular`
+  (RK4, step h in azimuth) is the general method the spec names; use it in
+  offline tools (h = 0.005 is about 5e-7 rad worst case). The exact form
+  (`escapeAzimuthExact`, `deflectionExact`, `deflectionExactAt`) is the
+  oracle: use it in checks, image solving and inverse rows. Never call either
+  per frame or per pixel.
+- **Capture is analytic.** `escapes(r, psi)`: outgoing rays escape, ingoing
+  rays escape iff b > b_c (valid for r >= 1.5). A captured ray has
+  `escaped = false`; `lensDeflection` and `deflectionExactAt` are NaN there.
+- **Near the shadow edge** delta diverges like -ln(psi - alpha_sh). Tables
+  store `lensRegular` = delta + ln tanh((psi - alpha_sh)/alpha_sh), finite
+  from 1e-8 alpha_sh to the antipode; add the singular term back analytically.
+  Float64 sets a floor there: at b = b_c (1 + 1e-8) one ulp of b moves delta
+  by ~1e-9.
+- **Weak field.** 2/b (`weakDeflection`) is 1.5 % low at b = 100; use
+  `weakDeflection2` (2.7e-4) or the exact form. Beyond r = 1e6 the finite
+  observer's (1 + cos psi)/b (`weakDeflectionFinite`) is within 1e-3 relative.
+- **Images.** `imageAngle(r, beta, 0)` is the primary, order 1 the secondary
+  on the far side; `einsteinAngle(r)` (beta = 0) is 29.83 deg at 10 r_s,
+  61.89 deg at 3 r_s, 2.60 deg at 1000 r_s. `imageMagnification` is the point
+  magnification at an image.
+- **Inverse rows.** `inverseRow(r, 16384, n)` gives n samples uniform in F
+  on [-pi, pi] (F = beta finds order 0, F = -beta order 1): psi - alpha_sh
+  and dpsi/dF, monotone by construction (Fritsch-Carlson).
+- **Tides and hover (SI).** Mass in solar masses, lever in metres, results in
+  m/s^2 (divide by 9.80665 for g). `tidalAccelSI` is the static or radially
+  moving value, `tidalOrbitAccelSI` the circular-orbit one (1.5x at 3 r_s).
+  The Higgs-bubble wall does not shield tides; the pocket does not feel the
+  hover acceleration, but the drive pays `hoverPowerPerKg` per kg of m_eff.
+  A crewed hover at 3 r_s needs M >= 1.97e5 Msun for <= 0.1 g over 100 m
+  (`tidalMinMass`); Sgr A* gives 2.1e-4 g.
+
 ## Precision and verification
 
 - Floats are outside Z3's decidable fragment. The `requires`/`ensures` here
@@ -283,10 +327,13 @@ V is good to about +-0.1 mag. Treat results as approximate.
   by an independent quadrature in theta). The 0.8.0 glow spectrum values come
   from tools/glow_spectrum_ref.py (60-digit Decimal; sigma from exact SI
   h, k, c; Stefan-Boltzmann checked by integrating Planck's law; the efficacy
-  peak checked against the CIE blackbody maximum).
+  peak checked against the CIE blackbody maximum). The 0.10.0 geodesic,
+  tide and hover values come from stapledons-godot tools/geodesic_ref.py
+  (an independent Python RK4 integrator, Carlson R_F in float64 and a
+  50-digit Decimal truth with Newton-polished roots; IAU 2015 GM_sun).
 - NaN: the interpreter answers NaN >= x with true (ailang#1419), the VM with
   false. Functions here test NaN first or are written with `<` so both engines
   agree; `_smoke.ail`'s `wdDigest`, `journeyDigest`, `photometryDigest`,
-  `glowDigest`, `discDigest`, `glowSpectrumDigest` and `approachDigest` check that bit for bit.
+  `glowDigest`, `discDigest`, `glowSpectrumDigest`, `approachDigest`, `schwarzschildDigest` and `lensDigest` check that bit for bit.
 - Colours use the Wyman–Sloan–Shirley (2013) fit to the CIE 1931 colour
   matching functions, which is accurate to about 0.002 in chromaticity.
