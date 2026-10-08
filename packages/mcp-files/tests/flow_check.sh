@@ -12,7 +12,9 @@ for name in "create returns sep-2631 descriptor" "token stored as digest only" "
             "empty upload refused" "unknown token refused" "cross-account refusal" "expired fileRef gone" \
             "foreign fileRef refused" "mime allow-list enforced" "receive via host round trip" "accept upload file" "upload file outside the temp dir refused" \
             "create needs account and sane config" "no raw token in store" "tampered bytes refused" "refused attempt spends the token" \
-            "reused token says one createUpload per file" "createUploads issues one token per file" "createUploads count is 1..20 and signed in"; do
+            "reused token says one createUpload per file" "createUploads issues one token per file" "createUploads count is 1..20 and signed in" \
+            "fileRef reusable by owner within the window" "cross-account refused during reuse" "fileRef refused after the reuse window" \
+            "reuse window capped by the object expiry" "releaseFileRef: owner only, then gone"; do
   grep -qxF "PASS $name" <<<"$OUT" || { echo "MISSING PASS: $name"; rc=1; }
 done
 [ $rc -eq 0 ] && echo "ok: all flow checks pass"

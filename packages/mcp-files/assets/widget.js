@@ -9,8 +9,11 @@
 // descriptor shows the picker; any other result shows one quiet line and no
 // picker ("No upload needed", or "Done." when this tool call was given a
 // fileRef). After an upload: "Uploaded <name> (<size>) - <CFG.afterUpload>",
-// then (0.1.3, CFG.onUploaded.tool set) the tool's outcome: "✓ Parsed — <summary>",
-// "✓ Done", or the error; see "after the upload" below.
+// then (CFG.onUploaded.tool set) the tool's outcome: "✓ Parsed <file> · <summary>"
+// + CFG.successSuffix, or "✓ Done"; if the call fails, times out (0.1.4: 10 s)
+// or the host cannot make it, "✓ Uploaded <name> (<size>) — <CFG.askNextText>"
+// and the model is told which tool to call with the fileRef. See "after the
+// upload" below.
 // ext-apps 2.0.3 delivers tool-result only for the call this widget is
 // attached to, so the later tool call that uses the file cannot update this
 // instance; that call renders its own instance, which says "Done.".
@@ -124,11 +127,25 @@ async function viaHost(f) {
 // widget sat on "parsing..." until the user typed). So when CFG.onUploaded.tool
 // is set the widget runs that tool itself, as an app-initiated tools/call
 // through the host (ext-apps App.callServerTool; the host's serverTools
-// capability), then puts the result in the model's context. Without the
-// capability it reports the fileRef and asks the user to continue.
+// capability), then puts the result in the model's context.
+// 0.1.4: the card never waits on that call. claude.ai (prod, 2026-10-08) took
+// the upload, but the widget's tools/call to an OAuth-gated tool never reached
+// the server and the card sat on "parsing…". So the call gets
+// CFG.autoCallTimeoutMs (default 10 s, enforced here, not only by the SDK).
+// On a timeout, a rejected call, an error result, or a host without the
+// serverTools capability, the card says "✓ Uploaded <name> (<size>) —
+// <CFG.askNextText>" and the model is told "call <tool> with fileRef=<ref>".
 const PLACEHOLDER = '{{fileRef}}';
 const MAX_CONTEXT_CHARS = 100000;
-const TOOL_TIMEOUT_MS = 300000;
+const TOOL_TIMEOUT_MS = CFG.autoCallTimeoutMs > 0 ? CFG.autoCallTimeoutMs : 10000;
+
+function withTimeout(p, ms) {
+  let t;
+  const late = new Promise((_, reject) => {
+    t = setTimeout(() => reject(new Error('no answer within ' + Math.max(1, Math.round(ms / 1000)) + ' s')), ms);
+  });
+  return Promise.race([p, late]).finally(() => clearTimeout(t));
+}
 
 // The arguments: parse the JSON template, then replace the one string value
 // that is exactly "{{fileRef}}". Keys and other strings are never spliced.
@@ -286,26 +303,34 @@ async function reportOnly(rc, via, statusTail) {
   }
 }
 
+// The upload landed but the widget did not get the tool's result: the card
+// says so and asks the user to prompt the assistant; the model gets the
+// fileRef and exactly which tool to call.
+async function handOff(rc, via, tool, reason) {
+  say(clip('✓ Uploaded ' + baseName(rc.name) + ' (' + size(rc.sizeBytes) + ') — ' +
+    (CFG.askNextText || 'ask the assistant to continue'), ONE_LINE), 'ok');
+  if (reason) console.warn('mcp_files widget: ' + tool + ' not run by the widget: ' + reason);
+  try {
+    await tell('The user uploaded ' + rc.name + '; call ' + tool + ' with fileRef=' + rc.fileRef + '. ' +
+      uploadedText(rc, via) + (reason ? ' (The widget could not run ' + tool + ' itself: ' + reason + '.)' : ''),
+      Object.assign({}, rc, { tool: tool, toolError: reason || '' }));
+  } catch (e) {
+    say('Uploaded ' + rc.name + ', but the assistant could not be told. Tell it: fileRef ' + rc.fileRef, 'err');
+  }
+}
+
 async function runTool(rc, via) {
   const tool = CFG.onUploaded.tool;
   say('Uploaded ' + rc.name + ' (' + size(rc.sizeBytes) + ') — ' + CFG.afterUpload);
   let r = null, failure = '';
   try {
     const args = fillArgs(CFG.onUploaded.argsJson, rc.fileRef);
-    r = await app.callServerTool({ name: tool, arguments: args }, { timeout: TOOL_TIMEOUT_MS });
+    r = await withTimeout(app.callServerTool({ name: tool, arguments: args }, { timeout: TOOL_TIMEOUT_MS }), TOOL_TIMEOUT_MS);
     if (!r || r.isError) failure = (textOf(r) || 'the tool reported an error').slice(0, 2000);
   } catch (e) {
     failure = String((e && e.message) || e).slice(0, 2000);
   }
-  if (failure) {
-    say('Uploaded ' + rc.name + ', but ' + tool + ' failed: ' + failure.slice(0, 300), 'err');
-    try {
-      await tell(uploadedText(rc, via) + ' The widget then called ' + tool + ' with it, which failed: ' + failure +
-        ' Retry by calling ' + tool + ' with this fileRef; if it says the fileRef is unknown or used, ask the user to upload the file again.',
-        Object.assign({}, rc, { tool: tool, toolError: failure }));
-    } catch (e) {}
-    return;
-  }
+  if (failure) { await handOff(rc, via, tool, failure); return; }
   const line = summaryLine(r);
   const parsed = !!findSummary(resultObject(r));
   const download = httpsUrl(findKey(resultObject(r), 'download_url', 0));
@@ -314,8 +339,12 @@ async function runTool(rc, via) {
   const text = head.length + body.length + 40 <= MAX_CONTEXT_CHARS
     ? head + ' The ' + tool + ' result:\n' + body
     : head + ' The result is ' + body.length + ' characters, too large to include here: call ' + tool +
-      ' yourself for the full result (the fileRef may now be used up; if so, ask the user to upload again).';
-  const done = parsed ? clip('✓ Parsed ' + baseName(rc.name) + (line ? ' · ' + line : ''), ONE_LINE) : '✓ Done';
+      ' yourself with fileRef=' + rc.fileRef + ' for the full result.';
+  // The suffix ("— ask Claude about it") is the call to action: it is kept
+  // whole and the summary is cut instead.
+  const suffix = String(CFG.successSuffix || '').replace(/[\r\n]+/g, ' ').slice(0, 60);
+  const room = Math.max(20, ONE_LINE - suffix.length);
+  const done = (parsed ? clip('✓ Parsed ' + baseName(rc.name) + (line ? ' · ' + line : ''), room) : '✓ Done') + suffix;
   if (download) showDownload(download);
   try {
     await tell(text, Object.assign({}, rc, { tool: tool, toolSummary: line }));
@@ -331,7 +360,7 @@ async function report(rc, via) {
     if (CFG.onUploadedProblem) console.warn('mcp_files widget: onUploaded ignored: ' + CFG.onUploadedProblem);
     await reportOnly(rc, via, CFG.afterUpload);
   } else if (!canCallTools()) {
-    await reportOnly(rc, via, 'tell the assistant to continue.');
+    await handOff(rc, via, CFG.onUploaded.tool, 'the host does not offer widget tool calls (serverTools)');
   } else {
     await runTool(rc, via);
   }

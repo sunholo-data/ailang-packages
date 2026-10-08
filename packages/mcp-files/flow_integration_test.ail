@@ -18,7 +18,7 @@ import std/list (any, range, map)
 import std/crypto (sha256Hex, sha256Bytes)
 import std/fs (writeFileBytes, mkdirAll)
 import pkg/sunholo/mcp_files/core (errorStatus, parseFileRef)
-import pkg/sunholo/mcp_files/flow (Hooks, StoredFile, createUpload, createUploads, acceptUpload, acceptUploadFile, receiveViaHost, resolveFileRef, serveApiTempDir)
+import pkg/sunholo/mcp_files/flow (Hooks, StoredFile, createUpload, createUploads, acceptUpload, acceptUploadFile, receiveViaHost, resolveFileRef, releaseFileRef, serveApiTempDir)
 
 -- ---------------- test hooks: SharedMem store ----------------
 
@@ -54,7 +54,10 @@ func tDelMeta(k: string) -> bool ! {IO, FS, Env, Net, Clock, SharedMem} {
 pure func hooksWith(mimes: [string]) -> Hooks =
   {putBytes: tPutBytes, getBytes: tGetBytes, delBytes: tDelBytes, putMeta: tPutMeta, claimMeta: tClaimMeta,
    getMeta: tGetMeta, delMeta: tDelMeta, server: "svc.example", uploadUrl: "https://svc.example/uploads",
-   tokenTtlSec: 600, objectTtlSec: 86400, maxBytesCeiling: 1000, allowedMimes: mimes}
+   tokenTtlSec: 600, objectTtlSec: 86400, reuseTtlSec: 1800, maxBytesCeiling: 1000, allowedMimes: mimes}
+
+-- 0.1.3 behaviour: a fileRef is deleted on its first read.
+pure func singleUseHooks() -> Hooks = { hooks() | reuseTtlSec: 0 }
 
 pure func hooks() -> Hooks = hooksWith([])
 
@@ -99,6 +102,9 @@ pure func tokenOf(desc: string) -> string = match decode(desc) {
   },
   Err(_) => ""
 }
+
+-- The <id> of mcp-file://<server>/file_<id> (the storage keys use it).
+pure func refId(ref: string) -> string = match parseFileRef("svc.example", ref) { Some(id) => id, None => "" }
 
 pure func status(r: Result[string, string]) -> int = match r {
   Ok(_) => 200,
@@ -159,9 +165,50 @@ export func main() -> unit ! {IO, FS, Env, Net, Clock, SharedMem, Rand[mode=cryp
     (match replay { Err(e) => contains(e, "already used — call createUpload again for each file"), Ok(_) => false })
       && contains(jstr(desc, ["note"]), "one createUpload/token per file"),
     match replay { Err(e) => e, Ok(r) => r });
-  -- fileRef is deleted after one read
+  -- 0.1.4: the owner reads it again inside the reuse window (first read at
+  -- now()+10, window 1800 s), same bytes each time
   let again = resolveFileRef(h, "acct-1", ref, now() + 11);
-  check("fileRef deleted after use", statusF(again) == 404 && anyKeyOrValueHas("b:obj:") == false, "status=${show(statusF(again))}");
+  let third = resolveFileRef(h, "acct-1", ref, now() + 1809);
+  check("fileRef reusable by owner within the window", (match again { Ok(f) => f.sha256 == sha256Bytes(payload()), Err(_) => false })
+    && (match third { Ok(f) => toInts(f.data) == range(0, 256), Err(_) => false }), "again=${show(statusF(again))} third=${show(statusF(third))}");
+  -- another account still cannot read it, and its attempt deletes nothing
+  let foreignReuse = resolveFileRef(h, "acct-2", ref, now() + 12);
+  check("cross-account refused during reuse", statusF(foreignReuse) == 404 && has_key("b:obj:${refId(ref)}"), "status=${show(statusF(foreignReuse))}");
+  -- reads never extend the window: past first read + 1800 it is gone and deleted
+  let after = resolveFileRef(h, "acct-1", ref, now() + 1810);
+  let afterAgain = resolveFileRef(h, "acct-1", ref, now() + 1811);
+  check("fileRef refused after the reuse window", statusF(after) == 410 && statusF(afterAgain) == 404 && has_key("b:obj:${refId(ref)}") == false,
+    "after=${show(statusF(after))} again=${show(statusF(afterAgain))}");
+  -- single-use mode (reuseTtlSec 0): deleted on the first read, as in 0.1.3
+  let su = singleUseHooks();
+  let suRef = match createUpload(su, "acct-1", "s.docx", "", 0, now()) {
+    Ok(d) => match acceptUpload(su, tokenOf(d), "s.docx", payload(), now() + 1) { Ok(r) => jstr(r, ["fileRef"]), Err(_) => "" },
+    Err(_) => ""
+  };
+  let suFirst = resolveFileRef(su, "acct-1", suRef, now() + 2);
+  let suSecond = resolveFileRef(su, "acct-1", suRef, now() + 3);
+  check("fileRef deleted after use", statusF(suFirst) == 200 && statusF(suSecond) == 404 && has_key("b:obj:${refId(suRef)}") == false,
+    "first=${show(statusF(suFirst))} second=${show(statusF(suSecond))}");
+  -- the window is capped by the object's own expiry
+  let capRef = match createUpload(h, "acct-1", "c.docx", "", 0, now()) {
+    Ok(d) => match acceptUpload(h, tokenOf(d), "c.docx", payload(), now() + 1) { Ok(r) => jstr(r, ["fileRef"]), Err(_) => "" },
+    Err(_) => ""
+  };
+  let capFirst = resolveFileRef(h, "acct-1", capRef, now() + 86000);
+  let capLate = resolveFileRef(h, "acct-1", capRef, now() + 86401);
+  check("reuse window capped by the object expiry", statusF(capFirst) == 200 && statusF(capLate) == 410,
+    "first=${show(statusF(capFirst))} late=${show(statusF(capLate))}");
+  -- releaseFileRef: only the owner, then it is gone
+  let relRef = match createUpload(h, "acct-1", "r.docx", "", 0, now()) {
+    Ok(d) => match acceptUpload(h, tokenOf(d), "r.docx", payload(), now() + 1) { Ok(r) => jstr(r, ["fileRef"]), Err(_) => "" },
+    Err(_) => ""
+  };
+  let relForeign = releaseFileRef(h, "acct-2", relRef);
+  let relOwn = releaseFileRef(h, "acct-1", relRef);
+  let relAfter = resolveFileRef(h, "acct-1", relRef, now() + 5);
+  check("releaseFileRef: owner only, then gone",
+    status(relForeign) == 404 && (match relOwn { Ok(_) => true, Err(_) => false }) && statusF(relAfter) == 404 && has_key("b:obj:${refId(relRef)}") == false,
+    "foreign=${show(status(relForeign))} after=${show(statusF(relAfter))}");
   -- expired token
   let late = match createUpload(h, "acct-1", "a.pdf", "", 0, now()) {
     Ok(d) => acceptUpload(h, tokenOf(d), "a.pdf", payload(), now() + 600),
@@ -209,7 +256,8 @@ export func main() -> unit ! {IO, FS, Env, Net, Clock, SharedMem, Rand[mode=cryp
   -- expired fileRef
   let r3 = uploaded(h, "acct-1", "c.pdf", payload());
   let gone = resolveFileRef(h, "acct-1", jstr(r3, ["fileRef"]), now() + 5 + 86400);
-  check("expired fileRef gone", statusF(gone) == 410 && anyKeyOrValueHas("b:obj:") == false, "status=${show(statusF(gone))}");
+  -- (only r3's own object: ref2 above is still inside its reuse window)
+  check("expired fileRef gone", statusF(gone) == 410 && has_key("b:obj:${refId(jstr(r3, ["fileRef"]))}") == false, "status=${show(statusF(gone))}");
   -- stored bytes that no longer match their sha256 are refused
   let r4 = uploaded(h, "acct-1", "d.pdf", payload());
   let ref4 = jstr(r4, ["fileRef"]);

@@ -46,7 +46,7 @@ func tDelMeta(k: string) -> bool ! {IO, FS, Env, Net, Clock, SharedMem} {
 pure func hooks() -> Hooks =
   {putBytes: tPutBytes, getBytes: tGetBytes, delBytes: tDelBytes, putMeta: tPutMeta, claimMeta: tClaimMeta,
    getMeta: tGetMeta, delMeta: tDelMeta, server: "svc.example", uploadUrl: "http://localhost/uploads",
-   tokenTtlSec: 600, objectTtlSec: 86400, maxBytesCeiling: 2000000, allowedMimes: []}
+   tokenTtlSec: 600, objectTtlSec: 86400, reuseTtlSec: 1800, maxBytesCeiling: 2000000, allowedMimes: []}
 
 func nowSec() -> int ! {Clock} = now() / 1000
 

@@ -21,8 +21,10 @@ What it does:
   the first use, the token hasn't expired, and the size is 1..maxBytes;
 - a **SEP-2631-shaped descriptor** (`{file, upload:{transport,method,url,headers,multipart,expiresAt}}`
   plus `fileRef`, `maxBytes`, `curl`), so adopting `files/authorizeUpload` later is a rename;
-- **fileRefs** `mcp-file://<server>/file_<32 hex>`, parsed strictly, resolved **once** and **only
-  for their owner**, then deleted. Another account's ref answers exactly like an unknown one;
+- **fileRefs** `mcp-file://<server>/file_<32 hex>`, parsed strictly, resolved **only for their
+  owner**. Since 0.1.4 the owner may read one again for `Hooks.reuseTtlSec` after the first read
+  (default 30 minutes, never past the upload's own expiry), then it is deleted. Another account's
+  ref answers exactly like an unknown one;
 - the **upload widget**: `uploadWidgetHtml(cfg)`, one self-contained HTML document that can also run
   your file tool itself once the upload lands (`cfg.onUploaded`, 0.1.3);
 - **`fetchFileParam`** for ChatGPT: one GET under `Net[scope=public] @limit=1`, size-capped.
@@ -33,7 +35,7 @@ uploads, serving routes (serve-api does), and the `@mcp_ui`/`@mcp_app_only` wiri
 ## Quick start
 ```ailang
 import pkg/sunholo/mcp_files/core (errorStatus, openAiFileSchema)
-import pkg/sunholo/mcp_files/flow (Hooks, StoredFile, createUpload, createUploads, acceptUploadFile, serveApiTempDir, receiveViaHost, resolveFileRef, fetchFileParam)
+import pkg/sunholo/mcp_files/flow (Hooks, StoredFile, createUpload, createUploads, acceptUploadFile, serveApiTempDir, receiveViaHost, resolveFileRef, releaseFileRef, fetchFileParam)
 import pkg/sunholo/mcp_files/widget (defaultWidgetConfig, uploadWidgetHtml, widgetCspMeta, widgetMimeType, claudeWidgetOrigin, callAfterUpload)
 import pkg/sunholo/mcp_files/brand (Brand, FooterLink, defaultBrand, brandWith)   -- optional: your own branding
 ```
@@ -48,7 +50,8 @@ Copy `routes_template.ail` into your service and replace `fileHooks()` and `acco
 | `acceptUploadFile(h, tokenRaw, filename, path, tempDir, nowSec)` | same | as above, from serve-api's multipart temp file. `path` must be `<tempDir>/ailang-upload-<x>/<name>`, else 400 before the path is read or the token spent (see "The temp-file guard"). Pass `serveApiTempDir()`; `""` = 500 |
 | `serveApiTempDir()` | `Env` | the dir serve-api writes multipart parts under: `$TMPDIR`, else `/tmp` (Go's `os.TempDir()`) |
 | `receiveViaHost(h, ticket, filename, base64, nowSec)` | same | as above; `ticket` is the descriptor's upload token. Bad base64 is refused **before** the token is spent |
-| `resolveFileRef(h, account, fileRef, nowSec)` | hooks | `Ok(StoredFile)` once, for the owner; then bytes and record are deleted |
+| `resolveFileRef(h, account, fileRef, nowSec)` | hooks | `Ok(StoredFile)` for the owner, sha256-checked on every read. The first read opens the reuse window (`core.reuseUntil(now, h.reuseTtlSec, upload expiry)`); reads inside it return the same file, a read after it is 410 and deletes it. `h.reuseTtlSec <= 0`: deleted on the first read (0.1.3) |
+| `releaseFileRef(h, account, fileRef)` | hooks | the owner deletes the file now: `Ok({released})`; another account's or an unknown ref is 404 and deletes nothing |
 | `fetchFileParam(fileObj: Json, maxBytes)` | `Net[scope=public] @limit=1` | `Ok(StoredFile)` (`fileRef` = the OpenAI `file_id`); nothing stored |
 | `uploadWidgetHtml(cfg)` | pure | the widget document |
 | `callAfterUpload(tool, argsJson)` / `noAutoCall()` | pure | `cfg.onUploaded`: the tool the widget calls after the upload (see "After the upload") |
@@ -80,6 +83,7 @@ One effect row for every hook: `! {IO, FS, Env, Net, Clock, SharedMem}`.
 | `uploadUrl` | the URL the descriptor names (https) | `https://docparse.ailang.sunholo.com/uploads` |
 | `tokenTtlSec` | token lifetime | `600` (`core.defaultTokenTtlSec()`) |
 | `objectTtlSec` | how long an unread upload is kept | `86400` |
+| `reuseTtlSec` | 0.1.4: how long the owner may read a fileRef again after its first read, capped by the upload's expiry; `<= 0` = deleted on the first read | `1800` (`core.defaultReuseTtlSec()`) |
 | `maxBytesCeiling` | the cap every token is bound under | plan's `maxFileSizeMb` |
 | `allowedMimes` | allow-list, `[]` = any | your parser's formats |
 
@@ -187,23 +191,32 @@ What the widget then does, after a successful upload (direct POST or the via-hos
 1. shows "Uploaded <name> (<size>) — parsing…";
 2. parses `argsJson` as JSON, replaces the one string value that is exactly `"{{fileRef}}"` with the
    fileRef, and calls the tool through the host: an app-initiated `tools/call`, ext-apps 2.0.3
-   `App.callServerTool(params, options)` (`this.request({method:"tools/call",params:$},…)` in the
-   bundle), with a 5-minute timeout (the SDK default is 60 s). The host proxies it to your server
-   with the user's session, so the tool runs signed in, as if the model had called it;
-3. shows "✓ Parsed AGM.docx · 68 blocks · 13 headings · 4 tracked changes" when the result holds a
-   `summary` object (top level, or up to two objects down, as in docparse's `document.summary`; the
-   counts as in "Result cards"), else "✓ Done";
-4. sends one `ui/update-model-context`: the receipt and fileRef, the summary, and the tool result
-   (`structuredContent` as JSON, else the text content). When that text would pass 100 000
-   characters, the result is left out and the model is told to call the tool itself;
-5. on an error (the tool's `isError`, a rejected or timed-out call, a bad template) it shows
-   "Uploaded <name>, but <tool> failed: …" and tells the model, with the fileRef, so it can retry.
+   `App.callServerTool(params, options)`. **It waits at most `cfg.autoCallTimeoutMs` (0.1.4,
+   default 10 s)**, enforced by the widget itself, not only passed to the SDK;
+3. on success, shows "✓ Parsed AGM.docx · 68 blocks · 13 headings · 4 tracked changes" when the
+   result holds a `summary` object (top level, or up to two objects down, as in docparse's
+   `document.summary`; the counts as in "Result cards"), else "✓ Done". `cfg.successSuffix` (0.1.4,
+   e.g. " — ask Claude about it") is appended whole; a long summary is cut to make room;
+4. on success, sends one `ui/update-model-context`: the receipt and fileRef, the summary, and the
+   tool result (`structuredContent` as JSON, else the text content). When that text would pass
+   100 000 characters, the result is left out and the model is told to call the tool itself with the
+   fileRef (still readable: see `reuseTtlSec`);
+5. **on anything else** (no answer within the timeout, a rejected call, the tool's `isError`, a bad
+   template, or a host without `serverTools`) it **hands off**: the card says "✓ Uploaded <name>
+   (<size>) — <cfg.askNextText>" (default "ask the assistant to continue"), and the model gets one
+   context update starting "The user uploaded <name>; call <tool> with fileRef=<ref>.", plus why the
+   widget could not. Never `ui/message`.
 
-**The host must allow it.** The widget calls only when the host's `serverTools` capability is set
-(claude.ai advertised it in the F1 spike handshake). Without it, the widget falls back to the 0.1.2
-behaviour (the fileRef and `cfg.nextStep` into the model's context) and asks the user: "Uploaded
-<name> (<size>) — tell the assistant to continue." `noAutoCall()` (the default, `tool: ""`) is the
-0.1.2 behaviour too, with `cfg.afterUpload` as the last line.
+**Why the card never waits (0.1.4).** Live in claude.ai (prod, 2026-10-08) the 2.37 MB upload was
+accepted, but the widget's `callServerTool` to an OAuth-gated `mcpParse` never reached the server: no
+request at all. The card sat on "parsing…" until the user typed "continue" and Claude called the
+tool itself. Treat the widget's own tool call as a bonus. Every outcome leaves the user and the
+model knowing what to do next, within the timeout.
+
+**The host must allow it.** The widget calls only when the host's `serverTools` capability is set.
+Without it, the widget hands off at once (step 5). `noAutoCall()` (the default, `tool: ""`) is the
+0.1.2 behaviour: the fileRef and `cfg.nextStep` go into the model's context, and `cfg.afterUpload`
+is the last line.
 
 **The template, checked.** `onUploadedProblem(cfg.onUploaded)` is `""` or the reason:
 - `tool` must match `[A-Za-z0-9_-]{1,64}` (`toolNameOk`);
@@ -215,13 +228,25 @@ problem to the browser console. Assert `onUploadedProblem(...) == ""` in your ow
 fails CI instead. The widget re-checks the template before every call.
 
 **Things to know.**
-- **A fileRef is single use.** The widget's call resolves it. If the model calls the tool again
-  with the same fileRef (a retry, or a result too large for the context), your tool answers 404
-  unless it keeps the parsed result; the model is told to ask the user for a new upload then.
+- **A fileRef is reusable by its owner for `reuseTtlSec` (0.1.4).** The widget's call may resolve it
+  and the model can still call the tool again with the same fileRef: a retry, the next page of a
+  large result, or another output format. Set `reuseTtlSec: 0` for the 0.1.3 single-use behaviour.
 - **Neither call starts a model turn either.** The tool call runs without the model, and the result
   sits in the model's context; the user's next message picks it up. The widget's "✓" line is what
   tells the user the file was taken.
 - **Billing and limits apply as usual**: the call is a normal signed-in `tools/call` to your server.
+
+## What to tell users (privacy)
+Text a service can adapt for its privacy page (0.1.4 defaults; substitute your own TTLs):
+
+> A file you upload goes straight to <service>, not through the AI model. It is stored only so the
+> assistant can read it: from your first use of it, it can be read again **for up to 30 minutes, and
+> only by the account that uploaded it**. After that it is deleted. A file that is never used is
+> refused after <objectTtlSec> and removed from storage by <your storage lifecycle>. Upload links
+> work once and expire after 10 minutes.
+
+Before 0.1.4 a file was deleted on its first read. If your privacy page says "deleted as soon as it
+has been read", update it when you adopt 0.1.4, or set `reuseTtlSec: 0`.
 
 ## Result cards
 Each tool call renders its own widget card. A card with no upload descriptor (a call given a fileRef
@@ -354,18 +379,18 @@ stays visible in both themes.
 ## How the guarantees are checked
 | Check | What it shows |
 |---|---|
-| `ailang verify core.ail` (`tests/verify_check.sh`) | Z3: `uploadVerdict` (single use + expiry + size), `isExpired`, `tokenExpiresAt`, `sizeOk`, `effectiveMaxBytes`, `ownerMatches`, `refVerdict`, `mimeAllowed`, `refFrameOk`, `downloadUrlOk` |
+| `ailang verify core.ail` (`tests/verify_check.sh`) | Z3: `uploadVerdict` (single use + expiry + size), `reuseUntil` (the reuse window never outlives the upload or the TTL), `isExpired`, `tokenExpiresAt`, `sizeOk`, `effectiveMaxBytes`, `ownerMatches`, `refVerdict`, `mimeAllowed`, `refFrameOk`, `downloadUrlOk` |
 | `ailang verify brand.ail` (same script) | Z3: `svgFrameOk` (one svg element, no `script`/`&#`/`<!`/`xml:base`, size), `accentOk` (`#` + length 4 or 7), `isHexDigit`, `linkUrlOk` (https, no userinfo or quotes). Proving "no `;` in an accepted accent" as a contract times the solver out, so tests pin it |
 | `tests/broken_single_use.ail`, `tests/broken_expiry.ail` | must be **refuted** (a forgotten claim; an off-by-one expiry; an empty-owner match) |
 | `ailang test --package .` | core (SEP-2631 descriptor golden, OpenAI schema golden, codec, sanitiser, properties), brand (48: hostile logos refused, the AILANG and Parse logos accepted, accents, links, fallbacks) and widget tests (default and custom brand rendered, hostile brand escaped or replaced, accent only on the button and ring, host theming, the after-upload template and tool-name checks) |
-| `tests/flow_check.sh` | flow over SharedMem hooks: single use (and its "one createUpload per file" message), expiry, size cap, cross-account, sha256 round trip, delete after use, tamper, mime, via host, paths outside the temp dir refused, `createUploads` (distinct tokens, 1..20) |
+| `tests/flow_check.sh` | flow over SharedMem hooks: single use (and its "one createUpload per file" message), expiry, size cap, cross-account, sha256 round trip, reusable by the owner within the window (0.1.4), refused and deleted after it, cross-account refused during reuse, window capped by the upload expiry, single-use mode, `releaseFileRef`, tamper, mime, via host, paths outside the temp dir refused, `createUploads` (distinct tokens, 1..20) |
 | `tests/e2e_uploads.sh` | real serve-api: curl multipart of a 1.5 MB binary, sha256 round trip, replay 409, cross-account 404, CORS for the widget origin, 413 above `--max-upload-size`, `-F file=/etc/hosts` / `../../x` / a temp-dir escape refused with the token unspent |
 | `tests/fetch_check.sh` | `fetchFileParam`: http/userinfo refused; metadata IP and a name resolving to loopback refused with permissive Net flags on; a pinned public file fetched byte-exact; size cap (network) |
 | `tests/ifc_leaks.sh` | logging or storing a token in the real `flow.ail` fails to compile |
 | `tests/widget_check.sh` | widget HTML (default brand + a footer link) parses, one picker, two inline module scripts, nothing external (the only href is an https footer link with `rel=noopener`); `node --check` on both scripts |
-| `tests/widget_sim.sh` | 33 scenarios of `assets/widget.js` under node with a mocked ext-apps App: upload → `tools/call` with the substituted args → one context update with the summary; no summary; a large result; tool error and rejected call; no `serverTools` (fallback); no tool (0.1.2); via-host then the tool; 9 bad templates refused in the widget; a hostile fileRef stays one value; 11 result cards (parse line, path, errors, convert + download, the cap, off). Never `ui/message` |
+| `tests/widget_sim.sh` | 39 scenarios of `assets/widget.js` under node with a mocked ext-apps App: upload → `tools/call` with the substituted args and the 10 s timeout → one context update with the summary; no summary; a large result; the hand-off (0.1.4) after a timeout, an error result, a rejected call, no `serverTools`, no capabilities; still waiting before the timeout; custom `askNextText`; `successSuffix` (kept whole on a long line); no tool (0.1.2); via-host then the tool; 9 bad templates handed off without a call; a hostile fileRef stays one value; 11 result cards |
 | `tests/lint.sh`, `tests/assets_check.sh` | source rules the types cannot express (no `innerHTML`/`eval`/`ui/message` in the widget); generated modules in sync |
-| `tests/mutation.sh` | 75 mutants of the key checks (the temp-file guard, the widget states, 22 for branding: the logo sanitiser, the accent check, link filtering, escaping, host theming, 17 for the after-upload call: skipped, string concatenation, the capability fallback, template and tool-name checks, the context cap, error reporting, and 11 for result cards and batches), each killed (one fetch mutant needs the network) |
+| `tests/mutation.sh` | 82 mutants of the key checks (the temp-file guard, the widget states, 22 for branding, the after-upload call and its 0.1.4 hand-off, timeout and suffix, result cards and batches, and 0.1.4's reuse window: single-use mode, never narrowed, uncapped by the upload, release without the owner check), each killed. A mutant that drops the reuse guard is equivalent (reads are capped by the already-narrowed expiry) and is documented in the script, not counted |
 
 ## Design
 `sunholo-data/ailang` `design_docs/planned/v0_53_0/m-mcp-file-handoff.md` (F2). SEP-2631:
