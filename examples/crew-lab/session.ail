@@ -1,0 +1,352 @@
+module sunholo/crew_lab/session
+import std/result (Result, Ok, Err)
+import std/option (Some, None)
+import std/list (length, map, filter, head, any)
+import std/string (join, length as stringLength)
+import std/json (Json, encode, getString, getBool, js, jint, jnum, jo, kv, ja)
+import pkg/sunholo/social_dynamics/model (Config, State, Error, InvalidSchema, Step, Event, Operation, Source, Authored, ActorInput, ActorPrincipal, Host, OfferTask, OfferCommitment, AcceptCommitment, AcceptTask, RaiseConcern, RequestRelief, ResolveRelief, Offered, Working, Appraisal, validId, sorted, numericLimit, Applied, Done, Pending, Blocked)
+import pkg/sunholo/social_dynamics/engine (init, advance, continueAdvance, abortAdvance)
+import pkg/sunholo/social_dynamics/proposals (apply)
+import pkg/sunholo/social_dynamics/tasks (findTask)
+import pkg/sunholo/social_dynamics/relationships (appraisalContext, deliver)
+import pkg/sunholo/social_dynamics/wire (encodeState, encodeEvents, encodeError, encodeConfig)
+import ./scenario (config, actors, resources, workerRecipe, policies)
+import ./codec (object, fields, text, integer, number, CrewOutcome, AgreedStart, RefusedOrder, GrantedRelief, DeniedRelief, encodeOutcome)
+import ./actor_policy (evaluate, requestBody, encodeChoice)
+
+export type HostError = HostFailure(string) | DomainFailure(Error) deriving (Eq)
+
+export type TaskAgreement = { task: string, agreement: string, captain: string, worker: string, recipe: string } deriving (Eq)
+
+export type Request = { id: string, actor: string, task: string, tick: int, revision: int, expires: int, configBody: string, policyId: string, threshold: float, legal: [string], context: string, body: string } deriving (Eq)
+
+export type Bank = { request: Request, status: string, body: string, roll: float, rollKey: string, choice: string, selected: string } deriving (Eq)
+
+export type Report = { id: string, task: string, agreement: string, worker: string, code: CrewOutcome } deriving (Eq)
+
+export type Session = { policy: string, config: Config, state: State, bindings: [TaskAgreement], pending: [Request], bank: [Bank], reports: [Report] } deriving (Eq)
+
+export type Output = { session: Session, trace: string, failed: bool } deriving (Eq)
+
+export pure func encodeHostError(e: HostError) -> string
+ensures { stringLength(result) > 0 } = match e {
+  HostFailure(s) => encode(jo([kv("host", js(s))])),
+  DomainFailure(d) => encodeError(d)
+}
+
+pure func requestJson(r: Request) -> Json =
+  jo([kv("id", js(r.id)), kv("actor", js(r.actor)), kv("task", js(r.task)), kv("tick", jint(r.tick)), kv("revision", jint(r.revision)), kv("expires", jint(r.expires)), kv("config_body", js(r.configBody)), kv("policy_id", js(r.policyId)), kv("threshold", jnum(r.threshold)), kv("legal", ja(map(js, r.legal))), kv("perception", js(r.context)), kv("request_body", js(r.body))])
+
+pure func bankJson(b: Bank) -> Json =
+  jo([kv("request", requestJson(b.request)), kv("status", js(b.status)), kv("synthetic_body", js(b.body)), kv("roll", jnum(b.roll)), kv("decision", js(b.choice)), kv("selected", js(b.selected))])
+
+pure func reportJson(r: Report) -> Json =
+  jo([kv("id", js(r.id)), kv("task", js(r.task)), kv("agreement", js(r.agreement)), kv("worker", js(r.worker)), kv("outcome", js(encodeOutcome(r.code)))])
+
+export pure func snapshot(s: Session) -> string
+ensures { stringLength(result) > 0 } =
+  encode(jo([kv("state", js(encodeState(s.state))), kv("policy", js(s.policy)), kv("bindings", ja(map(\b. jo([kv("task", js(b.task)), kv("agreement", js(b.agreement)), kv("captain", js(b.captain)), kv("worker", js(b.worker)), kv("recipe", js(b.recipe))]), s.bindings))), kv("pending", ja(map(requestJson, s.pending))), kv("bank", ja(map(bankJson, s.bank))), kv("reports", ja(map(reportJson, s.reports)))]))
+
+pure func output(s: Session, events: [Event]) -> Output =
+  { session: s, trace: "{\"state\":${encodeState(s.state)},\"events\":${encodeEvents(events)},\"host\":${snapshot(s)}}", failed: false }
+
+pure func checkedId(id: string) -> bool = validId(id) && stringLength(id) <= 64
+
+pure func identity(s: Session) -> bool = match config(s.policy) {
+  Err(_) => false,
+  Ok(c) => encodeConfig(c) == encodeConfig(s.config) && encodeConfig(c) == s.state.configBody && s.state.config == c.id && s.state.session == c.session
+}
+
+pure func idle(s: Session) -> bool = match s.state.continuation {
+  None => true,
+  Some(_) => false
+}
+
+pure func domain(s: Session, id: string, who: string, source: Source, ops: [Operation]) -> Result[Step, HostError] =
+  match apply(s.config, policies(), s.state, ActorPrincipal(who), source, { id: id, config: s.config.id, baseRevision: s.state.revision, principal: who, origin: source, expires: s.state.tick, causes: [], operations: ops }) {
+    Err(e) => Err(DomainFailure(e)),
+    Ok(step) => Ok(step)
+  }
+
+pure func receipt(s: Session, id: string, observer: string, evidence: string) -> Result[Step, HostError] =
+  match deliver(s.config, policies(), s.state, Host, { id: id, observer: observer, evidence: evidence, causes: [evidence], notBefore: s.state.tick, source: "crew-host-v1" }) {
+    Err(e) => Err(DomainFailure(e)),
+    Ok(step) => Ok(step)
+  }
+
+pure func binding(s: Session, task: string) -> Result[TaskAgreement, HostError] =
+  match head(filter(\b. b.task == task, s.bindings)) {
+    None => Err(HostFailure("unknown project binding")),
+    Some(b) => match findTask(s.state, task) {
+      None => Err(HostFailure("unknown project")),
+      Some(t) => match head(filter(\c. c.id == b.agreement, s.state.commitments)) {
+        None => Err(HostFailure("unknown agreement")),
+        Some(c) => if b.captain != "captain" || t.recipe != b.recipe || t.participants != [b.worker] || t.supervisor != "captain" || c.parties != sorted([b.captain, b.worker]) || not workerRecipe(b.worker, b.recipe) then Err(HostFailure("project binding mismatch")) else Ok(b)
+      }
+    }
+  }
+
+pure func consent(s: Session, b: TaskAgreement) -> bool =
+  any(\c. c.id == b.agreement && c.parties == sorted([b.captain, b.worker]) && c.active && c.accepted == c.parties && c.due > s.state.tick, s.state.commitments)
+
+export pure func offer(s: Session, worker: string, recipe: string, id: string) -> Result[Output, HostError]
+ensures { match result {
+  Ok(o) => length(o.session.bindings) == length(s.bindings) + 1,
+  Err(_) => true
+} } =
+  if not idle(s) || not identity(s) then Err(HostFailure("offer context")) else if not checkedId(id) || not workerRecipe(worker, recipe) || s.state.tick > numericLimit() - 20 then Err(HostFailure("offer fields")) else {
+    let agreement = "agreement-${id}"
+    let b: TaskAgreement = { task: id, agreement: agreement, captain: "captain", worker: worker, recipe: recipe }
+    match domain(s, "offer-${id}", "captain", Authored, [OfferTask(id, recipe, [worker], []), OfferCommitment(agreement, ["captain", worker], "Project agreement ${id}", s.state.tick + 20, []), AcceptCommitment(agreement)]) {
+      Err(e) => Err(e),
+      Ok(step) => {
+        let staged = { s | state: step.state, bindings: s.bindings ++ [b] }
+        match receipt(staged, "offer-task-${id}", worker, id) {
+          Err(e) => Err(e),
+          Ok(first) => match receipt({ staged | state: first.state }, "offer-agreement-${id}", worker, agreement) {
+            Err(e) => Err(e),
+            Ok(second) => Ok(output({ staged | state: second.state }, step.events ++ first.events ++ second.events))
+          }
+        }
+      }
+    }
+  }
+
+pure func perception(a: Appraisal, task: string, recipe: string) -> Json =
+  jo([kv("actor", js(a.observer.id)), kv("task", js(task)), kv("recipe", js(recipe)), kv("attributes", ja(map(\v. jo([kv("id", js(v.id)), kv("value", jint(v.value))]), a.observer.attributes))), kv("values", ja(map(\v. jo([kv("id", js(v.id)), kv("value", jint(v.value))]), a.observer.values))), kv("indicators", ja(map(\v. jo([kv("id", js(v.id)), kv("value", jint(v.value))]), a.observer.indicators))), kv("relationships", ja(map(\r. jo([kv("to", js(r.to)), kv("dimension", js(r.dimension)), kv("value", jint(r.value))]), a.relationships))), kv("visible", ja(map(\e. jo([kv("id", js(e.id)), kv("author", js(e.author)), kv("kind", js(e.kind)), kv("text", js(e.text)), kv("causes", ja(map(js, e.causes)))]), a.visible)))])
+
+export pure func ask(s: Session, actor: string, task: string, id: string) -> Result[Output, HostError]
+ensures { match result {
+  Ok(o) => o.session.state == s.state && length(o.session.pending) == length(s.pending) + 1,
+  Err(_) => true
+} } =
+  if not idle(s) || not identity(s) then Err(HostFailure("ask context")) else if not checkedId(id) || length(s.pending) >= 16 || any(\r. r.id == id, s.pending) || any(\b. b.request.id == id, s.bank) || s.state.tick >= numericLimit() then Err(HostFailure("request capacity/id/clock")) else match binding(s, task) {
+    Err(e) => Err(e),
+    Ok(b) => if b.worker != actor then Err(HostFailure("self actor required")) else match (findTask(s.state, task), head(filter(\c. c.id == b.agreement, s.state.commitments)), appraisalContext(s.state, actor, b.agreement)) {
+      (Some(t), Some(c), Ok(context)) => if t.status != Offered && t.status != Working || c.due <= s.state.tick then Err(HostFailure("subject transition/expiry")) else {
+        let legal = if t.status == Offered then ["accept", "decline", "concern", "defer"] else ["continue", "request_relief", "defer"]
+        let ctx = perception(context, task, b.recipe)
+        let r: Request = { id: id, actor: actor, task: task, tick: s.state.tick, revision: s.state.revision, expires: if c.due < s.state.tick + 1 then c.due else s.state.tick + 1, configBody: s.state.configBody, policyId: "crew-choice-v1", threshold: 0.6, legal: legal, context: encode(ctx), body: requestBody(ctx, legal) }
+        if stringLength(r.body) > 65536 then Err(HostFailure("request wire")) else Ok(output({ s | pending: s.pending ++ [r] }, []))
+      },
+      _ => Err(HostFailure("subject unreceived"))
+    }
+  }
+
+pure func mapped(s: Session, r: Request, b: TaskAgreement, selected: string) -> Result[Step, HostError] =
+  if selected == "defer" || selected == "continue" then Ok({ state: s.state, events: [], disposition: Applied }) else if selected == "accept" then domain(s, "answer-${r.id}", r.actor, ActorInput, [AcceptCommitment(b.agreement)]) else if selected == "request_relief" then domain(s, "answer-${r.id}", r.actor, ActorInput, [RequestRelief("relief-${r.id}", r.task, [b.agreement])]) else if selected == "decline" || selected == "concern" then domain(s, "answer-${r.id}", r.actor, ActorInput, [RaiseConcern("concern-${r.id}", [b.agreement], ["captain"], selected)]) else Err(HostFailure("illegal response mapping"))
+
+export pure func complete(s: Session, id: string, body: string, roll: float) -> Result[Output, HostError]
+ensures { match result {
+  Ok(o) => length(o.session.bank) >= length(s.bank),
+  Err(_) => true
+} } =
+  if not idle(s) || not identity(s) then Err(HostFailure("answer context")) else match head(filter(\b. b.request.id == id, s.bank)) {
+    Some(b) => if b.status == "completed" && b.body == body && b.rollKey == encode(jnum(roll)) then Ok(output(s, [])) else Err(HostFailure("altered/cancelled retry")),
+    None => if length(s.bank) >= 64 then Err(HostFailure("completed retention")) else match head(filter(\r. r.id == id, s.pending)) {
+      None => Err(HostFailure("unknown request")),
+      Some(r) => if r.configBody != s.state.configBody || r.policyId != "crew-choice-v1" || r.tick != s.state.tick || r.revision != s.state.revision || s.state.tick >= r.expires then Err(HostFailure("stale request")) else match binding(s, r.task) {
+        Err(e) => Err(e),
+        Ok(b) => if r.actor != b.worker then Err(HostFailure("actor binding")) else match evaluate(body, r.legal, r.threshold, roll) {
+          Err(e) => Err(HostFailure(e)),
+          Ok(choice) => match mapped(s, r, b, choice.selected) {
+            Err(e) => Err(e),
+            Ok(step) => {
+              let staged = { s | state: step.state }
+              let observed = if choice.selected == "request_relief" || choice.selected == "decline" || choice.selected == "concern" then receipt(staged, "answer-receipt-${r.id}", "captain", if choice.selected == "request_relief" then "relief-${r.id}" else "concern-${r.id}") else Ok({ state: step.state, events: [], disposition: Applied })
+              match observed {
+                Err(e) => Err(e),
+                Ok(received) => {
+                  let entry: Bank = { request: r, status: "completed", body: body, roll: roll, rollKey: encode(jnum(roll)), choice: encode(encodeChoice(choice)), selected: choice.selected }
+                  Ok(output({ staged | state: received.state, pending: filter(\p. p.id != id, s.pending), bank: s.bank ++ [entry] }, step.events ++ received.events))
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+
+export pure func cancel(s: Session, id: string) -> Result[Output, HostError]
+ensures { match result {
+  Ok(o) => o.session.state == s.state && length(o.session.pending) == length(s.pending) - 1,
+  Err(_) => true
+} } =
+  if not idle(s) || not identity(s) || length(s.bank) >= 64 then Err(HostFailure("cancel context/retention")) else match head(filter(\r. r.id == id, s.pending)) {
+    None => Err(HostFailure("unknown request")),
+    Some(r) => {
+      let entry: Bank = { request: r, status: "cancelled", body: "", roll: 0.0, rollKey: "", choice: "", selected: "" }
+      Ok(output({ s | pending: filter(\p. p.id != id, s.pending), bank: s.bank ++ [entry] }, []))
+    }
+  }
+
+pure func report(s: Session, b: TaskAgreement, outcome: CrewOutcome, id: string, events: [Event]) -> Result[Output, HostError] =
+  if any(\r. r.id == id, s.reports) then Err(HostFailure("report duplicate")) else match binding(s, b.task) {
+    Err(e) => Err(e),
+    Ok(checked) => if checked.task != b.task || checked.agreement != b.agreement || checked.captain != b.captain || checked.worker != b.worker || checked.recipe != b.recipe then Err(HostFailure("report binding")) else match domain(s, "create-${id}", "captain", Authored, [RaiseConcern(id, [b.task, b.agreement], [b.worker], encodeOutcome(outcome))]) {
+      Err(e) => Err(e),
+      Ok(step) => {
+        let staged = { s | state: step.state, reports: s.reports ++ [{ id: id, task: b.task, agreement: b.agreement, worker: b.worker, code: outcome }] }
+        match receipt(staged, "receive-${id}", b.worker, id) {
+          Err(e) => Err(e),
+          Ok(received) => Ok(output({ staged | state: received.state }, events ++ step.events ++ received.events))
+        }
+      }
+    }
+  }
+
+-- CrewOutcome deliberately avoids decisions.Outcome's unqualified type name:
+-- pinned VM registries collide across packages; reported upstream: inbox_1791551800555_38e0d9dc.
+export pure func startTask(s: Session, id: string) -> Result[Output, HostError]
+ensures { match result {
+  Ok(o) => o.session.state.tick == s.state.tick,
+  Err(_) => true
+} } = if not idle(s) || not identity(s) then Err(HostFailure("start context")) else match binding(s, id) {
+  Err(e) => Err(e),
+  Ok(b) => {
+    let agreed = consent(s, b)
+    if s.policy == "consent" && not agreed then Err(HostFailure("personal consent required")) else match domain(s, "start-${id}", "captain", Authored, [AcceptTask(id)]) {
+      Err(e) => Err(e),
+      Ok(step) => report({ s | state: step.state }, b, if agreed then AgreedStart else RefusedOrder, "report-${id}", step.events)
+    }
+  }
+}
+
+export pure func resolve(s: Session, id: string, release: bool) -> Result[Output, HostError]
+ensures { match result {
+  Ok(o) => o.session.state.tick == s.state.tick,
+  Err(_) => true
+} } =
+  if not idle(s) || not identity(s) then Err(HostFailure("resolve context")) else match head(filter(\r. r.id == id, s.state.reliefs)) {
+    None => Err(HostFailure("unknown relief")),
+    Some(r) => match binding(s, r.task) {
+      Err(e) => Err(e),
+      Ok(b) => if r.author != b.worker then Err(HostFailure("relief actor")) else match domain(s, "resolve-${id}", "captain", Authored, [ResolveRelief(id, release)]) {
+        Err(e) => Err(e),
+        Ok(step) => report({ s | state: step.state }, b, if release then GrantedRelief else DeniedRelief, "report-${id}", step.events)
+      }
+    }
+  }
+
+pure func delivered(s: Session, observer: string, evidence: string, id: string) -> Result[Output, HostError] =
+  match head(filter(\r. r.id == evidence, s.reports)) {
+    Some(r) => match binding(s, r.task) {
+      Err(e) => Err(e),
+      Ok(b) => if r.agreement != b.agreement || r.worker != b.worker || not any(\e. e.id == r.id && e.author == "captain" && e.kind == "concern" && e.text == encodeOutcome(r.code) && e.causes == sorted([r.task, r.agreement]), s.state.evidence) then Err(HostFailure("report provenance")) else match receipt(s, id, observer, evidence) {
+        Err(e) => Err(e),
+        Ok(step) => Ok(output({ s | state: step.state }, step.events))
+      }
+    },
+    None => match receipt(s, id, observer, evidence) {
+      Err(e) => Err(e),
+      Ok(step) => Ok(output({ s | state: step.state }, step.events))
+    }
+  }
+
+pure func advanced(s: Session, tick: int, budget: int) -> Result[Output, HostError] = {
+  let result = match s.state.continuation {
+    None => advance(s.config, policies(), s.state, tick, budget),
+    Some(token) => if token.target != tick then Blocked(s.state, [], "target", s.state.tick, InvalidSchema("pending target mismatch")) else continueAdvance(s.config, policies(), s.state, token, budget)
+  }
+  match result {
+    Done(state, events) => Ok(output({ s | state: state }, events)),
+    Pending(state, events, _) => Ok(output({ s | state: state }, events)),
+    Blocked(state, events, id, due, e) => {
+      let o = output({ s | state: state }, events)
+      Ok({ o | failed: true, trace: "{\"state\":${encodeState(state)},\"events\":${encodeEvents(events)},\"host\":${snapshot(o.session)},\"blocked\":${encodeError(e)},\"item\":${encode(js(id))},\"due_tick\":${show(due)}}" })
+    }
+  }
+}
+
+export pure func start(line: string) -> Result[Output, HostError]
+ensures { match result {
+  Ok(o) => o.session.state.tick == 0 && o.session.pending == [] && o.session.bank == [],
+  Err(_) => true
+} } = match object(line) {
+  Err(e) => Err(HostFailure(e)),
+  Ok(j) => if not fields(j, ["command", "policy"]) then Err(HostFailure("start fields")) else match (getString(j, "command"), getString(j, "policy")) {
+    (Some("start"), Some(policy)) => match config(policy) {
+      Err(e) => Err(HostFailure(e)),
+      Ok(c) => match init(c, actors(), resources()) {
+        Err(e) => Err(DomainFailure(e)),
+        Ok(state) => Ok(output({ policy: policy, config: c, state: state, bindings: [], pending: [], bank: [], reports: [] }, []))
+      }
+    },
+    _ => Err(HostFailure("start command required"))
+  }
+}
+
+pure func dispatch(s: Session, j: Json) -> Result[Output, HostError] = match getString(j, "command") {
+  Some("offer") => if not fields(j, ["command", "worker", "recipe", "id"]) then Err(HostFailure("offer fields")) else match (getString(j, "worker"), getString(j, "recipe"), getString(j, "id")) {
+    (Some(w), Some(r), Some(id)) => offer(s, w, r, id),
+    _ => Err(HostFailure("offer types"))
+  },
+  Some("ask") => if not fields(j, ["command", "actor", "task", "id"]) then Err(HostFailure("ask fields")) else match (getString(j, "actor"), getString(j, "task"), getString(j, "id")) {
+    (Some(a), Some(t), Some(id)) => ask(s, a, t, id),
+    _ => Err(HostFailure("ask types"))
+  },
+  Some("answer") => if not fields(j, ["command", "request", "body", "roll"]) then Err(HostFailure("answer fields")) else match (getString(j, "request"), text(j, "body"), number(j, "roll")) {
+    (Some(id), Ok(body), Ok(roll)) => complete(s, id, body, roll),
+    _ => Err(HostFailure("answer types"))
+  },
+  Some("cancel_request") => if not fields(j, ["command", "id"]) then Err(HostFailure("cancel fields")) else match getString(j, "id") {
+    Some(id) => cancel(s, id),
+    _ => Err(HostFailure("cancel types"))
+  },
+  Some("start_task") => if not fields(j, ["command", "task"]) then Err(HostFailure("start_task fields")) else match getString(j, "task") {
+    Some(id) => startTask(s, id),
+    _ => Err(HostFailure("start_task types"))
+  },
+  Some("resolve_relief") => if not fields(j, ["command", "id", "release"]) then Err(HostFailure("resolve fields")) else match (getString(j, "id"), getBool(j, "release")) {
+    (Some(id), Some(release)) => resolve(s, id, release),
+    _ => Err(HostFailure("resolve types"))
+  },
+  Some("deliver") => if not fields(j, ["command", "observer", "evidence", "id"]) then Err(HostFailure("delivery fields")) else match (getString(j, "observer"), getString(j, "evidence"), getString(j, "id")) {
+    (Some(observer), Some(evidence), Some(id)) => delivered(s, observer, evidence, id),
+    _ => Err(HostFailure("delivery types"))
+  },
+  Some("advance") => if not fields(j, ["command", "tick", "budget"]) then Err(HostFailure("advance fields")) else match (integer(j, "tick"), integer(j, "budget")) {
+    (Ok(t), Ok(b)) => advanced(s, t, b),
+    _ => Err(HostFailure("advance types"))
+  },
+  Some("abort") => if not fields(j, ["command"]) then Err(HostFailure("abort fields")) else match s.state.continuation {
+    None => Err(HostFailure("no pending advance")),
+    Some(token) => match abortAdvance(s.state, Host, token) {
+      Err(e) => Err(DomainFailure(e)),
+      Ok(state) => Ok(output({ s | state: state }, []))
+    }
+  },
+  _ => Err(HostFailure("unknown command"))
+}
+
+export pure func input(s: Session, line: string) -> Result[Output, HostError]
+ensures { match result {
+  Ok(o) => encodeConfig(o.session.config) == encodeConfig(s.config),
+  Err(_) => true
+} } = if not identity(s) then Err(HostFailure("session identity")) else match object(line) {
+  Err(e) => Err(HostFailure(e)),
+  Ok(j) => if not idle(s) && getString(j, "command") != Some("advance") && getString(j, "command") != Some("abort") then Err(HostFailure("pending scheduler")) else dispatch(s, j)
+}
+
+pure func tail(s: Session, lines: [string], records: [string]) -> [string] = match lines {
+  [] => records,
+  line :: rest => match input(s, line) {
+    Err(e) => records ++ ["{\"error\":${encodeHostError(e)}}"],
+    Ok(o) => if o.failed then records ++ [o.trace] else tail(o.session, rest, records ++ [o.trace])
+  }
+}
+
+export pure func recording(lines: [string]) -> string
+ensures { stringLength(result) > 0 } =
+  if length(lines) > 10000 then "{\"error\":\"recording_limit\"}" else match lines {
+    [] => "{\"error\":\"empty_recording\"}",
+    first :: rest => match start(first) {
+      Err(e) => "{\"error\":${encodeHostError(e)}}",
+      Ok(o) => join("\n", tail(o.session, rest, [o.trace]))
+    }
+  }
+
+test "empty recording is explicit failure" {
+  recording([]) == "{\"error\":\"empty_recording\"}"
+}

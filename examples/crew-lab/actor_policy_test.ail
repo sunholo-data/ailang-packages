@@ -1,0 +1,171 @@
+module sunholo/crew_lab/actor_policy_test
+import ./actor_policy (evaluate, requestBody, encodeChoice)
+import std/result (Result, Ok, Err)
+import std/option (Some, None)
+import std/json (Json, encode, decode, jo, kv, js, jnum, jint, get, getString, getNumber, keys)
+import std/list (length, contains)
+import std/math (sqrt, exp)
+import pkg/sunholo/decisions/decide (answer, ChoiceA)
+
+pure func legal() -> [string] = ["defer", "decline", "accept"]
+
+pure func ps(a: float, d: float, f: float) -> Json =
+  jo([kv("defer", jnum(f)), kv("accept", jnum(a)), kv("decline", jnum(d))])
+
+pure func zeroUsage() -> Json = jo([kv("input_tokens", jint(0)), kv("output_tokens", jint(0)), kv("cost", jnum(0.0))])
+
+pure func ans(p: Json, confidence: float, chosen: string) -> Json =
+  jo([kv("type", js("choice")), kv("choice", js(chosen)), kv("confidence", jnum(confidence)), kv("probabilities", p)])
+
+pure func body(a: Json, u: Json) -> string =
+  encode(jo([kv("model", js("synthetic/crew-choice-v1")), kv("id", js("fixture-1")), kv("answers", jo([kv("response", a)])), kv("usage", u)]))
+
+pure func good(confidence: float) -> string = body(ans(ps(0.25, 0.5, 0.25), confidence, "decline"), zeroUsage())
+
+pure func rejected(s: string) -> bool = match evaluate(s, legal(), 0.7, 0.1) {
+  Err(_) => true,
+  Ok(_) => false
+}
+
+pure func selected(roll: float) -> string = match evaluate(good(0.8), legal(), 0.7, roll) {
+  Ok(c) => c.selected,
+  Err(e) => e
+}
+
+test "sampling uses stable label order and strict interval boundaries" {
+  selected(0.0) == "accept" && selected(0.249999) == "accept" && selected(0.25) == "decline" && selected(0.749999) == "decline" && selected(0.75) == "defer" && selected(0.9999999999999999) == "defer"
+}
+
+test "confidence gate defers without selecting model argmax" {
+  match evaluate(good(0.69), legal(), 0.7, 0.0) {
+    Ok(c) => c.selected == "defer" && c.gated && c.confidence == 0.69,
+    Err(_) => false
+  }
+}
+
+test "threshold equality passes and roll selects alternative to wire choice" {
+  match evaluate(good(0.7), legal(), 0.7, 0.0) {
+    Ok(c) => c.selected == "accept" && not c.gated && (match answer(c.decision, "response") {
+      Ok(ChoiceA(a)) => a.choice == "decline" && length(a.probabilities) == 3,
+      _ => false
+    }),
+    Err(_) => false
+  }
+}
+
+test "zero probability endpoints never selected" {
+  let b = body(ans(ps(0.0, 1.0, 0.0), 1.0, "decline"), zeroUsage()) in
+  match (evaluate(b, legal(), 0.0, 0.0), evaluate(b, legal(), 1.0, 0.9999999999999999)) {
+    (Ok(a), Ok(z)) => a.selected == "decline" && z.selected == "decline",
+    _ => false
+  }
+}
+
+test "wire choice at zero probability cannot override positive sampled label" {
+  let b = body(ans(ps(0.0, 1.0, 0.0), 1.0, "accept"), zeroUsage()) in match evaluate(b, legal(), 0.7, 0.0) {
+    Err(_) => false,
+    Ok(c) => c.selected == "decline" && (match answer(c.decision, "response") {
+      Ok(ChoiceA(a)) => a.choice == "accept",
+      _ => false
+    })
+  }
+}
+
+test "near one total normalized and raw alternatives retained" {
+  let b = body(ans(ps(0.0, 0.9999999995, 0.0), 0.8, "decline"), zeroUsage()) in
+  match evaluate(b, legal(), 0.7, 0.9999999999999999) {
+    Ok(c) => c.selected == "decline" && (match (c.raw, c.normalized) {
+      ([a, b, d], [x, y, z]) => a.key == "accept" && b.key == "decline" && d.key == "defer" && b.p == 0.9999999995 && y.p == 1.0 && x.p == 0.0 && z.p == 0.0,
+      _ => false
+    }),
+    Err(_) => false
+  }
+}
+
+test "invalid and zero totals rejected" {
+  rejected(body(ans(ps(0.0, 0.0, 0.0), 0.8, "decline"), zeroUsage())) && rejected(body(ans(ps(0.2, 0.2, 0.2), 0.8, "decline"), zeroUsage())) && rejected(body(ans(ps(0.5, 0.5, 0.5), 0.8, "decline"), zeroUsage()))
+}
+
+test "out of range distribution and confidence rejected" {
+  rejected(body(ans(ps(0.0, 1.1, 0.0), 0.8, "decline"), zeroUsage())) && rejected(body(ans(ps(0.0, 1.0, 0.0 - 0.1), 0.8, "decline"), zeroUsage())) && rejected(good(1.1)) && rejected(good(0.0 - 0.1))
+}
+
+test "threshold and roll reject nonfinite and endpoints" {
+  let b = good(0.8) in
+  match (evaluate(b, legal(), sqrt(0.0 - 1.0), 0.0), evaluate(b, legal(), 0.7, sqrt(0.0 - 1.0)), evaluate(b, legal(), 0.7, exp(1000.0)), evaluate(b, legal(), exp(1000.0), 0.0), evaluate(b, legal(), 0.7, 1.0), evaluate(b, legal(), 0.7, 0.0 - 0.1), evaluate(b, legal(), 1.1, 0.0), evaluate(b, legal(), 0.0 - 0.1, 0.0)) {
+    (Err(_), Err(_), Err(_), Err(_), Err(_), Err(_), Err(_), Err(_)) => true,
+    _ => false
+  }
+}
+
+test "legal choices require unique bounded keys and defer" {
+  let b = good(0.8) in
+  match (evaluate(b, [], 0.7, 0.0), evaluate(b, ["accept", "decline"], 0.7, 0.0), evaluate(b, ["accept", "decline", "defer", "defer"], 0.7, 0.0), evaluate(b, ["", "defer"], 0.7, 0.0)) {
+    (Err(_), Err(_), Err(_), Err(_)) => true,
+    _ => false
+  }
+}
+
+test "unknown wire choice and missing or extra probabilities rejected" {
+  rejected(body(ans(ps(0.25, 0.5, 0.25), 0.8, "captain_order"), zeroUsage())) && rejected(body(ans(jo([kv("accept", jnum(0.5)), kv("defer", jnum(0.5))]), 0.8, "accept"), zeroUsage())) && rejected(body(ans(jo([kv("accept", jnum(0.25)), kv("decline", jnum(0.5)), kv("defer", jnum(0.25)), kv("captain_order", jnum(0.0))]), 0.8, "accept"), zeroUsage()))
+}
+
+test "wrong answer variant and numeric field types rejected before defaults" {
+  rejected(body(jo([kv("type", js("noul")), kv("noul", jnum(0.8))]), zeroUsage())) && rejected(body(jo([kv("type", js("choice")), kv("choice", js("accept")), kv("probabilities", ps(0.25, 0.5, 0.25))]), zeroUsage())) && rejected(body(jo([kv("type", js("choice")), kv("choice", js("accept")), kv("confidence", js("0.8")), kv("probabilities", ps(0.25, 0.5, 0.25))]), zeroUsage()))
+}
+
+test "usage rejects missing fractional negative and nonnumeric fields" {
+  let a = ans(ps(0.25, 0.5, 0.25), 0.8, "accept") in
+  rejected(body(a, jo([]))) && rejected(body(a, jo([kv("input_tokens", jnum(1.5)), kv("output_tokens", jint(0)), kv("cost", jnum(0.0))]))) && rejected(body(a, jo([kv("input_tokens", jint(0 - 1)), kv("output_tokens", jint(0)), kv("cost", jnum(0.0))]))) && rejected(body(a, jo([kv("input_tokens", jint(0)), kv("output_tokens", jint(0)), kv("cost", js("zero"))])))
+}
+
+test "wire structural duplicates rejected at every relevant object" {
+  rejected("{\"model\":\"fixture\",\"model\":\"fixture\",\"id\":\"f\",\"answers\":{\"response\":{\"type\":\"choice\",\"choice\":\"accept\",\"confidence\":0.8,\"probabilities\":{\"accept\":0.25,\"decline\":0.5,\"defer\":0.25}}},\"usage\":{\"input_tokens\":0,\"output_tokens\":0,\"cost\":0}}") && rejected(body(jo([kv("type", js("choice")), kv("choice", js("accept")), kv("confidence", jnum(0.8)), kv("confidence", jnum(0.8)), kv("probabilities", ps(0.25, 0.5, 0.25))]), zeroUsage())) && rejected(body(ans(jo([kv("accept", jnum(0.25)), kv("accept", jnum(0.25)), kv("decline", jnum(0.5)), kv("defer", jnum(0.25))]), 0.8, "accept"), zeroUsage())) && rejected(body(ans(ps(0.25, 0.5, 0.25), 0.8, "accept"), jo([kv("input_tokens", jint(0)), kv("input_tokens", jint(0)), kv("output_tokens", jint(0)), kv("cost", jnum(0.0))])))
+}
+
+test "unknown extra response field and trailing JSON rejected" {
+  rejected(body(jo([kv("type", js("choice")), kv("choice", js("accept")), kv("confidence", jnum(0.8)), kv("probabilities", ps(0.25, 0.5, 0.25)), kv("principal", js("captain"))]), zeroUsage())) && rejected("${good(0.8)} {}")
+}
+
+test "request body retains received context and legal choices" {
+  let ctx = jo([kv("observer", js("scientist")), kv("received", js("offer-1"))]) in
+  match decode(requestBody(ctx, legal())) {
+    Err(_) => false,
+    Ok(j) => match (get(j, "state"), get(j, "questions")) {
+      (Some(s), Some(q)) => s == ctx && length(keys(q)) == 1 && contains(keys(q), "response"),
+      _ => false
+    }
+  }
+}
+
+test "encoded causal result retains parsed provenance usage and selected action" {
+  match evaluate(good(0.8), legal(), 0.7, 0.0) {
+    Err(_) => false,
+    Ok(c) => let j = encodeChoice(c) in match get(j, "decision") {
+      None => false,
+      Some(d) => getString(j, "selected") == Some("accept") && getString(d, "model") == Some("synthetic/crew-choice-v1") && getString(d, "id") == Some("fixture-1") && getNumber(d, "cost_usd") == Some(0.0)
+    }
+  }
+}
+
+test "provenance and answer container cannot default or hide extra answers" {
+  let a = ans(ps(0.25, 0.5, 0.25), 0.8, "accept") in
+  let answers = jo([kv("response", a)]) in
+  rejected(encode(jo([kv("id", js("f")), kv("answers", answers), kv("usage", zeroUsage())]))) && rejected(encode(jo([kv("model", js("")), kv("id", js("f")), kv("answers", answers), kv("usage", zeroUsage())]))) && rejected(encode(jo([kv("model", js("fixture")), kv("id", jint(1)), kv("answers", answers), kv("usage", zeroUsage())]))) && rejected(encode(jo([kv("model", js("fixture")), kv("id", js("f")), kv("answers", jo([kv("response", a), kv("other_actor", a)])), kv("usage", zeroUsage())]))) && rejected(encode(jo([kv("model", js("fixture")), kv("id", js("f")), kv("answers", jo([kv("response", a), kv("response", a)])), kv("usage", zeroUsage())])))
+}
+
+test "nonnumeric probability and negative usage cost rejected" {
+  let a = ans(ps(0.25, 0.5, 0.25), 0.8, "accept") in
+  rejected(body(ans(jo([kv("accept", js("0.25")), kv("decline", jnum(0.5)), kv("defer", jnum(0.25))]), 0.8, "accept"), zeroUsage())) && rejected(body(a, jo([kv("input_tokens", jint(0)), kv("output_tokens", jint(0)), kv("cost", jnum(0.0 - 0.01))])))
+}
+
+test "near one surplus normalizes without changing raw probabilities" {
+  let b = body(ans(ps(0.25, 0.5, 0.2500000005), 0.8, "decline"), zeroUsage()) in
+  match evaluate(b, legal(), 0.7, 0.9999999999999999) {
+    Err(_) => false,
+    Ok(c) => c.selected == "defer" && (match (c.raw, c.normalized) {
+      ([a, b, d], [x, y, z]) => d.p == 0.2500000005 && z.p < d.p && x.p < a.p && y.p < b.p,
+      _ => false
+    })
+  }
+}

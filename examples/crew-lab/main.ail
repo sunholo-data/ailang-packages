@@ -1,0 +1,37 @@
+module sunholo/crew_lab/main
+import std/io (readLine, println, exit)
+import std/result (Ok, Err)
+import ./session (Session, start, input, encodeHostError)
+
+-- readLine returns the same empty string for EOF and a blank line. run.sh
+-- preflights finite saved inputs; direct interactive input ends at a blank line.
+func loop(session: Session, lines: int) -> () ! {IO} {
+  let line = readLine()
+  if line == "" then () else if lines >= 10000 then {
+    println("{\"error\":{\"code\":\"recording_limit\"}}")
+    exit(1)
+  } else match input(session, line) {
+    Err(e) => {
+      println("{\"error\":${encodeHostError(e)}}")
+      exit(1)
+    },
+    Ok(o) => {
+      println(o.trace)
+      if o.failed then exit(1) else loop(o.session, lines + 1)
+    }
+  }
+}
+
+export func main() -> () ! {IO} {
+  let first = readLine()
+  match start(first) {
+    Err(e) => {
+      println("{\"error\":${encodeHostError(e)}}")
+      exit(1)
+    },
+    Ok(o) => {
+      println(o.trace)
+      if o.failed then exit(1) else loop(o.session, 1)
+    }
+  }
+}

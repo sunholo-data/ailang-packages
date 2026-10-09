@@ -1,0 +1,13 @@
+{"command":"start","policy":"consent"}
+{"command":"offer","worker":"scientist","recipe":"observations","id":"science"}
+{"command":"ask","actor":"scientist","task":"science","id":"r1"}
+{"command":"answer","request":"r1","body":"{\"model\":\"synthetic:jev\",\"id\":\"synthetic-r1\",\"usage\":{\"input_tokens\":0,\"output_tokens\":0,\"cost\":0},\"answers\":{\"response\":{\"type\":\"choice\",\"choice\":\"accept\",\"confidence\":0.8,\"probabilities\":{\"accept\":0.8,\"concern\":0.05,\"defer\":0.05,\"decline\":0.1}}}}","roll":0.1}
+{"command":"start_task","task":"science"}
+{"command":"ask","actor":"scientist","task":"science","id":"r2"}
+{"command":"answer","request":"r2","body":"{\"model\":\"synthetic:jev\",\"id\":\"synthetic-r2\",\"usage\":{\"input_tokens\":0,\"output_tokens\":0,\"cost\":0},\"answers\":{\"response\":{\"type\":\"choice\",\"choice\":\"request_relief\",\"confidence\":0.8,\"probabilities\":{\"continue\":0.05,\"defer\":0.05,\"request_relief\":0.9}}}}","roll":0.5}
+{"command":"resolve_relief","id":"relief-r2","release":true}
+{"command":"offer","worker":"scientist","recipe":"rest_scientist","id":"rest"}
+{"command":"ask","actor":"scientist","task":"rest","id":"r3"}
+{"command":"answer","request":"r3","body":"{\"model\":\"synthetic:jev\",\"id\":\"synthetic-r3\",\"usage\":{\"input_tokens\":0,\"output_tokens\":0,\"cost\":0},\"answers\":{\"response\":{\"type\":\"choice\",\"choice\":\"accept\",\"confidence\":0.8,\"probabilities\":{\"accept\":0.8,\"concern\":0.05,\"defer\":0.05,\"decline\":0.1}}}}","roll":0.1}
+{"command":"start_task","task":"rest"}
+{"command":"advance","tick":2,"budget":64}

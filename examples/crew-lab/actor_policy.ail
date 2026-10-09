@@ -1,0 +1,139 @@
+module sunholo/crew_lab/actor_policy
+import std/result (Result, Ok, Err)
+import std/option (Some, None)
+import std/json (Json, decode, encode, asObject, asNumber, keys, get, getString, getNumber, getInt, jo, kv, js, ja, jb, jnum, jint)
+import std/list (length, dedup, contains, any, map, sortBy, foldl)
+import std/string (length as stringLength)
+import std/math (floor)
+import pkg/sunholo/decisions/decide (Decision, Answer, ChoiceA, NoulA, ScoreA, Question, Choice, buildRequest, parseAnswers, answer, gate, Act, Escalate, Ungateable)
+import pkg/sunholo/social_dynamics/wire (singleObject)
+
+export type Probability = { key: string, p: float }
+
+export type ChoiceResult = { decision: Decision, raw: [Probability], normalized: [Probability], confidence: float, selected: string, gated: bool }
+
+pure func unit(n: float) -> bool
+ensures { result == (n >= 0.0 && n <= 1.0) } = n >= 0.0 && n <= 1.0
+
+pure func legalSet(legal: [string]) -> bool =
+  length(legal) > 0 && length(legal) <= 8 && length(dedup(legal)) == length(legal) && contains(legal, "defer") && not any(\k. stringLength(k) == 0 || stringLength(k) > 96, legal)
+
+pure func stable(legal: [string]) -> [string] = sortBy(\a b. if a < b then 0 - 1 else if a == b then 0 else 1, legal)
+
+pure func questions(legal: [string]) -> [{ name: string, q: Question }] =
+  [{ name: "response", q: Choice("Choose this actor's response from their received context and legal options.", map(\k. { key: k, desc: k }, stable(legal))) }]
+
+export pure func requestBody(context: Json, legal: [string]) -> string
+requires { legalSet(legal) }
+ensures { stringLength(result) > 0 } = buildRequest("synthetic/crew-choice-v1", context, questions(legal))
+
+pure func fields(j: Json, expected: [string]) -> bool = match asObject(j) {
+  None => false,
+  Some(_) => let ks = keys(j) in
+  length(ks) == length(expected) && length(dedup(ks)) == length(ks) && not any(\k. not contains(ks, k), expected)
+}
+
+pure func nonempty(j: Json, name: string) -> bool = match getString(j, name) {
+  Some(s) => stringLength(s) > 0 && stringLength(s) <= 256,
+  None => false
+}
+
+pure func tokenCount(j: Json, name: string) -> bool = match (getNumber(j, name), getInt(j, name)) {
+  (Some(n), Some(_)) => n >= 0.0 && n <= 1e+09 && floor(n) == n,
+  _ => false
+}
+
+pure func usage(j: Json) -> bool =
+  fields(j, ["input_tokens", "output_tokens", "cost"]) && tokenCount(j, "input_tokens") && tokenCount(j, "output_tokens") && (match getNumber(j, "cost") {
+    Some(c) => c >= 0.0 && c <= 1e+09,
+    None => false
+  })
+
+pure func distribution(j: Json, legal: [string]) -> bool = fields(j, legal) && (match asObject(j) {
+  None => false,
+  Some(xs) => not any(\x. match asNumber(x.value) {
+    Some(p) => not unit(p),
+    None => true
+  }, xs)
+})
+
+pure func response(j: Json, legal: [string]) -> bool =
+  fields(j, ["type", "choice", "confidence", "probabilities"]) && (match (getString(j, "type"), getString(j, "choice"), getNumber(j, "confidence"), get(j, "probabilities")) {
+    (Some("choice"), Some(chosen), Some(confidence), Some(ps)) => contains(legal, chosen) && unit(confidence) && distribution(ps, legal),
+    _ => false
+  })
+
+pure func schema(j: Json, legal: [string]) -> bool =
+  fields(j, ["model", "id", "answers", "usage"]) && nonempty(j, "model") && nonempty(j, "id") && (match (get(j, "answers"), get(j, "usage")) {
+    (Some(ans), Some(u)) => fields(ans, ["response"]) && usage(u) && (match get(ans, "response") {
+      Some(r) => response(r, legal),
+      None => false
+    }),
+    _ => false
+  })
+
+pure func total(ps: [Probability]) -> float = foldl(\acc p. acc + p.p, 0.0, ps)
+
+pure func ordered(ps: [Probability], legal: [string]) -> [Probability] =
+  map(\key. { key: key, p: foldl(\acc p. if p.key == key then p.p else acc, 0.0, ps) }, stable(legal))
+
+pure func lastPositive(ps: [Probability], last: string) -> string = match ps {
+  [] => last,
+  p :: rest => lastPositive(rest, if p.p > 0.0 then p.key else last)
+}
+
+pure func sample(ps: [Probability], roll: float, cumulative: float, fallback: string) -> string = match ps {
+  [] => fallback,
+  p :: rest => let next = cumulative + p.p in
+  if p.p > 0.0 && roll < next then p.key else sample(rest, roll, next, fallback)
+}
+
+pure func evaluateDecision(d: Decision, legal: [string], threshold: float, roll: float) -> Result[ChoiceResult, string] =
+  match answer(d, "response") {
+    Err(_) => Err("missing_response"),
+    Ok(ChoiceA(c)) => {
+      let raw = ordered(c.probabilities, legal)
+      let sum = total(raw)
+      if not (sum > 0.0 && sum >= 0.999999999 && sum <= 1.000000001) then Err("probability_total") else {
+        let normalized = map(\p. { key: p.key, p: p.p / sum }, raw)
+        match gate(ChoiceA(c), threshold) {
+          Act(_) => Ok({ decision: d, raw: raw, normalized: normalized, confidence: c.confidence, selected: sample(normalized, roll, 0.0, lastPositive(normalized, "")), gated: false }),
+          Escalate(_) => Ok({ decision: d, raw: raw, normalized: normalized, confidence: c.confidence, selected: "defer", gated: true }),
+          Ungateable(_) => Err("wrong_variant")
+        }
+      }
+    },
+    Ok(_) => Err("wrong_variant")
+  }
+
+-- Validate the original wire before the permissive decisions decoder can default fields.
+export pure func evaluate(body: string, legal: [string], threshold: float, roll: float) -> Result[ChoiceResult, string]
+ensures { match result {
+  Ok(c) => unit(c.confidence) && contains(legal, c.selected) && length(c.normalized) == length(legal) && (not c.gated || c.selected == "defer"),
+  Err(_) => true
+} } =
+  if not legalSet(legal) then Err("legal_choices") else if not unit(threshold) then Err("confidence_threshold") else if not (roll >= 0.0 && roll < 1.0) then Err("sampling_roll") else if not singleObject(body) then Err("response_json") else match decode(body) {
+    Err(_) => Err("response_json"),
+    Ok(j) => if not schema(j, legal) then Err("response_schema") else match parseAnswers(body, questions(legal)) {
+      Err(_) => Err("response_parse"),
+      Ok(d) => evaluateDecision(d, legal, threshold, roll)
+    }
+  }
+
+pure func probabilities(ps: [Probability]) -> Json = ja(map(\p. jo([kv("key", js(p.key)), kv("p", jnum(p.p))]), ps))
+
+pure func encodeAnswer(a: Answer) -> Json = match a {
+  ChoiceA(c) => jo([kv("type", js("choice")), kv("choice", js(c.choice)), kv("confidence", jnum(c.confidence)), kv("probabilities", probabilities(c.probabilities))]),
+  NoulA(p) => jo([kv("type", js("noul")), kv("noul", jnum(p))]),
+  ScoreA(s) => jo([kv("type", js("score")), kv("score", jnum(s.score)), kv("confidence", jnum(s.confidence)), kv("probabilities", probabilities(s.probabilities))])
+}
+
+pure func encodeDecision(d: Decision) -> Json =
+  jo([kv("model", js(d.model)), kv("id", js(d.id)), kv("answers", ja(map(\a. jo([kv("name", js(a.name)), kv("answer", encodeAnswer(a.answer))]), d.answers))), kv("input_tokens", jint(d.input_tokens)), kv("output_tokens", jint(d.output_tokens)), kv("cost_usd", jnum(d.cost_usd))])
+
+export pure func encodeChoice(c: ChoiceResult) -> Json
+ensures { match getString(result, "selected") {
+  Some(s) => s == c.selected,
+  None => false
+} } =
+  jo([kv("decision", encodeDecision(c.decision)), kv("raw", probabilities(c.raw)), kv("normalized", probabilities(c.normalized)), kv("confidence", jnum(c.confidence)), kv("selected", js(c.selected)), kv("gated", jb(c.gated))])

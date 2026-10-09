@@ -1,0 +1,24 @@
+[package]
+name = "sunholo/crew_lab"
+version = "0.1.0"
+edition = "1"
+ailang = ">=0.52.0"
+description = "Offline captain and crew experiment with saved typed decisions"
+license = "Apache-2.0"
+[exports]
+modules = ["sunholo/crew_lab/actor_policy", "sunholo/crew_lab/scenario", "sunholo/crew_lab/session", "sunholo/crew_lab/codec"]
+[dependencies]
+"sunholo/social_dynamics" = {path = "../../packages/social-dynamics"}
+"sunholo/decisions" = "0.4.0"
+[effects]
+max = ["IO"]
+[bin]
+crew-lab = {module = "main", entry = "main", caps = "IO"}
+[metadata]
+ai_summary = "Pure recorded crew choices, personal consent and captain authority with deterministic causal traces; no provider calls"
+repository = "https://github.com/sunholo-data/ailang-packages/tree/main/examples/crew-lab"
+license_url = "https://github.com/sunholo-data/ailang-packages/blob/main/LICENSE"
+[stability]
+level = "experimental"
+[release]
+kind = "feature"
