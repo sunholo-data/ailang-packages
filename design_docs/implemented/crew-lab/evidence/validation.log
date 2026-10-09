@@ -1,0 +1,351 @@
+Resolving dependencies in /private/tmp/stapledon-crew-lab-20261009/examples/crew-lab
+✓ Generated ailang.lock (2 packages)
+  → sunholo/decisions@0.4.0 (registry)
+  → sunholo/social_dynamics@0.1.0 (path: ../../packages/social-dynamics)
+→ Checking package sunholo/crew_lab (4 exported modules)...
+
+  ✓ actor_policy.ail
+  ✓ actor_policy_test.ail
+  ✓ codec.ail
+  ✓ codec_test.ail
+  ✓ main.ail
+  ✓ scenario.ail
+  ✓ session.ail
+  ✓ session_test.ail
+
+  ! module "sunholo/crew_lab/session_test" compiled but not listed in [exports].modules
+  ! module "sunholo/crew_lab/actor_policy_test" compiled but not listed in [exports].modules
+  ! module "sunholo/crew_lab/codec_test" compiled but not listed in [exports].modules
+  ! module "sunholo/crew_lab/main" compiled but not listed in [exports].modules
+
+✓ 8 files checked, all passed!
+→ Package sunholo/crew_lab
+  5 source modules, 3 test files
+
+
+[1mTest Results[0m
+Module: sunholo/crew_lab
+
+[1mTests:[0m
+  [32m✓[0m sampling uses stable label order and strict interval boundaries (79.736375ms)
+      at [2mactor_policy_test.ail:35:1[0m
+  [32m✓[0m confidence gate defers without selecting model argmax (67.963792ms)
+      at [2mactor_policy_test.ail:39:1[0m
+  [32m✓[0m threshold equality passes and roll selects alternative to wire choice (68.203125ms)
+      at [2mactor_policy_test.ail:46:1[0m
+  [32m✓[0m zero probability endpoints never selected (71.553375ms)
+      at [2mactor_policy_test.ail:56:1[0m
+  [32m✓[0m wire choice at zero probability cannot override positive sampled label (71.260167ms)
+      at [2mactor_policy_test.ail:64:1[0m
+  [32m✓[0m near one total normalized and raw alternatives retained (73.979583ms)
+      at [2mactor_policy_test.ail:74:1[0m
+  [32m✓[0m invalid and zero totals rejected (74.878667ms)
+      at [2mactor_policy_test.ail:85:1[0m
+  [32m✓[0m out of range distribution and confidence rejected (75.44ms)
+      at [2mactor_policy_test.ail:89:1[0m
+  [32m✓[0m threshold and roll reject nonfinite and endpoints (75.872583ms)
+      at [2mactor_policy_test.ail:93:1[0m
+  [32m✓[0m legal choices require unique bounded keys and defer (72.333917ms)
+      at [2mactor_policy_test.ail:101:1[0m
+  [32m✓[0m unknown wire choice and missing or extra probabilities rejected (80.52525ms)
+      at [2mactor_policy_test.ail:109:1[0m
+  [32m✓[0m wrong answer variant and numeric field types rejected before defaults (85.056667ms)
+      at [2mactor_policy_test.ail:113:1[0m
+  [32m✓[0m usage rejects missing fractional negative and nonnumeric fields (80.840333ms)
+      at [2mactor_policy_test.ail:117:1[0m
+  [32m✓[0m wire structural duplicates rejected at every relevant object (85.769958ms)
+      at [2mactor_policy_test.ail:122:1[0m
+  [32m✓[0m unknown extra response field and trailing JSON rejected (73.967834ms)
+      at [2mactor_policy_test.ail:126:1[0m
+  [32m✓[0m request body retains received context and legal choices (68.604792ms)
+      at [2mactor_policy_test.ail:130:1[0m
+  [32m✓[0m encoded causal result retains parsed provenance usage and selected action (72.954041ms)
+      at [2mactor_policy_test.ail:141:1[0m
+  [32m✓[0m provenance and answer container cannot default or hide extra answers (98.806916ms)
+      at [2mactor_policy_test.ail:151:1[0m
+  [32m✓[0m nonnumeric probability and negative usage cost rejected (78.80975ms)
+      at [2mactor_policy_test.ail:157:1[0m
+  [32m✓[0m near one surplus normalizes without changing raw probabilities (75.038834ms)
+      at [2mactor_policy_test.ail:162:1[0m
+  [32m✓[0m fields accepts exact unique object keys in either order (36.529667ms)
+      at [2mcodec_test.ail:28:1[0m
+  [32m✓[0m fields rejects unknown missing duplicate and nonobject shapes (43.116375ms)
+      at [2mcodec_test.ail:32:1[0m
+  [32m✓[0m wire duplicate fields remain visible to the strict shape check (34.614125ms)
+      at [2mcodec_test.ail:36:1[0m
+  [32m✓[0m framing correctly ignores escaped braces inside strings (34.609958ms)
+      at [2mcodec_test.ail:43:1[0m
+  [32m✓[0m text requires present nonempty string without coercion (39.486334ms)
+      at [2mcodec_test.ail:50:1[0m
+  [32m✓[0m text accepts wire endpoint and refuses one character beyond (36.709625ms)
+      at [2mcodec_test.ail:54:1[0m
+  [32m✓[0m integer accepts zero maximum and integral float representation (40.1885ms)
+      at [2mcodec_test.ail:58:1[0m
+  [32m✓[0m integer rejects fractions negative overflow wrong type and absent (41.432458ms)
+      at [2mcodec_test.ail:62:1[0m
+  [32m✓[0m numbers reject NaN and infinity without conflating finite negatives (46.2435ms)
+      at [2mcodec_test.ail:66:1[0m
+  [32m✓[0m integer rejects nonfinite before conversion (37.33325ms)
+      at [2mcodec_test.ail:70:1[0m
+  [32m✓[0m object enforces complete framing but leaves field schemas to caller (34.378875ms)
+      at [2mcodec_test.ail:74:1[0m
+  [32m✓[0m object rejects trailing concatenated malformed nonobject and oversize wire (37.635458ms)
+      at [2mcodec_test.ail:81:1[0m
+  [32m✓[0m outcomes exact round trips and personal trust deltas (41.477667ms)
+      at [2mcodec_test.ail:85:1[0m
+  [32m✓[0m outcome decoder rejects narrative substrings whitespace and unknown codes (34.274458ms)
+      at [2mcodec_test.ail:89:1[0m
+  [32m✓[0m consent policy refuses unaccepted project; orders records no personal consent (246.807541ms)
+      at [2msession_test.ail:97:1[0m
+  [32m✓[0m agreed work consumes materials and accrues fatigue only at completion (232.415708ms)
+      at [2msession_test.ail:110:1[0m
+  [32m✓[0m same parties consent for another task cannot unlock project (227.38575ms)
+      at [2msession_test.ail:120:1[0m
+  [32m✓[0m ask is worker local and excludes unseen colleague offers (221.96075ms)
+      at [2msession_test.ail:133:1[0m
+  [32m✓[0m raw AI acceptance rejected while delegated self acceptance succeeds (218.319459ms)
+      at [2msession_test.ail:149:1[0m
+  [32m✓[0m uncertain response banks defer without state or resource effects (216.72375ms)
+      at [2msession_test.ail:165:1[0m
+  [32m✓[0m duplicate complete after later work is full-body-and-roll no-op (230.304375ms)
+      at [2msession_test.ail:178:1[0m
+  [32m✓[0m revision mutation invalidates answer and cancellation recovers (226.570416ms)
+      at [2msession_test.ail:191:1[0m
+  [32m✓[0m idle tick changes without revision still invalidate answer (213.158375ms)
+      at [2msession_test.ail:207:1[0m
+  [32m✓[0m sixteen stale pending requests explicitly recover one slot (277.164834ms)
+      at [2msession_test.ail:217:1[0m
+  [32m✓[0m expired agreement equality refuses consent start and new request (222.110292ms)
+      at [2msession_test.ail:236:1[0m
+  [32m✓[0m granted relief refunds untouched reservation while denial completes work (260.89975ms)
+      at [2msession_test.ail:246:1[0m
+  [32m✓[0m resource competition rejects second start without committing reservation or report (248.370708ms)
+      at [2msession_test.ail:259:1[0m
+  [32m✓[0m cooperation floor constrains orders (214.642625ms)
+      at [2msession_test.ail:275:1[0m
+  [32m✓[0m offer receipt failure stages all host and domain changes atomically (219.193625ms)
+      at [2msession_test.ail:283:1[0m
+  [32m✓[0m actor receipt failure cannot commit concern or consume pending request (223.39975ms)
+      at [2msession_test.ail:291:1[0m
+  [32m✓[0m captain report failure cannot commit work or reserve resources (215.235958ms)
+      at [2msession_test.ail:299:1[0m
+  [32m✓[0m completed retention refuses further answer and cancellation (223.391792ms)
+      at [2msession_test.ail:307:1[0m
+  [32m✓[0m received agreement alone cannot delegate another actor consent (214.92525ms)
+      at [2msession_test.ail:321:1[0m
+  [32m✓[0m pending scheduler precedes duplicate completion until abort (239.972125ms)
+      at [2msession_test.ail:331:1[0m
+  [32m✓[0m blocked advance retains earlier completed rest and does not claim target (260.987625ms)
+      at [2msession_test.ail:350:1[0m
+  [32m✓[0m numeric clock limit and altered captured policy/config are rejected (224.821834ms)
+      at [2msession_test.ail:373:1[0m
+
+──────────────────────────────────────────────────
+[32m✓[0m [1mAll tests passed![0m
+
+56 tests: 56 passed, 0 failed, 0 skipped (7.148388501s)
+  [32m✓ Passed:[0m 56
+  [31m✗ Failed:[0m 0
+
+[1mSeed:[0m
+  mode: derived
+  master seed: 0
+  derivation: ailang-property-seed-v1
+  replay: ailang test --seed 0 --package .
+
+→ Package sunholo/crew_lab
+  5 source modules, 3 test files
+
+→ bytecode: 56 named-test bodies ran on the VM, 0 fell back to the evaluator; inline tests and properties run on the evaluator
+
+[1mTest Results[0m
+Module: sunholo/crew_lab
+
+[1mTests:[0m
+  [32m✓[0m sampling uses stable label order and strict interval boundaries (75.278542ms)
+      at [2mactor_policy_test.ail:35:1[0m
+  [32m✓[0m confidence gate defers without selecting model argmax (73.566292ms)
+      at [2mactor_policy_test.ail:39:1[0m
+  [32m✓[0m threshold equality passes and roll selects alternative to wire choice (73.134208ms)
+      at [2mactor_policy_test.ail:46:1[0m
+  [32m✓[0m zero probability endpoints never selected (76.927542ms)
+      at [2mactor_policy_test.ail:56:1[0m
+  [32m✓[0m wire choice at zero probability cannot override positive sampled label (73.609875ms)
+      at [2mactor_policy_test.ail:64:1[0m
+  [32m✓[0m near one total normalized and raw alternatives retained (75.510625ms)
+      at [2mactor_policy_test.ail:74:1[0m
+  [32m✓[0m invalid and zero totals rejected (74.470208ms)
+      at [2mactor_policy_test.ail:85:1[0m
+  [32m✓[0m out of range distribution and confidence rejected (74.305125ms)
+      at [2mactor_policy_test.ail:89:1[0m
+  [32m✓[0m threshold and roll reject nonfinite and endpoints (80.949209ms)
+      at [2mactor_policy_test.ail:93:1[0m
+  [32m✓[0m legal choices require unique bounded keys and defer (72.951334ms)
+      at [2mactor_policy_test.ail:101:1[0m
+  [32m✓[0m unknown wire choice and missing or extra probabilities rejected (80.283417ms)
+      at [2mactor_policy_test.ail:109:1[0m
+  [32m✓[0m wrong answer variant and numeric field types rejected before defaults (84.08675ms)
+      at [2mactor_policy_test.ail:113:1[0m
+  [32m✓[0m usage rejects missing fractional negative and nonnumeric fields (83.804916ms)
+      at [2mactor_policy_test.ail:117:1[0m
+  [32m✓[0m wire structural duplicates rejected at every relevant object (86.991416ms)
+      at [2mactor_policy_test.ail:122:1[0m
+  [32m✓[0m unknown extra response field and trailing JSON rejected (77.96925ms)
+      at [2mactor_policy_test.ail:126:1[0m
+  [32m✓[0m request body retains received context and legal choices (74.013583ms)
+      at [2mactor_policy_test.ail:130:1[0m
+  [32m✓[0m encoded causal result retains parsed provenance usage and selected action (76.686125ms)
+      at [2mactor_policy_test.ail:141:1[0m
+  [32m✓[0m provenance and answer container cannot default or hide extra answers (100.71875ms)
+      at [2mactor_policy_test.ail:151:1[0m
+  [32m✓[0m nonnumeric probability and negative usage cost rejected (77.537292ms)
+      at [2mactor_policy_test.ail:157:1[0m
+  [32m✓[0m near one surplus normalizes without changing raw probabilities (79.378125ms)
+      at [2mactor_policy_test.ail:162:1[0m
+  [32m✓[0m fields accepts exact unique object keys in either order (38.649209ms)
+      at [2mcodec_test.ail:28:1[0m
+  [32m✓[0m fields rejects unknown missing duplicate and nonobject shapes (44.651916ms)
+      at [2mcodec_test.ail:32:1[0m
+  [32m✓[0m wire duplicate fields remain visible to the strict shape check (34.559166ms)
+      at [2mcodec_test.ail:36:1[0m
+  [32m✓[0m framing correctly ignores escaped braces inside strings (37.287667ms)
+      at [2mcodec_test.ail:43:1[0m
+  [32m✓[0m text requires present nonempty string without coercion (40.804083ms)
+      at [2mcodec_test.ail:50:1[0m
+  [32m✓[0m text accepts wire endpoint and refuses one character beyond (38.974833ms)
+      at [2mcodec_test.ail:54:1[0m
+  [32m✓[0m integer accepts zero maximum and integral float representation (42.195708ms)
+      at [2mcodec_test.ail:58:1[0m
+  [32m✓[0m integer rejects fractions negative overflow wrong type and absent (44.104458ms)
+      at [2mcodec_test.ail:62:1[0m
+  [32m✓[0m numbers reject NaN and infinity without conflating finite negatives (46.701542ms)
+      at [2mcodec_test.ail:66:1[0m
+  [32m✓[0m integer rejects nonfinite before conversion (39.588083ms)
+      at [2mcodec_test.ail:70:1[0m
+  [32m✓[0m object enforces complete framing but leaves field schemas to caller (36.080791ms)
+      at [2mcodec_test.ail:74:1[0m
+  [32m✓[0m object rejects trailing concatenated malformed nonobject and oversize wire (38.803292ms)
+      at [2mcodec_test.ail:81:1[0m
+  [32m✓[0m outcomes exact round trips and personal trust deltas (39.960583ms)
+      at [2mcodec_test.ail:85:1[0m
+  [32m✓[0m outcome decoder rejects narrative substrings whitespace and unknown codes (36.388291ms)
+      at [2mcodec_test.ail:89:1[0m
+  [32m✓[0m consent policy refuses unaccepted project; orders records no personal consent (221.818625ms)
+      at [2msession_test.ail:97:1[0m
+  [32m✓[0m agreed work consumes materials and accrues fatigue only at completion (218.46625ms)
+      at [2msession_test.ail:110:1[0m
+  [32m✓[0m same parties consent for another task cannot unlock project (216.246833ms)
+      at [2msession_test.ail:120:1[0m
+  [32m✓[0m ask is worker local and excludes unseen colleague offers (222.489542ms)
+      at [2msession_test.ail:133:1[0m
+  [32m✓[0m raw AI acceptance rejected while delegated self acceptance succeeds (216.77275ms)
+      at [2msession_test.ail:149:1[0m
+  [32m✓[0m uncertain response banks defer without state or resource effects (216.2095ms)
+      at [2msession_test.ail:165:1[0m
+  [32m✓[0m duplicate complete after later work is full-body-and-roll no-op (224.373416ms)
+      at [2msession_test.ail:178:1[0m
+  [32m✓[0m revision mutation invalidates answer and cancellation recovers (221.706833ms)
+      at [2msession_test.ail:191:1[0m
+  [32m✓[0m idle tick changes without revision still invalidate answer (218.126208ms)
+      at [2msession_test.ail:207:1[0m
+  [32m✓[0m sixteen stale pending requests explicitly recover one slot (238.646125ms)
+      at [2msession_test.ail:217:1[0m
+  [32m✓[0m expired agreement equality refuses consent start and new request (223.465791ms)
+      at [2msession_test.ail:236:1[0m
+  [32m✓[0m granted relief refunds untouched reservation while denial completes work (233.122917ms)
+      at [2msession_test.ail:246:1[0m
+  [32m✓[0m resource competition rejects second start without committing reservation or report (221.657875ms)
+      at [2msession_test.ail:259:1[0m
+  [32m✓[0m cooperation floor constrains orders (212.609875ms)
+      at [2msession_test.ail:275:1[0m
+  [32m✓[0m offer receipt failure stages all host and domain changes atomically (216.453959ms)
+      at [2msession_test.ail:283:1[0m
+  [32m✓[0m actor receipt failure cannot commit concern or consume pending request (222.05175ms)
+      at [2msession_test.ail:291:1[0m
+  [32m✓[0m captain report failure cannot commit work or reserve resources (222.351375ms)
+      at [2msession_test.ail:299:1[0m
+  [32m✓[0m completed retention refuses further answer and cancellation (226.353375ms)
+      at [2msession_test.ail:307:1[0m
+  [32m✓[0m received agreement alone cannot delegate another actor consent (215.715333ms)
+      at [2msession_test.ail:321:1[0m
+  [32m✓[0m pending scheduler precedes duplicate completion until abort (224.741959ms)
+      at [2msession_test.ail:331:1[0m
+  [32m✓[0m blocked advance retains earlier completed rest and does not claim target (234.63925ms)
+      at [2msession_test.ail:350:1[0m
+  [32m✓[0m numeric clock limit and altered captured policy/config are rejected (221.033667ms)
+      at [2msession_test.ail:373:1[0m
+
+──────────────────────────────────────────────────
+[32m✓[0m [1mAll tests passed![0m
+
+56 tests: 56 passed, 0 failed, 0 skipped (7.019975414s)
+  [32m✓ Passed:[0m 56
+  [31m✗ Failed:[0m 0
+
+[1mSeed:[0m
+  mode: derived
+  master seed: 0
+  derivation: ailang-property-seed-v1
+  replay: ailang test --seed 0 --package .
+
+→ Running tests in scenario.ail
+WARNING MOD010 (relaxed): module 'sunholo/crew_lab/scenario' does not match canonical path 'scenario'
+  Running under --relax-modules; mismatch ignored. For strict checking, omit --relax-modules flag.
+
+[1mTest Results[0m
+Module: All Tests
+
+[1mTests:[0m
+  [32m✓[0m experimental recipe ownership (82.643583ms)
+      at [2mscenario.ail:56:1[0m
+  [32m✓[0m unknown policy rejected (81.755333ms)
+      at [2mscenario.ail:60:1[0m
+
+[1mProperties:[0m
+  [32m✓[0m config_property_1 (100 cases, 97.195542ms)
+      at [2mscenario.ail:10:11[0m
+  [32m✓[0m actors_property_1 (100 cases, 53.801542ms)
+      at [2mscenario.ail:17:11[0m
+  [32m✓[0m resources_property_1 (100 cases, 53.334542ms)
+      at [2mscenario.ail:27:11[0m
+  [32m✓[0m workerRecipe_property_1 (100 cases, 53.268125ms)
+      at [2mscenario.ail:31:11[0m
+  [32m✓[0m policies_property_1 (100 cases, 54.995584ms)
+      at [2mscenario.ail:53:11[0m
+
+──────────────────────────────────────────────────
+[32m✓[0m [1mAll tests passed![0m
+
+7 tests: 7 passed, 0 failed, 0 skipped (476.994251ms)
+  [32m✓ Passed:[0m 7
+  [31m✗ Failed:[0m 0
+
+[1mSeed:[0m
+  mode: derived
+  master seed: 0
+  derivation: ailang-property-seed-v1
+  replay: ailang test --seed 0 scenario.ail
+
+Five saved crew scenarios executed
+Five saved recordings replay identically
+Five evaluator/strict-VM traces identical
+✓ Lock: /private/tmp/stapledon-crew-lab-20261009/examples/crew-lab/ailang.lock (existing, 2 packages)
+✓ bin: crew-lab → /var/folders/kr/h0wr2sj94vd6ljtmsxv8jkt00000gn/T/crew-cli.783Q6p/bin/crew-lab  (sunholo/crew_lab@0.1.0, module main, entry main, caps IO)
+⚠ /var/folders/kr/h0wr2sj94vd6ljtmsxv8jkt00000gn/T/crew-cli.783Q6p/bin is not on your PATH. Add:  export PATH="/var/folders/kr/h0wr2sj94vd6ljtmsxv8jkt00000gn/T/crew-cli.783Q6p/bin:$PATH"
+Installed crew CLI: five traces identical from unrelated cwd; malformed input exits1; finite framing guards pass
+→ quality sunholo/crew_lab@0.1.0 (experimental)
+  compile:   ✓ 8 files
+  contracts: ✓ 5/28 verified, 0 refuted, 0 uncontracted exports (0.3s)
+  interface: ✓ v2 9be1a0ae4ee4… (43 signatures)
+  effects:   max [IO]  rank_max IO  ceiling_declared true
+  release:   kind feature  changelog_section true
+  docs:      AGENT.md true  ai_summary true
+  style:     27 exported funcs, 27 pure (100%)
+  tests:     [attested] 3 files, 56 passed, 0 failed
+  smoke:     [attested] present false passed false
+
+  · PUB016 22 contract(s) skipped by Z3 (unencodable types or builtins) — not proved; `ailang verify --package .` lists the reason per function
+  · PUB023 registry export-overlap check did not run: failed to fetch registry index: Get "https://storage.googleapis.com/ailang-registry/index.json?t=1791552081": dial tcp: lookup storage.googleapis.com: no such host
+  · PUB014 no _smoke.ail — publish runs no boot check in a clean workdir
+
+✓ no gates

@@ -9,7 +9,7 @@
 | Grounded Strangeness | 0 | No alien generation in this slice. |
 | We Are Not Built For This | +2 | Refusal, uncertainty and fatigue constrain cooperation. |
 
-**Status:** Design quorum PASS (two independent reviews, revised once). Implementation in progress. **Target:** independent experimental
+**Status:** Design quorum PASS (two independent reviews, revised once). Implemented; independent evaluation PASS100/100. **Target:** independent experimental
 `sunholo/crew_lab@0.1.0` example. The social kernel remains 0.1.0.
 **Priority:** P1. **Planner-Lane:** codex-ok.
 **Authorisation:** Mark selected captain and crew in the CLI lab and instructed
