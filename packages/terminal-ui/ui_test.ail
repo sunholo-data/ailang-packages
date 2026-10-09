@@ -47,3 +47,7 @@ test "early wide ranges" {
 test "all caller actions stay visible" {
   contains((screen(dimensions(40, 16), false, ["h"], "body", ["1 First", "2 Second", "3 Third", "4 Fourth", "5 Fifth"], 0)).text, "5 Fifth")
 }
+
+test "all long reply remainder reaches last page" {
+  contains((screen(dimensions(80, 28), false, ["Header"], "${repeat("x", 4096)} END_OF_REPLY", ["1 Start /2 Leave"], 9999)).text, "END_OF_REPLY") && contains((screen(dimensions(60, 24), false, ["Header"], "${repeat("界", 4096)} END_OF_REPLY", ["1 Start /2 Leave"], 9999)).text, "END_OF_REPLY")
+}

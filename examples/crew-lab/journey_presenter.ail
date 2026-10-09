@@ -2,7 +2,7 @@ module sunholo/crew_lab/journey_presenter
 import std/string (repeat, toUpper, join, length as slength)
 import std/list (map, filter, length, head)
 import std/option (Option, Some, None)
-import pkg/sunholo/terminal_ui/ui (Dimensions, Screen, screen, gauge)
+import pkg/sunholo/terminal_ui/ui (Dimensions, Screen, screen, gauge, safeText)
 import pkg/sunholo/social_dynamics/model (Relationship, Actor, Task, Recipe, Value, Effect, IndicatorDelta, RelationshipDelta, Working, Offered, Completed, Stopped)
 import ./session (Session)
 import ./play_flow (PlayState, menu)
@@ -219,5 +219,5 @@ ensures { slength(result) > 0 } = {
   let complete = length(filter(\t. t.status == Completed, s.session.state.tasks))
   let unfinished = length(filter(\t. t.status == Offered || t.status == Working, s.session.state.tasks))
   let material = supplies(s)
-  "END OF THE PREPARATION WATCH\n${show(s.session.state.tick)} turns elapsed / ${show(complete)} projects completed / ${show(unfinished)} unfinished.\n${material}\n${crew(s)}\nJournal: ${path}\nNo arrival or grade is simulated. Fresh launch starts a new crew; library persists."
+  safeText("END OF THE PREPARATION WATCH\n${show(s.session.state.tick)} turns elapsed / ${show(complete)} projects completed / ${show(unfinished)} unfinished.\n${material}\n${crew(s)}\nJournal: ${path}\nNo arrival or grade is simulated. Fresh launch starts a new crew; library persists.")
 }

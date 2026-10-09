@@ -1,5 +1,5 @@
 module sunholo/terminal_ui/ui
-import std/string (chars, charCode, concat, repeat, join, startsWith, split, words)
+import std/string (chars, charCode, concat, repeat, join, contains, startsWith, split, words)
 import std/list (map, filter, foldl, flatMap, length, take, drop)
 
 export type Dimensions = { columns: int, rows: int } deriving (Eq)
@@ -17,7 +17,8 @@ pure func safe(c: string) -> bool = {
 
 -- Remove C0/C1 and bidi controls. Keep newline for layout; replace tab with a space.
 export pure func safeText(text: string) -> string ! {}
-ensures { cells(result) >= 0 } = sanitizeChars(chars(text))
+ensures { not contains(result, "\u{1B}") && not contains(result, "\u{7}") && not contains(result, "\u{202E}") } =
+  sanitizeChars(chars(text))
 
 pure func sanitizeChars(xs: [string]) -> string = match xs {
   [] => "",

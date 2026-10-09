@@ -2,7 +2,7 @@ module sunholo/crew_lab/journey_presenter_test
 import std/result (Ok, Err)
 import std/string (contains, repeat)
 import ./session (start)
-import ./journey_presenter (chapter, opening, frame, indicatorChanges)
+import ./journey_presenter (chapter, opening, frame, indicatorChanges, journeyRecap)
 import ./journey_flow (initial)
 import pkg/sunholo/terminal_ui/ui (dimensions, cells)
 
@@ -71,6 +71,16 @@ test "actual rest completion projection has exact fatigue change" {
         indicatorChanges(o.session, changed) == "\nscientist fatigue: 45 -> 30"
       },
       _ => false
+    }
+  }
+}
+
+test "quit recap sanitizes only display path controls" {
+  match base() {
+    Err(_) => false,
+    Ok(o) => {
+      let s = { session: o.session, seed: 42, nextId: 1, seq: 0, phase: "main", target: "" };
+      not contains(journeyRecap(s, "path\u{1B}[31m\u{202E}journal"), "\u{1B}") && not contains(journeyRecap(s, "path\u{1B}[31m\u{202E}journal"), "\u{202E}") && contains(journeyRecap(s, "path\u{1B}[31m\u{202E}journal"), "path[31mjournal")
     }
   }
 }

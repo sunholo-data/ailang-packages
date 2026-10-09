@@ -1,0 +1,7 @@
+module sunholo/crew_lab/journey
+import ./play (launchJourney)
+
+-- Internal bin adapters are outside the reusable library export inventory.
+export func main() -> () ! {IO, Env, FS, AI} = launchJourney("live")
+
+export func offline() -> () ! {IO, Env, FS, AI} = launchJourney("offline")

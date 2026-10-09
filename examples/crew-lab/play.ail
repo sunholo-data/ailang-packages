@@ -8,7 +8,7 @@ import std/string (length as stringLength, stringToInt)
 import std/json (Json, encode, decode, jo, ja, kv, js, jint, jnum, jb)
 import pkg/sunholo/content_library/library (Bundle, encodeBundle, starterBundle, nextRoll, pickLabel, pickVariant)
 import pkg/sunholo/social_dynamics/model (Offered)
-import pkg/sunholo/terminal_ui/ui (Dimensions, dimensions, screen)
+import pkg/sunholo/terminal_ui/ui (Dimensions, dimensions, screen, safeText)
 import ./journey_flow (Navigation, initial, options as journeyOptions, styleDefault, onboardingAllowed, navigation, remember)
 import ./journey_presenter (frame, opening, indicatorChanges, journeyRecap)
 import ./session (Request, start)
@@ -140,7 +140,7 @@ func status(r: Run) -> () ! {IO} {
 func finish(r: Run) -> () ! {IO, FS} =
   match appendRun(r.path, envelope(r.ui.seq + 1, jo([kv("kind", js("quit")), kv("seed", jint(r.ui.seed))]))) {
     Err(e) => {
-      println("Journal failed: ${e}")
+      println(if r.modern then safeText("Journal failed: ${e}") else "Journal failed: ${e}")
       exit(1)
     },
     Ok(_) => if r.modern then {
@@ -198,7 +198,7 @@ func journeyLoop(r: Run) -> () ! {IO, FS, AI} = {
       Err(e) => journeyLoop({ r | lastMessage: e, nav: { r.nav | view: "bridge", page: 0 }, lines: r.lines + 1 }),
       Ok(i) => if i.kind == "quit" then finish(r) else match act({ r | lines: r.lines + 1 }, i) {
         Err(e) => {
-          println(e)
+          println(safeText(e))
           exit(1)
         },
         Ok(a) => {
@@ -245,12 +245,12 @@ func launch(mode: string, modern: bool) -> () ! {IO, Env, FS, AI} = {
   let flags = if modern then journeyOptions(getArgs(), envDims.columns, envDims.rows, styleDefault(getEnvOr("TERM", ""), hasEnv("NO_COLOR"))) else Ok({ args: getArgs(), columns: 80, rows: 28, ansi: false })
   match flags {
     Err(e) => {
-      println(e)
+      println(if modern then safeText(e) else e)
       exit(1)
     },
     Ok(f) => match parseArgs(f.args, "${home}/.ailang/crew-lab") {
       Err(e) => {
-        println(e)
+        println(if modern then safeText(e) else e)
         exit(1)
       },
       Ok(o) => {
@@ -267,16 +267,16 @@ func launch(mode: string, modern: bool) -> () ! {IO, Env, FS, AI} = {
         }
         match seed {
           Err(e) => {
-            println(e)
+            println(if modern then safeText(e) else e)
             exit(1)
           },
           Ok(seedValue) => match (begin(policyChoice, seedValue), loadPolicy(o.home)) {
             (Err(e), _) => {
-              println(e)
+              println(if modern then safeText(e) else e)
               exit(1)
             },
             (_, Err(e)) => {
-              println(e)
+              println(if modern then safeText(e) else e)
               exit(1)
             },
             (Ok(ui), Ok(config)) => {
@@ -290,7 +290,7 @@ func launch(mode: string, modern: bool) -> () ! {IO, Env, FS, AI} = {
                   let header = envelope(0, jo([kv("kind", js("start")), kv("host_input", js(c)), kv("host_output", js(initialHost.trace)), kv("seed", jint(seedValue)), kv("policy_body", js(config.body)), kv("model", js(model())), kv("mode", js(mode))]))
                   match openRun(o.home, "${getPid()}-${seedValue}", header) {
                     Err(e) => {
-                      println("Run ownership/journal failed: ${e}")
+                      println(if modern then safeText("Run ownership/journal failed: ${e}") else "Run ownership/journal failed: ${e}")
                       exit(1)
                     },
                     Ok(path) => {
@@ -316,7 +316,7 @@ ensures { result == () } = launch("live", false)
 export func offline() -> () ! {IO, Env, FS, AI}
 ensures { result == () } = launch("offline", false)
 
--- Installed offline controls validate these effectful entries.
-export func journey() -> () ! {IO, Env, FS, AI} = launch("live", true)
-
-export func journeyOffline() -> () ! {IO, Env, FS, AI} = launch("offline", true)
+-- The public adapter accepts only supported dialogue modes. Effectful launch
+-- behaviour is established by the installed CLI controls, not a unit-return proof.
+export func launchJourney(mode: string) -> () ! {IO, Env, FS, AI}
+requires { mode == "live" || mode == "offline" } = launch(mode, true)

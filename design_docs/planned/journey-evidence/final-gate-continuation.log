@@ -1,0 +1,272 @@
+→ quality sunholo/crew_lab@0.1.0 (experimental)
+  compile:   ✓ 26 files
+  contracts: ✓ 16/84 verified, 0 refuted, 0 uncontracted exports (1.7s)
+  interface: ✓ v2 2b64daf8eb46… (113 signatures)
+  effects:   max [AI Env FS IO]  rank_max FS  ceiling_declared true
+  release:   kind feature  changelog_section true
+  docs:      AGENT.md true  ai_summary true
+  style:     83 exported funcs, 75 pure (90%)
+  tests:     [attested] 11 files, 125 passed, 0 failed
+  smoke:     [attested] present false passed false
+
+  · PUB016 65 contract(s) skipped by Z3 (unencodable types or builtins) — not proved; `ailang verify --package .` lists the reason per function
+  · PUB023 registry export-overlap check did not run: failed to fetch registry index: Get "https://storage.googleapis.com/ailang-registry/index.json?t=1791569811": dial tcp: lookup storage.googleapis.com: no such host
+  · PUB014 no _smoke.ail — publish runs no boot check in a clean workdir
+
+✓ no gates
+→ Checking package sunholo/terminal_ui (1 exported modules)...
+
+  ✓ demo.ail
+  ✓ ui.ail
+  ✓ ui_test.ail
+
+  ! module "sunholo/terminal_ui/demo" compiled but not listed in [exports].modules
+  ! module "sunholo/terminal_ui/ui_test" compiled but not listed in [exports].modules
+
+✓ 3 files checked, all passed!
+→ Package sunholo/terminal_ui
+  2 source modules, 1 test files
+
+
+[1mTest Results[0m
+Module: sunholo/terminal_ui
+
+[1mTests:[0m
+  [32m✓[0m controls cannot reach terminal (12.541583ms)
+      at [2mui_test.ail:11:1[0m
+  [32m✓[0m unicode cells (11.614375ms)
+      at [2mui_test.ail:15:1[0m
+  [32m✓[0m word wrapping and hard breaks (12.562209ms)
+      at [2mui_test.ail:19:1[0m
+  [32m✓[0m dimensions bounded (11.658625ms)
+      at [2mui_test.ail:23:1[0m
+  [32m✓[0m plain never includes escape and bounds long pages (1.75524575s)
+      at [2mui_test.ail:27:1[0m
+  [32m✓[0m body remainder and fixed footer (243.864334ms)
+      at [2mui_test.ail:31:1[0m
+  [32m✓[0m ansi trusted redraw only (15.021833ms)
+      at [2mui_test.ail:35:1[0m
+  [32m✓[0m gauge bounded endpoints (11.770084ms)
+      at [2mui_test.ail:39:1[0m
+  [32m✓[0m early wide ranges (10.937625ms)
+      at [2mui_test.ail:43:1[0m
+  [32m✓[0m all caller actions stay visible (13.482375ms)
+      at [2mui_test.ail:47:1[0m
+  [32m✓[0m all long reply remainder reaches last page (699.163833ms)
+      at [2mui_test.ail:51:1[0m
+
+──────────────────────────────────────────────────
+[32m✓[0m [1mAll tests passed![0m
+
+11 tests: 11 passed, 0 failed, 0 skipped (2.797862626s)
+  [32m✓ Passed:[0m 11
+  [31m✗ Failed:[0m 0
+
+[1mSeed:[0m
+  mode: derived
+  master seed: 0
+  derivation: ailang-property-seed-v1
+  replay: ailang test --seed 0 --package .
+
+→ Package sunholo/terminal_ui
+  2 source modules, 1 test files
+
+→ bytecode: 11 named-test bodies ran on the VM, 0 fell back to the evaluator; inline tests and properties run on the evaluator
+
+[1mTest Results[0m
+Module: sunholo/terminal_ui
+
+[1mTests:[0m
+  [32m✓[0m controls cannot reach terminal (14.086042ms)
+      at [2mui_test.ail:11:1[0m
+  [32m✓[0m unicode cells (12.359667ms)
+      at [2mui_test.ail:15:1[0m
+  [32m✓[0m word wrapping and hard breaks (11.931042ms)
+      at [2mui_test.ail:19:1[0m
+  [32m✓[0m dimensions bounded (12.157458ms)
+      at [2mui_test.ail:23:1[0m
+  [32m✓[0m plain never includes escape and bounds long pages (373.736333ms)
+      at [2mui_test.ail:27:1[0m
+  [32m✓[0m body remainder and fixed footer (67.583708ms)
+      at [2mui_test.ail:31:1[0m
+  [32m✓[0m ansi trusted redraw only (13.83275ms)
+      at [2mui_test.ail:35:1[0m
+  [32m✓[0m gauge bounded endpoints (12.942708ms)
+      at [2mui_test.ail:39:1[0m
+  [32m✓[0m early wide ranges (11.645917ms)
+      at [2mui_test.ail:43:1[0m
+  [32m✓[0m all caller actions stay visible (12.46675ms)
+      at [2mui_test.ail:47:1[0m
+  [32m✓[0m all long reply remainder reaches last page (177.649541ms)
+      at [2mui_test.ail:51:1[0m
+
+──────────────────────────────────────────────────
+[32m✓[0m [1mAll tests passed![0m
+
+11 tests: 11 passed, 0 failed, 0 skipped (720.391916ms)
+  [32m✓ Passed:[0m 11
+  [31m✗ Failed:[0m 0
+
+[1mSeed:[0m
+  mode: derived
+  master seed: 0
+  derivation: ailang-property-seed-v1
+  replay: ailang test --seed 0 --package .
+
+→ Running tests in ui.ail
+WARNING MOD010 (relaxed): module 'sunholo/terminal_ui/ui' does not match canonical path 'ui'
+  Running under --relax-modules; mismatch ignored. For strict checking, omit --relax-modules flag.
+
+[1mTest Results[0m
+Module: All Tests
+
+[1mTests:[0m
+  [32m✓[0m clampPage_test_1 (72.4885ms)
+      at [2mui.ail:98:5[0m
+  [32m✓[0m clampPage_test_2 (18.760417ms)
+      at [2mui.ail:99:5[0m
+  [32m✓[0m clampPage_test_3 (18.380916ms)
+      at [2mui.ail:100:5[0m
+
+[1mProperties:[0m
+  [32m✓[0m dimensions_property_1 (100 cases, 19.112042ms)
+      at [2mui.ail:10:11[0m
+  [32m✓[0m safeText_property_1 (100 cases, 55.465833ms)
+      at [2mui.ail:20:11[0m
+  [32m✓[0m cells_property_1 (100 cases, 90.384416ms)
+      at [2mui.ail:43:11[0m
+  [33m⊘[0m wrap_property_1 (1 cases, 9.602791ms)
+      accepted 1, discarded 0, generated 1
+      [33mrequires not satisfied by random input (consider tighter generators): text=5owAMhi505eWik, columns=-870[0m
+      at [2mui.ail:69:12[0m
+  [32m✓[0m wrap_property_2 (100 cases, 251.036791ms)
+      accepted 100, discarded 876, generated 976
+      at [2mui.ail:70:11[0m
+  [33m⊘[0m pad_property_1 (1 cases, 9.679792ms)
+      accepted 1, discarded 0, generated 1
+      [33mrequires not satisfied by random input (consider tighter generators): text=a8jIchKiBT7PQadwTzxoI, columns=-751[0m
+      at [2mui.ail:76:12[0m
+  [33m⊘[0m pad_property_2 (45 cases, 279.042083ms)
+      accepted 45, discarded 955, generated 1000
+      [33munverified: requires filter accepted 45 of 1000 generated inputs; need 100 (955 discarded)[0m
+      at [2mui.ail:77:11[0m
+  [33m⊘[0m rule_property_1 (1 cases, 8.796917ms)
+      accepted 1, discarded 0, generated 1
+      [33mrequires not satisfied by random input (consider tighter generators): columns=-835[0m
+      at [2mui.ail:83:12[0m
+  [33m⊘[0m rule_property_2 (77 cases, 191.925459ms)
+      accepted 77, discarded 923, generated 1000
+      [33munverified: requires filter accepted 77 of 1000 generated inputs; need 100 (923 discarded)[0m
+      at [2mui.ail:84:11[0m
+  [33m⊘[0m gauge_property_1 (1 cases, 9.922333ms)
+      accepted 1, discarded 0, generated 1
+      [33mrequires not satisfied by random input (consider tighter generators): value=99, size=-350[0m
+      at [2mui.ail:87:12[0m
+  [33m⊘[0m gauge_property_2 (17 cases, 100.059833ms)
+      accepted 17, discarded 983, generated 1000
+      [33munverified: requires filter accepted 17 of 1000 generated inputs; need 100 (983 discarded)[0m
+      at [2mui.ail:88:11[0m
+  [33m⊘[0m clampPage_property_1 (1 cases, 9.668792ms)
+      accepted 1, discarded 0, generated 1
+      [33mrequires not satisfied by random input (consider tighter generators): page=492, pages=-187[0m
+      at [2mui.ail:95:12[0m
+  [32m✓[0m clampPage_property_2 (100 cases, 33.144917ms)
+      accepted 100, discarded 89, generated 189
+      at [2mui.ail:96:11[0m
+  [33m⊘[0m screen_property_1 (1 cases, 9.019208ms)
+      accepted 1, discarded 0, generated 1
+      [33mrequires not satisfied by random input (consider tighter generators): d={columns: -506, rows: 716}, ansi=true, header=[9yayzvaP7bPbNdQ6TbVIQNo6nacX8nmm1P6TFJF, 6g56xeo6ciNmUmGS9Z33meXIQ, z1ed604HjFMw2FNvbrT, Z9d56GrY97L, Wf, g4Mm6MabaZQOznSX2CVpv3xiOL6kmFJNLiKkVSoW9OFYl2WuymS2, nrzBVYdiLY6ErHTR7rXxOBDicqgcBGF, YyTvD7AGpk5YMbnGvcuSKvQ0uODABYf0mXMXYcnykhySiHT1Inlp2B, Ts13De6sixt3lZWa0ZjfGQCwnilfhVnQ9TIDzMOcODfnNkydV8bggXidJIBol2WWHkzzJefoGQKbHzjZb0GbMaSyN06o4P2im, TJRFktT6yLayFWvUjtPhh2WQqNTIg59D9GF9CwQ6Oe6eKQKLQ5lXTK4bsiB6kYm8mAn4ISM6kI5VRI3qIHn, tE4jy74iJBIk6O40S6lVssJPxGnkK4kXOY9XoPWrCHxqMeXzTmiWtzAUdjEv4NtYvYIkMrwnO5ZLKaxgATCLXZgVYNr2J5B0M, 5gWNGUMTICnmQLCBMCc6UBXFQ8k, DEMmDndW4qs3xYElD2FP5x, jdBZP8ppyBMgRYxuegFfgHoPV7JIqCZEnOkPqjKPcJuAj7TJCs4gEG3yXHMuf3HMDZ3AV1R6G9Y6Gq, tTq1eTrWt0A3VHEXow68KAmdapxcXg2iJEBBzdHl80ul7nyzzm52TKlOYaGFc, JmWthpuXS48Du6c8Su62qTzOd51lkxJC4wGse3JobqQsY9PWcZKdbjoVELIfp2YfRUyjDHo6OI8Kv7tZPsXffEli8SwaYPX8VN, VHffMXuAIxqHBwoXZK7DOdCknsbJwnhJqbF2H5XhRAw3mfiqD43E66PrmA, 4TxN3M711P7PdfPoxfMa7lMO71DF7FKPN2MvUYwLO54pgFLfdBnZMYgxQdHYY31gq, xAchcWhWQ3LSVFtFapUH25mUYQEO6BeU2PciUbWTblit880TImoRxQ44wyYhobG798BwXBGMMnvdgRekxd5C, VzBDHV4nhEI3AVCjKKX5yqA65Z9Zaa7Z1, AhoAjx8TrL25KvHcGwKUjzF25ScclEK, K8S6TvQffL8Eian0rqMBIsQTc796PaYhkzFTIHcnWt1VXoGM, xiZ6W0XHlAKNbUvHOhLFHqyYrOX2B3HtO8RAvdtJpNCYnjpMikNGgRX2YG4SsmEmsnIUDzxSm2MPpQbqvt6lbmPrpKPaC, ASMnBaopF5pFh2ciVNA7Qii5DhsZ3DGCymPPombaI8TovwuyZQOLDQf2V4t6Fw3BZ5MCwgflt17tLQv3iUzTzV68HwkLrgl, MVtePVdy6BJ, TmsVkdBoW4F75UpnvgfbXmYO8UTaBi3jaFrn9, 3WRQ, gUyUtjAmoUVQwd, DZ21df5YpxMLUTiLLHWIk9jfR, xj0cO6WfRVcfBwX3HJUYj7A5zEQW2CrgQkypZe09429eaWJWhyZIA6ivgUudCJHgv, 3xwJxyqpsmUqOyZ3oJQaN1fhr9sBBRbQ1FDrojuR62M80nG58EJet, w3zTtviBjDIpunmzyWidDypfkLJfgqGh3mEaCtSfKh4IbyRWQeIw, NVdb8hhl3UHt6Ab2GLWwVrVp1MJhtXlPv0DCqSI, m2lGvGOMjg085QhnLMoeJzVp8qoN07hFybngCU9Nrwp39jD3FhDDDLnlNO3PtZXW9N2itSGnAJLlV, lvCNh6vDLz2qzoeOiWvheUlSV0otkZEEOEkW53si4QCr0M, eE33ZWmH4fdljjQD138ae5yuTUVFLOrkYEbI8bcin0I4ksxWhEmbDO8GUbyJahQFVEytx1QNvXd4vPWUWbdsGabiSM0CCET9dKQh, l364CZXdjqROwrl2rGdiTxl, , DaxTBvUwCAntFHXQyfReNMxmcEMgv6apLxNd2jKkLmlO, yf2864M0GX7NQ8Dj4aGrtm6xyBboTQ4soPBgE7YIE7c8bCScFNJ4eI12UHxGQPKcKfbi5BRjol73XpNJeL3VIo, pgSJ, dps7xIM7DbSBQ6HGnKuBYdPTBq90w, EzdfJmbKqZQyNG0H129lnNiRqPmuFBtxIztKkI3QwgJ1hcWRNh7Yf, PtkJ9sBcPjLhtg8dqiDiICH22rL3YYEAO8HdmllBKBnj3XCdELa19nP6OSgiICPPVL5q8j, vkSowHDezcbJuF5MAK4ooiJArLCh0gbgEJcf1bPZ8VQwrJe, Y85Isa2upjPiQWbE8APExDQd0gwLCIjVDD9J75A2GqWS0ga4diBrAOU2, 4uD35bfguIjcbpy6Mpl6WrVQdGfYoTXU9AoB4NJCCDZX1PEBByZvCWk9L2pdLUbA4sFUk0XPlmo1ImoM0Uqs, cU91H2l9dZpjZ7Mz2oCgKG4Yb0DN5xM6dBfY4rReMxzJ7wukPwn3pyU33jbdLpDMBM8sDxTCuFJ9zxQc8ld, kTvehsF0ETGygKUPWWlgIxlvUSYDAspw0GgaSbbZjhuOqGVGuw7Dsv, aXemx1PftLP79Jb91t59eKc2cNJWgHorMiVMUR1BZed8wf3U3zLWd0xDHtU3R3FNLbtO4IZpNfFhq7UrxJ, q9UEu7Y9ECBPdFDFUUh3zkHWbsmsf9Vcb6Ve3y, Psf, kKiDRUt2Bz6x, dVtDOtYHy2zRLvI8K7yl0d1VcaKHsLQXr3qnEe, KGNPgPIBMPsdCdQxQWuUDwO5IvFIwj0k8w8E81lzqaAakILrMs848DcqNK8J9bk3Y38P01RH9A1CVFKZ8hIskiEMB5zi6fA, dauikZXH5kyc9c9AOA3RaMXr0RuEZZUT91NZlAB, 6eMmbNBqRi0FMvxeLTTciOtSRfQyFn3gB6VsX0L791ASn7rHT35v860lrMVOlcYC5, VjfkxCN6b9ZxzITOFEVW, uxCbfIE69lqXHdCeGnzaAZidlwZpAYNp2klWjKjkZRw92QgVJGUvAvq2Wqj], body=GOqV6QZZfTt1EhIwuXF9YUvnn4fAStfaqEWE74JtA7V, actions=[6Slw8G6El8Js0Tedr0ubCXf0tLGirCJ1t4p3Q5EYKe6Fm88F28sQGZGS6dHBBOwHA5qRQjIBFBq4fGo886X, n0WHLuwvpiOTcfbf1hCv4d5vBYWHezGVsMiG5eCALpI0tYBjNKfLXctKeah2ysDN47K7mQWyAvRkzAHbfvXh9r90t, IzeAnFXzavXkkEUV6dQXr2DteUL4sOGSQ5Y7Hq6O2YICDzsS8Fcw7afVUBR7RqENQ3I1ZX6fsElKT5XqL, srDjfGNo83i1QHzhJZ8zYatFbWMO7wiRT, 4UciiWNOtaD5y, lZALdFeAjHG5wvyoEs9Anffj837D2C59gyEnQZauvEggVUeoxZxHjWOSMhMHBTTdOAl5isb, uokfjpuSSBBEXpaX5WVAbwE, GLso7wscAzZCaF2d4aEDqtopebkxSYAr2hAONydDnNOEemq7w0S8uyvaml3yzcsQ4JhoZtEwuuJERtiMtIeLBugFSJAtVP, RjGYTW2fg1QbnTzL1jty1q9LD4laGd0A6nFSrUuxYxUaQ8ZwgCJSNFJI0pun84Xjx0LcHbYdYLARat, yDOFhmfatYUxSB8XdSsEHDnQd7Rqt3opUZRrSARLujr4W4XYYufRZ0snM, sjo19bJc52u11NfJFqSuchSkQag6ru67, Comfx43q, r7wFXYDQt39nE08QMQsb1XHBxzDuFBu1ksVeS6Ei8gq1Utx2M8IC3oeMKCL61, EtRSZ43qxL5NCWjF4Vl6J, srlC61NCYLgRH3eIadw0HuxqYQruYmpovwOeNVr82eTDyjJZd6TQzFwPUkb9XPrvvhqQSDO1rkRWM, sTnTWrPkMam7uEservFCzDqEQKjt7VON702b1Xh8BNwuPOPFBbgt64GRr4DI27C07B9nHLjRVvhS0wDvw3coecmfQAumBQztcx, 5YU4hN8x8sV58XwYiqIVdNbB2OvlVC6UC3h8Yhmyi1GXtLUHciOmitIIAUXvyoJoZaXbLXgtvmVGOef4rPne4hu0eE, oAqVoutu0MPdTQSGulqf9nQasJFMoiEarjIKoFFFAbVKOWM0RnDbkwrqifZ, peTeLo8w0eOR8Dj3GyQFFwawZezVFzJnZvqRuJe0YxMyasueGvZPby5vPpUZ, fYXSY1wskf9ZtMi0zDzsri3CBOaoIOpKBakXVn7IGuORXJXCk0UjMR9hM7dvhlgOiuxYdq9mNHfGgbaAJZA, FIDlD6c0cMh95XQnsajvM, Qudr19onaTpy0TMTkEdpm8e9SaKgDS2i21y67ebiKjWSgcHCgHTVQUt7jEeI3Zfp8bEtNfHzo6L9, 70JAYqig6c7LihetJEfurF8n2L29bj02biloOaFLGL58EMemxH2axl36g0Nw1hOf1JVxmBCqhqrkgnYlZ, m7pw4ivYSJ6SWNcKEzgeauMFqSJ8dSbTk0R8YrAmzmhgoGaZ2Xff, 0rgS8bhwtKfBZdk5rffUOPCP5ELNMxAaHQSDs6m, 8tg23qyLTXSp5zdPCFQG72yeD4PPGnl5XiTajetVkrLbuRqtbzEm7af4S8SdIAYh3, , BkIA1SD1EurwIvnyYV, khDTwf7OOyvDlxYnXdiPUjp6s2K6NJ7M5Qbf93QbDGctr3yI7vvomONOnjyxON0mdklEKD1Fw, 6myi93Q40p3Y45TcEwrKutHMdnku8ONW, 284vBTT8XTyU, oCIcafa5hUtO8xpGvXIddNPkRBniKintZUwQEyedWauv40ABF, 7eHLA69IY, hfUKfg3z6hgC2Ljk, 3dRL9l9XtlSCkFMVxXi2jaxdVvroAzrL8Xw5pDN5JSbaevrYiyd8rrvXGskiGYMrGS, sF38geiXr9gQ7xZkaFg8mu2ZDacnPAhXcVJDfDzuG2VbnHdCRKHITvyhsMfNkthPlf7ELNMsGQnR3YzBFA, U, Y], page=-790[0m
+      at [2mui.ail:108:12[0m
+  [33m⊘[0m screen_property_2 (415.900125ms)
+      accepted 0, discarded 1000, generated 1000
+      [33munverified: requires filter accepted 0 of 1000 generated inputs; need 100 (1000 discarded)[0m
+      at [2mui.ail:109:11[0m
+
+──────────────────────────────────────────────────
+[32m✓[0m [1mAll tests passed![0m
+
+18 tests: 8 passed, 0 failed, 10 skipped (1.602391165s)
+  [32m✓ Passed:[0m 8
+  [31m✗ Failed:[0m 0
+  [33m⊘ Skipped:[0m 10
+
+[1mSeed:[0m
+  mode: derived
+  master seed: 0
+  derivation: ailang-property-seed-v1
+  replay: ailang test --seed 0 ui.ail
+
+→ Running tests in demo.ail
+WARNING MOD010 (relaxed): module 'sunholo/terminal_ui/demo' does not match canonical path 'demo'
+  Running under --relax-modules; mismatch ignored. For strict checking, omit --relax-modules flag.
+
+[1mTest Results[0m
+Module: All Tests
+
+[1mTests:[0m
+  [32m✓[0m nextPage_test_1 (30.243583ms)
+      at [2mdemo.ail:10:5[0m
+  [32m✓[0m nextPage_test_2 (22.369292ms)
+      at [2mdemo.ail:11:5[0m
+  [32m✓[0m nextPage_test_3 (21.203667ms)
+      at [2mdemo.ail:12:5[0m
+
+[1mProperties:[0m
+  [33m⊘[0m nextPage_property_1 (1 cases, 9.67ms)
+      accepted 1, discarded 0, generated 1
+      [33mrequires not satisfied by random input (consider tighter generators): page=-556, key=52p2ibawAewc8ZPS3sqopLR06FrVQTii2mDWwRNZLXXXZDTXAGzSERW1Gv[0m
+      at [2mdemo.ail:7:12[0m
+  [32m✓[0m nextPage_property_2 (100 cases, 36.909667ms)
+      accepted 100, discarded 109, generated 209
+      at [2mdemo.ail:8:11[0m
+
+──────────────────────────────────────────────────
+[32m✓[0m [1mAll tests passed![0m
+
+5 tests: 4 passed, 0 failed, 1 skipped (120.396209ms)
+  [32m✓ Passed:[0m 4
+  [31m✗ Failed:[0m 0
+  [33m⊘ Skipped:[0m 1
+
+[1mSeed:[0m
+  mode: derived
+  master seed: 0
+  derivation: ailang-property-seed-v1
+  replay: ailang test --seed 0 demo.ail
+
+→ quality sunholo/terminal_ui@0.1.0 (experimental)
+  compile:   ✓ 3 files
+  contracts: ✓ 2/9 verified, 0 refuted, 0 uncontracted exports (0.0s)
+  interface: ✓ v2 3c8f811eecc6… (11 signatures)
+  effects:   max [IO]  rank_max IO  ceiling_declared true
+  release:   kind feature  changelog_section true
+  docs:      AGENT.md true  ai_summary true
+  style:     9 exported funcs, 9 pure (100%)
+  tests:     [attested] 1 files, 11 passed, 0 failed
+  smoke:     [attested] present false passed false
+
+  · PUB016 7 contract(s) skipped by Z3 (unencodable types or builtins) — not proved; `ailang verify --package .` lists the reason per function
+  · PUB008 [metadata] license_url is missing — registry consumers cannot inspect the package license
+  · PUB023 registry export-overlap check did not run: failed to fetch registry index: Get "https://storage.googleapis.com/ailang-registry/index.json?t=1791569837": dial tcp: lookup storage.googleapis.com: no such host
+  · PUB014 no _smoke.ail — publish runs no boot check in a clean workdir
+
+✓ no gates
+✓ Lock: /private/tmp/stapledon-journey-tui-20261009/packages/terminal-ui/ailang.lock (existing, 0 packages)
+✓ bin: terminal-ui-demo → /var/folders/kr/h0wr2sj94vd6ljtmsxv8jkt00000gn/T/crew-journey.SDm4yo/bin/terminal-ui-demo  (sunholo/terminal_ui@0.1.0, module demo, entry main, caps IO)
+⚠ /var/folders/kr/h0wr2sj94vd6ljtmsxv8jkt00000gn/T/crew-journey.SDm4yo/bin is not on your PATH. Add:  export PATH="/var/folders/kr/h0wr2sj94vd6ljtmsxv8jkt00000gn/T/crew-journey.SDm4yo/bin:$PATH"
+✓ Lock: /private/tmp/stapledon-journey-tui-20261009/examples/crew-lab/ailang.lock (existing, 4 packages)
+✓ bin: crew-journey → /var/folders/kr/h0wr2sj94vd6ljtmsxv8jkt00000gn/T/crew-journey.SDm4yo/bin/crew-journey  (sunholo/crew_lab@0.1.0, module play, entry journey, caps IO,FS,Env,AI)
+✓ bin: crew-journey-offline → /var/folders/kr/h0wr2sj94vd6ljtmsxv8jkt00000gn/T/crew-journey.SDm4yo/bin/crew-journey-offline  (sunholo/crew_lab@0.1.0, module play, entry journeyOffline, caps IO,FS,Env,AI)
+✓ bin: crew-lab → /var/folders/kr/h0wr2sj94vd6ljtmsxv8jkt00000gn/T/crew-journey.SDm4yo/bin/crew-lab  (sunholo/crew_lab@0.1.0, module main, entry main, caps IO)
+✓ bin: crew-play → /var/folders/kr/h0wr2sj94vd6ljtmsxv8jkt00000gn/T/crew-journey.SDm4yo/bin/crew-play  (sunholo/crew_lab@0.1.0, module play, entry main, caps IO,FS,Env,AI)
+✓ bin: crew-play-offline → /var/folders/kr/h0wr2sj94vd6ljtmsxv8jkt00000gn/T/crew-journey.SDm4yo/bin/crew-play-offline  (sunholo/crew_lab@0.1.0, module play, entry offline, caps IO,FS,Env,AI)
+✓ bin: crew-view → /var/folders/kr/h0wr2sj94vd6ljtmsxv8jkt00000gn/T/crew-journey.SDm4yo/bin/crew-view  (sunholo/crew_lab@0.1.0, module viewer, entry main, caps IO)
+⚠ /var/folders/kr/h0wr2sj94vd6ljtmsxv8jkt00000gn/T/crew-journey.SDm4yo/bin is not on your PATH. Add:  export PATH="/var/folders/kr/h0wr2sj94vd6ljtmsxv8jkt00000gn/T/crew-journey.SDm4yo/bin:$PATH"
+PASS science: navigation payloads and both-engine recovery replay
+PASS care: navigation payloads and both-engine recovery replay
+PASS deny: navigation payloads and both-engine recovery replay
+PASS projects: navigation payloads and both-engine recovery replay
+PASS shortage: navigation payloads and both-engine recovery replay
+PASS occupied: navigation payloads and both-engine recovery replay
+PASS refusal: navigation payloads and both-engine recovery replay
+Journey installed: seven navigation/baseline payloads identical, evaluator/strictVM recovery replay, completion deltas, cachedAI/stock, pending error, 8-turn review, plain/ANSI bounds and journal failure; zero provider calls.
