@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
 """Generate the dwarf photometry table from Pecaut & Mamajek 2022.04.16.
 
-Two node chains come from the same first dwarf table: Gaia BP-RP (with Teff
-and G-V) and Johnson B-V (with Teff). Each chain keeps rows whose colour is
-strictly increasing and whose Teff is strictly decreasing.
+Three node chains come from the same first dwarf table: Gaia BP-RP (with Teff
+and G-V), Johnson B-V (with Teff), and (0.11.0) the bolometric correction BCv
+against Teff. Each colour chain keeps rows whose colour is strictly increasing
+and whose Teff is strictly decreasing; the BCv chain keeps every row with a
+numeric Teff and BCv, written in increasing Teff.
 """
 
 import argparse
@@ -82,12 +84,42 @@ def parse(path):
     return rows, dropped
 
 
+def parse_bc(path):
+    """Rows (name, teff, bcv) of the first table with numeric Teff and BCv, increasing Teff."""
+    rows = []
+    in_table = False
+    for line in path.read_text(encoding="utf-8").splitlines():
+        if line.startswith("#SpT"):
+            if in_table:
+                break
+            in_table = True
+            continue
+        if not in_table or line.startswith("#"):
+            continue
+        fields = line.split()
+        if len(fields) < 12 or not fields[0].endswith("V"):
+            continue
+        name, temperature, bcv = fields[0], fields[1], fields[3]
+        if any(value.startswith("...") for value in (temperature, bcv)):
+            continue
+        try:
+            teff, bc = float(temperature), float(bcv)
+        except ValueError as exc:
+            raise ValueError(f"bad numeric row: {line}") from exc
+        if rows and teff >= rows[-1][1]:
+            raise ValueError(f"temperature is not strictly decreasing at {name}")
+        rows.append((name, teff, bc))
+    if len(rows) < 2:
+        raise ValueError("no usable BCv rows found")
+    return list(reversed(rows))
+
+
 def literal(number):
     result = format(number, ".15g")
     return result if "." in result else (result.replace("e", ".0e") if "e" in result else result + ".0")
 
 
-def render(rows, dropped, bv_rows, bv_dropped):
+def render(rows, dropped, bv_rows, bv_dropped, bc_rows):
     lines = [
         "-- Pecaut & Mamajek, A Modern Mean Dwarf Stellar Color and Effective Temperature Sequence",
         "-- Version 2022.04.16",
@@ -118,6 +150,16 @@ def render(rows, dropped, bv_rows, bv_dropped):
         for start in range(0, len(values), 8):
             lines.append("  " + ", ".join(values[start:start + 8]) + ("," if start + 8 < len(values) else ""))
         lines += ["]", ""]
+    lines += [
+        f"-- Bolometric correction chain (0.11.0): BCv against Teff, {bc_rows[0][0]} to {bc_rows[-1][0]}, increasing Teff.",
+        "",
+    ]
+    for function, index in (("bcTeffNodes", 1), ("bcVNodes", 2)):
+        values = [literal(row[index]) for row in bc_rows]
+        lines += [f"export pure func {function}() -> [float] = ["]
+        for start in range(0, len(values), 8):
+            lines.append("  " + ", ".join(values[start:start + 8]) + ("," if start + 8 < len(values) else ""))
+        lines += ["]", ""]
     names = [f'"{row[0]}"' for row in rows]
     lines += ["export pure func spectralTypes() -> [string] = ["]
     for start in range(0, len(names), 8):
@@ -133,11 +175,13 @@ def main():
     args = parser.parse_args()
     rows, dropped = parse(args.input)
     bv_rows, bv_dropped = parse_bv(args.input)
-    args.output.write_text(render(rows, dropped, bv_rows, bv_dropped), encoding="utf-8")
+    bc_rows = parse_bc(args.input)
+    args.output.write_text(render(rows, dropped, bv_rows, bv_dropped, bc_rows), encoding="utf-8")
     print(f"Kept {len(rows)} rows: {rows[0][0]} to {rows[-1][0]}")
     print("Dropped rows: " + (
         ", ".join(f"{name} (Bp-Rp {literal(colour)})" for name, colour in dropped) if dropped else "none"
     ))
+    print(f"BCv chain: kept {len(bc_rows)} rows: {bc_rows[0][0]} to {bc_rows[-1][0]}")
     print(f"B-V chain: kept {len(bv_rows)} rows: {bv_rows[0][0]} to {bv_rows[-1][0]}; dropped: " + (
         ", ".join(f"{name} ({literal(colour)})" for name, colour in bv_dropped) if bv_dropped else "none"
     ))

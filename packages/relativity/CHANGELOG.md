@@ -1,5 +1,49 @@
 # Changelog
 
+## 0.11.0
+
+Feature (stapledons ledger D-58, Mark attended 2026-10-09): a star's radius
+from its V magnitude, distance and Teff, for the stars without a measured
+radius (D-54 stops that show relative size); the Schwarzschild ISCO as a
+function; the integrator's step-size note corrected. Additive: every existing
+function and digest is value-identical to 0.10.1 (`photometry_table` gains two
+node lists; the BP-RP and B-V chains are byte-identical).
+
+- **photometry.** `bolometricCorrectionV(teffK)`: BC_V by linear interpolation
+  in Teff in the Pecaut & Mamajek 2022.04.16 dwarf table's BCv column (L5V-O3V,
+  1,710-44,900 K; Pecaut & Mamajek 2013, ApJS 208, 9), clamped to the ends, NaN
+  to the hot end. `luminositySunFromV(v, distancePc, bc)`: L/L_sun from
+  M_bol = V - 5 log10(d/10 pc) + BC with M_bol,sun = 4.74 (IAU 2015 B2,
+  `solarBolometricMagnitude`). `radiusSunFromLuminosity(lSun, teffK)`:
+  sqrt(L) (5772 K / Teff)^2 (Stefan-Boltzmann, IAU 2015 B3 nominal
+  T_eff,sun, `solarTeffNominal`). Extinction is ignored (fine inside ~100 pc).
+- **Validation against measured radii** (photometry_test.ail; V, distance and
+  Teff as cited there): the Sun -0.3 %, alpha Cen A -0.3 %, alpha Cen B -1.6 %
+  (Kervella 2017), Aldebaran -4.5 % (Richichi 2005), Arcturus +3.7 %
+  (Ramirez & Allende Prieto 2011), Barnard's Star +0.3 % (Ribas 2018),
+  TRAPPIST-1 about +10 % (Agol 2021), Proxima Cen -31 % (Kervella 2017 radius,
+  Segransan 2003 Teff 3042 K). M dwarfs are the limit: BC_V falls about 0.5 mag
+  per 100 K there, so a 100 K Teff error is about 25 % in R. Validated range:
+  about 2,500-7,000 K (dwarfs) and K giants; hot stars (above 7,000 K) follow
+  the same table but are not validated here.
+- **Why not Flower/Torres.** Torres (2010, PASP 122, 1158; Flower 1996
+  corrected) was measured: it agrees with Pecaut & Mamajek to 0.1 mag above
+  4,000 K, but its cool polynomial (giants and supergiants) gives M dwarfs
+  radii up to 7x too large (TRAPPIST-1 +670 %, Barnard's Star +94 %), and most
+  stars within 100 pc are M dwarfs.
+- **schwarzschild.** `isco()` = 3 r_s (6 GM/c^2; MTW section 25.6); the
+  circular-orbit speed there is exactly 0.5 (tested).
+- **Docs fix (geodesic, AGENT.md).** The integrator note said h = 0.005 is
+  "about 5e-7 rad worst case". The error grows toward the shadow edge as
+  1/eps for b = b_c (1 + eps) and falls as h^4: seen from r = 1000, eps = 1e-8
+  gives 1.3e-4 rad at h = 0.005 and 8.2e-6 rad at h = 0.0025 (the stapledons
+  lens tables use 0.0025; measured once against `escapeAzimuthExact` for an
+  ingoing ray, too slow for the suite); eps = 1e-6 gives 1.3e-6 and 8e-8
+  (now tested).
+- `tools/mamajek_to_ail.py` emits the BCv chain (`bcTeffNodes`, `bcVNodes`).
+- Tests: 6 new (BC nodes and clamps, the definitions, FGK and giants, M dwarfs,
+  three killed mutants, ISCO) plus the step-size check.
+
 ## 0.10.1
 
 Fix (documentation only; no API or behaviour change, every function and digest

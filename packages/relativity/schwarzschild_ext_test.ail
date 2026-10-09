@@ -13,7 +13,7 @@
 module sunholo/relativity/schwarzschild_ext_test
 
 import ./hyper (absf)
-import ./schwarzschild (pi, criticalImpact, staticClockRate, impactFromStaticAngle, turningRadius, weakDeflection2, weakDeflectionFinite, strongDeflectionBbar, circularOrbitSpeed, circularOrbitClockRate, orbitalAngularVelocity, movingClockRate, radialCoordinateRate, hoverAcceleration, rsPerSolarMassMetres, tidalRadial, tidalTransverse, tidalRadialOrbit, tidalAccelSI, tidalOrbitAccelSI, tidalSafeRadius, tidalMinMass, hoverAccelSI, hoverPowerPerKg)
+import ./schwarzschild (pi, criticalImpact, staticClockRate, impactFromStaticAngle, turningRadius, weakDeflection2, weakDeflectionFinite, strongDeflectionBbar, circularOrbitSpeed, circularOrbitClockRate, isco, orbitalAngularVelocity, movingClockRate, radialCoordinateRate, hoverAcceleration, rsPerSolarMassMetres, tidalRadial, tidalTransverse, tidalRadialOrbit, tidalAccelSI, tidalOrbitAccelSI, tidalSafeRadius, tidalMinMass, hoverAccelSI, hoverPowerPerKg)
 
 pure func near(got: float, want: float, tol: float) -> bool = absf(got - want) <= tol
 pure func rel(got: float, want: float, tol: float) -> bool = absf(got - want) <= tol * absf(want)
@@ -145,3 +145,9 @@ pure func checkHoverPower() -> bool =
   r12(hoverPowerPerKg(sgrA(), 10.0), 11190391503656.248) && r12(hoverPowerPerKg(sgrA(), 5.0), 47476810298205.945) && r12(hoverPowerPerKg(sgrA(), 3.0), 144467333104005.4)
   && rel(hoverPowerPerKg(sgrA(), 10.0), 11190000000000.0, 0.0001) && rel(hoverPowerPerKg(sgrA(), 5.0), 47477000000000.0, 0.0001) && rel(hoverPowerPerKg(sgrA(), 3.0), 144470000000000.0, 0.0001)
 test "check53 HB-90 Sgr A* hover power per kg of m_eff: 1.1190e13, 4.7477e13, 1.4447e14 W/kg" { checkHoverPower() }
+
+-- 0.11.0: the ISCO is 3 r_s (6 GM/c^2), where the circular-orbit speed seen by static
+-- observers is exactly c/2 and the orbit clock runs at sqrt(1/2).
+pure func checkIsco() -> bool =
+  isco() == 3.0 && circularOrbitSpeed(isco()) == 0.5 && near(circularOrbitClockRate(isco()), 0.7071067811865476, 0.000000000000001)
+test "isco: 3 r_s, circular speed exactly 0.5, clock rate sqrt(1/2)" { checkIsco() }

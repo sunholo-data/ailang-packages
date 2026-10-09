@@ -101,6 +101,13 @@ export pure func weakDeflectionFinite(r: float, psi: float) -> float
 -- infinity is -ln(b/b_c - 1) + bbar, bbar = ln(216(7 - 4 sqrt3)) - pi.
 export pure func strongDeflectionBbar() -> float = log(216.0 * (7.0 - 4.0 * sqrt(3.0))) - pi()
 
+-- The innermost stable circular orbit (0.11.0), r_ISCO = 6 GM/c^2 = 3 r_s:
+-- the minimum of the effective potential's stable branch for timelike geodesics
+-- (Misner, Thorne & Wheeler 1973, section 25.6; Bardeen, Press & Teukolsky 1972 at
+-- a = 0). Circular orbits exist down to the photon sphere (1.5 r_s) but are
+-- unstable inside it; circularOrbitSpeed there is exactly 0.5.
+export pure func isco() -> float = 3.0
+
 -- Local speed of a circular orbit, measured by static observers:
 -- sqrt(1/(2(r - 1))); 0.5 at 3 r_s, 1 at the photon sphere.
 export pure func circularOrbitSpeed(r: float) -> float

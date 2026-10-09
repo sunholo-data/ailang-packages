@@ -7,7 +7,7 @@ module sunholo/relativity/photometry
 
 import std/math (pow, sqrt, log10)
 import std/list (length, nth_or)
-import ./photometry_table (bpRpNodes, teffNodes, gMinusVNodes, bvNodes, bvTeffNodes)
+import ./photometry_table (bpRpNodes, teffNodes, gMinusVNodes, bvNodes, bvTeffNodes, bcTeffNodes, bcVNodes)
 
 -- Interpolate between adjacent colour nodes. The generator guarantees
 -- strictly increasing colours; endpoints are handled by the caller.
@@ -168,4 +168,54 @@ export pure func limitingMagnitude(lb: float, f: float) -> float
   requires { f > 0.0 }
 {
   vFromIlluminance(f * pointThresholdIlluminance(lb))
+}
+
+-- ------------------------------------------------------------ stellar radius from V (0.11.0)
+-- A star's radius from its V magnitude, distance and Teff, for stars with no
+-- measured radius (stapledons ledger D-54/D-58):
+--   M_bol = V - 5 log10(d / 10 pc) + BC_V(Teff),  L / L_sun = 10^(-0.4 (M_bol - 4.74)),
+--   R / R_sun = sqrt(L / L_sun) (T_sun / Teff)^2  (Stefan-Boltzmann, L = 4 pi R^2 sigma T^4).
+-- Extinction is ignored (fine inside ~100 pc). Checked against measured radii in
+-- photometry_test.ail: FGK dwarfs and K giants within a few percent; M dwarfs within
+-- about 30 percent (their BC_V moves 0.5 mag per 100 K, so a Teff error of 100 K is
+-- about 25 percent in R).
+
+-- The bolometric correction BC_V = M_bol - M_V (mag) at Teff: linear interpolation in
+-- Teff in the same Pecaut & Mamajek 2022.04.16 dwarf table (its BCv column, L5V-O3V,
+-- 1,710-44,900 K; Pecaut & Mamajek 2013, ApJS 208, 9), clamped to the end nodes; NaN
+-- gives the hottest node. It is a dwarf sequence but BC_V depends mostly on Teff: K and
+-- early-M giants (Aldebaran, Arcturus) come out within 5 percent in R. Validated (photometry_test)
+-- over about 2,500-7,000 K and for K giants; hotter stars use the same table, unvalidated here. Flower (1996) /
+-- Torres (2010, PASP 122, 1158) was measured and not used: below about 3,600 K its cool
+-- polynomial (fit to giants and supergiants) overstates M-dwarf radii by up to 7x
+-- (TRAPPIST-1 +670 %, Barnard's Star +94 %); above 4,000 K both agree to 0.1 mag.
+export pure func bolometricCorrectionV(teffK: float) -> float
+  ensures { result >= 0.0 - 7.87 && result <= 0.02 }
+{
+  tableLookup(teffK, bcTeffNodes(), bcVNodes())
+}
+
+-- The absolute bolometric magnitude of the Sun, M_bol,sun = 4.74 (IAU 2015
+-- Resolution B2, Mamajek et al. 2015, arXiv:1510.06262; L_sun = 3.828e26 W).
+export pure func solarBolometricMagnitude() -> float = 4.74
+-- The nominal solar effective temperature, 5772 K (IAU 2015 Resolution B3).
+export pure func solarTeffNominal() -> float = 5772.0
+
+-- Luminosity in nominal solar units from apparent V, distance (parsecs) and the
+-- bolometric correction bc (bolometricCorrectionV(Teff)).
+export pure func luminositySunFromV(v: float, distancePc: float, bc: float) -> float
+  requires { v > -100.0 && v < 100.0 && distancePc > 0.0 && bc > -20.0 && bc < 20.0 }
+  ensures { result > 0.0 }
+{
+  pow(10.0, -0.4 * (v - 5.0 * log10(distancePc / 10.0) + bc - solarBolometricMagnitude()))
+}
+
+-- Radius in nominal solar radii from L / L_sun and Teff (K), by Stefan-Boltzmann:
+-- R / R_sun = sqrt(L / L_sun) (5772 K / Teff)^2.
+export pure func radiusSunFromLuminosity(lSun: float, teffK: float) -> float
+  requires { lSun > 0.0 && teffK > 0.0 }
+  ensures { result > 0.0 }
+{
+  let t = solarTeffNominal() / teffK;
+  sqrt(lSun) * t * t
 }
