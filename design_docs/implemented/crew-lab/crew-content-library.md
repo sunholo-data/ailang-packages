@@ -9,7 +9,9 @@
 | Grounded Strangeness | 0 | Human lab; no alien OCEAN assumptions |
 | We Are Not Built For This | +1 | Strain, refusal and personality influence choices |
 
-**Status:** Planned; attended user authorisation2026-10-09.
+**Status:** Implemented2026-10-09; packages PR110 merged to main21ca31a.
+Independent evaluation100/100 and scoped CI green. Standalone CLI; game integration
+and peer disagreement spreading remain separate design work.
 **Target:** Experimental content_library0.1.0 + crew_lab0.1.0. **Priority:** P0.
 **Estimate:** 2days/~1100LOC. **Depends on:** packages/main3b86383,
 social_dynamics0.1.0 and decisions0.4.0.
@@ -190,3 +192,22 @@ Net+11; no hard violations. Numerical coefficients and policy are tuning fixture
 not game canon. Personality drift, peer disagreement spreading, broad cache
 matching, alien content and Godot presentation remain subsequent experiments.
 No registry publication or modifications to active user/game branches.
+
+## Landing and measured validation
+
+[PR110](https://github.com/sunholo-data/ailang-packages/pull/110) merged to main
+21ca31a after [CI37951211310](https://github.com/sunholo-data/ailang-packages/actions/runs/37951211310)
+passed the complete crew suite, eight behavioural mutation controls and existing
+social-lab regression. Independent final evaluation100/100 is in
+content-evidence/independent-evaluation.json. Native94app+14library controls pass
+on evaluator and strictVM with zero native skips/fallback. Installed offline
+science/care/denial/material paths extract complete unchanged-host replay traces.
+The live receipt records one GLM5.3Flash generation followed by identical zero-call
+cache reuse. Source/property/proof skips are reported separately and not claimed
+as proofs. No registry publication or Godot integration in this slice.
+
+Standalone AILANG runtime repros were reported through the canonical feedback
+inbox as inbox_1791558956795_282ef10d without project paths/source. The initial
+detailed report was blocked by automatic review; the narrower report was accepted.
+The existing transitive Result/callback workaround remains linked to prior report
+inbox_1791551801569_90564219; its local reduction is retained.

@@ -43,7 +43,7 @@ helpers where meaningful, skip IO ownership (integration tests execute it).
 - [x] Complete journal recording extracts/replays unchanged host input trace.
 - [x] Existing crew/social validation and mutations remain green.
 - [x] Bounded live smoke1 generation followed by same-context cache hit.
-- [ ] README/AGENT/CHANGELOG, roadmap update, independent evaluation and PR CI.
+- [x] README/AGENT/CHANGELOG, roadmap update, independent evaluation and PR CI.
 
 Registry reuse: depend on existing crew host and new content_library (path locally).
 Play showcase contracts: include pure menu routing and response binding; effects
@@ -57,4 +57,11 @@ Implementation status (2026-10-09): M1/M2 implemented and native/fixture control
 pass. M3 installed offline scenarios/replay pass. Google key was rejected as API_KEY_INVALID. Mark then selected the existing
 OpenRouter key and GLM5.3Flash; bounded smoke passed (one generated bundle, identical
 repeat from cache with zero calls). Independent implementation review passed94/100
-before the provider switch; updated review and PR CI remain pending.
+before the provider switch; final independent review100/100 and PR110 CI passed.
+
+✅ M1 completed — pure library and all OCEAN reaction controls.
+✅ M2 completed — cache, bounded generation and journal controls.
+✅ M3 completed — installed menus, full replay, live reuse and independent CI.
+
+Main landing21ca31a (PR110), CI37951211310 green, evaluator100/100. The app
+implements999AILANG lines with445native-test lines in one attended day.

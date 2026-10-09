@@ -1,8 +1,8 @@
 {
   "sprint_id": "CREW-CONTENT-LIBRARY",
-  "status": "in_progress",
-  "design_doc": "design_docs/planned/crew-lab/crew-content-library.md",
-  "sprint_plan": "design_docs/planned/crew-lab/crew-content-library-sprint.md",
+  "status": "completed",
+  "design_doc": "design_docs/implemented/crew-lab/crew-content-library.md",
+  "sprint_plan": "design_docs/implemented/crew-lab/crew-content-library-sprint.md",
   "features": [
     {
       "id": "M1_LIBRARY_REACTIONS",
@@ -16,7 +16,7 @@
       "passes": true,
       "started": "2026-10-09",
       "completed": "2026-10-09",
-      "notes": "Implementation complete; scoped combined checks and independent review pending."
+      "notes": "Pure library14 and reactions13 named controls pass on both engines with zero fallback/skips; source/proof generator and encoder limits documented."
     },
     {
       "id": "M2_STORAGE_GENERATION",
@@ -32,7 +32,7 @@
       "passes": true,
       "started": "2026-10-09",
       "completed": "2026-10-09",
-      "notes": "Implementation complete; scoped combined checks and independent review pending."
+      "notes": "Generated fixture miss/cache-only repeat and real OpenRouter GLM miss/repeat pass; invalid/model/budget/lock/provider/config and atomic journal failure/ownership/sequence controls pass."
     },
     {
       "id": "M3_GUIDED_PLAY",
@@ -47,10 +47,10 @@
         "Journal replays through unchanged host and legacy regressions pass",
         "Independent evaluation and scoped CI pass before main merge"
       ],
-      "passes": false,
+      "passes": true,
       "started": "2026-10-09",
-      "completed": null,
-      "notes": "Guided offline flows/replay/journal rollback pass. OpenRouter GLM5.3Flash live miss generated once then same-context zero-call cache repeat passed; final independent review and PR CI pending."
+      "completed": "2026-10-09",
+      "notes": "Guided installed science/rest/relief/material flows and exact host replay pass; legacy regressions and all8mutants pass; independent evaluation100/100 and PR110CI run37951211310 green."
     }
   ],
   "registry_reuse": [
@@ -76,7 +76,23 @@
   "velocity": {
     "target_loc_per_day": 550,
     "estimated_total_loc": 1100,
-    "estimated_days": 2
+    "estimated_days": 2,
+    "actual_implementation_loc": 999,
+    "actual_test_loc": 445,
+    "actual_days": 1
   },
-  "github_issues": []
+  "github_issues": [
+    110
+  ],
+  "validation": {
+    "ci": "https://github.com/sunholo-data/ailang-packages/actions/runs/37951211310",
+    "source_head": "cb260590f2cec6dd29b7085f450af67aaa013c35",
+    "merge_commit": "21ca31ac03a114bedc354a750c79ea5c60344ea3",
+    "independent_score": 100,
+    "native_app_each_engine": 94,
+    "native_library_each_engine": 14,
+    "live_model": "z-ai/glm-5.3-flash",
+    "live_generate_calls": 1,
+    "identical_repeat_calls": 0
+  }
 }
