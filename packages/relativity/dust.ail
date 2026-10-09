@@ -50,7 +50,10 @@ export pure func grainRate(nGrain: float, phi: float, r: float) -> float = nGrai
 
 -- Afterglow temperature of the spot t seconds after the impact (K):
 -- (KE / (sigma pi rSpot^2 tau))^(1/4) e^(-t/4 tau), by two square roots.
--- t < 0 (before the impact) and KE <= 0 give 0; NaN gives NaN.
+-- t < 0 (before the impact) and KE <= 0 give 0; NaN gives NaN. eps and fIn do not enter: the
+-- spot is a greybody of emissivity eps that thermalises the whole KE (as the glow, D-30), and
+-- eps and fIn only set its brightness (afterglowEmittance), so the total inward light is
+-- eps fIn KE.
 export pure func afterglowTemperature(ke: float, rSpot: float, tau: float, t: float) -> float {
   let x = ke / (stefanBoltzmannSI() * pi() * rSpot * rSpot * tau);
   if x != x || t != t then x + t

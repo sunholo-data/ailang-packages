@@ -19,21 +19,26 @@ stdlib Python).
   coefficients refit to Linsky et al. 2019 Table 2 (their Table 3's printed
   coefficients do not reproduce Table 2 in any standard convention; see
   ism-structure.md section 3) the LIC reproduces the 63 edge distances with a
-  median |delta| of 0.378 pc (paper: 0.40).
+  median |delta| of 0.378 pc (paper: 0.40). This is in-sample: the refit is
+  made on the same 63 rows.
 - `Interval {t0, t1}`; `coneShellChord`, `insideConeShell`, `ellipsoidChord`,
   `insideEllipsoid`, `slabChord`, `chordsOf(boundaries, inside, a, b)`: exact
   parameter intervals of a segment inside each shape.
 - `nHFromExtinction(avPerPc, nhPerEbv, rV)`: 606.34 cm^-3 per mag/pc at
   Bohlin's 5.8e21 and R_V 3.1.
-- `healpixRingVec(nside, pix)`: HEALPix RING centres; 13 oracle rows to 1e-14
-  (the oracle agrees with healpy 1.20.1 to 8.2e-15 on 11,433 pixels).
+- `healpixRingVec(nside, pix)`: HEALPix RING centres; the package test checks 13
+  oracle rows to 1e-14 and a unit-vector sweep at Nside 64. The broad comparison
+  (the oracle against healpy 1.20.1, 8.2e-15 worst over 11,433 pixels up to
+  Nside 256) was run once with the oracle, not in this package's tests; the plan's
+  1e-15 is tighter than float rounding allows at Nside 256.
 - `GrainDist {k, aMin, aBreak, aMax, q, rhoGrain}`, `grainDist`,
   `grainMassDensity`, `grainTailMassFraction`, `grainMass`, `grainsAbove`,
   `grainRadiusAt`: MRN (a^-3.5, 5 nm-0.25 um) plus the big-grain tail (a^-q to
   a_max), normalised to a dust mass density. LIC (2.1e-24 kg/m^3, q 3.1,
   3,300 kg/m^3, a_max 8.98 um): 94.0 % of the mass in the tail, a flux of
   >= 1e-13 kg grains at 26 km/s of 5.52e-8 m^-2 s^-1 (Krueger 2015: "on the
-  order of 1e-7").
+  order of 1e-7"). The flux is fitted, not an independent check: q was chosen
+  as the slope that maximises it.
 - `poissonDraw(mean, u, v)`: inversion below 30, a rounded normal from 30.
 - `_smoke.ail`: `ismProbe` (strict VM = interpreter) and an ISM check in main.
 - Tests: `ism_test.ail` (24).
