@@ -31,6 +31,11 @@ M3 candidate uses internal `journey.ail` bin wrappers and the public supported-m
 
 Initial failed and interim logs are retained as evidence, not described as passed.
 Effectful entry behavior is established by installed controls, not Z3 unit proofs.
-Registry export-overlap lookup was unavailable (DNS); absent `_smoke` is reported
+Local registry export-overlap lookup was unavailable (DNS); final network-enabled
+CI completed that lookup without a gate. Absent `_smoke` is reported
 informationally. Live provider generation was not exercised. Independent acceptance
-and exact-head CI remain the parent agent's final landing gates.
+and exact-head CI passed: evaluation98/100 with no blockers, source3e5659e,
+[CI37973618460](https://github.com/sunholo-data/ailang-packages/actions/runs/37973618460).
+Implementation merged to packages main in PR114 (220ae3f). Installed merged command
+from an unrelated cwd completed science in four turns with the existing AI cache,
+zero calls, observations25, fatigue70, supplies2 available/0 reserved/4 consumed.
