@@ -1,0 +1,389 @@
+-- sunholo/celestial/ism — the geometry and astrophysics of the local
+-- interstellar medium: a star-shaped cloud surface from real spherical
+-- harmonics (the Local Interstellar Cloud of Linsky et al. 2019), the exact
+-- parameter intervals of a straight segment inside a cone shell, an
+-- ellipsoid or a slab, gas density from a dust-extinction gradient, HEALPix
+-- RING pixel centres, a broken power-law grain-size distribution and a
+-- Poisson draw from two uniforms.
+--
+-- Pure, float64, no relativity (that is sunholo/relativity; the two never
+-- import each other). Lengths in any one unit (the caller's: pc or ly);
+-- segments are a -> b and intervals are parameters t in [0, 1] along them.
+-- Check values: stapledons-design physics/ism-structure.md (IS-n) and
+-- higgs-bubble.md section 6b (HB-113..HB-123); oracle tools/ism_dust_ref.py
+-- in stapledons-godot.
+
+module sunholo/celestial/ism
+
+import std/math (sin, cos, sqrt, exp, log, pow, floor, intToFloat, floatToInt)
+import std/list (sortBy)
+import ./kepler (Vec3, absf)
+
+-- A parameter interval [t0, t1] of a segment a -> b, 0 <= t0 < t1 <= 1.
+export type Interval = { t0: float, t1: float }
+
+pure func pi() -> float = 3.141592653589793
+
+pure func dot(a: Vec3, b: Vec3) -> float = a.x * b.x + a.y * b.y + a.z * b.z
+
+pure func sub(a: Vec3, b: Vec3) -> Vec3 = { x: a.x - b.x, y: a.y - b.y, z: a.z - b.z }
+
+pure func lerp(a: Vec3, b: Vec3, t: float) -> Vec3 = { x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t, z: a.z + (b.z - a.z) * t }
+
+pure func scale(v: Vec3, s: float) -> Vec3 = { x: v.x * s, y: v.y * s, z: v.z * s }
+
+pure func len3(v: Vec3) -> float = sqrt(dot(v, v))
+
+-- ---------- real spherical harmonics ----------
+
+-- Orthonormal real spherical harmonic Y_lm of a unit vector u, l <= 2,
+-- without the Condon-Shortley phase: m > 0 carries cos(m phi), m < 0
+-- sin(|m| phi) (in Cartesian form: Y_1,-1 ~ y, Y_1,1 ~ x, Y_2,-2 ~ xy,
+-- Y_2,-1 ~ yz, Y_2,1 ~ xz, Y_2,2 ~ x^2 - y^2). l > 2 or |m| > l gives 0.
+export pure func realSphericalHarmonicAt(l: int, m: int, u: Vec3) -> float {
+  let s3 = sqrt(3.0 / (4.0 * pi()));
+  let h15 = 0.5 * sqrt(15.0 / pi());
+  if l == 0 && m == 0 then 0.5 / sqrt(pi())
+  else if l == 1 && m == -1 then s3 * u.y
+  else if l == 1 && m == 0 then s3 * u.z
+  else if l == 1 && m == 1 then s3 * u.x
+  else if l == 2 && m == -2 then h15 * u.x * u.y
+  else if l == 2 && m == -1 then h15 * u.y * u.z
+  else if l == 2 && m == 0 then 0.25 * sqrt(5.0 / pi()) * (3.0 * u.z * u.z - 1.0)
+  else if l == 2 && m == 1 then h15 * u.x * u.z
+  else if l == 2 && m == 2 then 0.5 * h15 * (u.x * u.x - u.y * u.y)
+  else 0.0
+}
+
+-- The same, of the colatitude theta (from +z) and the azimuth phi (from +x
+-- toward +y), radians. In the galactic frame theta = 90 deg - b, phi = l.
+export pure func realSphericalHarmonic(l: int, m: int, theta: float, phi: float) -> float {
+  let st = sin(theta);
+  realSphericalHarmonicAt(l, m, { x: st * cos(phi), y: st * sin(phi), z: cos(theta) })
+}
+
+pure func lmAt(i: int) -> (int, int) =
+  if i == 0 then (0, 0) else if i == 1 then (1, -1) else if i == 2 then (1, 0) else if i == 3 then (1, 1)
+  else if i == 4 then (2, -2) else if i == 5 then (2, -1) else if i == 6 then (2, 0) else if i == 7 then (2, 1) else (2, 2)
+
+pure func sumHarmonics(cs: [float], i: int, u: Vec3, acc: float) -> float = match cs {
+  [] => acc,
+  a :: rest => match lmAt(i) { (l, m) => sumHarmonics(rest, i + 1, u, acc + a * realSphericalHarmonicAt(l, m, u)) }
+}
+
+-- Radius of a star-shaped surface r(dir) = sum a_lm Y_lm(dir), coefficients
+-- in the order (0,0), (1,-1), (1,0), (1,1), (2,-2), (2,-1), (2,0), (2,1),
+-- (2,2) (at most 9 are read). dir need not be a unit vector; a zero or NaN
+-- dir gives NaN.
+export pure func starSurfaceRadius(coeffs: [float], dir: Vec3) -> float {
+  let d = len3(dir);
+  if d > 0.0 then sumHarmonics(coeffs, 0, scale(dir, 1.0 / d), 0.0) else 0.0 / 0.0
+}
+
+-- Is p strictly inside the surface about centre? The centre itself is
+-- inside.
+export pure func insideStarSurface(centre: Vec3, coeffs: [float], p: Vec3) -> bool {
+  let q = sub(p, centre);
+  let d = len3(q);
+  if d == 0.0 then true else d < starSurfaceRadius(coeffs, q)
+}
+
+pure func bisectCross(centre: Vec3, coeffs: [float], a: Vec3, b: Vec3, lo: float, hi: float, inLo: bool, n: int) -> float =
+  if n <= 0 then 0.5 * (lo + hi)
+  else {
+    let mid = 0.5 * (lo + hi);
+    if insideStarSurface(centre, coeffs, lerp(a, b, mid)) == inLo
+    then bisectCross(centre, coeffs, a, b, mid, hi, inLo, n - 1)
+    else bisectCross(centre, coeffs, a, b, lo, mid, inLo, n - 1)
+  }
+
+pure func scanCross(centre: Vec3, coeffs: [float], a: Vec3, b: Vec3, k: int, prevIn: bool, acc: [float]) -> [float] =
+  if k > 64 then reverseF(acc, [])
+  else {
+    let t = intToFloat(k) / 64.0;
+    let now = insideStarSurface(centre, coeffs, lerp(a, b, t));
+    if now != prevIn
+    then scanCross(centre, coeffs, a, b, k + 1, now, bisectCross(centre, coeffs, a, b, intToFloat(k - 1) / 64.0, t, prevIn, 60) :: acc)
+    else scanCross(centre, coeffs, a, b, k + 1, now, acc)
+  }
+
+pure func reverseF(xs: [float], acc: [float]) -> [float] = match xs { [] => acc, x :: rest => reverseF(rest, x :: acc) }
+
+-- Parameters t in (0, 1) where a -> b crosses the surface, ascending:
+-- bracketed on a fixed grid of 64 steps, each refined by 60 bisections
+-- (2^-60 of a step). Two crossings inside one step are not resolved (the
+-- surface is smooth at l <= 2; the caller keeps segments shorter than the
+-- surface's smallest feature over 64).
+export pure func starSurfaceCrossings(centre: Vec3, coeffs: [float], a: Vec3, b: Vec3) -> [float] =
+  scanCross(centre, coeffs, a, b, 1, insideStarSurface(centre, coeffs, a), [])
+
+-- Parameter intervals of a -> b inside the surface.
+export pure func starSurfaceChords(centre: Vec3, coeffs: [float], a: Vec3, b: Vec3) -> [Interval] =
+  chordsOf(starSurfaceCrossings(centre, coeffs, a, b), \p. insideStarSurface(centre, coeffs, p), a, b)
+
+pure func bisectExit(centre: Vec3, coeffs: [float], u: Vec3, lo: float, hi: float, n: int) -> float =
+  if n <= 0 then lo
+  else {
+    let mid = 0.5 * (lo + hi);
+    if insideStarSurface(centre, coeffs, scale(u, mid)) then bisectExit(centre, coeffs, u, mid, hi, n - 1)
+    else bisectExit(centre, coeffs, u, lo, mid, n - 1)
+  }
+
+pure func scanExit(centre: Vec3, coeffs: [float], u: Vec3, sMax: float, k: int) -> float =
+  if k > 64 then sMax
+  else {
+    let s = sMax * intToFloat(k) / 64.0;
+    if insideStarSurface(centre, coeffs, scale(u, s)) then scanExit(centre, coeffs, u, sMax, k + 1)
+    else bisectExit(centre, coeffs, u, sMax * intToFloat(k - 1) / 64.0, s, 60)
+  }
+
+-- Distance from the origin along the unit vector u to where the ray first
+-- leaves the surface (64-step bracket over [0, sMax], 60 bisections): the
+-- edge distance of a sight line from the Sun. 0 if the origin is outside;
+-- sMax if the ray never leaves within it.
+export pure func rayExitDistance(centre: Vec3, coeffs: [float], u: Vec3, sMax: float) -> float =
+  if insideStarSurface(centre, coeffs, { x: 0.0, y: 0.0, z: 0.0 }) then scanExit(centre, coeffs, u, sMax, 1) else 0.0
+
+-- ---------- closed-form chords ----------
+
+pure func cmpF(a: float, b: float) -> int = if a < b then -1 else if a > b then 1 else 0
+
+pure func inOpen(ts: [float], acc: [float]) -> [float] = match ts {
+  [] => acc,
+  t :: rest => if t > 0.0 && t < 1.0 then inOpen(rest, t :: acc) else inOpen(rest, acc)
+}
+
+pure func dedupe(ts: [float], acc: [float]) -> [float] = match ts {
+  [] => reverseF(acc, []),
+  t :: rest => match acc { p :: _ => if p == t then dedupe(rest, acc) else dedupe(rest, t :: acc), [] => dedupe(rest, [t]) }
+}
+
+pure func mergeIn(ts: [float], inside: (Vec3) -> bool, a: Vec3, b: Vec3, acc: [Interval]) -> [Interval] = match ts {
+  t0 :: rest => match rest {
+    t1 :: _ =>
+      if t1 > t0 && inside(lerp(a, b, 0.5 * (t0 + t1)))
+      then (match acc {
+              i :: more => if i.t1 == t0 then mergeIn(rest, inside, a, b, { t0: i.t0, t1: t1 } :: more) else mergeIn(rest, inside, a, b, { t0: t0, t1: t1 } :: acc),
+              [] => mergeIn(rest, inside, a, b, [{ t0: t0, t1: t1 }])
+            })
+      else mergeIn(rest, inside, a, b, acc),
+    [] => reverseI(acc, [])
+  },
+  [] => reverseI(acc, [])
+}
+
+pure func reverseI(xs: [Interval], acc: [Interval]) -> [Interval] = match xs { [] => acc, x :: rest => reverseI(rest, x :: acc) }
+
+-- Merged intervals of a -> b inside a region, from its boundary parameters
+-- (any order, any range): each piece between consecutive boundaries is
+-- classified by its midpoint.
+export pure func chordsOf(boundaries: [float], inside: (Vec3) -> bool, a: Vec3, b: Vec3) -> [Interval] =
+  mergeIn(dedupe(sortBy(cmpF, 0.0 :: 1.0 :: inOpen(boundaries, [])), []), inside, a, b, [])
+
+-- Roots of A t^2 + B t + C = 0 (none, one or two), in any order.
+pure func quadRoots(qa: float, qb: float, qc: float) -> [float] =
+  if absf(qa) > 0.0 then {
+    let disc = qb * qb - 4.0 * qa * qc;
+    if disc >= 0.0 then {
+      let sq = sqrt(disc);
+      [(0.0 - qb - sq) / (2.0 * qa), (0.0 - qb + sq) / (2.0 * qa)]
+    } else []
+  }
+  else if absf(qb) > 0.0 then [(0.0 - qc) / qb]
+  else []
+
+pure func sphereRoots(r: float, a: Vec3, d: Vec3) -> [float] = quadRoots(dot(d, d), 2.0 * dot(a, d), dot(a, a) - r * r)
+
+-- Is p inside the cone shell with apex at the origin, unit axis, half-angle
+-- acos(cosHalf), between the spheres rIn <= |p| < rOut? The apex is not.
+export pure func insideConeShell(axis: Vec3, cosHalf: float, rIn: float, rOut: float, p: Vec3) -> bool {
+  let r = len3(p);
+  r > 0.0 && r >= rIn && r < rOut && dot(p, axis) >= cosHalf * r
+}
+
+-- Parameter intervals of a -> b inside a cone shell (closed form: the two
+-- spheres and the nappe; the mirror nappe is rejected by the midpoint test).
+export pure func coneShellChord(axis: Vec3, cosHalf: float, rIn: float, rOut: float, a: Vec3, b: Vec3) -> [Interval] {
+  let d = sub(b, a);
+  let k2 = cosHalf * cosHalf;
+  let ad = dot(a, axis);
+  let dn = dot(d, axis);
+  let cone = quadRoots(dn * dn - k2 * dot(d, d), 2.0 * (ad * dn - k2 * dot(a, d)), ad * ad - k2 * dot(a, a));
+  chordsOf(concatF(sphereRoots(rIn, a, d), concatF(sphereRoots(rOut, a, d), cone)), \p. insideConeShell(axis, cosHalf, rIn, rOut, p), a, b)
+}
+
+pure func concatF(xs: [float], ys: [float]) -> [float] = match xs { [] => ys, x :: rest => x :: concatF(rest, ys) }
+
+pure func ellQ(q: Vec3, u: Vec3, s: float) -> float = dot(q, u) / s
+
+-- Is p strictly inside the ellipsoid about centre with orthonormal axes
+-- u1, u2, u3 and semi-axes s1, s2, s3?
+export pure func insideEllipsoid(centre: Vec3, u1: Vec3, u2: Vec3, u3: Vec3, s1: float, s2: float, s3: float, p: Vec3) -> bool {
+  let q = sub(p, centre);
+  let x = ellQ(q, u1, s1);
+  let y = ellQ(q, u2, s2);
+  let z = ellQ(q, u3, s3);
+  x * x + y * y + z * z < 1.0
+}
+
+-- Parameter interval of a -> b inside that ellipsoid (closed form).
+export pure func ellipsoidChord(centre: Vec3, u1: Vec3, u2: Vec3, u3: Vec3, s1: float, s2: float, s3: float, a: Vec3, b: Vec3) -> [Interval] {
+  let d = sub(b, a);
+  let q = sub(a, centre);
+  let d1 = ellQ(d, u1, s1);
+  let d2 = ellQ(d, u2, s2);
+  let d3 = ellQ(d, u3, s3);
+  let q1 = ellQ(q, u1, s1);
+  let q2 = ellQ(q, u2, s2);
+  let q3 = ellQ(q, u3, s3);
+  let roots = quadRoots(d1 * d1 + d2 * d2 + d3 * d3, 2.0 * (d1 * q1 + d2 * q2 + d3 * q3), q1 * q1 + q2 * q2 + q3 * q3 - 1.0);
+  chordsOf(roots, \p. insideEllipsoid(centre, u1, u2, u3, s1, s2, s3, p), a, b)
+}
+
+-- Parameter interval of a -> b inside the slab d0 <= n . p < d1 (n a unit
+-- normal), closed form.
+export pure func slabChord(normal: Vec3, d0: float, d1: float, a: Vec3, b: Vec3) -> [Interval] {
+  let da = dot(normal, a);
+  let db = dot(normal, b);
+  let roots = if da == db then [] else [(d0 - da) / (db - da), (d1 - da) / (db - da)];
+  chordsOf(roots, \p. dot(normal, p) >= d0 && dot(normal, p) < d1, a, b)
+}
+
+-- ---------- extinction to gas ----------
+
+-- Hydrogen density (cm^-3) from a dust-extinction gradient avPerPc (A_V
+-- magnitudes per parsec), a gas-to-reddening ratio nhPerEbv (N_H / E(B-V),
+-- cm^-2 mag^-1; Bohlin, Savage & Drake 1978: 5.8e21) and R_V:
+-- n_H = nhPerEbv avPerPc / (R_V pc). 606.34 per mag/pc at Bohlin, R_V 3.1.
+export pure func nHFromExtinction(avPerPc: float, nhPerEbv: float, rV: float) -> float =
+  nhPerEbv * avPerPc / (rV * 3085677581491367300.0)
+
+-- ---------- HEALPix ----------
+
+-- Centre of RING-scheme pixel pix at resolution nside (Gorski et al. 2005,
+-- ApJ 622, 759, section 4; the equatorial ring phase as in the HEALPix C++
+-- library). Unit vector, z toward the pole of the map's frame.
+export pure func healpixRingVec(nside: int, pix: int) -> Vec3 {
+  let n = intToFloat(nside);
+  let npix = 12 * nside * nside;
+  let ncap = 2 * nside * (nside - 1);
+  if pix < ncap then {
+    let i = floatToInt(floor((1.0 + sqrt(1.0 + 2.0 * intToFloat(pix))) / 2.0));
+    let j = pix + 1 - 2 * i * (i - 1);
+    let fi = intToFloat(i);
+    ringVec(1.0 - fi * fi / (3.0 * n * n), pi() / (2.0 * fi) * (intToFloat(j) - 0.5))
+  } else if pix < npix - ncap then {
+    let ip = pix - ncap;
+    let i = ip / (4 * nside) + nside;
+    let j = ip % (4 * nside) + 1;
+    let fodd = if (i + nside) % 2 == 1 then 1.0 else 0.5;
+    ringVec(4.0 / 3.0 - 2.0 * intToFloat(i) / (3.0 * n), pi() / (2.0 * n) * (intToFloat(j) - fodd))
+  } else {
+    let ip = npix - pix;
+    let i = floatToInt(floor((1.0 + sqrt(2.0 * intToFloat(ip) - 1.0)) / 2.0));
+    let j = 4 * i + 1 - (ip - 2 * i * (i - 1));
+    let fi = intToFloat(i);
+    ringVec(-1.0 + fi * fi / (3.0 * n * n), pi() / (2.0 * fi) * (intToFloat(j) - 0.5))
+  }
+}
+
+pure func ringVec(z: float, phi: float) -> Vec3 {
+  let w = (1.0 - z) * (1.0 + z);
+  let st = if w > 0.0 then sqrt(w) else 0.0;
+  { x: st * cos(phi), y: st * sin(phi), z: z }
+}
+
+-- ---------- grains ----------
+
+-- A broken power law in grain radius a (m): dn/da = k a^-3.5 for
+-- aMin <= a < aBreak (Mathis, Rumpl & Nordsieck 1977), k aBreak^(q-3.5)
+-- a^-q for aBreak <= a <= aMax (the measured big-grain tail; Krueger et al.
+-- 2015), continuous at aBreak, normalised to a dust mass density.
+export type GrainDist = { k: float, aMin: float, aBreak: float, aMax: float, q: float, rhoGrain: float }
+
+pure func intPow(p: float, lo: float, hi: float) -> float =
+  if absf(p + 1.0) < 0.000000000001 then log(hi / lo) else (pow(hi, p + 1.0) - pow(lo, p + 1.0)) / (p + 1.0)
+
+pure func mrnMass(aMin: float, aBreak: float) -> float = intPow(-0.5, aMin, aBreak)
+
+pure func tailMass(aBreak: float, aMax: float, q: float) -> float = pow(aBreak, q - 3.5) * intPow(3.0 - q, aBreak, aMax)
+
+-- The distribution with dust mass density rhoDust (kg/m^3) and grain bulk
+-- density rhoGrain (kg/m^3; Krueger et al. 2015: 3,300). HB-113..HB-118.
+export pure func grainDist(rhoDust: float, aMin: float, aBreak: float, aMax: float, q: float, rhoGrain: float) -> GrainDist {
+  let m = mrnMass(aMin, aBreak) + tailMass(aBreak, aMax, q);
+  { k: rhoDust / (4.0 / 3.0 * pi() * rhoGrain * m), aMin: aMin, aBreak: aBreak, aMax: aMax, q: q, rhoGrain: rhoGrain }
+}
+
+-- Dust mass density the distribution holds (kg/m^3): recovers rhoDust.
+export pure func grainMassDensity(d: GrainDist) -> float =
+  d.k * 4.0 / 3.0 * pi() * d.rhoGrain * (mrnMass(d.aMin, d.aBreak) + tailMass(d.aBreak, d.aMax, d.q))
+
+-- Share of the dust mass in the tail (aBreak..aMax).
+export pure func grainTailMassFraction(d: GrainDist) -> float {
+  let t = tailMass(d.aBreak, d.aMax, d.q);
+  t / (mrnMass(d.aMin, d.aBreak) + t)
+}
+
+-- Mass of a grain of radius a (kg).
+export pure func grainMass(d: GrainDist, a: float) -> float = 4.0 / 3.0 * pi() * a * a * a * d.rhoGrain
+
+pure func tailAbove(d: GrainDist, a: float) -> float = d.k * pow(d.aBreak, d.q - 3.5) * intPow(0.0 - d.q, a, d.aMax)
+
+-- Number density (m^-3) of grains with radius >= a: 0 from aMax up, the
+-- whole population below aMin. NaN gives NaN.
+export pure func grainsAbove(d: GrainDist, a: float) -> float =
+  if a != a then a
+  else if a >= d.aMax then 0.0
+  else {
+    let x = if a < d.aMin then d.aMin else a;
+    if x < d.aBreak then d.k * intPow(-3.5, x, d.aBreak) + tailAbove(d, d.aBreak)
+    else tailAbove(d, x)
+  }
+
+-- Inverse CDF of the radius above a0: the a with
+-- grainsAbove(a) = (1 - u) grainsAbove(a0), u in [0, 1] (u = 0 gives a0,
+-- u = 1 gives aMax). NaN u gives NaN.
+export pure func grainRadiusAt(d: GrainDist, a0: float, u: float) -> float =
+  if u != u then u
+  else {
+    let target = (1.0 - u) * grainsAbove(d, a0);
+    let nb = grainsAbove(d, if a0 > d.aBreak then a0 else d.aBreak);
+    if !(target > 0.0) then d.aMax
+    else if target <= nb then {
+      let c = d.k * pow(d.aBreak, d.q - 3.5) / (d.q - 1.0);
+      pow(target / c + pow(d.aMax, 1.0 - d.q), 1.0 / (1.0 - d.q))
+    } else pow((target - nb) * 2.5 / d.k + pow(d.aBreak, -2.5), -1.0 / 2.5)
+  }
+
+-- ---------- Poisson ----------
+
+pure func invPoisson(mean: float, u: float, k: int, p: float, f: float) -> int =
+  if u <= f || k >= 200 then k
+  else {
+    let p2 = p * mean / intToFloat(k + 1);
+    invPoisson(mean, u, k + 1, p2, f + p2)
+  }
+
+-- A Poisson-distributed count with the given mean from two uniforms u, v in
+-- [0, 1): inversion (u) below a mean of 30, a rounded normal
+-- (Box-Muller, u and v) from 30 up, floored at 0. Deterministic in its
+-- inputs; NaN, negative or zero means give 0. u is clamped to
+-- [0, 1 - 2^-53] in the normal branch, so u = 1 stays finite; a NaN v gives
+-- 0. Means above 4e15 are returned as their integer part.
+export pure func poissonDraw(mean: float, u: float, v: float) -> int
+  ensures { result >= 0 }
+{
+  if !(mean > 0.0) then 0
+  else if mean < 30.0 then {
+    let p0 = exp(0.0 - mean);
+    invPoisson(mean, u, 0, p0, p0)
+  } else {
+    let uc = if u < 0.0 then 0.0 else if u > 0.9999999999999999 then 0.9999999999999999 else u;
+    let z = sqrt(-2.0 * log(1.0 - uc)) * cos(2.0 * pi() * v);
+    let x = floor(mean + sqrt(mean) * z + 0.5);
+    if !(x > 0.0) then 0
+    else if x > 4000000000000000.0 then floatToInt(mean)
+    else floatToInt(x)
+  }
+}

@@ -1,0 +1,121 @@
+-- Check values for sunholo/relativity/dust (0.12.0): grain energetics,
+-- impact rates and the wall afterglow G-AG (a labelled game approximation;
+-- stapledons ledger D-60, D-61; higgs-bubble.md section 6b). Expected
+-- numbers come from the independent oracle tools/ism_dust_ref.py
+-- (stapledons-godot), never from the code under test.
+
+module sunholo/relativity/dust_test
+
+import std/math (exp, intToFloat)
+import ./hyper (absf, sinh)
+import ./kinematics (rapidityOfOneMinusBeta)
+import ./medium (lightYearM, glowLuminanceAt)
+import ./dust (grainKinetic, sweptCount, grainRate, afterglowTemperature, afterglowEmittance, afterglowLuminance, visibleRadius, grainMassOf)
+
+pure func rel(got: float, want: float, tol: float) -> bool = absf(got - want) <= tol * absf(want)
+pure func r12(got: float, want: float) -> bool = rel(got, want, 0.000000000001)
+pure func m1um() -> float = 0.000000000000010471975511965977   -- 1 um at 2,500 kg/m^3
+pure func phi099() -> float = 2.646652412362246
+pure func phi0999() -> float = 3.8002011672502
+pure func phiCap() -> float = 7.254328619262047
+pure func ke5() -> float = 3318048.4379902543                   -- 5 um at 3,300 kg/m^3, 0.999c
+pure func eps() -> float = 0.0000000001                         -- HB-111
+pure func darkSky() -> float = 0.00004327
+
+pure func checkKinetic() -> bool =
+  r12(grainKinetic(m1um(), phi099()), 5730.632945958672)
+  && r12(grainKinetic(m1um(), phi0999()), 20109.384472668207)
+  && r12(grainKinetic(m1um(), phiCap()), 664569.6670206458)
+  && rel(grainKinetic(m1um(), phi0999()), 20110.0, 0.0001) && rel(grainKinetic(m1um(), phiCap()), 664600.0, 0.0001)
+  && r12(grainMassOf(0.000001, 2500.0), m1um())
+
+test "grainKinetic: 1 um grain 2.011e4 J at 0.999c, 6.646e5 J at 0.999999c (HB-124, HB-125)" { checkKinetic() }
+
+pure func checkRapidityMatch() -> bool = rel(rapidityOfOneMinusBeta(0.001), phi0999(), 0.000000000001) && rel(rapidityOfOneMinusBeta(0.000001), phiCap(), 0.000000000001)
+
+test "the test rapidities are 0.999c and 0.999999c" { checkRapidityMatch() }
+
+-- Swept count is frame-independent; the rate per ship second over a cruise
+-- of d light years (ship time d / sinh(phi) years) sums to the same count.
+pure func sweptOk(phi: float) -> bool {
+  let nGr = 0.000000000008752565346015855;
+  let d = 3.0;
+  let count = sweptCount(nGr * d * lightYearM(), 100.0);
+  let shipSeconds = d * lightYearM() / (sinh(phi) * 299792458.0);
+  rel(grainRate(nGr, phi, 100.0) * shipSeconds, count, 0.000000000001)
+}
+
+test "sweptCount is the same at three speeds and equals grainRate x ship time (frame-independent count)" { sweptOk(phi099()) && sweptOk(phi0999()) && sweptOk(phiCap()) }
+
+pure func checkRate() -> bool = r12(grainRate(0.000000000008752565346015855, phi0999(), 100.0), 1841.8956772817496) && rel(grainRate(0.000000000008752565346015855, phi0999(), 100.0), 1842.0, 0.0005)
+
+test "LIC impacts of >= 1 um grains: 1,842 per ship second at 0.999c (HB-126)" { checkRate() }
+
+pure func agRow(t: float, tk: float, e: float, l: float) -> bool =
+  r12(afterglowTemperature(ke5(), 0.5, 0.2, t), tk)
+  && r12(afterglowEmittance(ke5(), eps(), 0.5, 0.5, 0.2, t), e)
+  && rel(afterglowLuminance(ke5(), eps(), 0.5, 0.5, 0.2, t), l, 0.000000001)
+
+test "afterglow of a 5 um grain at 0.999c, r_s 0.5 m, tau 0.2 s: 4,393 K, 1.056e-3 W/m^2, 0.0225 cd/m^2 at t = 0 (HB-139..141)" {
+  agRow(0.0, 4393.268808506808, 0.0010561676206489823, 0.022493611688749904)
+  && agRow(0.1, 3877.0461157287746, 0.0006405980437193497, 0.010325915137666883)
+  && agRow(0.4, 2664.6522287185694, 0.00014293674408586936, 0.0005245991708946924)
+}
+
+-- G-AG's total light is eps f_in KE: integrate the emittance over the spot
+-- (pi r_s^2) and time (midpoint rule, 0..60 tau, 200,000 steps).
+pure func agIntegral(i: int, n: int, dt: float, acc: float) -> float =
+  if i >= n then acc else agIntegral(i + 1, n, dt, acc + afterglowEmittance(ke5(), eps(), 0.5, 0.5, 0.2, (intToFloat(i) + 0.5) * dt))
+
+pure func checkAgEnergy() -> bool {
+  let total = agIntegral(0, 200000, 12.0 / 200000.0, 0.0) * (12.0 / 200000.0) * 3.141592653589793 * 0.25;
+  rel(total, eps() * 0.5 * ke5(), 0.000001)
+}
+
+test "afterglow light integrated over time and spot is eps f_in KE (1e-6, the midpoint rule's error)" { checkAgEnergy() }
+
+pure func checkAgClosedForm() -> bool {
+  -- the analytic integral of E over [0, inf) is eps fIn KE / (pi r_s^2); the
+  -- emittance's own shape: E(t) = E(0) e^(-t/tau), T(t) = T(0) e^(-t/4 tau)
+  let e0 = afterglowEmittance(ke5(), eps(), 0.5, 0.5, 0.2, 0.0);
+  r12(e0 * 0.2 * 3.141592653589793 * 0.25, eps() * 0.5 * ke5())
+  && r12(afterglowEmittance(ke5(), eps(), 0.5, 0.5, 0.2, 0.3), e0 * exp(-1.5))
+  && r12(afterglowTemperature(ke5(), 0.5, 0.2, 0.3), afterglowTemperature(ke5(), 0.5, 0.2, 0.0) * exp(-0.375))
+}
+
+test "E(0) tau pi r_s^2 = eps f_in KE exactly (1e-12); E and T decay as e^(-t/tau), e^(-t/4 tau)" { checkAgClosedForm() }
+
+pure func checkAgEdges() -> bool {
+  let nan = 0.0 / 0.0;
+  let a = afterglowTemperature(nan, 0.5, 0.2, 0.0);
+  let b = afterglowEmittance(ke5(), eps(), 0.5, 0.5, 0.2, nan);
+  let c = afterglowLuminance(ke5(), eps(), 0.5, 0.5, 0.2, nan);
+  a != a && b != b && c != c
+  && afterglowTemperature(ke5(), 0.5, 0.2, -0.1) == 0.0 && afterglowEmittance(ke5(), eps(), 0.5, 0.5, 0.2, -0.1) == 0.0
+  && afterglowTemperature(0.0, 0.5, 0.2, 0.0) == 0.0 && afterglowLuminance(0.0, eps(), 0.5, 0.5, 0.2, 0.0) == 0.0
+}
+
+test "afterglow: NaN gives NaN; before the impact (t < 0) and for no energy it is 0" { checkAgEdges() }
+
+pure func bgAt(n: float, phi: float) -> float = glowLuminanceAt(n, phi, eps(), 0.5, 1.0) + darkSky()
+
+pure func visAt(n: float, phi: float, contrast: float, want: float) -> bool =
+  rel(visibleRadius(0.000000005, 0.000008977026012029025, 3300.0, phi, eps(), 0.5, 0.5, 0.2, bgAt(n, phi), contrast), want, 0.000000001)
+
+pure func checkVisible() -> bool =
+  visAt(5479.780787071504, phi099(), 0.05, 0.000002103674058611313)
+  && visAt(5479.780787071504, phi0999(), 0.05, 0.000001384372296067985)
+  && visAt(5479.780787071504, phi0999(), 1.0, 0.0000018750250278050327)
+  && visAt(5479.780787071504, phiCap(), 1.0, 0.000002805620762334522)
+  && visAt(5479.780787071504, phiCap(), 10.0, 0.000008254140937481432)
+  && visAt(347614.8119798692, phi0999(), 0.05, 0.000002257462524569503)
+  && visAt(347614.8119798692, phi0999(), 1.0, 0.0000035440063381984863)
+  && visAt(347614.8119798692, phiCap(), 0.05, 0.000002584096966048977)
+  && visAt(347614.8119798692, phiCap(), 1.0, 0.000008977034989055036)
+
+test "visibleRadius against the glow and dark sky at the pole: 1.38 um (hot, 0.999c) .. none bright (LIC, 0.999999c) (HB-142..149)" { checkVisible() }
+
+pure func checkBgMatchesOracle() -> bool =
+  rel(bgAt(347614.8119798692, phi0999()), 0.0040411915282410745, 0.000000001) && rel(bgAt(5479.780787071504, phiCap()), 0.18707132254328337, 0.000000001)
+
+test "the background the oracle used is medium.glowLuminanceAt at the pole plus the 23.5 mag/arcsec^2 dark sky" { checkBgMatchesOracle() }

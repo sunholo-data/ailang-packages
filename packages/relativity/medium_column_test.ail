@@ -1,0 +1,94 @@
+-- Check values for the 0.12.0 medium additions (stapledons ledger D-60,
+-- D-61): the mass-equivalent density, drag by column, the trip ledger by
+-- column and the drive-hold limit. Expected numbers come from the
+-- independent oracle tools/ism_dust_ref.py (stapledons-godot), never from
+-- the code under test; IS-n and HB-n are the IDs of stapledons-design
+-- physics/ism-structure.md and higgs-bubble.md section 5.
+
+module sunholo/relativity/medium_column_test
+
+import std/math (intToFloat)
+import ./hyper (absf, cosh)
+import ./kinematics (rapidityOfOneMinusBeta)
+import ./journey (TripPlan, planBurnCoastBurn)
+import ./medium (cSI, lightYearM, accelSI, cruiseDragEnergy, tripEnergy, brakeHoldsAgainstDrag, mirrorDragForce, massEquivalentDensity, columnDragEnergy, tripEnergyColumn, driveHoldMaxPhi)
+
+pure func rel(got: float, want: float, tol: float) -> bool = absf(got - want) <= tol * absf(want)
+pure func r12(got: float, want: float) -> bool = rel(got, want, 0.000000000001)
+pure func aCanon() -> float = 7354987.5        -- 7.5e5 g, m/s^2
+pure func aGuided() -> float = 29419950.0      -- 3e6 g, m/s^2 (GUIDED_DRIVE)
+pure func nWarm() -> float = 347614.8119798692 -- IS-25
+pure func nHot() -> float = 5479.780787071504  -- IS-26
+pure func rBub() -> float = 100.0
+
+pure func checkMassEquivalent() -> bool =
+  r12(massEquivalentDensity(247000.0, 1.4, 0.0051), 347059.7)
+  && r12(massEquivalentDensity(247400.0, 1.4, 0.005071996685000932), nWarm())
+
+test "massEquivalentDensity: 0.247 cm^-3, 1.4, 0.0051 -> 3.4706e5 m^-3; the warm clouds' IS-25" { checkMassEquivalent() }
+
+-- For a uniform medium the column is n d, and the drag energy by column is
+-- exactly cruiseDragEnergy (HB-51..HB-56), at every speed.
+pure func idAt(phi: float) -> bool =
+  r12(columnDragEnergy(100000.0 * 4.37 * lightYearM(), phi, rBub()), cruiseDragEnergy(100000.0, phi, rBub(), 4.37))
+
+test "columnDragEnergy(n d) == cruiseDragEnergy(n, d) at 0.5c .. 0.999999c (1e-12, AC2)" {
+  idAt(0.5493061443340548) && idAt(2.6466524123622457) && idAt(rapidityOfOneMinusBeta(0.000001))
+}
+
+pure func tripId(phi: float) -> bool {
+  let p = planBurnCoastBurn(4.37, 774221.4566651969, phi);
+  let a = tripEnergy(p, 1.0, 100000.0, rBub());
+  let b = tripEnergyColumn(p, 1.0, 100000.0 * p.dCoast * lightYearM(), rBub());
+  r12(b.boost, a.boost) && r12(b.brake, a.brake) && r12(b.drag, a.drag) && r12(b.total, a.total)
+}
+
+test "tripEnergyColumn equals tripEnergy for a uniform medium (1e-12, AC2)" { tripId(1.4722194895832204) && tripId(rapidityOfOneMinusBeta(0.000001)) }
+
+pure func holdAt(m: float, a: float, n: float, want: float) -> bool = rel(driveHoldMaxPhi(m, a, n, rBub()), want, 0.000000000001)
+
+pure func checkHoldValues() -> bool =
+  holdAt(1.0, aCanon(), nHot(), 10.4257480345407)
+  && holdAt(1.0, aCanon(), nWarm(), 8.35073313605109)
+  && holdAt(1.0, aCanon(), 4200000000.0, 3.6516565720271927)
+  && holdAt(10.0, aGuided(), nWarm(), 10.19517280870166)
+  && holdAt(10.0, aGuided(), nHot(), 12.270187760740008)
+  && holdAt(1.0, aCanon(), 100000.0, 8.973695505619965)
+
+test "driveHoldMaxPhi: hot gas, warm clouds, n 4,200 cm^-3, guided drive (oracle, 1e-12)" { checkHoldValues() }
+
+pure func checkHoldGammas() -> bool =
+  rel(cosh(driveHoldMaxPhi(1.0, aCanon(), nHot(), rBub())), 16858.0, 0.0001)
+  && rel(cosh(driveHoldMaxPhi(1.0, aCanon(), nWarm(), rBub())), 2117.0, 0.0005)
+  && rel(cosh(driveHoldMaxPhi(1.0, aCanon(), 4200000000.0, rBub())), 19.28, 0.0005)
+  && rel(cosh(driveHoldMaxPhi(10.0, aGuided(), nWarm(), rBub())), 13387.0, 0.0001)
+
+test "HB-130, HB-131, HB-135, HB-137: gamma_hold 16,858 / 2,117 / 13,387 / 19.28 at their printed digits" { checkHoldGammas() }
+
+-- The limit is exactly where brakeHoldsAgainstDrag flips.
+pure func flips(m: float, a: float, n: float) -> bool {
+  let p = driveHoldMaxPhi(m, a, n, rBub());
+  brakeHoldsAgainstDrag(m, a, n, p - 0.000000001, rBub()) && !brakeHoldsAgainstDrag(m, a, n, p + 0.000000001, rBub())
+}
+
+test "brakeHoldsAgainstDrag is true 1e-9 below driveHoldMaxPhi and false 1e-9 above (AC10)" {
+  flips(1.0, aCanon(), nHot()) && flips(1.0, aCanon(), nWarm()) && flips(10.0, aGuided(), 14100000.0) && flips(1.0, aCanon(), 4230000000.0)
+}
+
+pure func checkNaN() -> bool {
+  let nan = 0.0 / 0.0;
+  let a = massEquivalentDensity(nan, 1.4, 0.005);
+  let b = columnDragEnergy(nan, 3.0, 100.0);
+  let c = driveHoldMaxPhi(1.0, aCanon(), nan, 100.0);
+  let d = driveHoldMaxPhi(nan, aCanon(), 1.0, 100.0);
+  a != a && b != b && c != c && d != d
+}
+
+test "NaN in gives NaN out" { checkNaN() }
+
+pure func checkHoldEdges() -> bool {
+  let inf = 1.0 / 0.0;
+  driveHoldMaxPhi(1.0, aCanon(), 0.0, 100.0) == inf && driveHoldMaxPhi(0.0, aCanon(), 1.0, 100.0) == 0.0
+}
+
+test "driveHoldMaxPhi in a vacuum is +Inf; with no drive it is 0" { checkHoldEdges() }

@@ -4,7 +4,8 @@ Pure solar-system mechanics for AILANG: Kepler's equation and orbit state
 vectors, where the planets and their moons are on any date, the frame
 rotations and rotation models that put them on a galactic sky, where they
 are seen (light time), how hard they pull, and how bright they and their
-rings are in reflected starlight.
+rings are in reflected starlight; and, from 0.4.0, the shape of the local
+interstellar medium the Sun sits in.
 
 ```sh
 ailang install sunholo/celestial
@@ -19,6 +20,10 @@ ailang pkg-docs sunholo/celestial   # AGENT.md: usage, units, pitfalls
   JPL satellite mean elements on their Laplace planes, `julianDate`, and
   the Earth and Moon split out of the Earth-Moon barycentre (`earthAt`,
   `moonAt`, `earthMoonSplit`; DE440 mass ratio).
+- `ism` (0.4.0): the Local Interstellar Cloud as a star-shaped harmonic
+  surface, exact route chords through cone shells, ellipsoids and slabs, gas
+  from dust extinction, HEALPix RING centres, a Ulysses-normalised grain-size
+  distribution and a Poisson draw.
 - `frames`: ecliptic J2000 -> ICRS (IAU 2006 obliquity) -> galactic
   (Hipparcos 1997), and IAU WGCCRE 2015 pole and prime-meridian models.
 - `lighttime`: the retarded time and position of a source seen by an

@@ -17,7 +17,7 @@
 module sunholo/relativity/medium
 
 import std/math (sqrt)
-import ./hyper (sinh)
+import ./hyper (sinh, log1p)
 import ./journey (TripPlan)
 import ./blackbody (stefanBoltzmannSI, luminousEfficacy)
 
@@ -197,3 +197,56 @@ export pure func hoverPower(mEffKg: float, gMs2: float) -> float {
   let g = if gMs2 < 0.0 then 0.0 - gMs2 else gMs2;
   mEffKg * g * cSI()
 }
+
+-- 0.12.0: a structured medium (stapledons ledger D-60, D-61;
+-- stapledons-design physics/ism-structure.md and higgs-bubble.md section 5).
+-- Every function above takes n as the mass-equivalent proton density: the
+-- wall reflects every massive particle, dust included, so the drag and the
+-- glow follow the whole mass flux.
+
+-- Mass-equivalent density n_H (muH + deltaDust) (m^-3 when nH is): nH the
+-- hydrogen nucleon density, muH the gas mass per H nucleon (helium and
+-- metals; Draine 2011: 1.4), deltaDust the dust mass per H nucleon (local
+-- clouds 0.00507 from Krueger et al. 2015 and Slavin & Frisch 2008; Draine
+-- 2011: 0.010), both in hydrogen (proton) masses. 0.247 cm^-3, 1.4, 0.0051
+-- gives 3.4706e5 m^-3. NaN in gives NaN.
+export pure func massEquivalentDensity(nH: float, muH: float, deltaDust: float) -> float = nH * (muH + deltaDust)
+
+-- Ship-frame energy radiated to hold cruise through a column nCol = int n ds
+-- (m^-2) of medium: nCol sinh(phi) m_p c^2 pi r^2 (J). For a uniform medium
+-- nCol = n d and this is cruiseDragEnergy (tested to 1e-12), so a ledger
+-- summed piece by piece over a structured route closes at arrival.
+export pure func columnDragEnergy(nCol: float, phi: float, r: float) -> float {
+  let c = cSI();
+  nCol * sinh(phi) * protonMassKg() * c * c * pi() * r * r
+}
+
+-- tripEnergy with the cruise drag by column: nColCoast is the column over
+-- the coast (p.dCoast) of the route (m^-2). Equals tripEnergy for a uniform
+-- medium (nColCoast = n p.dCoast lightYearM()).
+export pure func tripEnergyColumn(p: TripPlan, mEff: float, nColCoast: float, r: float) -> TripEnergy {
+  let b = photonDriveEnergy(mEff, p.phiPeak);
+  let d = columnDragEnergy(nColCoast, p.phiPeak, r);
+  { boost: b, brake: b, drag: d, total: 2.0 * b + d }
+}
+
+-- asinh for x >= 0 without cancellation: log1p(x + x^2 / (1 + sqrt(1 + x^2))).
+pure func asinhPos(x: float) -> float = log1p(x + x * x / (1.0 + sqrt(1.0 + x * x)))
+
+-- The drive-hold limit: the largest rapidity whose drag at density n the
+-- photon drive's force m_eff a (a in m/s^2) can still overcome,
+-- asinh sqrt(mEff a / (n m_p c^2 pi r^2)). Holding cruise needs thrust equal
+-- to the drag everywhere along it, so a plan uses the peak n of its whole
+-- cruise; brakeHoldsAgainstDrag is true just below and false just above
+-- (tested at 1e-9). Canon drive (1 kg, 7.5e5 g): gamma 16,858 in the hot gas,
+-- 2,117 in the warm clouds, 19.3 at n = 4,200 cm^-3 (HB-130..HB-137). n = 0
+-- gives +Inf; mEff a = 0 gives 0; NaN gives NaN.
+export pure func driveHoldMaxPhi(mEff: float, a: float, n: float, r: float) -> float {
+  let c = cSI();
+  let x = mEff * a / (n * protonMassKg() * c * c * pi() * r * r);
+  if x != x then x
+  else if x > 1.0e300 then x
+  else if x > 0.0 then asinhPos(sqrt(x))
+  else 0.0
+}
+
