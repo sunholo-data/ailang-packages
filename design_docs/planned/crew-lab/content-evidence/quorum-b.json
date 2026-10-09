@@ -1,0 +1,64 @@
+{
+  "reviewer": "crew_design_review_b",
+  "document": "design_docs/planned/crew-lab/crew-content-library.md",
+  "status": "PASS",
+  "scope": "Independent design review only; no implementation or provider calls",
+  "strongest_objection": "Resolved at design level. The strongest remaining implementation risk is preserving the documented journal-first Session/seed publication boundary on every success, failure and blocked scheduler path.",
+  "blocking_issues": [],
+  "rounds": [
+    {
+      "round": 1,
+      "status": "BLOCK",
+      "strongest_objection": "The journal does not define the current action's publication/commit boundary. Stopping before another action still permits the latest accepted state/selection to be absent from replay, and appendFileResult can leave a partial final NDJSON record.",
+      "blocking_issues": [
+    {
+      "id": "B1",
+      "reference": "crew-content-library.md:90-95",
+      "problem": "Journal append failure and interruption recovery are underspecified relative to host state and seed advancement.",
+      "fix": "Stage the pure host output and selection, durably persist the complete corresponding input/output/metadata before publishing the new Session, selected dialogue or advanced seed. Define complete-record framing and recovery for a partially written final record, or use an atomic bounded journal replacement. Failure must keep the prior session/request/seed authoritative and stop further actions.",
+      "tests": [
+        "Inject persistence failure after a valid host operation is staged; prior authoritative state and seed remain unchanged and no success/dialogue is published.",
+        "Simulate a partial final journal write; earlier committed records remain replayable and the incomplete action is visibly uncommitted.",
+        "Replay every successfully published action from journal without cache, AI or policy files."
+      ]
+    }
+      ]
+    },
+    {
+      "round": 2,
+      "status": "PASS",
+      "resolution": "The corrected design stages pure host output and proposed seed, publishes a complete bounded whole-file journal through same-directory temporary write and atomic rename, then accepts/displays new Session and seed. Failed or partial temporary writes preserve prior journal and authoritative state. Blocked outputs are explicitly included, and no fsync or silent tail-repair claim is made.",
+      "additional_corrections": [
+        "Explicit seed, signature, bundle, variant, text, weight, coefficient, context and token limits.",
+        "Cache lookup rechecked under per-key lock and first-use policy creation rechecked under its exclusive lock.",
+        "Original generation usage retained separately from zero new calls/tokens on a cache hit."
+      ],
+      "blocking_issues": [],
+      "required_implementation_evidence": [
+        "Failure injection for staged successful and blocked actions, temporary-write failure and rename failure; previous Session/seed/journal stay authoritative and success is not shown.",
+        "Complete journal replay without cache, AI or editable policy files.",
+        "Compile probe for actual supported effect-budget syntax; no claim of an enforced annotation without evidence."
+      ]
+    }
+  ],
+  "implementation_controls": [
+    "Recheck cache existence and signature after acquiring the per-key lock; never overwrite a valid bundle created by another run between initial lookup and lock acquisition.",
+    "Protect first-use policy initialization with exclusive ownership and recheck inside it; an existing editable policy must never be silently overwritten.",
+    "Separate original bundle-generation token metadata from this resolution's usage. A cache hit spends zero new provider calls/tokens while retaining the original generation provenance.",
+    "Specify numeric policy/seed/text bounds and checked arithmetic in the native controls. A growing persistent library has no stated total-storage cap; avoid claiming globally bounded storage.",
+    "Verify supported effect-budget syntax against the selected runtime; pinned v0.52.0 rejected the earlier literal @limit attribute. Do not claim an enforced annotation without a compiling probe."
+  ],
+  "supported_findings": [
+    "Existing Request.context provides actor-local perception and existing host retains consent/authority/revision mechanics.",
+    "Author-provided OCEAN/value/fatigue/trust weights and one-hot confidence1 are explicitly experimental policy, with no calibrated model probability claim.",
+    "Exact signature matching and included stored signature give a conservative context boundary; retained identity makes missed reuse explicit.",
+    "Core std/fs exposes Result-returning mkdir/rename/read/write/append functions, std/ai.step exposes typed Result plus token usage, std/crypto.sha256Hex is pure.",
+    "Bounded attempted calls, visible errors and explicit authored continuation preserve provider failure legibility; account/model availability appropriately remains pending live smoke."
+  ],
+  "verification": {
+    "source_inspection": ["examples/crew-lab/session.ail", "examples/crew-lab/scenario.ail", "examples/crew-lab/ailang.toml", "ailang/std/fs.ail", "ailang/std/ai.ail", "ailang/std/crypto.ail"],
+    "runtime": "AILANG v0.52.0 bf2436a",
+    "live_model_calls": 0,
+    "implementation_tests_run": false
+  }
+}
