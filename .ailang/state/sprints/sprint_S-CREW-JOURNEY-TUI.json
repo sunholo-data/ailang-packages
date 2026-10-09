@@ -1,0 +1,77 @@
+{
+  "sprint_id": "S-CREW-JOURNEY-TUI",
+  "status": "in_progress",
+  "design_doc": "design_docs/planned/crew-journey-terminal.md",
+  "sprint_plan": "design_docs/planned/crew-journey-terminal-sprint.md",
+  "authorization": "Attended user requested serious pure AILANG terminal UI and chose strained crew preparing for first contact; prior package-main landing authorized.",
+  "prompt_version": "v0.16.6",
+  "features": [
+    {
+      "id": "M1",
+      "description": "Reusable pure AILANG terminal UI and installed showcase",
+      "estimated_loc": 400,
+      "dependencies": [],
+      "acceptance_criteria": [
+        "Safe bounded wrapping/paging and ANSI/plain",
+        "Installed IO-only demo",
+        "Native both engines and strict quality"
+      ],
+      "passes": true,
+      "completed": "2026-10-09",
+      "notes": "10 native controls pass evaluator and strict VM; installed IO demo actual frames; strict quality2/9 proved7skipped0errors; runtime callback limitation documented."
+    },
+    {
+      "id": "M2",
+      "description": "Focused captain interface and first contact preparation chapter",
+      "estimated_loc": 450,
+      "dependencies": [
+        "M1"
+      ],
+      "acceptance_criteria": [
+        "Newcomer understands offer/start/time",
+        "View/page navigation preserves active host decision",
+        "Chapter is factual projection, no simulated alien contact"
+      ],
+      "passes": null
+    },
+    {
+      "id": "M3",
+      "description": "Installed scenario controls, documentation and independent evaluation",
+      "estimated_loc": 250,
+      "dependencies": [
+        "M2"
+      ],
+      "acceptance_criteria": [
+        "Navigation journal equals baseline",
+        "Offline zero calls and replay agreement",
+        "Independent visual and behavioral acceptance review"
+      ],
+      "passes": null
+    }
+  ],
+  "registry_reuse": [
+    {
+      "milestone": "M1",
+      "action": "none",
+      "package": "sunholo/terminal_ui",
+      "reason": "Successful registry searches terminal and tui returned no packages; use std/string std/list std/io"
+    },
+    {
+      "milestone": "M2",
+      "action": "depend",
+      "package": "sunholo/social_dynamics,sunholo/decisions,sunholo/content_library,sunholo/terminal_ui",
+      "reason": "Reuse existing pure host, reaction selection, library and new layout package"
+    },
+    {
+      "milestone": "M3",
+      "action": "depend",
+      "package": "sunholo/crew_lab",
+      "reason": "Reuse baseline installed controls and extracted journal replay"
+    }
+  ],
+  "velocity": {
+    "target_loc_per_day": 367,
+    "estimated_total_loc": 1100,
+    "estimated_days": 3
+  }
+}

@@ -1,0 +1,49 @@
+module sunholo/terminal_ui/ui_test
+import std/list (length, any, map, filter, foldl, flatMap, take, drop)
+import std/string (contains, join, repeat, chars, charCode, concat, split, words)
+import ./ui (safeText, cells, wrap, dimensions, screen, gauge)
+
+pure func fit(xs: [string], n: int) -> bool = match xs {
+  [] => true,
+  s :: rest => cells(s) <= n && fit(rest, n)
+}
+
+test "controls cannot reach terminal" {
+  safeText("a\u{1B}[31mb\u{202E}c\u{7}") == "a[31mbc"
+}
+
+test "unicode cells" {
+  cells("café — ─界") == 10
+}
+
+test "word wrapping and hard breaks" {
+  wrap("one two abcdefghi", 5) == ["one", "two", "abcde", "fghi"]
+}
+
+test "dimensions bounded" {
+  dimensions(2, 100) == { columns: 40, rows: 60 }
+}
+
+test "plain never includes escape and bounds long pages" {
+  fit((screen(dimensions(60, 24), false, ["header"], repeat("界", 4096), ["1 Start / 2 Leave"], 0)).lines, 60) && length((screen(dimensions(60, 24), false, ["header"], repeat("界", 4096), ["1 Start / 2 Leave"], 0)).lines) == 24 && (screen(dimensions(60, 24), false, ["header"], repeat("界", 4096), ["1 Start / 2 Leave"], 9999)).page == (screen(dimensions(60, 24), false, ["header"], repeat("界", 4096), ["1 Start / 2 Leave"], 0)).pages - 1
+}
+
+test "body remainder and fixed footer" {
+  (screen(dimensions(40, 16), false, ["header"], repeat("x", 2000), ["1 Start"], 1)).pages > 1 && contains((screen(dimensions(40, 16), false, ["header"], repeat("x", 2000), ["1 Start"], 1)).text, "1 Start") && not contains((screen(dimensions(40, 16), false, ["header"], "body", ["quit"], 0)).text, "\u{1B}")
+}
+
+test "ansi trusted redraw only" {
+  contains((screen(dimensions(80, 28), true, ["header"], "\u{1B}[2Jinjected", ["quit"], 0)).text, "\u{1B}[2J\u{1B}[H") && contains((screen(dimensions(80, 28), true, ["header"], "\u{1B}[2Jinjected", ["quit"], 0)).text, "[2Jinjected")
+}
+
+test "gauge bounded endpoints" {
+  gauge(-1, 10) == "[----------] -1" && gauge(101, 10) == "[##########] 101"
+}
+
+test "early wide ranges" {
+  cells("ᄀ〈界") == 6
+}
+
+test "all caller actions stay visible" {
+  contains((screen(dimensions(40, 16), false, ["h"], "body", ["1 First", "2 Second", "3 Third", "4 Fourth", "5 Fifth"], 0)).text, "5 Fifth")
+}
