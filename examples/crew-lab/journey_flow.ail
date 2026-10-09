@@ -12,7 +12,7 @@ export type Routed = { state: PlayState, nav: Navigation, handled: bool } derivi
 export type JourneyOptions = { args: [string], columns: int, rows: int, ansi: bool } deriving (Eq)
 
 export pure func initial() -> Navigation ! {}
-ensures { result.page == 0 && result.view == "bridge" && result.history == [] } =
+ensures { result.page == 0 && result.view == "bridge" && length(result.history) == 0 } =
   { view: "bridge", page: 0, history: [] }
 
 export pure func navigation(s: PlayState, nav: Navigation, key: string) -> Routed ! {}
@@ -26,6 +26,7 @@ ensures { result.state == s && result.nav.page >= 0 && result.nav.page <= 10000 
 }
 
 export pure func remember(nav: Navigation, message: string) -> Navigation ! {}
+requires { length(nav.history) <= 64 }
 ensures { length(result.history) <= 64 && result.page == 0 && result.view == "bridge" } =
   { nav | view: "bridge", page: 0, history: if message == "" then nav.history else reverse(take(64, reverse(nav.history ++ [message]))) }
 

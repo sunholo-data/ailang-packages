@@ -1,0 +1,544 @@
+{
+  "schema": "ailang.package-verify/v1",
+  "package": "sunholo/crew_lab",
+  "version": "0.1.0",
+  "verified": 17,
+  "total": 83,
+  "counterexample": 0,
+  "skipped": 64,
+  "errors": 2,
+  "uncontracted": 0,
+  "wall_seconds": 1.725685833,
+  "modules": [
+    {
+      "module": "sunholo/crew_lab/actor_policy",
+      "file": "actor_policy.ail",
+      "verified": 1,
+      "counterexample": 0,
+      "skipped": 3,
+      "errors": 0,
+      "uncontracted": 0,
+      "results": [
+        {
+          "function": "evaluate",
+          "status": "skipped",
+          "reason": "Function \"evaluate\" calls \"answer\" whose signature uses an unencodable type \"Result[Answer, DecideError]\""
+        },
+        {
+          "function": "unit",
+          "status": "verified"
+        },
+        {
+          "function": "requestBody",
+          "status": "skipped",
+          "reason": "Function \"requestBody\" calls \"map\" whose signature uses an unencodable type \"Result[b, e]\""
+        },
+        {
+          "function": "encodeChoice",
+          "status": "skipped",
+          "reason": "Function \"encodeChoice\" calls \"map\" whose signature uses an unencodable type \"Result[b, e]\""
+        }
+      ]
+    },
+    {
+      "module": "sunholo/crew_lab/codec",
+      "file": "codec.ail",
+      "verified": 2,
+      "counterexample": 0,
+      "skipped": 6,
+      "errors": 0,
+      "uncontracted": 0,
+      "results": [
+        {
+          "function": "outcomeDelta",
+          "status": "verified"
+        },
+        {
+          "function": "integer",
+          "status": "skipped",
+          "reason": "Function \"integer\" calls \"getInt\" whose signature uses an unencodable type \"Option[int]\""
+        },
+        {
+          "function": "object",
+          "status": "skipped",
+          "reason": "Function \"object\" calls \"decode\" whose signature uses an unencodable type \"Result[Json, string]\""
+        },
+        {
+          "function": "decodeOutcome",
+          "status": "skipped",
+          "reason": "SMT declaration closure could not resolve a required sort (unresolvable SMT declaration types: sort \"CrewOutcome\" referenced in signature of a callee define-fun is not declared)"
+        },
+        {
+          "function": "fields",
+          "status": "skipped",
+          "reason": "Function \"fields\" calls \"dedup\" whose signature uses an unencodable type \"list[a]\""
+        },
+        {
+          "function": "text",
+          "status": "skipped",
+          "reason": "Function \"text\" calls \"getString\" whose signature uses an unencodable type \"Option[string]\""
+        },
+        {
+          "function": "number",
+          "status": "skipped",
+          "reason": "Function \"number\" calls \"getNumber\" whose signature uses an unencodable type \"Option[float]\""
+        },
+        {
+          "function": "encodeOutcome",
+          "status": "verified"
+        }
+      ]
+    },
+    {
+      "module": "sunholo/crew_lab/journey_flow",
+      "file": "journey_flow.ail",
+      "verified": 3,
+      "counterexample": 0,
+      "skipped": 2,
+      "errors": 1,
+      "uncontracted": 0,
+      "results": [
+        {
+          "function": "remember",
+          "status": "error",
+          "reason": "encoding error: cannot encode function body: let body: let value: if else: let body: let body: let body: let value: unsupported application: std/list.reverse([$tmp53])"
+        },
+        {
+          "function": "styleDefault",
+          "status": "verified"
+        },
+        {
+          "function": "options",
+          "status": "skipped",
+          "reason": "Function \"options\" calls \"argsLoop\" whose signature uses an unencodable type \"Result[JourneyOptions, string]\""
+        },
+        {
+          "function": "onboardingAllowed",
+          "status": "verified"
+        },
+        {
+          "function": "initial",
+          "status": "verified"
+        },
+        {
+          "function": "navigation",
+          "status": "skipped",
+          "reason": "Function \"navigation\" uses an unencodable builtin: std/string.trim"
+        }
+      ]
+    },
+    {
+      "module": "sunholo/crew_lab/journey_presenter",
+      "file": "journey_presenter.ail",
+      "verified": 3,
+      "counterexample": 0,
+      "skipped": 3,
+      "errors": 0,
+      "uncontracted": 0,
+      "results": [
+        {
+          "function": "chapter",
+          "status": "verified"
+        },
+        {
+          "function": "journeyRecap",
+          "status": "skipped",
+          "reason": "Function \"journeyRecap\" calls \"filter\" whose signature uses an unencodable type \"Option[a]\""
+        },
+        {
+          "function": "guide",
+          "status": "verified"
+        },
+        {
+          "function": "indicatorChanges",
+          "status": "skipped",
+          "reason": "Function \"indicatorChanges\" uses an unencodable builtin: std/string.join; Function \"indicatorChanges\" calls \"oldActor\" whose signature uses an unencodable type \"Option[Actor]\""
+        },
+        {
+          "function": "opening",
+          "status": "verified"
+        },
+        {
+          "function": "frame",
+          "status": "skipped",
+          "reason": "Function \"frame\" uses an unencodable builtin: std/string.join; Function \"frame\" calls \"filter\" whose signature uses an unencodable type \"Option[a]\""
+        }
+      ]
+    },
+    {
+      "module": "sunholo/crew_lab/play",
+      "file": "play.ail",
+      "verified": 0,
+      "counterexample": 0,
+      "skipped": 4,
+      "errors": 0,
+      "uncontracted": 0,
+      "results": [
+        {
+          "function": "launchJourney",
+          "status": "skipped",
+          "reason": "no ensures clause (nothing to verify)"
+        },
+        {
+          "function": "selectReply",
+          "status": "skipped",
+          "reason": "Function \"selectReply\" has deeply nested patterns; Function \"selectReply\" calls \"decode\" whose signature uses an unencodable type \"Result[Json, string]\""
+        },
+        {
+          "function": "offline",
+          "status": "skipped",
+          "reason": "Function \"offline\" has effects; Function \"offline\" calls \"act\" whose signature uses an unencodable type \"Result[Applied, string]\""
+        },
+        {
+          "function": "main",
+          "status": "skipped",
+          "reason": "Function \"main\" has effects; Function \"main\" calls \"act\" whose signature uses an unencodable type \"Result[Applied, string]\""
+        }
+      ]
+    },
+    {
+      "module": "sunholo/crew_lab/play_flow",
+      "file": "play_flow.ail",
+      "verified": 1,
+      "counterexample": 0,
+      "skipped": 9,
+      "errors": 0,
+      "uncontracted": 0,
+      "results": [
+        {
+          "function": "recover",
+          "status": "skipped",
+          "reason": "Function \"recover\" calls \"filter\" whose signature uses an unencodable type \"list[a]\""
+        },
+        {
+          "function": "stage",
+          "status": "skipped",
+          "reason": "Function \"stage\" calls \"decode\" whose signature uses an unencodable type \"Result[Json, string]\""
+        },
+        {
+          "function": "publish",
+          "status": "verified"
+        },
+        {
+          "function": "parseArgs",
+          "status": "skipped",
+          "reason": "Function \"parseArgs\" calls \"argsLoop\" whose signature uses an unencodable type \"Result[Options, string]\""
+        },
+        {
+          "function": "recoveryRecording",
+          "status": "skipped",
+          "reason": "Function \"recoveryRecording\" uses an unencodable builtin: std/string.join; Function \"recoveryRecording\" calls \"add\" whose signature uses an unencodable type \"Result[int, Error]\""
+        },
+        {
+          "function": "seedNumber",
+          "status": "skipped",
+          "reason": "Function \"seedNumber\" uses an unencodable builtin: std/string.trim; Function \"seedNumber\" calls \"stringToInt\" whose signature uses an unencodable type \"Option[int]\""
+        },
+        {
+          "function": "menu",
+          "status": "skipped",
+          "reason": "Function \"menu\" uses an unencodable builtin: std/string.join; Function \"menu\" calls \"filter\" whose signature uses an unencodable type \"list[a]\""
+        },
+        {
+          "function": "begin",
+          "status": "skipped",
+          "reason": "Function \"begin\" calls \"any\" whose signature uses an unencodable type \"*ast.FuncType\""
+        },
+        {
+          "function": "renderStatus",
+          "status": "skipped",
+          "reason": "Function \"renderStatus\" calls \"map\" whose signature uses an unencodable type \"Result[b, e]\""
+        },
+        {
+          "function": "route",
+          "status": "skipped",
+          "reason": "Function \"route\" uses an unencodable builtin: std/string.trim; Function \"route\" calls \"filter\" whose signature uses an unencodable type \"list[a]\""
+        }
+      ]
+    },
+    {
+      "module": "sunholo/crew_lab/presenter",
+      "file": "presenter.ail",
+      "verified": 5,
+      "counterexample": 0,
+      "skipped": 9,
+      "errors": 0,
+      "uncontracted": 0,
+      "results": [
+        {
+          "function": "projectCost",
+          "status": "skipped",
+          "reason": "Function \"projectCost\" uses an unencodable builtin: std/list.head; Function \"projectCost\" calls \"filter\" whose signature uses an unencodable type \"list[a]\""
+        },
+        {
+          "function": "elapsed",
+          "status": "verified"
+        },
+        {
+          "function": "dashboard",
+          "status": "skipped",
+          "reason": "Function \"dashboard\" uses an unencodable builtin: std/list.map; Function \"dashboard\" calls \"map\" whose signature uses an unencodable type \"list[b]\""
+        },
+        {
+          "function": "policyBrief",
+          "status": "verified"
+        },
+        {
+          "function": "rejection",
+          "status": "skipped",
+          "reason": "Function \"rejection\" calls \"decode\" whose signature uses an unencodable type \"Result[Json, string]\""
+        },
+        {
+          "function": "guidance",
+          "status": "skipped",
+          "reason": "Function \"guidance\" calls \"filter\" whose signature uses an unencodable type \"list[a]\""
+        },
+        {
+          "function": "recap",
+          "status": "skipped",
+          "reason": "Function \"recap\" uses an unencodable builtin: std/string.join; Function \"recap\" calls \"filter\" whose signature uses an unencodable type \"list[a]\""
+        },
+        {
+          "function": "seedBrief",
+          "status": "verified"
+        },
+        {
+          "function": "consequences",
+          "status": "skipped",
+          "reason": "Function \"consequences\" uses an unencodable builtin: std/string.join; Function \"consequences\" calls \"decode\" whose signature uses an unencodable type \"Result[Json, string]\""
+        },
+        {
+          "function": "projectReview",
+          "status": "skipped",
+          "reason": "Function \"projectReview\" uses an unencodable builtin: std/list.head; Function \"projectReview\" calls \"filter\" whose signature uses an unencodable type \"list[a]\""
+        },
+        {
+          "function": "projectName",
+          "status": "verified"
+        },
+        {
+          "function": "briefing",
+          "status": "skipped",
+          "reason": "SMT declaration closure could not resolve a required sort (cannot encode function body: let body: let body: let body: unresolvable SMT declaration types: calls user function \"panel\" that is not SMT-encodable in this context)"
+        },
+        {
+          "function": "help",
+          "status": "skipped",
+          "reason": "Function \"help\" calls \"filter\" whose signature uses an unencodable type \"list[a]\""
+        },
+        {
+          "function": "dialogue",
+          "status": "verified"
+        }
+      ]
+    },
+    {
+      "module": "sunholo/crew_lab/reactions",
+      "file": "reactions.ail",
+      "verified": 0,
+      "counterexample": 0,
+      "skipped": 6,
+      "errors": 0,
+      "uncontracted": 0,
+      "results": [
+        {
+          "function": "defaultPolicyBody",
+          "status": "skipped",
+          "reason": "Function \"defaultPolicyBody\" uses an unencodable builtin: std/list.map; Function \"defaultPolicyBody\" calls \"map\" whose signature uses an unencodable type \"Result[b, e]\""
+        },
+        {
+          "function": "signature",
+          "status": "skipped",
+          "reason": "Function \"signature\" uses an unencodable builtin: std/list.map; Function \"signature\" calls \"map\" whose signature uses an unencodable type \"Result[b, e]\""
+        },
+        {
+          "function": "prompt",
+          "status": "skipped",
+          "reason": "Function \"prompt\" uses an unencodable builtin: std/list.map; Function \"prompt\" calls \"map\" whose signature uses an unencodable type \"Result[b, e]\""
+        },
+        {
+          "function": "decodePolicy",
+          "status": "skipped",
+          "reason": "Function \"decodePolicy\" calls \"any\" whose signature uses an unencodable type \"*ast.FuncType\""
+        },
+        {
+          "function": "fixtureBody",
+          "status": "skipped",
+          "reason": "Function \"fixtureBody\" calls \"map\" whose signature uses an unencodable type \"Result[b, e]\""
+        },
+        {
+          "function": "weights",
+          "status": "skipped",
+          "reason": "Function \"weights\" uses an unencodable builtin: std/list.dedup; Function \"weights\" calls \"any\" whose signature uses an unencodable type \"*ast.FuncType\""
+        }
+      ]
+    },
+    {
+      "module": "sunholo/crew_lab/scenario",
+      "file": "scenario.ail",
+      "verified": 2,
+      "counterexample": 0,
+      "skipped": 2,
+      "errors": 1,
+      "uncontracted": 0,
+      "results": [
+        {
+          "function": "resources",
+          "status": "verified"
+        },
+        {
+          "function": "config",
+          "status": "skipped",
+          "reason": "Function \"config\" calls \"map\" whose signature uses an unencodable type \"Result[b, e]\""
+        },
+        {
+          "function": "workerRecipe",
+          "status": "verified"
+        },
+        {
+          "function": "policies",
+          "status": "error",
+          "reason": "encoding error: cannot encode function body: record construction: unknown record type with fields [appraisal appraisalId authority authorityId] (not declared in function signature)"
+        },
+        {
+          "function": "actors",
+          "status": "skipped",
+          "reason": "SMT declaration closure could not resolve a required sort (cannot encode function body: let body: let body: let value: unresolvable SMT declaration types: calls user function \"values\" that is not SMT-encodable in this context)"
+        }
+      ]
+    },
+    {
+      "module": "sunholo/crew_lab/session",
+      "file": "session.ail",
+      "verified": 0,
+      "counterexample": 0,
+      "skipped": 11,
+      "errors": 0,
+      "uncontracted": 0,
+      "results": [
+        {
+          "function": "offer",
+          "status": "skipped",
+          "reason": "Function \"offer\" calls \"any\" whose signature uses an unencodable type \"*ast.FuncType\""
+        },
+        {
+          "function": "ask",
+          "status": "skipped",
+          "reason": "Function \"ask\" uses higher-order functions; Function \"ask\" has deeply nested patterns; Function \"ask\" uses an unencodable builtin: std/list.any; Function \"ask\" calls \"any\" whose signature uses an unencodable type \"*ast.FuncType\""
+        },
+        {
+          "function": "startTask",
+          "status": "skipped",
+          "reason": "Function \"startTask\" calls \"any\" whose signature uses an unencodable type \"*ast.FuncType\""
+        },
+        {
+          "function": "complete",
+          "status": "skipped",
+          "reason": "Function \"complete\" uses an unencodable builtin: std/list.head; Function \"complete\" calls \"any\" whose signature uses an unencodable type \"*ast.FuncType\""
+        },
+        {
+          "function": "start",
+          "status": "skipped",
+          "reason": "Function \"start\" has deeply nested patterns; Function \"start\" calls \"any\" whose signature uses an unencodable type \"*ast.FuncType\""
+        },
+        {
+          "function": "encodeHostError",
+          "status": "skipped",
+          "reason": "SMT declaration closure could not resolve a required sort (cannot encode function body: match body: let value: unresolvable SMT declaration types: calls user function \"js\" that is not SMT-encodable in this context)"
+        },
+        {
+          "function": "input",
+          "status": "skipped",
+          "reason": "Function \"input\" calls \"abortAdvance\" whose signature uses an unencodable type \"Result[State, Error]\""
+        },
+        {
+          "function": "snapshot",
+          "status": "skipped",
+          "reason": "Function \"snapshot\" uses an unencodable builtin: std/list.map; Function \"snapshot\" calls \"map\" whose signature uses an unencodable type \"Option[b]\""
+        },
+        {
+          "function": "resolve",
+          "status": "skipped",
+          "reason": "Function \"resolve\" uses an unencodable builtin: std/list.head; Function \"resolve\" calls \"any\" whose signature uses an unencodable type \"*ast.FuncType\""
+        },
+        {
+          "function": "recording",
+          "status": "skipped",
+          "reason": "Function \"recording\" uses an unencodable builtin: std/string.join; Function \"recording\" calls \"abortAdvance\" whose signature uses an unencodable type \"Result[State, Error]\""
+        },
+        {
+          "function": "cancel",
+          "status": "skipped",
+          "reason": "Function \"cancel\" uses an unencodable builtin: std/list.head; Function \"cancel\" calls \"config\" whose signature uses an unencodable type \"Result[Config, string]\""
+        }
+      ]
+    },
+    {
+      "module": "sunholo/crew_lab/store",
+      "file": "store.ail",
+      "verified": 0,
+      "counterexample": 0,
+      "skipped": 7,
+      "errors": 0,
+      "uncontracted": 0,
+      "results": [
+        {
+          "function": "loadPolicy",
+          "status": "skipped",
+          "reason": "Function \"loadPolicy\" has effects; Function \"loadPolicy\" calls \"atomic\" whose signature uses an unencodable type \"Result[(), string]\""
+        },
+        {
+          "function": "openRun",
+          "status": "skipped",
+          "reason": "Function \"openRun\" has effects; Function \"openRun\" calls \"atomic\" whose signature uses an unencodable type \"Result[(), string]\""
+        },
+        {
+          "function": "validOwner",
+          "status": "skipped",
+          "reason": "Function \"validOwner\" uses higher-order functions; Function \"validOwner\" uses an unencodable builtin: std/string.foldChars; Function \"validOwner\" calls \"foldChars\" whose signature uses an unencodable type \"a\""
+        },
+        {
+          "function": "appendRun",
+          "status": "skipped",
+          "reason": "Function \"appendRun\" has effects; Function \"appendRun\" uses an unencodable builtin: std/string.split; Function \"appendRun\" calls \"any\" whose signature uses an unencodable type \"*ast.FuncType\""
+        },
+        {
+          "function": "resolve",
+          "status": "skipped",
+          "reason": "Function \"resolve\" has effects; Function \"resolve\" calls \"atomic\" whose signature uses an unencodable type \"Result[(), string]\""
+        },
+        {
+          "function": "validJournal",
+          "status": "skipped",
+          "reason": "Function \"validJournal\" uses an unencodable builtin: std/string.split; Function \"validJournal\" calls \"decode\" whose signature uses an unencodable type \"Result[Json, string]\""
+        },
+        {
+          "function": "validRecord",
+          "status": "skipped",
+          "reason": "Function \"validRecord\" has deeply nested patterns; Function \"validRecord\" calls \"any\" whose signature uses an unencodable type \"*ast.FuncType\""
+        }
+      ]
+    },
+    {
+      "module": "sunholo/crew_lab/terminal",
+      "file": "terminal.ail",
+      "verified": 0,
+      "counterexample": 0,
+      "skipped": 2,
+      "errors": 0,
+      "uncontracted": 0,
+      "results": [
+        {
+          "function": "begin",
+          "status": "skipped",
+          "reason": "Function \"begin\" uses an unencodable builtin: std/string.trim; Function \"begin\" calls \"decode\" whose signature uses an unencodable type \"Result[Json, string]\""
+        },
+        {
+          "function": "translate",
+          "status": "skipped",
+          "reason": "Function \"translate\" uses an unencodable builtin: std/string.trim; Function \"translate\" calls \"advance\" whose signature uses an unencodable type \"Result[string, string]\""
+        }
+      ]
+    }
+  ]
+}

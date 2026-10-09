@@ -44,6 +44,10 @@ test "early wide ranges" {
   cells("ᄀ〈界") == 6
 }
 
+test "wide clock symbols cannot overflow a sixty cell line" {
+  cells("⌚⏰") == 4 && wrap(repeat("⌚", 60), 60) == [repeat("⌚", 30), repeat("⌚", 30)] && wrap(repeat("⏰", 60), 60) == [repeat("⏰", 30), repeat("⏰", 30)]
+}
+
 test "all caller actions stay visible" {
   contains((screen(dimensions(40, 16), false, ["h"], "body", ["1 First", "2 Second", "3 Third", "4 Fourth", "5 Fifth"], 0)).text, "5 Fifth")
 }

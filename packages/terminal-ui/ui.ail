@@ -35,7 +35,9 @@ pure func cellChars(xs: [string]) -> int = match xs {
 
 pure func width(c: string) -> int = {
   let n = charCode(c)
-  if not safe(c) || n == 10 then 0 else if n >= 4352 && n <= 4447 || n == 9001 || n == 9002 || n >= 11904 then 2 else 1
+  -- Known narrow Latin, punctuation and box/block glyphs. Unknown symbols count
+  -- as two cells: overestimate rather than let wide symbols overflow a frame.
+  if not safe(c) || n == 10 then 0 else if n <= 591 || n >= 8192 && n <= 8303 || n >= 9472 && n <= 9631 then 1 else 2
 }
 
 -- Conservative codepoint cells, not Unicode grapheme segmentation.

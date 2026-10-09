@@ -7,8 +7,19 @@ M3 candidate uses internal `journey.ail` bin wrappers and the public supported-m
   in each engine, content-library, saved scenarios, replay/parity, CLI/store/player
   controls passed. It stopped honestly at PUB011 for the initial new bin boundary.
 - `final-quality.log`: corrected export boundary, strict crew and terminal quality;
-  crew 16/83 verified, 64 skipped (not proved), 0 refuted, 0 uncontracted exports;
+  crew initially 16/83 verified, 64 skipped (not proved), 3 encoder errors,
+  0 refuted, 0 uncontracted exports;
   terminal 2/9 verified, 7 skipped, 0 errors, 0 uncontracted exports. No gates.
+- `root-final-verify.json`: final crew 17/83 verified, 64 skipped, 2 encoder errors,
+  0 counterexamples and 0 uncontracted. The equivalent typed-empty-list contract
+  uses length==0 and now proves. Remaining errors are unsupported std/list.reverse
+  in remember and an existing scenario.policies nested-record encoder limitation.
+  These are unproved obligations, not native test failures. Feedback:
+  inbox_1791570353485_20a9a08d. Strict quality omits encoder errors from its summary;
+  the raw verifier JSON is authoritative for the full breakdown.
+- Final terminal native controls: 12 passed on each engine, including known-wide
+  watch/clock symbols split into actual thirty-character lines at sixty cells.
+  Unknown symbols are conservatively counted as two cells.
 - `final-installed.log`: final internal bin adapter harness: seven exact navigation
   versus legacy journal payloads, evaluator/strict VM recovery replay, indicator
   deltas, AI-cache/stock provenance, pending error, eight-turn review, actual plain
