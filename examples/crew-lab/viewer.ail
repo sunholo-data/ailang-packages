@@ -1,0 +1,84 @@
+module sunholo/crew_lab/viewer
+import std/io (readLine, println, exit)
+import std/result (Ok, Err)
+import std/option (Some, None)
+import std/list (map, filter, head, length)
+import std/string (join)
+import std/json (decode, getString)
+import pkg/sunholo/social_dynamics/model (State)
+import ./session (Session, Output, Bank, start, input, encodeHostError)
+import ./codec (encodeOutcome)
+
+pure func value(s: State, actor: string, id: string) -> int = match head(filter(\a. a.id == actor, s.actors)) {
+  None => 0,
+  Some(a) => match head(filter(\v. v.id == id, a.indicators)) {
+    None => 0,
+    Some(v) => v.value
+  }
+}
+
+pure func trust(s: State, actor: string) -> string =
+  match head(filter(\r. r.from == actor && r.to == "captain" && r.dimension == "trust", s.relationships)) {
+    None => "--",
+    Some(r) => show(r.value)
+  }
+
+pure func crew(s: State, actor: string) -> string =
+  "  ${actor}: fatigue ${show(value(s, actor, "fatigue"))} | readiness ${show(value(s, actor, "readiness"))} | observations ${show(value(s, actor, "observations"))} | trust in captain ${trust(s, actor)}"
+
+pure func command(line: string) -> string = match decode(line) {
+  Err(_) => "invalid",
+  Ok(j) => match getString(j, "command") {
+    None => "invalid",
+    Some(name) => name
+  }
+}
+
+pure func render(o: Output, line: string) -> string = {
+  let s = o.session
+  let last = length(s.bank) - 1
+  let choice = match head(filter(\b. b.request.id != "", if last < 0 then [] else lastBank(s.bank, last))) {
+    None => "",
+    Some(b) => if b.status == "cancelled" then "\n  Latest request: ${b.request.actor}/${b.request.task} cancelled" else "\n  Latest crew response: ${b.request.actor} -> ${b.selected} (${b.status}, roll ${show(b.roll)})"
+  }
+  let pending = if s.pending == [] then "" else join("", ["\n  Waiting: ", join("; ", map(\r. "${r.actor}/${r.task}: ${join(", ", r.legal)}", s.pending))])
+  let resources = join("; ", map(\r. "${r.id}: available ${show(r.available)}, reserved ${show(r.reserved)}, used ${show(r.consumed)}", s.state.resources))
+  let outcomes = if s.reports == [] then "" else join("", ["\n  Captain outcomes: ", join("; ", map(\r. "${r.worker}/${r.task}: ${encodeOutcome(r.code)}", s.reports))])
+  "[turn ${show(s.state.tick)} | ${command(line)} | ${s.policy}]\n${crew(s.state, "scientist")}\n${crew(s.state, "engineer")}\n  ${resources}${pending}${choice}${outcomes}${if o.failed then "\n  BLOCKED: earlier completed boundaries retained" else ""}"
+}
+
+pure func lastBank(xs: [Bank], n: int) -> [Bank] = match xs {
+  [] => [],
+  b :: rest => if n == 0 then [b] else lastBank(rest, n - 1)
+}
+
+func loop(s: Session, count: int) -> () ! {IO} = {
+  let line = readLine()
+  if line == "" then () else if count >= 10000 then {
+    println("ERROR: command limit")
+    exit(1)
+  } else match input(s, line) {
+    Err(e) => {
+      println("ERROR: ${encodeHostError(e)}")
+      exit(1)
+    },
+    Ok(o) => {
+      println(render(o, line))
+      if o.failed then exit(1) else loop(o.session, count + 1)
+    }
+  }
+}
+
+export func main() -> () ! {IO} = {
+  let line = readLine()
+  match start(line) {
+    Err(e) => {
+      println("ERROR: ${encodeHostError(e)}")
+      exit(1)
+    },
+    Ok(o) => {
+      println(render(o, line))
+      loop(o.session, 1)
+    }
+  }
+}

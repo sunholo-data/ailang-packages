@@ -82,3 +82,16 @@ workspace cannot resolve the unpublished social kernel path dependency. Installe
 CLI tests boot the complete repository package graph. No publication readiness or
 complete SMT proof is claimed: retained proof evidence separates verified,
 skipped and encoding-error contracts.
+
+For a readable interior view instead of JSON:
+
+```sh
+crew-view < examples/crew-lab/recordings/granted-relief.ndjson
+make -f examples/crew-lab/Makefile view INPUT=examples/crew-lab/recordings/refused-order.ndjson
+```
+
+`crew-view` shows each captain step, crew fatigue/readiness/observations, directed
+trust, materials, pending choices and saved responses. It executes the same host
+as `crew-lab`; the readable view changes no mechanics. Edit `scenario.ail` to tune
+traits, work costs or fixed reaction rules; edit/regenerate a recording to compare
+captain choices and saved replies. Rerun immediately—there is no game build.

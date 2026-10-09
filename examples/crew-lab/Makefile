@@ -39,3 +39,6 @@ validate: deps tests scenarios replay parity cli-test quality
 .PHONY: mutations
 mutations:
 	@AILANG="$(AILANG)" python3 "$(EX)/test-mutations.py"
+.PHONY: view
+view:
+	@"$(AILANG)" run --package-dir "$(EX)" --caps IO --entry main "$(EX)/viewer.ail" < "$(INPUT)"

@@ -22,3 +22,6 @@ request context, with trait-dependent appraisal deferred. Proof evidence reports
 5/28 verified,22skipped and one unsupported function-record encoding; runtime
 contracts remain active. No isolated publish smoke is claimed for the unpublished
 path dependency. A scoped CI job runs the crew and original social lab checks.
+
+Adds `[bin] crew-view` and `make view` for readable per-step interior state, sharing
+the same pure host and saved decisions with the full JSON CLI.
