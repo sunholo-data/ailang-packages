@@ -35,6 +35,40 @@ jq -s -e 'last.state.tasks | any(.[]; .recipe=="observations" and .status=="comp
 jq -s -e 'last.state | (.resources[0].available==6 and .resources[0].consumed==0) and any(.tasks[]; .recipe=="rest_scientist" and .status=="completed") and any(.tasks[]; .recipe=="observations" and .status=="stopped")' "$TMP/care-replay.ndjson" > /dev/null
 jq -s -e 'last.state | .resources[0].consumed==4 and any(.tasks[]; .recipe=="observations" and .status=="completed")' "$TMP/deny-replay.ndjson" > /dev/null
 jq -s -e 'last.state | .resources[0].consumed==6 and .resources[0].available==0 and ([.tasks[]|select(.status=="completed")]|length)==2' "$TMP/projects-replay.ndjson" > /dev/null
+# Ordinary published resource rejection must leave the captain playing.
+mkdir -p "$TMP/shortage"
+cp "$TMP/projects/response-policy.json" "$TMP/shortage/response-policy.json"
+"$TMP/bin/crew-play-offline" --home "$TMP/shortage" < "$EX/recordings/play-shortage.menu" > "$TMP/shortage.out"
+journals=("$TMP/shortage"/runs/*/journal.jsonl)
+jq -s -e 'any(.[]; (.payload.host_output? // "") | startswith("{\"error\"")) and last.payload.kind=="quit"' "${journals[0]}" > /dev/null
+jq -s -e '[.[]|select((.payload.host_output? // "") | startswith("{\"error\""))] | length==2 and all(.[]; .payload.seed_before==.payload.seed_after)' "${journals[0]}" > /dev/null
+jq -s -e '[.[]|select(.payload.host_output? != null)|.payload.host_output|fromjson|select(.state!=null)]|last.state | .tick==6 and .resources[0].available==2 and .resources[0].consumed==4 and any(.tasks[]; .recipe=="rest_scientist" and .status=="completed")' "${journals[0]}" > /dev/null
+# Crew occupancy and consent denial are also recorded, recoverable starts.
+mkdir -p "$TMP/occupied" "$TMP/refusal"
+cp "$TMP/projects/response-policy.json" "$TMP/occupied/response-policy.json"
+jq '.rules |= map(.base=(if .label=="decline" then 1000 elif .label=="defer" then 1000 else 0 end)|.influences=[])' "$TMP/science/response-policy.json" > "$TMP/refusal/response-policy.json"
+printf '1\n42\n1\n1\n3\n1\n5\n0\n' | "$TMP/bin/crew-play-offline" --home "$TMP/occupied" > "$TMP/occupied.out"
+printf '1\n42\n1\n1\n5\n0\n' | "$TMP/bin/crew-play-offline" --home "$TMP/refusal" > "$TMP/refusal.out"
+for path in occupied refusal; do
+ journals=("$TMP/$path"/runs/*/journal.jsonl)
+ jq -s -e 'last.payload.kind=="quit" and any(.[]; ((.payload.host_output? // "")|startswith("{\"error\"")))' "${journals[0]}" > /dev/null
+done
+# Compare the accepted host snapshot immediately around the rejected start.
+# The following advance commits tick movement but none of the attempted start.
+journals=("$TMP/shortage"/runs/*/journal.jsonl)
+jq -s -e '[.[]|select(.payload.host_output!=null)] as $xs | [range(1;($xs|length)-1)|select(($xs[.].payload.host_output|fromjson|has("error")))] | all(.[]; . as $i | ($xs[$i-1].payload.host_output|fromjson).state.resources == ($xs[$i+1].payload.host_output|fromjson).state.resources and $xs[$i].payload.seed_before==$xs[$i].payload.seed_after)' "${journals[0]}" > /dev/null
+# Recovery journals include rejected commands; the old run.sh remains fail-fast.
+for path in shortage occupied refusal; do
+ journals=("$TMP/$path"/runs/*/journal.jsonl)
+ journal=${journals[0]}
+ jq -r 'select(.payload.host_input != null)|.payload.host_input' "$journal" > "$TMP/$path-input.ndjson"
+ jq -r 'select(.payload.host_output != null)|.payload.host_output' "$journal" > "$TMP/$path-expected.ndjson"
+ jq -Rs 'split("\n")|map(select(length>0))' "$TMP/$path-input.ndjson" > "$TMP/$path-args.json"
+ "$AILANG" run --package-dir "$EX" --entry recoveryRecording --args-file "$TMP/$path-args.json" "$EX/play_flow.ail" > "$TMP/$path-replay.ndjson"
+ "$AILANG" run --bytecode --strict-bytecode --package-dir "$EX" --entry recoveryRecording --args-file "$TMP/$path-args.json" "$EX/play_flow.ail" > "$TMP/$path-vm.ndjson"
+ cmp "$TMP/$path-expected.ndjson" "$TMP/$path-replay.ndjson"
+ cmp "$TMP/$path-expected.ndjson" "$TMP/$path-vm.ndjson"
+done
 # Force journal publication failure after startup: an existing directory at the
 # temporary file path makes Result-returning file write fail before rename.
 mkfifo "$TMP/input.fifo"

@@ -42,3 +42,8 @@ with every actual host command before state/seed/dialogue publication. New nativ
 UI controls and installed offline tests cover science, care, denial, materials
 competition, extracted strict-VM replay and atomic journal-write rollback.
 The original fixed host trust appraisal and completion-only work effects remain.
+
+Published guided-play host rejections now return to the bridge without undoing
+committed work or consuming an extra RNG step. Offered review opens Start/Leave
+without re-answering an already accepted agreement. Recovery journal replay
+continues across rejected commands; legacy recording entry stays fail-fast.

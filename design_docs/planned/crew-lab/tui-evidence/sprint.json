@@ -1,0 +1,55 @@
+{
+  "sprint_id": "CREW-TUI",
+  "status": "in_progress",
+  "design_doc": "design_docs/planned/crew-lab/standalone-captain-game.md",
+  "sprint_plan": "design_docs/planned/crew-lab/standalone-captain-game-sprint.md",
+  "features": [
+    {
+      "id": "M1_RECOVERY",
+      "description": "Recover published host rejections without undo or unrecorded state",
+      "estimated_loc": 150,
+      "dependencies": [],
+      "acceptance_criteria": [
+        "Science/maintenance shortage continues play with unchanged failed-action seed/resources",
+        "Publication failure still stops safely",
+        "Partial scheduler boundaries retained"
+      ],
+      "passes": true,
+      "completed": "2026-10-09T15:59:10.724057+00:00",
+      "notes": "Red shortage process exit reproduced; green installed harness covers immediate reserved shortage, post-completion depletion, occupancy, refusal, recovery replay both engines and fatal journal rollback. Native 97/97 both engines; no fallback."
+    },
+    {
+      "id": "M2_INTERFACE",
+      "description": "Self-explaining standalone captain game interface",
+      "estimated_loc": 350,
+      "dependencies": [
+        "M1_RECOVERY"
+      ],
+      "acceptance_criteria": [
+        "Briefing and readable costs/progress/trust",
+        "Pure help and contextual guidance",
+        "Factual exit recap and newcomer transcript review"
+      ],
+      "passes": false
+    }
+  ],
+  "registry_reuse": [
+    {
+      "milestone": "M1_RECOVERY",
+      "action": "contribute",
+      "package": "sunholo/crew_lab",
+      "reason": "Extend existing application; unchanged social_dynamics handles permissions and resources"
+    },
+    {
+      "milestone": "M2_INTERFACE",
+      "action": "contribute",
+      "package": "sunholo/crew_lab",
+      "reason": "Registry terminal/crew searches returned no results; simple pure stdlib presentation belongs in existing application"
+    }
+  ],
+  "velocity": {
+    "estimated_total_loc": 500,
+    "estimated_days": 1
+  },
+  "github_issues": []
+}

@@ -67,7 +67,7 @@ pure func tasks(s: PlayState, working: bool) -> [Task] =
 pure func taskChoice(s: PlayState, choice: string, working: bool) -> Result[Intent, string] =
   match stringToInt(choice) {
     Some(i) => match nth(tasks(s, working), i - 1) {
-      Some(t) => Ok(intent("ask", t.id)),
+      Some(t) => Ok(intent(if working then "ask" else "review_start", t.id)),
       None => Err("Choose a listed project")
     },
     None => Err("Choose a project number")
@@ -146,3 +146,29 @@ ensures { stringLength(result) > 0 } = {
   let projects = if state.tasks == [] then "No projects" else join("; ", map(\t. "${t.id} (${t.recipe}): ${show(t.status)}", state.tasks))
   "Tick ${show(state.tick)}; policy ${s.session.policy}; AI attempts remaining ${show(remaining)}\n${crew}\n${relations}\n${resources}\n${projects}"
 }
+
+-- Only navigation changes after a published rejection. Retain committed domain,
+-- RNG, journal sequence and IDs, including earlier boundaries of a blocked advance.
+export pure func recover(s: PlayState) -> PlayState
+ensures { result.session == s.session && result.seed == s.seed && result.seq == s.seq && result.nextId == s.nextId } =
+  if length(filter(\r. r.id == s.target, s.session.pending)) > 0 then { s | phase: "response" } else { s | phase: "main", target: "" }
+
+pure func recoveryLoop(s: Session, lines: [string], records: [string]) -> [string] = match lines {
+  [] => records,
+  line :: rest => match input(s, line) {
+    Err(e) => recoveryLoop(s, rest, records ++ ["{\"error\":${encodeHostError(e)}}"]),
+    Ok(o) => recoveryLoop(o.session, rest, records ++ [o.trace])
+  }
+}
+
+-- Replay actual journal host inputs, continuing across published rejections.
+-- The legacy recording entry intentionally remains fail-fast.
+export pure func recoveryRecording(lines: [string]) -> string
+ensures { length(lines) == 0 || stringLength(result) > 0 } =
+  if length(lines) > 10000 then "{\"error\":{\"host\":\"recording limit\"}}" else match lines {
+    [] => "",
+    first :: rest => match start(first) {
+      Err(e) => "{\"error\":${encodeHostError(e)}}",
+      Ok(o) => join("\n", recoveryLoop(o.session, rest, [o.trace]))
+    }
+  }

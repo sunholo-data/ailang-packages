@@ -11,7 +11,7 @@ import pkg/sunholo/social_dynamics/model (Offered)
 import ./session (Request, start)
 import ./reactions (Policy, weights, signature, fixtureBody)
 import ./store (Fetch, loadPolicy, resolve, openRun, appendRun)
-import ./play_flow (PlayState, Stage, Intent, begin, seedNumber, parseArgs, menu, route, stage, publish, renderStatus)
+import ./play_flow (PlayState, Stage, Intent, begin, seedNumber, parseArgs, menu, route, stage, publish, renderStatus, recover)
 
 type Run = { ui: PlayState, home: string, path: string, policy: Policy, policyBody: string, mode: string, remaining: int, lines: int }
 
@@ -122,7 +122,7 @@ func act(r: Run, i: Intent) -> Result[Applied, string] ! {FS, AI} = if i.kind ==
     Err(e) => Err(e),
     Ok(a) => if a.failed then Ok(a) else askProject(a.run, id)
   }
-} else if i.kind == "ask" then askProject(r, i.target) else if i.kind == "retry" || i.kind == "authored" then respond(r, i.kind == "authored") else if i.kind == "start" then commit(r, command("start_task", [kv("task", js(i.target))]), r.ui.seed, "main", "", r.ui.nextId, jo([]), 0) else if i.kind == "cancel" then commit(r, command("cancel_request", [kv("id", js(i.target))]), r.ui.seed, "main", "", r.ui.nextId, jo([]), 0) else if i.kind == "grant" || i.kind == "deny" then commit(r, command("resolve_relief", [kv("id", js(i.target)), kv("release", jb(i.kind == "grant"))]), r.ui.seed, "main", "", r.ui.nextId, jo([]), 0) else if i.kind == "advance" then commit(r, command("advance", [kv("tick", jint(r.ui.session.state.tick + 1)), kv("budget", jint(64))]), r.ui.seed, "main", "", r.ui.nextId, jo([]), 0) else if i.kind == "continue" then match r.ui.session.state.continuation {
+} else if i.kind == "review_start" then Ok({ run: { r | ui: { r.ui | phase: "start", target: i.target } }, failed: false, message: "Review the existing offer; the crew agreement is unchanged." }) else if i.kind == "ask" then askProject(r, i.target) else if i.kind == "retry" || i.kind == "authored" then respond(r, i.kind == "authored") else if i.kind == "start" then commit(r, command("start_task", [kv("task", js(i.target))]), r.ui.seed, "main", "", r.ui.nextId, jo([]), 0) else if i.kind == "cancel" then commit(r, command("cancel_request", [kv("id", js(i.target))]), r.ui.seed, "main", "", r.ui.nextId, jo([]), 0) else if i.kind == "grant" || i.kind == "deny" then commit(r, command("resolve_relief", [kv("id", js(i.target)), kv("release", jb(i.kind == "grant"))]), r.ui.seed, "main", "", r.ui.nextId, jo([]), 0) else if i.kind == "advance" then commit(r, command("advance", [kv("tick", jint(r.ui.session.state.tick + 1)), kv("budget", jint(64))]), r.ui.seed, "main", "", r.ui.nextId, jo([]), 0) else if i.kind == "continue" then match r.ui.session.state.continuation {
   Some(t) => commit(r, command("advance", [kv("tick", jint(t.target)), kv("budget", jint(64))]), r.ui.seed, "main", "", r.ui.nextId, jo([]), 0),
   None => Err("No pending advance")
 } else if i.kind == "abort" then commit(r, command("abort", []), r.ui.seed, "main", "", r.ui.nextId, jo([]), 0) else if i.kind == "relief_choice" then Ok({ run: { r | ui: { r.ui | phase: "relief", target: i.target } }, failed: false, message: "" }) else if i.kind == "back" then Ok({ run: { r | ui: { r.ui | phase: "main", target: "" } }, failed: false, message: "" }) else if i.kind == "working" || i.kind == "offered" || i.kind == "reliefs" then Ok({ run: { r | ui: { r.ui | phase: i.kind, target: "" } }, failed: false, message: "" }) else Err("Unknown captain action")
@@ -160,8 +160,8 @@ func loop(r: Run) -> () ! {IO, FS, AI} = {
       Ok(a) => {
         if a.message != "" then println(a.message) else ()
         if a.failed then {
-          println("Action failed; prior successful boundaries are in the journal")
-          exit(1)
+          println("Action not completed. Earlier successful work remains recorded; returning to the bridge.")
+          loop({ a.run | ui: recover(a.run.ui) })
         } else loop(a.run)
       }
     }
