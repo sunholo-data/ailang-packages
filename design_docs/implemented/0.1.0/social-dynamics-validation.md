@@ -68,3 +68,5 @@ live model generation, long-term retention/save migration and game UI adapters
 remain outside this sprint; example policies don't decide final game mechanics.
 
 Final pending-effects correction was test-first: the new indicator regression failed before its guard (21/22), then passed. The current aggregate and strict-VM suites each pass110/110; updated mutation baseline71/71 and all8 killers pass. The registry-aware quality log predates this private guard change but verifies the same unchanged module export set/interface; latest local strict-quality attestation is110/110. Full `verify` exits1 for the three explicitly recorded verifier errors, while the complete `validate` target exits0.
+
+Independent final evaluation PASS100/100 against18e8ba1;11 separate adversarial consumer probes pass, no remaining blockers. Report: [independent evaluation](evidence/independent-evaluation.json). Follow-up delivery changes are documentation/archival only.

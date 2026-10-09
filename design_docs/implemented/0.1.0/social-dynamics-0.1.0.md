@@ -9,7 +9,7 @@
 | Grounded Strangeness | +1 | Actor knowledge and causal contact boundaries remain explicit. |
 | We Are Not Built For This | +2 | Capacity and autonomy constrain cooperation. |
 
-**Status:** Implemented and locally validated 2026-10-09; independent final evaluation pending. Mark approved; independent design round2 PASS.
+**Status:** Implemented and locally validated 2026-10-09; independent evaluation PASS100/100, no blockers. Mark approved; independent design round2 PASS.
 **Priority:** P1. **Version:** new experimental package 0.1.0, not published.
 **Implements:** Mark's direction: task-driven conditions, captain trust/authority,
 crew-to-crew reactions, dynamic AI-created events, shared micro/macro causal mechanics,
