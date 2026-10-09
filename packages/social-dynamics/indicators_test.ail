@@ -1,0 +1,39 @@
+module sunholo/social_dynamics/indicators_test
+import ./model (Actor, Config, Resource, State, Error, InvalidConfig, InvalidPolicyEffect, NumericOverflow, IndicatorDelta, RelationshipDelta, emptyState)
+import ./indicators (validateConfig, applyEffects)
+import std/result (Result, Ok, Err)
+
+export pure func fixtureConfig() -> Config = {
+ id: "demo", version: 1, session: "session", timeUnit: "minutes", authorityId: "permit", appraisalId: "react",
+ limits: {actors: 8, tasks: 8, commitments: 8, reliefs: 8, evidence: 16, knowledge: 32, accepted: 32, operations: 8, effects: 8, text: 512, wire: 10000},
+ indicators: [{id: "trust", minimum: 0, maximum: 100}], recipes: [], rules: [],
+ evidence: [{id: "report", author: "a", kind: "report", text: "hello", causes: []}],
+ knowledge: [{observer: "a", evidence: "report"}],
+ relationships: [{from: "a", to: "b", dimension: "trust", value: 50}, {from: "b", to: "a", dimension: "trust", value: 70}]
+}
+export pure func fixtureActors() -> [Actor] = [{id: "a", capacity: 2, attributes: [], values: [], indicators: [{id: "trust", value: 50}]}, {id: "b", capacity: 2, attributes: [], values: [], indicators: [{id: "trust", value: 70}]}]
+export pure func fixtureResources() -> [Resource] = [{id: "material", initial: 10, available: 10, reserved: 0, consumed: 0, transferredIn: 0, transferredOut: 0}]
+export pure func fixtureStateFor(c: Config) -> State = match validateConfig(c, fixtureActors(), fixtureResources()) { Ok(s) => s, Err(_) => emptyState(c, fixtureActors(), fixtureResources()) }
+pure func fixtureState() -> State = fixtureStateFor(fixtureConfig())
+
+test "valid bounded configuration initializes" { match validateConfig(fixtureConfig(), fixtureActors(), fixtureResources()) { Ok(s) => s.tick == 0 && s.revision == 0, Err(_) => false } }
+test "duplicate actor refuses" { match validateConfig(fixtureConfig(), fixtureActors() ++ fixtureActors(), fixtureResources()) { Err(_) => true, Ok(_) => false } }
+test "nonconserved initial resources refuse" { match validateConfig(fixtureConfig(), fixtureActors(), [{id: "material", initial: 10, available: 11, reserved: 0, consumed: 0, transferredIn: 0, transferredOut: 0}]) { Err(_) => true, Ok(_) => false } }
+test "unknown initial knowledge refuses" { let c = fixtureConfig(); match validateConfig({c | knowledge: [{observer: "b", evidence: "hidden"}]}, fixtureActors(), fixtureResources()) { Err(_) => true, Ok(_) => false } }
+test "invalid range refuses" { let c = fixtureConfig(); match validateConfig({c | indicators: [{id: "trust", minimum: 100, maximum: 0}]}, fixtureActors(), fixtureResources()) { Err(_) => true, Ok(_) => false } }
+test "invalid recipe resource and duration refuse" { let c = fixtureConfig(); match validateConfig({c | recipes: [{id: "bad", duration: 0, allocation: 1, costs: [{resource: "missing", reserve: 1, consume: 1}], effects: []}]}, fixtureActors(), fixtureResources()) { Err(_) => true, Ok(_) => false } }
+test "valid directed effect changes only its source" { match applyEffects(fixtureConfig(), fixtureState(), [RelationshipDelta("a", "b", "trust", 5)]) { Ok(s) => s.relationships == [{from: "a", to: "b", dimension: "trust", value: 55}, {from: "b", to: "a", dimension: "trust", value: 70}], Err(_) => false } }
+test "effects cannot clamp into valid bounds" { match applyEffects(fixtureConfig(), fixtureState(), [IndicatorDelta("a", "trust", 51)]) { Err(_) => true, Ok(_) => false } }
+test "late effect failure returns only error" { match applyEffects(fixtureConfig(), fixtureState(), [IndicatorDelta("a", "trust", 5), IndicatorDelta("missing", "trust", 5)]) { Err(_) => true, Ok(_) => false } }
+test "numeric overflow rejected" { match applyEffects(fixtureConfig(), fixtureState(), [IndicatorDelta("a", "trust", 1000000000)]) { Err(NumericOverflow(_)) => true, _ => false } }
+test "actor duplicate indicators refuse" { let c = fixtureConfig(); let a = {id: "a", capacity: 1, attributes: [], values: [], indicators: [{id: "trust", value: 50}, {id: "trust", value: 50}]}; match validateConfig({c | evidence: [], knowledge: [], relationships: []}, [a], fixtureResources()) { Err(_) => true, _ => false } }
+test "bad threshold recovery band refuses" { let c = fixtureConfig(); let rule = {id: "stress", actor: "a", indicator: "trust", above: true, threshold: 60, recovery: 60, duration: 2, cooldown: 3}; match validateConfig({c | rules: [rule]}, fixtureActors(), fixtureResources()) { Err(_) => true, _ => false } }
+test "host evidence and explicit knowledge allowed" { let c = fixtureConfig(); match validateConfig({c | evidence: [{id: "report", author: "host", kind: "report", text: "announcement", causes: []}], knowledge: [{observer: "host", evidence: "report"}]}, fixtureActors(), fixtureResources()) { Ok(_) => true, _ => false } }
+test "actor and config category caps refuse overflow" { let c = fixtureConfig(); match validateConfig({c | limits: {c.limits | actors: 1}}, fixtureActors(), fixtureResources()) { Err(_) => true, _ => false } }
+test "atomic effect sequence does not manufacture a relationship" { match applyEffects(fixtureConfig(), fixtureState(), [RelationshipDelta("b", "b", "trust", 2)]) { Err(_) => true, _ => false } }
+test "effect batch cap refuses even individually valid effects" { let c = fixtureConfig(); match applyEffects({c | limits: {c.limits | effects: 1}}, fixtureStateFor({c | limits: {c.limits | effects: 1}}), [IndicatorDelta("a", "trust", 1), IndicatorDelta("a", "trust", 1)]) { Err(_) => true, _ => false } }
+test "initial reservations must belong to tasks and no initial tasks exist" { match validateConfig(fixtureConfig(), fixtureActors(), [{id: "material", initial: 10, available: 9, reserved: 1, consumed: 0, transferredIn: 0, transferredOut: 0}]) { Err(_) => true, _ => false } }
+test "causal cycles in initial evidence refuse" { let c = fixtureConfig(); let cyc = [{id: "report", author: "a", kind: "report", text: "x", causes: ["later"]}, {id: "later", author: "b", kind: "report", text: "y", causes: ["report"]}]; match validateConfig({c | evidence: cyc}, fixtureActors(), fixtureResources()) { Err(_) => true, _ => false } }
+test "acyclic evidence references accept independent of input order" { let c = fixtureConfig(); let es = [{id: "later", author: "b", kind: "report", text: "y", causes: ["report"]}] ++ c.evidence; match validateConfig({c | evidence: es}, fixtureActors(), fixtureResources()) { Ok(_) => true, _ => false } }
+test "same ID cap mutation refuses on initialized state" { let c = fixtureConfig(); match applyEffects({c | limits: {c.limits | effects: 9}}, fixtureState(), [IndicatorDelta("a", "trust", 1)]) { Err(InvalidConfig(_)) => true, _ => false } }
+test "same ID recipe mutation refuses on initialized state" { let c = fixtureConfig(); let changed = {c | recipes: [{id: "new", duration: 1, allocation: 1, costs: [], effects: []}]}; match applyEffects(changed, fixtureState(), []) { Err(InvalidConfig(_)) => true, _ => false } }

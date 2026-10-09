@@ -1,0 +1,132 @@
+module sunholo/social_dynamics/proposals
+import std/result (Result, Ok, Err)
+import std/option (Some, None)
+import std/list (length, any, filter, map, concat, contains)
+import std/string (length as stringLength, startsWith)
+import ./model (Config, Policies, State, Principal, Host, ActorPrincipal, Source, AI, Proposal, Operation, OfferTask, RaiseConcern, RequestRelief, OfferCommitment, AcceptTask, ResolveRelief, AcceptCommitment, Error, InvalidConfig, InvalidSchema, UnknownId, Unauthorized, UnseenEvidence, StaleRevision, Expired, AlteredDuplicate, CapacityExceeded, InvalidTransition, PendingAdvance, NumericOverflow, Step, Applied, Duplicate, Evidence, Task, Offered, Working, Relief, Commitment, Event, EventKind, TaskOffered, ConcernRaised, ReliefRequested, CommitmentOffered, CommitmentAccepted, validId, unique, sorted, bounded, principalId, event, numericLimit)
+import ./indicators (knows, findActor)
+import ./tasks (accept, resolveRelief)
+import ./conditions (reevaluate)
+import ./wire (encodeProposal, encodeConfig)
+
+pure func allIds(ids: [string]) -> bool = not any(\x. not validId(x), ids) && unique(ids)
+pure func known(s: State, author: string, ids: [string]) -> bool = allIds(ids) && not any(\id. not knows(s, author, id), ids)
+pure func actorExists(s: State, id: string) -> bool = match findActor(s, id) { Some(_) => true, None => false }
+pure func actorsExist(s: State, ids: [string]) -> bool = allIds(ids) && not any(\id. not actorExists(s, id), ids)
+pure func idUsed(s: State, id: string) -> bool = any(\x. x.id == id, s.evidence) || any(\x. x.id == id, s.tasks) || any(\x. x.id == id, s.commitments) || any(\x. x.id == id, s.reliefs)
+pure func emission(s: State, kind: EventKind, causes: [string]) -> Step = {state: {s | seq: s.seq + 1}, disposition: Applied, events: [event(s, kind, causes)]}
+pure func authored(c: Config, s: State, author: string, id: string, kind: string, text: string, causes: [string]) -> Result[State, Error] =
+  if not validId(id) || startsWith(id, "event-") || not allIds(causes) || stringLength(text) > c.limits.text then Err(InvalidSchema(id))
+  else if idUsed(s, id) then Err(InvalidTransition(id))
+  else if not known(s, author, causes) then Err(UnseenEvidence(id))
+  else if length(s.evidence) >= c.limits.evidence || length(s.knowledge) >= c.limits.knowledge then Err(CapacityExceeded(id))
+  else {
+    let e: Evidence = {id: id, author: author, kind: kind, text: text, causes: sorted(causes)};
+    Ok({s | evidence: concat(s.evidence, [e]), knowledge: concat(s.knowledge, [{observer: author, evidence: id}])})
+  }
+
+pure func offer(c: Config, s: State, who: string, id: string, recipe: string, people: [string], causes: [string]) -> Result[Step, Error] =
+  if not actorsExist(s, people) || length(people) == 0 then Err(UnknownId(id))
+  else if not any(\r. r.id == recipe, c.recipes) then Err(UnknownId(recipe))
+  else if length(s.tasks) >= c.limits.tasks then Err(CapacityExceeded(id))
+  else match authored(c, s, who, id, "task_offer", recipe, causes) {
+    Err(e) => Err(e),
+    Ok(t) => {
+      let task: Task = {id: id, recipe: recipe, participants: sorted(people), causes: sorted(causes), supervisor: who, status: Offered, started: 0, due: 0};
+      Ok(emission({t | tasks: concat(t.tasks, [task])}, TaskOffered(id), causes))
+    }
+  }
+pure func concern(c: Config, s: State, who: string, id: string, evidence: [string], people: [string], text: string) -> Result[Step, Error] =
+  if not actorsExist(s, people) then Err(UnknownId(id))
+  else match authored(c, s, who, id, "concern", text, evidence) {
+    Err(e) => Err(e), Ok(t) => Ok(emission(t, ConcernRaised(id), evidence))
+  }
+pure func request(c: Config, s: State, who: string, id: string, taskId: string, causes: [string]) -> Result[Step, Error] = {
+  let ts = filter(\t. t.id == taskId, s.tasks);
+  match ts {
+    [] => Err(UnknownId(taskId)),
+    task :: _ => if task.status != Working || not contains(task.participants, who) then Err(Unauthorized(taskId))
+      else if length(s.reliefs) >= c.limits.reliefs then Err(CapacityExceeded(id))
+      else match authored(c, s, who, id, "relief_request", taskId, causes) {
+        Err(e) => Err(e), Ok(t) => {
+          let relief: Relief = {id: id, task: taskId, author: who, resolved: false};
+          Ok(emission({t | reliefs: concat(t.reliefs, [relief])}, ReliefRequested(id), causes))
+        }
+      }
+  }
+}
+pure func commitment(c: Config, s: State, who: string, id: string, people: [string], text: string, due: int, causes: [string]) -> Result[Step, Error] =
+  if not actorsExist(s, people) || length(people) < 2 || not contains(people, who) then Err(Unauthorized(id))
+  else if not bounded(due) || due <= s.tick then Err(InvalidTransition(id))
+  else if length(s.commitments) >= c.limits.commitments then Err(CapacityExceeded(id))
+  else match authored(c, s, who, id, "commitment_offer", text, causes) {
+    Err(e) => Err(e), Ok(t) => {
+      let com: Commitment = {id: id, parties: sorted(people), accepted: [], terms: text, due: due, causes: sorted(causes), active: false};
+      Ok(emission({t | commitments: concat(t.commitments, [com])}, CommitmentOffered(id), causes))
+    }
+  }
+pure func consent(s: State, who: string, id: string) -> Result[Step, Error] =
+  match filter(\x. x.id == id, s.commitments) {
+    [] => Err(UnknownId(id)),
+    com :: _ => if not contains(com.parties, who) then Err(Unauthorized(id))
+      else if contains(com.accepted, who) || com.due <= s.tick then Err(InvalidTransition(id))
+      else {
+        let accepted = sorted(concat(com.accepted, [who]));
+        let active = length(accepted) == length(com.parties);
+        let changed = {com | accepted: accepted, active: active};
+        Ok(emission({s | commitments: map(\x. if x.id == id then changed else x, s.commitments)}, CommitmentAccepted(id, who, active), com.causes))
+      }
+  }
+pure func generated(op: Operation) -> bool = match op { AcceptTask(_) => false, ResolveRelief(_, _) => false, AcceptCommitment(_) => false, _ => true }
+pure func applyOne(c: Config, policies: Policies, s: State, p: Principal, op: Operation) -> Result[Step, Error] = {
+  let who = principalId(p);
+  match op {
+    OfferTask(id, recipe, people, causes) => offer(c, s, who, id, recipe, people, causes),
+    RaiseConcern(id, causes, people, text) => concern(c, s, who, id, causes, people, text),
+    RequestRelief(id, taskId, causes) => request(c, s, who, id, taskId, causes),
+    OfferCommitment(id, people, text, due, causes) => commitment(c, s, who, id, people, text, due, causes),
+    AcceptTask(id) => accept(c, policies, s, p, id),
+    ResolveRelief(id, release) => resolveRelief(c, s, p, id, release),
+    AcceptCommitment(id) => consent(s, who, id)
+  }
+}
+pure func stage(c: Config, policies: Policies, s: State, principal: Principal, ops: [Operation], events: [Event]) -> Result[Step, Error] =
+  match ops {
+    [] => Ok({state: s, disposition: Applied, events: events}),
+    op :: rest => match applyOne(c, policies, s, principal, op) {
+      Err(e) => Err(e), Ok(step) => stage(c, policies, step.state, principal, rest, concat(events, step.events))
+    }
+  }
+
+-- Pure all-or-nothing boundary: callers retain their incoming State on Err.
+export pure func apply(c: Config, policies: Policies, s: State, principal: Principal, source: Source, p: Proposal) -> Result[Step, Error]
+ensures { match result { Ok(step) => step.state.config == s.config && step.state.tick == s.tick, Err(_) => true } } = {
+  let who = principalId(principal);
+  let body = encodeProposal(p);
+  if encodeConfig(c) != s.configBody || c.id != s.config || c.session != s.session || p.config != c.id || policies.authorityId != c.authorityId || policies.appraisalId != c.appraisalId then Err(InvalidConfig(c.id))
+  else if not validId(p.id) || p.principal != who || p.origin != source || (who != "host" && not actorExists(s, who)) || (match principal { ActorPrincipal(id) => id == "host" || not validId(id), Host => false }) then Err(Unauthorized(p.id))
+  else if (match s.continuation { Some(_) => true, None => false }) then Err(PendingAdvance(p.id))
+  else if stringLength(body) > c.limits.wire then Err(InvalidSchema(p.id))
+  else match filter(\a. a.id == p.id, s.accepted) {
+    prior :: _ => if prior.body == body then Ok({state: s, disposition: Duplicate, events: []}) else Err(AlteredDuplicate(p.id)),
+    [] => match s.continuation {
+      Some(_) => Err(PendingAdvance(p.id)),
+      None => if length(s.accepted) >= c.limits.accepted then Err(CapacityExceeded(p.id))
+        else if p.baseRevision != s.revision then Err(StaleRevision(p.id))
+        else if not bounded(p.expires) || p.expires < s.tick then Err(Expired(p.id))
+        else if length(p.operations) == 0 || length(p.operations) > c.limits.operations || not allIds(p.causes) then Err(InvalidSchema(p.id))
+        else if not known(s, who, p.causes) then Err(UnseenEvidence(p.id))
+        else if source == AI && any(\op. not generated(op), p.operations) then Err(Unauthorized(p.id))
+        else if s.revision >= numericLimit() || s.seq > numericLimit() - length(p.operations) then Err(NumericOverflow(p.id))
+        else match stage(c, policies, s, principal, p.operations, []) {
+          Err(e) => Err(e), Ok(step) => match reevaluate(c, step.state) {
+            Err(e) => Err(e), Ok(t) => {
+              let rev = s.revision + 1;
+              Ok({state: {t | revision: rev, accepted: concat(t.accepted, [{id: p.id, body: body}])}, disposition: Applied,
+                events: map(\ev. {ev | revision: rev}, step.events)})
+            }
+          }
+        }
+    }
+  }
+}

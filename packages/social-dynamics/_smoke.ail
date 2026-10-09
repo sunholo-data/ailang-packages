@@ -1,0 +1,9 @@
+module sunholo/social_dynamics/_smoke
+import std/io (println)
+import std/result (Ok, Err)
+import ./model (bounded, add, NumericOverflow)
+import ./wire (decodeProposal, encodeProposal)
+export pure func smokeChecks() -> bool ensures { result == (bounded(1000000000) && add(1000000000, 1) == Err(NumericOverflow("addition"))) } =
+  bounded(1000000000) && add(1000000000, 1) == Err(NumericOverflow("addition"))
+export func main() -> () ! {IO @limit=1} = println(if smokeChecks() then "OK social dynamics invariants" else "FAIL social dynamics invariants")
+test "smoke scalar overflow boundary" { smokeChecks() }

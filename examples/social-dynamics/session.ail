@@ -1,0 +1,87 @@
+module sunholo/social_experiments/session
+import std/result (Result, Ok, Err)
+import std/option (Some, None)
+import std/json (Json, JNumber, decode, encode, get, getString, getNumber, getInt, getStringArrayStrict, keys, js as stdJsonString)
+import std/list (length, dedup, contains, concat)
+import std/string (length as stringLength, join)
+import std/math (floor)
+import pkg/sunholo/social_dynamics/model (Config, Policies, State, Step, Error, Source, AI, Authored, ActorInput, InvalidSchema, InvalidConfig, Host, ActorPrincipal, Principal, Applied, Delivery, Done, Pending, Blocked, Token)
+import pkg/sunholo/social_dynamics/engine (init, advance, continueAdvance, abortAdvance)
+import pkg/sunholo/social_dynamics/proposals (apply)
+import pkg/sunholo/social_dynamics/relationships (deliver)
+import pkg/sunholo/social_dynamics/wire (decodeProposal, encodeState, encodeEvents, encodeError, singleObject)
+import ./config (config, actors, resources, policies)
+
+export type Session = {config: Config, policies: Policies, state: State}
+export type Output = {session: Session, trace: string, failed: bool}
+export pure func trace(s: State, events: string) -> string ensures { stringLength(result) > 0 } = "{\"state\":${encodeState(s)},\"events\":${events}}"
+export pure func start(text: string) -> Result[Output, Error]
+ensures { match result { Ok(o) => o.session.state.tick == 0, Err(_) => true } } = if not singleObject(text) then Err(InvalidSchema("start JSON")) else match decode(text) {
+  Err(_) => Err(InvalidSchema("start JSON")), Ok(j) => match (getString(j, "command"), getString(j, "scenario"), getString(j, "policy")) {
+    (Some("start"), Some(scenario), Some(policy)) => if not fields(j, ["command", "scenario", "policy"]) then Err(InvalidSchema("start fields")) else match config(scenario, policy) {
+      Err(e) => Err(e), Ok(c) => match init(c, actors(scenario), resources()) {
+        Err(e) => Err(e), Ok(s) => Ok({session: {config: c, policies: policies(policy), state: s}, trace: trace(s, "[]"), failed: false})
+      }
+    }, _ => Err(InvalidSchema("start command required"))
+  }
+}
+pure func fields(j: Json, required: [string]) -> bool = {
+  let ks = keys(j);
+  length(ks) == length(required) && length(dedup(ks)) == length(ks) && not missing(ks, required)
+}
+pure func missing(xs: [string], ys: [string]) -> bool = match ys { [] => false, y :: rest => not contains(xs, y) || missing(xs, rest) }
+pure func integer(j: Json, key: string) -> Result[int, Error] = match (getNumber(j, key), getInt(j, key)) {
+  (Some(n), Some(i)) => if n < 0.0 || n > 1000000000.0 || floor(n) != n then Err(InvalidSchema(key)) else Ok(i), _ => Err(InvalidSchema(key))
+}
+pure func submissionSource(src: string) -> Result[Source, Error] = match src { "ai" => Ok(AI), "authored" => Ok(Authored), "actor" => Ok(ActorInput), _ => Err(InvalidSchema("submission source")) }
+pure func stepped(session: Session, step: Step) -> Output = {session: {session | state: step.state}, trace: trace(step.state, encodeEvents(step.events)), failed: false}
+pure func advanced(session: Session, target: int, budget: int) -> Result[Output, Error] = {
+  let result = match session.state.continuation { None => advance(session.config, session.policies, session.state, target, budget), Some(token) => if token.target == target then continueAdvance(session.config, session.policies, session.state, token, budget) else Blocked(session.state, [], "target", session.state.tick, InvalidSchema("pending target mismatch")) };
+  match result {
+    Done(s, ev) => Ok({session: {session | state: s}, trace: trace(s, encodeEvents(ev)), failed: false}),
+    Pending(s, ev, _) => Ok({session: {session | state: s}, trace: trace(s, encodeEvents(ev)), failed: false}),
+    Blocked(s, ev, id, due, e) => Ok({session: {session | state: s}, trace: "{\"state\":${encodeState(s)},\"events\":${encodeEvents(ev)},\"blocked\":${encodeError(e)},\"item\":${encode(stdJsonString(id))},\"due_tick\":${show(due)}}", failed: true})
+  }
+}
+export pure func input(session: Session, text: string) -> Result[Output, Error]
+ensures { match result { Ok(o) => o.session.state.config == session.state.config, Err(_) => true } } =
+  if not singleObject(text) then Err(InvalidSchema("line size")) else match decode(text) {
+    Err(_) => Err(InvalidSchema("command JSON")), Ok(j) => match getString(j, "command") {
+      Some("proposal") => if not fields(j, ["command", "principal", "source", "proposal"]) then Err(InvalidSchema("proposal fields")) else match (getString(j, "principal"), getString(j, "source"), get(j, "proposal")) {
+        (Some(id), Some(src), Some(raw)) => match (submissionSource(src), decodeProposal(encode(raw))) {
+          (Err(e), _) => Err(e), (_, Err(e)) => Err(e), (Ok(source), Ok(p)) => match apply(session.config, session.policies, session.state, if id == "host" then Host else ActorPrincipal(id), source, p) {
+            Err(e) => Err(e), Ok(step) => Ok(stepped(session, step))
+          }
+        }, _ => Err(InvalidSchema("proposal input"))
+      },
+      Some("advance") => if not fields(j, ["command", "tick", "budget"]) then Err(InvalidSchema("advance fields")) else match (integer(j, "tick"), integer(j, "budget")) {
+        (Ok(t), Ok(b)) => advanced(session, t, b), _ => Err(InvalidSchema("advance numbers"))
+      },
+      Some("deliver") => if not fields(j, ["command", "id", "observer", "evidence", "causes", "not_before", "source"]) then Err(InvalidSchema("deliver fields")) else match (getString(j, "id"), getString(j, "observer"), getString(j, "evidence"), getStringArrayStrict(j, "causes"), integer(j, "not_before"), getString(j, "source")) {
+        (Some(id), Some(observer), Some(evidence), Some(causes), Ok(receipt), Some(source)) => {
+          let d: Delivery = {id: id, observer: observer, evidence: evidence, causes: causes, notBefore: receipt, source: source};
+          match deliver(session.config, session.policies, session.state, Host, d) { Err(e) => Err(e), Ok(step) => Ok(stepped(session, step)) }
+        }, _ => Err(InvalidSchema("delivery input"))
+      },
+      Some("abort") => if not fields(j, ["command"]) then Err(InvalidSchema("abort fields")) else match session.state.continuation {
+        None => Err(InvalidSchema("no pending advance")), Some(token) => match abortAdvance(session.state, Host, token) { Err(e) => Err(e), Ok(s) => Ok({session: {session | state: s}, trace: trace(s, "[]"), failed: false}) }
+      },
+      _ => Err(InvalidSchema("unknown command"))
+    }
+  }
+
+-- Pure replay entry permits strict-VM comparison without evaluator-only readLine.
+pure func recordedTail(session: Session, lines: [string], records: [string]) -> [string] = match lines {
+  [] => records,
+  line :: rest => match input(session, line) {
+    Err(e) => concat(records, ["{\"error\":${encodeError(e)}}"]),
+    Ok(o) => if o.failed then concat(records, [o.trace]) else recordedTail(o.session, rest, concat(records, [o.trace]))
+  }
+}
+export pure func recording(lines: [string]) -> string ensures { stringLength(result) > 0 } = match lines {
+  [] => "{\"error\":\"empty_recording\"}",
+  first :: rest => if length(lines) > 10000 then "{\"error\":\"recording_limit\"}" else match start(first) {
+    Err(e) => "{\"error\":${encodeError(e)}}",
+    Ok(o) => join("\n", recordedTail(o.session, rest, [o.trace]))
+  }
+}

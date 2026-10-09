@@ -1,0 +1,75 @@
+module sunholo/social_dynamics/relationships
+import ./model (Appraisal, Config, State, Policies, Principal, Host, ActorPrincipal, Delivery, Step, Error, Effect, IndicatorDelta, RelationshipDelta, InvalidConfig, UnknownId, UnseenEvidence, Unauthorized, InvalidTransition, InvalidSchema, InvalidPolicyEffect, CapacityExceeded, PendingAdvance, AlteredDuplicate, Applied, Duplicate, ObservationDelivered, ReactionApplied, validId, bounded, unique, sorted, add, event)
+import ./indicators (findActor, knows, applyEffects)
+import ./wire (encodeConfig)
+import ./conditions (reevaluate)
+import std/list (filter, head, any, length)
+import std/option (Some, None)
+import std/result (Result, Ok, Err)
+import std/json (encode, jo, kv, js, jint, ja)
+import std/list (map)
+import std/string (length as stringLength)
+
+export pure func appraisalContext(s: State, observer: string, evidence: string) -> Result[Appraisal, Error]
+ensures { match result { Ok(c) => c.observer.id == observer && c.evidence.id == evidence, Err(_) => true } } =
+ if not validId(observer) || not validId(evidence) then Err(InvalidSchema("appraisal_ids")) else match findActor(s, observer) {
+  None => Err(UnknownId(observer)),
+  Some(a) => match head(filter(\e. e.id == evidence, s.evidence)) {
+   None => Err(UnknownId(evidence)),
+   Some(e) => if not knows(s, observer, evidence) then Err(UnseenEvidence(evidence)) else Ok({observer: a, evidence: e, relationships: filter(\r. r.from == observer, s.relationships), visible: filter(\v. knows(s, observer, v.id), s.evidence)})
+  }
+ }
+
+pure func ownEffect(observer: string, e: Effect) -> bool = match e { IndicatorDelta(actor, _, _) => actor == observer, RelationshipDelta(from, _, _, _) => from == observer }
+pure func deliveryBody(d: Delivery) -> string = encode(jo([kv("schema", js("social_delivery/1")), kv("id", js(d.id)), kv("observer", js(d.observer)), kv("evidence", js(d.evidence)), kv("causes", ja(map(js, sorted(d.causes)))), kv("not_before", jint(d.notBefore)), kv("source", js(d.source))]))
+pure func received(c: Config, p: Policies, s: State, d: Delivery, body: string) -> Result[Step, Error] = {
+ let staged = {s | knowledge: s.knowledge ++ [{observer: d.observer, evidence: d.evidence}]};
+ match appraisalContext(staged, d.observer, d.evidence) {
+  Err(err) => Err(err),
+  Ok(context) => {
+   let effects = p.appraisal(context);
+   if length(effects) > c.limits.effects then Err(CapacityExceeded("effects"))
+   else if any(\e. not ownEffect(d.observer, e), effects) then Err(InvalidPolicyEffect(d.observer))
+   else match applyEffects(c, staged, effects) {
+    Err(err) => Err(err),
+    Ok(effected) => match reevaluate(c, effected) {
+     Err(err) => Err(err),
+     Ok(changed) => match add(s.revision, 1) {
+     Err(err) => Err(err),
+     Ok(revision) => match add(s.seq, 2) {
+      Err(err) => Err(err),
+      Ok(seq) => {
+       let observed = event(s, ObservationDelivered(d.evidence, d.observer), d.causes);
+       let reacted = {event(s, ReactionApplied(d.observer, d.evidence, effects), [d.evidence]) | seq: s.seq + 2};
+       Ok({state: {changed | revision: revision, seq: seq, accepted: s.accepted ++ [{id: d.id, body: body}]}, disposition: Applied, events: [observed, reacted]})
+      }
+     }
+    }
+    }
+   }
+  }
+ }
+}
+export pure func deliver(c: Config, p: Policies, s: State, principal: Principal, d: Delivery) -> Result[Step, Error]
+ensures { match result { Ok(step) => step.state.tick == s.tick && (if step.disposition == Duplicate then step.state == s && step.events == [] else step.state.revision == s.revision + 1), Err(_) => true } } = {
+ if principal != Host then Err(Unauthorized("delivery_host"))
+ else if s.config != c.id || s.session != c.session || s.configBody != encodeConfig(c) || p.authorityId != c.authorityId || p.appraisalId != c.appraisalId then Err(InvalidConfig("delivery_context"))
+ else match s.continuation {
+  Some(_) => Err(PendingAdvance("delivery")),
+  None => if not validId(d.id) || not validId(d.observer) || not validId(d.evidence) || not validId(d.source) || d.notBefore < 0 || not bounded(d.notBefore) || length(d.causes) > c.limits.operations || not unique(d.causes) || any(\id. not validId(id), d.causes) then Err(InvalidSchema("delivery"))
+  else if d.notBefore > s.tick then Err(InvalidTransition("receipt_time"))
+  else if not any(\a. a.id == d.observer, s.actors) then Err(UnknownId(d.observer))
+  else if not any(\e. e.id == d.evidence, s.evidence) || any(\id. not any(\e. e.id == id, s.evidence), d.causes) then Err(UnknownId(d.evidence))
+  else {
+   let body = deliveryBody(d);
+   if stringLength(body) > c.limits.wire then Err(CapacityExceeded("wire"))
+   else match head(filter(\a. a.id == d.id, s.accepted)) {
+    Some(accepted) => if accepted.body == body then Ok({state: s, disposition: Duplicate, events: []}) else Err(AlteredDuplicate(d.id)),
+    None => if knows(s, d.observer, d.evidence) then Ok({state: s, disposition: Duplicate, events: []})
+     else if length(s.knowledge) >= c.limits.knowledge then Err(CapacityExceeded("knowledge"))
+     else if length(s.accepted) >= c.limits.accepted then Err(CapacityExceeded("accepted"))
+     else received(c, p, s, d, body)
+   }
+  }
+ }
+}

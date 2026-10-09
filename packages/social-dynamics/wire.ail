@@ -1,0 +1,155 @@
+module sunholo/social_dynamics/wire
+import ./model (Error, Principal, Source, Disposition, Value, Actor, Indicator, Relationship, Resource, Cost, Effect, Recipe, Requirement, Authority, TaskStatus, Task, Relief, Commitment, Evidence, Knowledge, Appraisal, Rule, Condition, Limits, Config, Policies, Accepted, Token, State, Operation, Proposal, Delivery, EventKind, Event, Step, AdvanceResult, InvalidConfig, InvalidSchema, UnsupportedVersion, UnknownId, Unauthorized, UnseenEvidence, StaleRevision, Expired, AlteredDuplicate, InsufficientResource, CapacityExceeded, InvalidPolicyEffect, InvalidTransition, ClockRewind, InvalidBudget, NumericOverflow, PendingAdvance, InvalidContinuation, Host, ActorPrincipal, AI, Authored, ActorInput, Applied, Duplicate, IndicatorDelta, RelationshipDelta, Allowed, Conditional, Refused, Offered, Working, Completed, Stopped, OfferTask, RaiseConcern, RequestRelief, OfferCommitment, AcceptTask, ResolveRelief, AcceptCommitment, TaskOffered, TaskAccepted, ConcernRaised, ReliefRequested, ReliefResolved, CommitmentOffered, CommitmentAccepted, TaskCompleted, ConditionEntered, ConditionRecovered, ObservationDelivered, ReactionApplied, Done, Pending, Blocked, validId, unique, sorted, bounded)
+import std/json (Json, JNull, JString, JNumber, JBool, JArray, JObject, encode, decode, js, jint, jb, ja, jo, kv, getString, getInt, getNumber, getBool, getStringArrayStrict, getArray, keys)
+import std/list (map, any, length, sortBy)
+import std/string (length as stringLength, contains, chars, trim, startsWith, endsWith)
+import std/result (Result, Ok, Err)
+import std/option (Option, Some, None)
+
+pure func strings(xs: [string]) -> Json = ja(map(js, sorted(xs)))
+pure func str(j: Json, k: string) -> string = match getString(j,k) { Some(s) => s, None => "" }
+pure func num(j: Json,k: string) -> int = match getInt(j,k) { Some(n) => n, None => 0 }
+pure func flag(j: Json,k: string) -> bool = match getBool(j,k) { Some(n) => n, None => false }
+pure func ids(j: Json,k: string) -> [string] = match getStringArrayStrict(j,k) { Some(xs) => sorted(xs), None => [] }
+pure func shape(j: Json, fields: [string]) -> bool = unique(keys(j)) && sorted(keys(j)) == sorted(fields)
+pure func idField(j: Json,k: string) -> bool = match getString(j,k) { Some(s) => validId(s), None => false }
+pure func textField(j: Json,k: string) -> bool = match getString(j,k) { Some(s) => stringLength(s)<=4096, None => false }
+pure func intField(j: Json,k: string) -> bool = match getNumber(j,k) { Some(n) => n>=0.0-1000000000.0 && n<=1000000000.0 && match getInt(j,k) {Some(i) => n == intToFloat(i), None => false}, None => false }
+pure func idsField(j: Json,k: string) -> bool = match getStringArrayStrict(j,k) { Some(xs) => length(xs)<=128 && unique(xs) && not any(\s. not validId(s),xs), None => false }
+pure func boolField(j: Json,k: string) -> bool = match getBool(j,k) { Some(_) => true, None => false }
+pure func source(s: Source) -> string = match s { AI => "ai", Authored => "authored", ActorInput => "actor_input" }
+pure func readSource(s: string) -> Source = if s=="ai" then AI else if s=="actor_input" then ActorInput else Authored
+
+pure func operationJson(op: Operation) -> Json = match op {
+  OfferTask(x0,x1,x2,x3) => jo([kv("type",js("offer_task")),kv("offer_id",js(x0)),kv("recipe_id",js(x1)),kv("participants",strings(x2)),kv("causes",strings(x3))])
+  RaiseConcern(x0,x1,x2,x3) => jo([kv("type",js("raise_concern")),kv("concern_id",js(x0)),kv("evidence_ids",strings(x1)),kv("addressees",strings(x2)),kv("text",js(x3))])
+  RequestRelief(x0,x1,x2) => jo([kv("type",js("request_relief")),kv("request_id",js(x0)),kv("task_id",js(x1)),kv("causes",strings(x2))])
+  OfferCommitment(x0,x1,x2,x3,x4) => jo([kv("type",js("offer_commitment")),kv("commitment_id",js(x0)),kv("parties",strings(x1)),kv("terms",js(x2)),kv("due_tick",jint(x3)),kv("causes",strings(x4))])
+  AcceptTask(x0) => jo([kv("type",js("accept_task")),kv("offer_id",js(x0))])
+  ResolveRelief(x0,x1) => jo([kv("type",js("resolve_relief")),kv("request_id",js(x0)),kv("release_remaining",jb(x1))])
+  AcceptCommitment(x0) => jo([kv("type",js("accept_commitment")),kv("commitment_id",js(x0))])
+}
+pure func readOperation(j: Json) -> Result[Operation,Error] =
+  if str(j,"type")=="offer_task" then
+    if shape(j,["type","offer_id","recipe_id","participants","causes"]) && idField(j,"offer_id") && idField(j,"recipe_id") && idsField(j,"participants") && idsField(j,"causes") then Ok(OfferTask(str(j,"offer_id"),str(j,"recipe_id"),ids(j,"participants"),ids(j,"causes"))) else Err(InvalidSchema("operation"))
+  else if str(j,"type")=="raise_concern" then
+    if shape(j,["type","concern_id","evidence_ids","addressees","text"]) && idField(j,"concern_id") && idsField(j,"evidence_ids") && idsField(j,"addressees") && textField(j,"text") then Ok(RaiseConcern(str(j,"concern_id"),ids(j,"evidence_ids"),ids(j,"addressees"),str(j,"text"))) else Err(InvalidSchema("operation"))
+  else if str(j,"type")=="request_relief" then
+    if shape(j,["type","request_id","task_id","causes"]) && idField(j,"request_id") && idField(j,"task_id") && idsField(j,"causes") then Ok(RequestRelief(str(j,"request_id"),str(j,"task_id"),ids(j,"causes"))) else Err(InvalidSchema("operation"))
+  else if str(j,"type")=="offer_commitment" then
+    if shape(j,["type","commitment_id","parties","terms","due_tick","causes"]) && idField(j,"commitment_id") && idsField(j,"parties") && textField(j,"terms") && intField(j,"due_tick") && idsField(j,"causes") then Ok(OfferCommitment(str(j,"commitment_id"),ids(j,"parties"),str(j,"terms"),num(j,"due_tick"),ids(j,"causes"))) else Err(InvalidSchema("operation"))
+  else if str(j,"type")=="accept_task" then
+    if shape(j,["type","offer_id"]) && idField(j,"offer_id") then Ok(AcceptTask(str(j,"offer_id"))) else Err(InvalidSchema("operation"))
+  else if str(j,"type")=="resolve_relief" then
+    if shape(j,["type","request_id","release_remaining"]) && idField(j,"request_id") && boolField(j,"release_remaining") then Ok(ResolveRelief(str(j,"request_id"),flag(j,"release_remaining"))) else Err(InvalidSchema("operation"))
+  else if str(j,"type")=="accept_commitment" then
+    if shape(j,["type","commitment_id"]) && idField(j,"commitment_id") then Ok(AcceptCommitment(str(j,"commitment_id"))) else Err(InvalidSchema("operation"))
+  else Err(InvalidSchema("operation_type"))
+@allow_empty_ok("Recursive tail: an empty operations list is valid internally; public decoder requires 1 to 16 operations")
+pure func readOperations(js: [Json]) -> Result[[Operation],Error] = match js { [] => Ok([]), j::rest => match readOperation(j) { Err(e) => Err(e), Ok(op) => match readOperations(rest) {Err(e)=>Err(e),Ok(ops)=>Ok(op::ops)} } }
+
+export pure func encodeProposal(p: Proposal) -> string ensures { contains(result,"\"schema\":\"social_proposal/1\"") } = encode(jo([kv("schema",js("social_proposal/1")),kv("id",js(p.id)),kv("config_id",js(p.config)),kv("base_revision",jint(p.baseRevision)),kv("principal_id",js(p.principal)),kv("origin",js(source(p.origin))),kv("expires_tick",jint(p.expires)),kv("causes",strings(p.causes)),kv("operations",ja(map(operationJson,p.operations)))]))
+-- std/json accepts trailing data on this pinned runtime; check one complete object first.
+pure func oneObjectTail(xs: [string], depth: int, quoted: bool, escaped: bool) -> bool = match xs {
+ [] => false,
+ c::rest => if quoted then
+   if escaped then oneObjectTail(rest,depth,true,false)
+   else if c=="\\" then oneObjectTail(rest,depth,true,true)
+   else if c=="\"" then oneObjectTail(rest,depth,false,false)
+   else oneObjectTail(rest,depth,true,false)
+ else if c=="\"" then oneObjectTail(rest,depth,true,false)
+ else if c=="{" || c=="[" then oneObjectTail(rest,depth+1,false,false)
+ else if c=="}" || c=="]" then if depth==1 then not any(\c. not (c==" " || c=="\n" || c=="\r" || c=="\t"),rest) else oneObjectTail(rest,depth-1,false,false)
+ else oneObjectTail(rest,depth,false,false)
+}
+-- Framing/syntax only: callers must additionally validate their object keys and schema.
+export pure func singleObject(text: string) -> bool ensures { not result || (stringLength(text)<=65536 && startsWith(trim(text),"{") && endsWith(trim(text),"}")) } =
+ if stringLength(text)>65536 || not startsWith(trim(text),"{") || not endsWith(trim(text),"}") then false
+ else match chars(trim(text)) { "{"::rest => oneObjectTail(rest,1,false,false) && match decode(text) {Ok(JObject(_))=>true,_=>false}, _=>false }
+export pure func decodeProposal(text: string) -> Result[Proposal, Error] ensures { match result {Ok(p)=>bounded(p.baseRevision) && bounded(p.expires) && validId(p.id) && validId(p.config) && validId(p.principal) && unique(p.causes) && length(p.operations)>0 && length(p.operations)<=16, Err(_)=>true} } =
+ if stringLength(text)>65536 then Err(InvalidSchema("wire_size")) else if not singleObject(text) then Err(InvalidSchema("json")) else match decode(text) {
+ Err(_) => Err(InvalidSchema("json")), Ok(j) =>
+ if str(j,"schema")!="social_proposal/1" then Err(UnsupportedVersion("schema"))
+ else if not shape(j,["schema","id","config_id","base_revision","principal_id","origin","expires_tick","causes","operations"]) || not idField(j,"id") || not idField(j,"config_id") || not idField(j,"principal_id") || not intField(j,"base_revision") || not intField(j,"expires_tick") || not idsField(j,"causes") || not (str(j,"origin")=="ai" || str(j,"origin")=="authored" || str(j,"origin")=="actor_input") then Err(InvalidSchema("proposal"))
+ else match getArray(j,"operations") { None=>Err(InvalidSchema("operations")), Some(ops)=> if length(ops)==0 || length(ops)>16 then Err(InvalidSchema("operations_size")) else match readOperations(ops) {Err(e)=>Err(e),Ok(xs)=>Ok({id:str(j,"id"),config:str(j,"config_id"),baseRevision:num(j,"base_revision"),principal:str(j,"principal_id"),origin:readSource(str(j,"origin")),expires:num(j,"expires_tick"),causes:ids(j,"causes"),operations:xs})} }
+ }
+
+pure func sortedJson(xs: [Json]) -> Json = ja(sortBy(\a b. if encode(a)<encode(b) then 0-1 else if encode(a)==encode(b) then 0 else 1,xs))
+pure func taskStatus(t: TaskStatus) -> string = match t { Offered=>"offered",Working=>"working",Completed=>"completed",Stopped=>"stopped" }
+pure func valueJson(x: Value) -> Json = jo([kv("id",js(x.id)),kv("value",jint(x.value))])
+pure func actorJson(x: Actor) -> Json = jo([kv("id",js(x.id)),kv("capacity",jint(x.capacity)),kv("attributes",sortedJson(map(valueJson,x.attributes))),kv("values",sortedJson(map(valueJson,x.values))),kv("indicators",sortedJson(map(valueJson,x.indicators)))])
+pure func relationshipJson(x: Relationship) -> Json = jo([kv("from",js(x.from)),kv("to",js(x.to)),kv("dimension",js(x.dimension)),kv("value",jint(x.value))])
+pure func resourceJson(x: Resource) -> Json = jo([kv("id",js(x.id)),kv("initial",jint(x.initial)),kv("available",jint(x.available)),kv("reserved",jint(x.reserved)),kv("consumed",jint(x.consumed)),kv("transferred_in",jint(x.transferredIn)),kv("transferred_out",jint(x.transferredOut))])
+pure func taskJson(x: Task) -> Json = jo([kv("id",js(x.id)),kv("recipe",js(x.recipe)),kv("participants",strings(x.participants)),kv("causes",strings(x.causes)),kv("supervisor",js(x.supervisor)),kv("status",js(taskStatus(x.status))),kv("started",jint(x.started)),kv("due",jint(x.due))])
+pure func reliefJson(x: Relief) -> Json = jo([kv("id",js(x.id)),kv("task",js(x.task)),kv("author",js(x.author)),kv("resolved",jb(x.resolved))])
+pure func commitmentJson(x: Commitment) -> Json = jo([kv("id",js(x.id)),kv("parties",strings(x.parties)),kv("accepted",strings(x.accepted)),kv("terms",js(x.terms)),kv("due",jint(x.due)),kv("causes",strings(x.causes)),kv("active",jb(x.active))])
+pure func evidenceJson(x: Evidence) -> Json = jo([kv("id",js(x.id)),kv("author",js(x.author)),kv("kind",js(x.kind)),kv("text",js(x.text)),kv("causes",strings(x.causes))])
+pure func knowledgeJson(x: Knowledge) -> Json = jo([kv("observer",js(x.observer)),kv("evidence",js(x.evidence))])
+pure func conditionJson(x: Condition) -> Json = jo([kv("id",js(x.id)),kv("since",jint(x.since)),kv("active",jb(x.active)),kv("cooldown_until",jint(x.cooldownUntil))])
+pure func acceptedJson(x: Accepted) -> Json = jo([kv("id",js(x.id)),kv("body",js(x.body))])
+pure func tokenJson(x: Token) -> Json = jo([kv("config",js(x.config)),kv("revision",jint(x.revision)),kv("target",jint(x.target)),kv("cursor",jint(x.cursor))])
+pure func tokenOption(x: Option[Token]) -> Json = match x {None=>JNull,Some(t)=>tokenJson(t)}
+export pure func encodeState(s: State) -> string ensures { contains(result,"\"schema\":\"social_state/1\"") } = encode(jo([kv("schema",js("social_state/1")),kv("config",js(s.config)),kv("config_body",js(s.configBody)),kv("session",js(s.session)),kv("tick",jint(s.tick)),kv("revision",jint(s.revision)),kv("seq",jint(s.seq)),kv("actors",sortedJson(map(actorJson,s.actors))),kv("resources",sortedJson(map(resourceJson,s.resources))),kv("relationships",sortedJson(map(relationshipJson,s.relationships))),kv("tasks",sortedJson(map(taskJson,s.tasks))),kv("reliefs",sortedJson(map(reliefJson,s.reliefs))),kv("commitments",sortedJson(map(commitmentJson,s.commitments))),kv("evidence",sortedJson(map(evidenceJson,s.evidence))),kv("knowledge",sortedJson(map(knowledgeJson,s.knowledge))),kv("conditions",sortedJson(map(conditionJson,s.conditions))),kv("accepted",sortedJson(map(acceptedJson,s.accepted))),kv("continuation",tokenOption(s.continuation))]))
+pure func effectJson(e: Effect) -> Json = match e {
+ IndicatorDelta(actor,indicator,delta)=>jo([kv("type",js("indicator_delta")),kv("actor",js(actor)),kv("indicator",js(indicator)),kv("delta",jint(delta))])
+ RelationshipDelta(from,to,dimension,delta)=>jo([kv("type",js("relationship_delta")),kv("from",js(from)),kv("to",js(to)),kv("dimension",js(dimension)),kv("delta",jint(delta))])
+}
+pure func kindName(k: EventKind) -> string = match k {
+TaskOffered(_)=>"task_offered"
+TaskAccepted(_)=>"task_accepted"
+ConcernRaised(_)=>"concern_raised"
+ReliefRequested(_)=>"relief_requested"
+ReliefResolved(_,_)=>"relief_resolved"
+CommitmentOffered(_)=>"commitment_offered"
+CommitmentAccepted(_,_,_)=>"commitment_accepted"
+TaskCompleted(_)=>"task_completed"
+ConditionEntered(_)=>"condition_entered"
+ConditionRecovered(_)=>"condition_recovered"
+ObservationDelivered(_,_)=>"observation_delivered"
+ReactionApplied(_,_,_)=>"reaction_applied"
+}
+pure func kindPayload(k: EventKind) -> Json = match k {
+TaskOffered(x0)=>jo([kv("id",js(x0))])
+TaskAccepted(x0)=>jo([kv("id",js(x0))])
+ConcernRaised(x0)=>jo([kv("id",js(x0))])
+ReliefRequested(x0)=>jo([kv("id",js(x0))])
+ReliefResolved(x0,x1)=>jo([kv("id",js(x0)),kv("release_remaining",jb(x1))])
+CommitmentOffered(x0)=>jo([kv("id",js(x0))])
+CommitmentAccepted(x0,x1,x2)=>jo([kv("id",js(x0)),kv("party",js(x1)),kv("active",jb(x2))])
+TaskCompleted(x0)=>jo([kv("id",js(x0))])
+ConditionEntered(x0)=>jo([kv("id",js(x0))])
+ConditionRecovered(x0)=>jo([kv("id",js(x0))])
+ObservationDelivered(x0,x1)=>jo([kv("evidence",js(x0)),kv("observer",js(x1))])
+ReactionApplied(x0,x1,x2)=>jo([kv("observer",js(x0)),kv("evidence",js(x1)),kv("effects",ja(map(effectJson,x2)))])
+}
+pure func evidenceOption(e: Option[string]) -> Json = match e {None=>JNull,Some(id)=>js(id)}
+pure func eventJson(e: Event) -> Json = jo([kv("schema",js(e.schema)),kv("seq",jint(e.seq)),kv("revision",jint(e.revision)),kv("tick",jint(e.tick)),kv("kind",js(kindName(e.kind))),kv("causes",strings(e.causes)),kv("evidence",evidenceOption(e.evidence)),kv("payload",kindPayload(e.kind))])
+export pure func encodeEvents(events: [Event]) -> string ensures { stringLength(result)>=2 } = encode(ja(map(eventJson,events)))
+pure func errorJson(e: Error) -> Json = match e {
+InvalidConfig(detail)=>jo([kv("schema",js("social_error/1")),kv("code",js("invalid_config")),kv("detail",js(detail))])
+InvalidSchema(detail)=>jo([kv("schema",js("social_error/1")),kv("code",js("invalid_schema")),kv("detail",js(detail))])
+UnsupportedVersion(detail)=>jo([kv("schema",js("social_error/1")),kv("code",js("unsupported_version")),kv("detail",js(detail))])
+UnknownId(detail)=>jo([kv("schema",js("social_error/1")),kv("code",js("unknown_id")),kv("detail",js(detail))])
+Unauthorized(detail)=>jo([kv("schema",js("social_error/1")),kv("code",js("unauthorized")),kv("detail",js(detail))])
+UnseenEvidence(detail)=>jo([kv("schema",js("social_error/1")),kv("code",js("unseen_evidence")),kv("detail",js(detail))])
+StaleRevision(detail)=>jo([kv("schema",js("social_error/1")),kv("code",js("stale_revision")),kv("detail",js(detail))])
+Expired(detail)=>jo([kv("schema",js("social_error/1")),kv("code",js("expired")),kv("detail",js(detail))])
+AlteredDuplicate(detail)=>jo([kv("schema",js("social_error/1")),kv("code",js("altered_duplicate")),kv("detail",js(detail))])
+InsufficientResource(detail)=>jo([kv("schema",js("social_error/1")),kv("code",js("insufficient_resource")),kv("detail",js(detail))])
+CapacityExceeded(detail)=>jo([kv("schema",js("social_error/1")),kv("code",js("capacity_exceeded")),kv("detail",js(detail))])
+InvalidPolicyEffect(detail)=>jo([kv("schema",js("social_error/1")),kv("code",js("invalid_policy_effect")),kv("detail",js(detail))])
+InvalidTransition(detail)=>jo([kv("schema",js("social_error/1")),kv("code",js("invalid_transition")),kv("detail",js(detail))])
+ClockRewind(detail)=>jo([kv("schema",js("social_error/1")),kv("code",js("clock_rewind")),kv("detail",js(detail))])
+InvalidBudget(detail)=>jo([kv("schema",js("social_error/1")),kv("code",js("invalid_budget")),kv("detail",js(detail))])
+NumericOverflow(detail)=>jo([kv("schema",js("social_error/1")),kv("code",js("numeric_overflow")),kv("detail",js(detail))])
+PendingAdvance(detail)=>jo([kv("schema",js("social_error/1")),kv("code",js("pending_advance")),kv("detail",js(detail))])
+InvalidContinuation(detail)=>jo([kv("schema",js("social_error/1")),kv("code",js("invalid_continuation")),kv("detail",js(detail))])
+}
+export pure func encodeError(e: Error) -> string ensures { contains(result,"\"schema\":\"social_error/1\"") } = encode(errorJson(e))
+
+pure func indicatorJson(x: Indicator) -> Json = jo([kv("id",js(x.id)),kv("minimum",jint(x.minimum)),kv("maximum",jint(x.maximum))])
+pure func costJson(x: Cost) -> Json = jo([kv("resource",js(x.resource)),kv("reserve",jint(x.reserve)),kv("consume",jint(x.consume))])
+pure func recipeJson(x: Recipe) -> Json = jo([kv("id",js(x.id)),kv("duration",jint(x.duration)),kv("allocation",jint(x.allocation)),kv("costs",sortedJson(map(costJson,x.costs))),kv("effects",ja(map(effectJson,x.effects)))])
+pure func ruleJson(x: Rule) -> Json = jo([kv("id",js(x.id)),kv("actor",js(x.actor)),kv("indicator",js(x.indicator)),kv("above",jb(x.above)),kv("threshold",jint(x.threshold)),kv("recovery",jint(x.recovery)),kv("duration",jint(x.duration)),kv("cooldown",jint(x.cooldown))])
+pure func limitsJson(x: Limits) -> Json = jo([kv("actors",jint(x.actors)),kv("tasks",jint(x.tasks)),kv("commitments",jint(x.commitments)),kv("reliefs",jint(x.reliefs)),kv("evidence",jint(x.evidence)),kv("knowledge",jint(x.knowledge)),kv("accepted",jint(x.accepted)),kv("operations",jint(x.operations)),kv("effects",jint(x.effects)),kv("text",jint(x.text)),kv("wire",jint(x.wire))])
+export pure func encodeConfig(c: Config) -> string ensures { contains(result,"\"schema\":\"social_config/1\"") } = encode(jo([kv("schema",js("social_config/1")),kv("id",js(c.id)),kv("version",jint(c.version)),kv("session",js(c.session)),kv("time_unit",js(c.timeUnit)),kv("authority_id",js(c.authorityId)),kv("appraisal_id",js(c.appraisalId)),kv("limits",limitsJson(c.limits)),kv("indicators",sortedJson(map(indicatorJson,c.indicators))),kv("recipes",sortedJson(map(recipeJson,c.recipes))),kv("rules",sortedJson(map(ruleJson,c.rules))),kv("evidence",sortedJson(map(evidenceJson,c.evidence))),kv("knowledge",sortedJson(map(knowledgeJson,c.knowledge))),kv("relationships",sortedJson(map(relationshipJson,c.relationships)))]))

@@ -1,0 +1,91 @@
+module sunholo/social_dynamics/engine
+import ./model (Config, Policies, State, Actor, Resource, Token, Principal, Host, Error, InvalidConfig, PendingAdvance, InvalidContinuation, InvalidBudget, ClockRewind, NumericOverflow, AdvanceResult, Done, Pending, Blocked, Event, Working, bounded)
+import ./wire (encodeConfig)
+import ./indicators (validateConfig)
+import ./conditions (reevaluate, due, transition)
+import ./tasks (complete)
+import std/result (Result, Ok, Err)
+import std/option (Option, Some, None)
+import std/list (filter, map, sortBy)
+
+export type Boundary = { tick: int, phase: int, id: string } deriving (Eq)
+
+export pure func init(c: Config, actors: [Actor], resources: [Resource]) -> Result[State, Error]
+ensures { match result {
+  Ok(s) => s.tick == 0 && s.revision == 0,
+  Err(_) => true
+} } = match validateConfig(c, actors, resources) {
+  Err(e) => Err(e),
+  Ok(s) => reevaluate(c, s)
+}
+
+pure func before(a: Boundary, b: Boundary) -> int =
+  if a.tick < b.tick then 0 - 1 else if a.tick > b.tick then 1 else if a.phase < b.phase then 0 - 1 else if a.phase > b.phase then 1 else if a.id < b.id then 0 - 1 else if a.id > b.id then 1 else 0
+
+pure func conditionBoundaries(c: Config, s: State, ids: [string]) -> [Boundary] = match ids {
+  [] => [],
+  id :: tail => match due(c, s, id) {
+    None => conditionBoundaries(c, s, tail),
+    Some(t) => { tick: t, phase: 1, id: id } :: conditionBoundaries(c, s, tail)
+  }
+}
+
+export pure func nextBoundary(c: Config, s: State) -> Option[Boundary]
+ensures { match result {
+  Some(b) => b.phase == 0 || b.phase == 1,
+  None => true
+} } =
+  match sortBy(before, map(\t. { tick: t.due, phase: 0, id: t.id }, filter(\t. t.status == Working, s.tasks)) ++ conditionBoundaries(c, s, map(\r. r.id, c.rules))) {
+    [] => None,
+    b :: _ => Some(b)
+  }
+
+pure func compatible(c: Config, p: Policies, s: State) -> bool =
+  encodeConfig(c) == s.configBody && c.id == s.config && c.session == s.session && c.authorityId == p.authorityId && c.appraisalId == p.appraisalId
+
+pure func drive(c: Config, p: Policies, s: State, target: int, budget: int, cursor: int, events: [Event]) -> AdvanceResult =
+  match nextBoundary(c, s) {
+    None => Done({ s | tick: target, continuation: None }, events),
+    Some(b) => if b.tick > target then Done({ s | tick: target, continuation: None }, events) else if budget <= 0 then let token = { config: c.id, revision: s.revision, target: target, cursor: cursor } in
+    Pending({ s | continuation: Some(token) }, events, token) else if cursor >= 1000000000 then Blocked(s, events, b.id, b.tick, NumericOverflow("cursor")) else match if b.phase == 0 then complete(c, { s | tick: b.tick }, b.id) else transition(c, { s | tick: b.tick }, b.id) {
+      Err(e) => Blocked(s, events, b.id, b.tick, e),
+      Ok(step) => match reevaluate(c, step.state) {
+        Err(e) => Blocked(s, events, b.id, b.tick, e),
+        Ok(n) => drive(c, p, n, target, budget - 1, cursor + 1, events ++ step.events)
+      }
+    }
+  }
+
+export pure func advance(c: Config, p: Policies, s: State, target: int, budget: int) -> AdvanceResult
+ensures { match result {
+  Done(n, _) => n.tick == target,
+  Pending(n, _, _) => n.tick <= target,
+  Blocked(n, _, _, _, _) => n.tick >= s.tick
+} } =
+  if not compatible(c, p, s) then Blocked(s, [], "input", s.tick, InvalidConfig("identity")) else match s.continuation {
+    Some(_) => Blocked(s, [], "input", s.tick, PendingAdvance("advance")),
+    None => if budget < 1 || budget > 1000000 then Blocked(s, [], "input", s.tick, InvalidBudget("budget")) else if target < s.tick then Blocked(s, [], "input", s.tick, ClockRewind("tick")) else if not bounded(target) then Blocked(s, [], "input", s.tick, NumericOverflow("tick")) else drive(c, p, s, target, budget, 0, [])
+  }
+
+pure func sameToken(a: Token, b: Token) -> bool =
+  a.config == b.config && a.revision == b.revision && a.target == b.target && a.cursor == b.cursor
+
+export pure func continueAdvance(c: Config, p: Policies, s: State, token: Token, budget: int) -> AdvanceResult
+ensures { match result {
+  Done(n, _) => n.tick == token.target,
+  Pending(n, _, _) => n.tick <= token.target,
+  Blocked(_, _, _, _, _) => true
+} } =
+  if not compatible(c, p, s) then Blocked(s, [], "input", s.tick, InvalidConfig("identity")) else if budget < 1 || budget > 1000000 then Blocked(s, [], "input", s.tick, InvalidBudget("budget")) else match s.continuation {
+    None => Blocked(s, [], "input", s.tick, InvalidContinuation("absent")),
+    Some(expected) => if not sameToken(expected, token) || token.config != c.id || token.revision != s.revision || token.target < s.tick then Blocked(s, [], "input", s.tick, InvalidContinuation("token")) else drive(c, p, { s | continuation: None }, token.target, budget, token.cursor, [])
+  }
+
+export pure func abortAdvance(s: State, p: Principal, token: Token) -> Result[State, Error]
+ensures { match result {
+  Ok(n) => n.tick == s.tick && n.revision == s.revision,
+  Err(_) => true
+} } = if p != Host then Err(InvalidContinuation("host")) else match s.continuation {
+  None => Err(InvalidContinuation("absent")),
+  Some(expected) => if not sameToken(expected, token) then Err(InvalidContinuation("token")) else Ok({ s | continuation: None })
+}

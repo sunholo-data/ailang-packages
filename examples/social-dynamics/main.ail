@@ -1,0 +1,23 @@
+module sunholo/social_experiments/main
+import std/io (readLine, println, exit)
+import std/result (Ok, Err)
+import ./session (Session, start, input)
+import pkg/sunholo/social_dynamics/wire (encodeError)
+
+-- Finite stdin recording. Blank lines are rejected by shell preflight because
+-- std/io.readLine intentionally represents both blank line and EOF as "".
+func loop(session: Session, lines: int) -> () ! {IO} = {
+  let line = readLine();
+  if line == "" then () else if lines >= 10000 then { println("{\"error\":\"recording_limit\"}"); exit(1) }
+  else match input(session, line) {
+    Err(e) => { println("{\"error\":${encodeError(e)}}"); exit(1) },
+    Ok(o) => { println(o.trace); if o.failed then exit(1) else loop(o.session, lines + 1) }
+  }
+}
+export func main() -> () ! {IO} = {
+  let first = readLine();
+  match start(first) {
+    Err(e) => { println("{\"error\":${encodeError(e)}}"); exit(1) },
+    Ok(o) => { println(o.trace); loop(o.session, 1) }
+  }
+}

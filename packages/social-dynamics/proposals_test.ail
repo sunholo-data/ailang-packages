@@ -1,0 +1,139 @@
+module sunholo/social_dynamics/proposals_test
+import std/result (Ok, Err)
+import std/option (Some)
+import std/list (length, filter)
+import ./model (ActorPrincipal, Host, Authored, AI, OfferTask, AcceptTask, RaiseConcern, OfferCommitment, AcceptCommitment, Unauthorized, UnknownId, StaleRevision, AlteredDuplicate, CapacityExceeded, Applied, Duplicate, State, Step, Error, InvalidTransition, TaskStatus, Offered, Working, InsufficientResource, InvalidConfig, UnseenEvidence, PendingAdvance, InvalidSchema)
+import ./indicators (validateConfig)
+import ./proposals (apply)
+
+import ./model (Config, Actor, Resource, Policies, Principal, Host, ActorPrincipal, Allowed, Refused, Authority, State, Task, Appraisal, Effect, RelationshipDelta, Value, Proposal, Operation, Authored)
+pure func config() -> Config = {
+  id: "ship_v1", version: 1, session: "experiment1", timeUnit: "hour", authorityId: "captain-v1", appraisalId: "social-v1",
+  limits: {actors: 128, tasks: 64, commitments: 64, reliefs: 64, evidence: 512, knowledge: 2048, accepted: 4096, operations: 16, effects: 16, text: 4096, wire: 65536},
+  indicators: [{id: "fatigue", minimum: 0, maximum: 100}, {id: "readiness", minimum: 0, maximum: 100}, {id: "observations", minimum: 0, maximum: 100}, {id: "trust", minimum: 0, maximum: 100}],
+  recipes: [{id: "maintenance", duration: 3, allocation: 1, costs: [{resource: "materials", reserve: 3, consume: 2}], effects: []}, {id: "observations", duration: 4, allocation: 1, costs: [{resource: "materials", reserve: 4, consume: 4}], effects: []}],
+  rules: [], evidence: [{id: "request1", author: "counterpart", kind: "request", text: "Please return observations", causes: []}],
+  knowledge: [{observer: "scientist", evidence: "request1"}, {observer: "captain", evidence: "request1"}, {observer: "counterpart", evidence: "request1"}, {observer: "host", evidence: "request1"}],
+  relationships: [{from: "scientist", to: "captain", dimension: "trust", value: 50}, {from: "captain", to: "scientist", dimension: "trust", value: 70}]
+}
+pure func actors() -> [Actor] = [
+  {id: "captain", capacity: 2, attributes: [], values: [], indicators: [{id: "fatigue", value: 10}, {id: "readiness", value: 50}, {id: "observations", value: 0}, {id: "trust", value: 50}]},
+  {id: "scientist", capacity: 2, attributes: [{id: "openness", value: 80}], values: [{id: "curiosity", value: 80}], indicators: [{id: "fatigue", value: 30}, {id: "readiness", value: 50}, {id: "observations", value: 0}, {id: "trust", value: 50}]},
+  {id: "counterpart", capacity: 1, attributes: [], values: [], indicators: [{id: "fatigue", value: 0}, {id: "readiness", value: 50}, {id: "observations", value: 0}, {id: "trust", value: 50}]}]
+pure func resources() -> [Resource] = [{id: "materials", initial: 10, available: 10, reserved: 0, consumed: 0, transferredIn: 0, transferredOut: 0}]
+pure func authority(s: State, p: Principal, t: Task) -> Authority = match p { Host => Allowed, ActorPrincipal(id) => if id == "captain" then Allowed else Refused(id) }
+pure func appraisal(a: Appraisal) -> [Effect] = if a.observer.id == "scientist" then [RelationshipDelta("scientist", "captain", "trust", 2)] else []
+pure func policies() -> Policies = {authorityId: "captain-v1", appraisalId: "social-v1", authority: authority, appraisal: appraisal}
+pure func proposal(id: string, who: string, revision: int, ops: [Operation]) -> Proposal = {id: id, config: "ship_v1", principal: who, baseRevision: revision, origin: Authored, expires: 60, causes: [], operations: ops}
+
+test "author creates offer and knowledge without reaction or reservation" {
+  match validateConfig(config(), actors(), resources()) {
+    Err(_) => false, Ok(s) => match apply(config(), policies(), s, ActorPrincipal("scientist"), Authored, proposal("p1", "scientist", 0, [OfferTask("offer1", "observations", ["scientist"], ["request1"])])) {
+      Err(_) => false, Ok(step) => step.state.revision == 1 && length(step.events) == 1 && step.state.relationships == s.relationships && step.state.resources == s.resources && length(step.state.knowledge) == length(s.knowledge) + 1
+    }
+  }
+}
+test "last invalid operation rolls back entire proposal" {
+  match validateConfig(config(), actors(), resources()) {
+    Err(_) => false, Ok(s) => apply(config(), policies(), s, ActorPrincipal("scientist"), Authored, proposal("p1", "scientist", 0, [OfferTask("offer1", "observations", ["scientist"], []), OfferTask("offer2", "unknown", ["scientist"], [])])) == Err(UnknownId("unknown")) && s.revision == 0 && length(s.tasks) == 0
+  }
+}
+test "exact retry beats stale revision and expiry; altered duplicate refused" {
+  match validateConfig(config(), actors(), resources()) {
+    Err(_) => false, Ok(s) => {
+      let p = proposal("p1", "scientist", 0, [RaiseConcern("concern1", ["request1"], ["captain"], "A concern")]);
+      match apply(config(), policies(), s, ActorPrincipal("scientist"), Authored, p) {
+        Err(_) => false, Ok(step) => {
+          let late = {step.state | tick: 70};
+          match apply(config(), policies(), late, ActorPrincipal("scientist"), Authored, p) {
+            Err(_) => false, Ok(retry) => retry.disposition == Duplicate && retry.state == late && length(retry.events) == 0 && apply(config(), policies(), late, ActorPrincipal("scientist"), Authored, {p | expires: 80}) == Err(AlteredDuplicate("p1"))
+          }
+        }
+      }
+    }
+  }
+}
+test "AI cannot accept or spoof actor source" {
+  match validateConfig(config(), actors(), resources()) {
+    Err(_) => false, Ok(s) => {
+      let p = {proposal("p1", "captain", 0, [AcceptTask("offer1")]) | origin: AI};
+      apply(config(), policies(), s, ActorPrincipal("captain"), AI, p) == Err(Unauthorized("p1")) && apply(config(), policies(), s, ActorPrincipal("scientist"), AI, p) == Err(Unauthorized("p1"))
+    }
+  }
+}
+test "stale input and full ledger refuse new IDs" {
+  let c = config();
+  let small = {c | limits: {c.limits | accepted: 1}};
+  match validateConfig(small, actors(), resources()) {
+    Err(_) => false, Ok(s) => {
+      let p = proposal("p1", "scientist", 0, [RaiseConcern("concern1", [], ["captain"], "Concern")]);
+      match apply(small, policies(), s, ActorPrincipal("scientist"), Authored, p) {
+        Err(_) => false, Ok(step) => {
+          let q = proposal("p2", "scientist", 1, [RaiseConcern("concern2", [], ["captain"], "Another")]);
+          match apply(small, policies(), step.state, ActorPrincipal("scientist"), Authored, p) {
+            Err(_) => false, Ok(retry) => retry.disposition == Duplicate && apply(small, policies(), step.state, ActorPrincipal("scientist"), Authored, q) == Err(CapacityExceeded("p2"))
+          }
+        }
+      }
+    }
+  }
+}
+test "commitments require each party consent without implicit reward" {
+  match validateConfig(config(), actors(), resources()) {
+    Err(_) => false, Ok(s) => match apply(config(), policies(), s, ActorPrincipal("scientist"), Authored, proposal("p1", "scientist", 0, [OfferCommitment("promise1", ["scientist", "counterpart"], "Return findings", 40, [])])) {
+      Err(_) => false, Ok(a) => match apply(config(), policies(), a.state, ActorPrincipal("scientist"), Authored, proposal("p2", "scientist", 1, [AcceptCommitment("promise1")])) {
+        Err(_) => false, Ok(b) => match apply(config(), policies(), b.state, ActorPrincipal("counterpart"), Authored, proposal("p3", "counterpart", 2, [AcceptCommitment("promise1")])) {
+          Err(_) => false, Ok(d) => match d.state.commitments { [] => false, com :: _ => com.active && length(com.accepted) == 2 && d.state.resources == s.resources && d.state.relationships == s.relationships }
+        }
+      }
+    }
+  }
+}
+
+test "aggregate accept cost overcommit rolls back first reservation and events" {
+  let rs = [{id: "materials", initial: 7, available: 7, reserved: 0, consumed: 0, transferredIn: 0, transferredOut: 0}];
+  match validateConfig(config(), actors(), rs) {
+    Err(_) => false, Ok(s) => match apply(config(), policies(), s, ActorPrincipal("scientist"), Authored, proposal("p1", "scientist", 0, [OfferTask("o1", "observations", ["scientist"], []), OfferTask("o2", "observations", ["scientist"], [])])) {
+      Err(_) => false, Ok(offered) => {
+        let result = apply(config(), policies(), offered.state, ActorPrincipal("captain"), Authored, proposal("p2", "captain", 1, [AcceptTask("o1"), AcceptTask("o2")]));
+        match result { Err(InsufficientResource("materials")) => offered.state.resources == s.resources && offered.state.seq == 2 && length(offered.state.accepted) == 1, _ => false }
+      }
+    }
+  }
+}
+test "stale nonduplicate and changed same-id configuration refuse" {
+  match validateConfig(config(), actors(), resources()) {
+    Err(_) => false, Ok(s) => {
+      let p = proposal("p1", "scientist", 1, [RaiseConcern("c1", [], [], "stale")]);
+      let c = config();
+      let changed = {c | limits: {c.limits | tasks: 1}};
+      apply(c, policies(), s, ActorPrincipal("scientist"), Authored, p) == Err(StaleRevision("p1")) && apply(changed, policies(), s, ActorPrincipal("scientist"), Authored, {p | baseRevision: 0}) == Err(InvalidConfig("ship_v1"))
+    }
+  }
+}
+test "unseen causes cannot be laundered by authorship" {
+  let c = config();
+  let limited = {c | knowledge: [{observer: "counterpart", evidence: "request1"}]};
+  match validateConfig(limited, actors(), resources()) {
+    Err(_) => false, Ok(s) => apply(limited, policies(), s, ActorPrincipal("scientist"), Authored, proposal("p1", "scientist", 0, [RaiseConcern("c1", ["request1"], ["captain"], "Hidden")])) == Err(UnseenEvidence("c1"))
+  }
+}
+
+test "pending scheduler blocks even exact retries until host continues or aborts" {
+  match validateConfig(config(), actors(), resources()) {
+    Err(_) => false, Ok(s) => {
+      let p = proposal("p1", "scientist", 0, [RaiseConcern("c1", [], [], "Concern")]);
+      match apply(config(), policies(), s, ActorPrincipal("scientist"), Authored, p) {
+        Err(_) => false, Ok(step) => {
+          let pending = {step.state | continuation: Some({config: "ship_v1", revision: 1, target: 10, cursor: 0})};
+          apply(config(), policies(), pending, ActorPrincipal("scientist"), Authored, p) == Err(PendingAdvance("p1"))
+        }
+      }
+    }
+  }
+}
+test "generated content cannot claim reserved outcome evidence namespace" {
+ match validateConfig(config(), actors(), resources()) {
+  Err(_) => false, Ok(s) => apply(config(), policies(), s, ActorPrincipal("scientist"), Authored, proposal("p1", "scientist", 0, [RaiseConcern("event-1", [], [], "Collision")])) == Err(InvalidSchema("event-1"))
+ }
+}
