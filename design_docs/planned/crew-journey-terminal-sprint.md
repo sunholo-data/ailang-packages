@@ -61,3 +61,21 @@ command and provide the user one explicit new command for this interface.
 Report any AILANG limitation to the canonical inbox through ailang-feedback. Core
 terminal input/size capability is requested separately, not an implementation in
 this packages branch. No live AI spending for tests; library + fixtures suffice.
+
+## Implementation handoff (2026-10-09)
+
+M1 and M2 are implemented; M3 installed evidence is complete at candidate4467372.
+Final native controls:125 crew and11 terminal, evaluator and strictVM, zero failures.
+Seven installed navigation/baseline journals match exactly and replay both engines;
+eight compiled mutants are killed. New inline controls15passed/7generator-skipped.
+Strict crew quality16/83proved/64skipped, terminal2/9proved/7skipped; neither has
+uncontracted exports or a quality gate. Effectful internal `journey.ail` bin adapters
+are excluded from reusable library exports; `play.launchJourney` has a meaningful
+supported-mode precondition, with behavior covered by installed controls. Existing
+legacy unit contracts are unchanged and are not a behavior proof.
+
+The original full scoped validation log retains its initial PUB011 failure; final
+corrected-boundary quality and installed continuation logs establish the correction.
+Formatting check passes. Registry overlap DNS lookup and absent clean-workdir smoke
+remain informational limitations. Independent acceptance and exact-head CI remain
+pending the parent agent's landing stage. No provider calls or durable installs.
