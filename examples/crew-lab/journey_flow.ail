@@ -1,0 +1,68 @@
+module sunholo/crew_lab/journey_flow
+import std/result (Result, Ok, Err)
+import std/string (trim, stringToInt, length as slength)
+import std/option (Some, None)
+import std/list (length, take, reverse)
+import ./play_flow (PlayState)
+
+export type Navigation = { view: string, page: int, history: [string] } deriving (Eq)
+
+export type Routed = { state: PlayState, nav: Navigation, handled: bool } deriving (Eq)
+
+export type JourneyOptions = { args: [string], columns: int, rows: int, ansi: bool } deriving (Eq)
+
+export pure func initial() -> Navigation ! {}
+ensures { result.page == 0 && result.view == "bridge" && result.history == [] } =
+  { view: "bridge", page: 0, history: [] }
+
+export pure func navigation(s: PlayState, nav: Navigation, key: string) -> Routed ! {}
+requires { nav.page >= 0 && nav.page <= 10000 }
+ensures { result.state == s && result.nav.page >= 0 && result.nav.page <= 10000 } = {
+  let c = trim(key)
+  let view = if c == "c" then "crew" else if c == "w" then "work" else if c == "j" then "log" else if c == "h" || c == "help" then "guide" else if c == "b" || c == "9" then "bridge" else nav.view
+  let handled = c == "c" || c == "w" || c == "j" || c == "h" || c == "help" || c == "b" || c == "9" || c == "n" || c == "v"
+  let page = if c == "n" then if nav.page >= 10000 then 10000 else nav.page + 1 else if c == "v" then if nav.page == 0 then 0 else nav.page - 1 else if handled then 0 else nav.page;
+  { state: s, nav: { nav | view: view, page: page }, handled: handled }
+}
+
+export pure func remember(nav: Navigation, message: string) -> Navigation ! {}
+ensures { length(result.history) <= 64 && result.page == 0 && result.view == "bridge" } =
+  { nav | view: "bridge", page: 0, history: if message == "" then nav.history else reverse(take(64, reverse(nav.history ++ [message]))) }
+
+pure func argsLoop(xs: [string], o: JourneyOptions, seen: [string], seed: bool) -> Result[JourneyOptions, string] =
+  match xs {
+    [] => Ok({ o | args: if seed then o.args else o.args ++ ["--seed", "42"] }),
+    "--plain" :: rest => if member(seen, "style") then Err("Repeated UI style") else argsLoop(rest, { o | ansi: false }, "style" :: seen, seed),
+    "--ansi" :: rest => if member(seen, "style") then Err("Repeated UI style") else argsLoop(rest, { o | ansi: true }, "style" :: seen, seed),
+    flag :: value :: rest => if flag == "--columns" || flag == "--rows" then if member(seen, flag) then Err("Repeated dimension") else match stringToInt(value) {
+      None => Err("Dimensions must be integers"),
+      Some(n) => if n < 1 || n > 10000 then Err("Dimensions outside1..10000") else argsLoop(rest, if flag == "--columns" then { o | columns: if n < 40 then 40 else if n > 160 then 160 else n } else { o | rows: if n < 16 then 16 else if n > 60 then 60 else n }, flag :: seen, seed)
+    } else if flag == "--home" || flag == "--seed" then argsLoop(rest, { o | args: o.args ++ [flag, value] }, seen, seed || flag == "--seed") else Err("Usage: crew-journey [--home PATH] [--seed N] [--plain|--ansi] [--columns N] [--rows N]"),
+    _ => Err("Missing flag value")
+  }
+
+pure func member(xs: [string], s: string) -> bool = match xs {
+  [] => false,
+  x :: rest => x == s || member(rest, s)
+}
+
+export pure func styleDefault(term: string, noColor: bool) -> bool ! {}
+ensures { result == (term != "" && term != "dumb" && not noColor) } = term != "" && term != "dumb" && not noColor
+
+export pure func options(args: [string], columns: int, rows: int, ansi: bool) -> Result[JourneyOptions, string] ! {}
+requires { columns >= 40 && columns <= 160 && rows >= 16 && rows <= 60 }
+ensures { match result {
+  Ok(o) => o.columns >= 40 && o.columns <= 160 && o.rows >= 16 && o.rows <= 60,
+  Err(_) => true
+} } = argsLoop(args, { args: [], columns: columns, rows: rows, ansi: ansi }, [], false)
+
+export pure func onboardingAllowed(lines: int, size: int) -> bool ! {}
+ensures { result == (lines >= 0 && lines < 10000 && size >= 0 && size <= 65536) }
+  tests [
+    ((0, 65536), true),
+    ((0, 65537), false),
+    ((9999, 1), true),
+    ((10000, 1), false)
+  ] {
+  lines >= 0 && lines < 10000 && size >= 0 && size <= 65536
+}

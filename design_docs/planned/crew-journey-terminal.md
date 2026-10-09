@@ -111,7 +111,7 @@ Create `sunholo/terminal_ui` under `packages/terminal-ui`, experimental 0.1.0:
 - Plain mode uses no escapes and preserves readable output for pipes, TERM=dumb,
   NO_COLOR, tests and accessibility. Explicit `--plain` / `--ansi` UI override.
   `--columns` and `--rows` are explicit dimensions; read COLUMNS/LINES if provided,
-  default 80x28. Runtime has no confirmed terminal-size query; do not claim
+  default 80x24. Runtime has no confirmed terminal-size query; do not claim
   automatic resizing or TTY detection. Record that a manual refresh/relaunch with
   new dimensions is the supported size change in this release.
 - All interaction remains `readLine`: keys + Enter. No Go, Python, Node, shell

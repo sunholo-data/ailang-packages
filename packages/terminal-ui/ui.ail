@@ -1,5 +1,5 @@
 module sunholo/terminal_ui/ui
-import std/string (chars, charCode, concat, repeat, join, split, words)
+import std/string (chars, charCode, concat, repeat, join, startsWith, split, words)
 import std/list (map, filter, foldl, flatMap, length, take, drop)
 
 export type Dimensions = { columns: int, rows: int } deriving (Eq)
@@ -104,19 +104,28 @@ ensures { result >= 0 && result < pages }
 -- Header limited to two wrapped rows; all caller action rows retained; body always paged.
 -- Explicit footers must be concise. Remaining body and messages are never clipped.
 export pure func screen(d: Dimensions, ansi: bool, header: [string], body: string, actions: [string], page: int) -> Screen ! {}
-requires { d.columns >= 40 && d.columns <= 160 && d.rows >= 16 && d.rows <= 60 && length(manyWrap(actions, d.columns)) <= d.rows - 6 }
+requires { d.columns >= 40 && d.columns <= 160 && d.rows >= 16 && d.rows <= 60 && length(manyWrap(actions, d.columns)) + length(manyWrap(header, d.columns)) <= d.rows - 5 }
 ensures { result.page >= 0 && result.page < result.pages && length(result.lines) == d.rows } = {
-  let top = take(2, manyWrap(header, d.columns))
+  let top = manyWrap(header, d.columns)
   let footer = manyWrap(actions, d.columns)
-  let height = d.rows - length(top) - length(footer) - 3
+  let height = d.rows - length(top) - length(footer) - 4
   let lines = wrap(body, d.columns)
   let pages = (length(lines) + height - 1) / height
   let current = clampPage(page, pages)
   let shown = take(height, drop(current * height, lines))
   let spacer = repeatLines(height - length(shown))
-  let allLines = top ++ [rule(d.columns)] ++ shown ++ spacer ++ [rule(d.columns), "Page ${show(current + 1)}/${show(pages)} | n Next / v Previous"] ++ footer
+  let allLines = top ++ [rule(d.columns)] ++ shown ++ spacer ++ [rule(d.columns), "Page ${show(current + 1)}/${show(pages)} | n Next / v Previous"] ++ footer ++ [""]
   let plain = join("\n", allLines);
-  { lines: allLines, text: if ansi then "\u{1B}[2J\u{1B}[H\u{1B}[34m${join("\n", top)}\u{1B}[0m\n\u{1B}[33m${rule(d.columns)}\u{1B}[0m\n${join("\n", drop(length(top) + 1, allLines))}\u{1B}[0m" else plain, page: current, pages: pages }
+  { lines: allLines, text: if ansi then "\u{1B}[2J\u{1B}[H\u{1B}[94m${join("\n", top)}\u{1B}[0m\n\u{1B}[93m${repeat("─", d.columns)}\u{1B}[0m\n${styledLines(drop(length(top) + 1, allLines), d.columns)}\u{1B}[0m" else plain, page: current, pages: pages }
 }
 
 pure func repeatLines(n: int) -> [string] = if n <= 0 then [] else "" :: repeatLines(n - 1)
+
+-- Styling tokens are trusted renderer output; source text is sanitized first.
+pure func styledLines(xs: [string], columns: int) -> string = match xs {
+  [] => "",
+  s :: rest => {
+    let styled = if s == rule(columns) then "\u{1B}[93m${repeat("─", columns)}\u{1B}[0m" else if startsWith(s, "[ ") then "\u{1B}[93m${s}\u{1B}[0m" else s
+    if rest == [] then styled else "${styled}\n${styledLines(rest, columns)}"
+  }
+}

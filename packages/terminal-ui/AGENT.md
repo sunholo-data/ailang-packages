@@ -2,8 +2,8 @@
 Pure reusable rendering; independent terminal-ui-demo uses IO only.
 Core exports are ui dimensions, safeText, cells, wrap, pad, rule, gauge,
 clampPage, screen and Dimensions/Screen. Call dimensions first. Screen is exactly
-rows lines with body paging, a concise two-row header and four-row action footer.
-Body never clips; callers keep headers/actions concise. No raw mode, cursor hiding,
+rows lines with body paging, caller chrome with all action rows retained; reserve one empty prompt row.
+Body never clips; callers keep total wrapped header/action rows <= rows-5. Screen text ends on the empty prompt row: print(text), print(prompt), flush, readLine. Do not append a newline before input. No raw mode, cursor hiding,
 alternate buffer, Process, AI, terminal-size detection or automatic resize.
 Cells counts codepoints conservatively: ASCII, European punctuation/box drawing1,
 CJK2; no grapheme/emoji combining precision promised. C0/C1 and bidi stripped.

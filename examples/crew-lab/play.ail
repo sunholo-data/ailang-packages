@@ -1,20 +1,23 @@
 module sunholo/crew_lab/play
-import std/io (readLine, println, exit)
-import std/env (getArgs, getEnvOr, getPid)
+import std/io (readLine, println, exit, print, flush)
+import std/env (getArgs, getEnvOr, getPid, hasEnv)
 import std/result (Result, Ok, Err)
 import std/option (Some, None)
 import std/list (head, filter, map)
-import std/string (length as stringLength)
+import std/string (length as stringLength, stringToInt)
 import std/json (Json, encode, decode, jo, ja, kv, js, jint, jnum, jb)
 import pkg/sunholo/content_library/library (Bundle, encodeBundle, starterBundle, nextRoll, pickLabel, pickVariant)
 import pkg/sunholo/social_dynamics/model (Offered)
+import pkg/sunholo/terminal_ui/ui (Dimensions, dimensions, screen)
+import ./journey_flow (Navigation, initial, options as journeyOptions, styleDefault, onboardingAllowed, navigation, remember)
+import ./journey_presenter (frame, opening, indicatorChanges, journeyRecap)
 import ./session (Request, start)
 import ./reactions (Policy, weights, signature, fixtureBody)
 import ./store (Fetch, loadPolicy, resolve, openRun, appendRun)
 import ./presenter (briefing, policyBrief, seedBrief, dashboard, guidance, help, dialogue, rejection, consequences, recap)
 import ./play_flow (PlayState, Stage, Intent, begin, seedNumber, parseArgs, menu, route, stage, publish, renderStatus, recover)
 
-type Run = { ui: PlayState, home: string, path: string, policy: Policy, policyBody: string, mode: string, remaining: int, lines: int, lastMessage: string }
+type Run = { ui: PlayState, home: string, path: string, policy: Policy, policyBody: string, mode: string, remaining: int, lines: int, lastMessage: string, modern: bool, nav: Navigation, dimensions: Dimensions, ansi: bool }
 
 type Applied = { run: Run, failed: bool, message: string }
 
@@ -72,11 +75,12 @@ func noteFailure(r: Run, fetch: Fetch, error: string) -> Result[Run, string] ! {
     Ok(_) => Ok({ r | ui: { r.ui | seq: r.ui.seq + 1, phase: "response" }, remaining: r.remaining - fetch.calls })
   }
 
-func respond(r: Run, explicitAuthored: bool) -> Result[Applied, string] ! {FS, AI} =
+func respond(r: Run, explicitAuthored: bool) -> Result[Applied, string] ! {IO, FS, AI} =
   match head(filter(\q. q.id == r.ui.target, r.ui.session.pending)) {
     None => Err("No pending response"),
     Some(request) => {
       let sig = signature(request, r.policyBody, model())
+      waiting(r)
       let fetch = if explicitAuthored then { outcome: starterBundle(sig, request.legal), source: "explicit-authored", calls: 0, inputTokens: 0, outputTokens: 0, usageKnown: true } else resolve(r.home, sig, request.legal, model(), r.mode, r.remaining)
       match fetch.outcome {
         Err(e) => match noteFailure(r, fetch, e) {
@@ -105,7 +109,7 @@ pure func anyOffered(s: PlayState, task: string) -> bool = match head(filter(\t.
   None => false
 }
 
-func askProject(r: Run, task: string) -> Result[Applied, string] ! {FS, AI} =
+func askProject(r: Run, task: string) -> Result[Applied, string] ! {IO, FS, AI} =
   match head(filter(\b. b.task == task, r.ui.session.bindings)) {
     None => Err("Unknown project"),
     Some(b) => {
@@ -117,7 +121,7 @@ func askProject(r: Run, task: string) -> Result[Applied, string] ! {FS, AI} =
     }
   }
 
-func act(r: Run, i: Intent) -> Result[Applied, string] ! {FS, AI} = if i.kind == "offer" then {
+func act(r: Run, i: Intent) -> Result[Applied, string] ! {IO, FS, AI} = if i.kind == "offer" then {
   let id = "project-${r.ui.nextId}"
   match commit(r, command("offer", [kv("worker", js(i.worker)), kv("recipe", js(i.recipe)), kv("id", js(id))]), r.ui.seed, "main", "", r.ui.nextId + 1, jo([]), 0) {
     Err(e) => Err(e),
@@ -139,10 +143,13 @@ func finish(r: Run) -> () ! {IO, FS} =
       println("Journal failed: ${e}")
       exit(1)
     },
-    Ok(_) => println(recap(r.ui.session, r.path))
+    Ok(_) => if r.modern then {
+      println("")
+      println(journeyRecap(r.ui, r.path))
+    } else println(recap(r.ui.session, r.path))
   }
 
-func loop(r: Run) -> () ! {IO, FS, AI} = {
+func loop(r: Run) -> () ! {IO, FS, AI} = if r.modern then journeyLoop(r) else {
   status(r)
   if r.lastMessage != "" then println(r.lastMessage) else ()
   println(guidance(r.ui.session, r.ui.phase, r.ui.target))
@@ -169,53 +176,127 @@ func loop(r: Run) -> () ! {IO, FS, AI} = {
   }
 }
 
-func launch(mode: string) -> () ! {IO, Env, FS, AI} = {
-  let home = getEnvOr("HOME", "")
-  match parseArgs(getArgs(), "${home}/.ailang/crew-lab") {
-    Err(e) => {
-      println(e)
-      exit(1)
-    },
-    Ok(options) => {
-      println(briefing(mode))
-      if options.hasSeed then println("Seed ${show(options.seed)}: the same seed, policy, library and choices repeat the variation.") else ()
-      println(policyBrief())
-      let policyChoice = readLine()
-      let seed = if options.hasSeed then Ok(options.seed) else {
-        println(seedBrief())
-        seedNumber(readLine())
-      }
-      match seed {
+func waiting(r: Run) -> () ! {IO} = if not r.modern then () else {
+  let f = screen(r.dimensions, r.ansi, ["Stapledon's Voyage / crew reply", "Request recorded; awaiting crew reply."], "HEARING THE CREW\nLooking for a matching saved response. In live mode, a library miss may call AI within the allowance. No answer or consequence is committed yet.", ["Please wait; next decision follows."], 0)
+  if r.ansi then print(f.text) else println(f.text)
+  flush()
+}
+
+func journeyLoop(r: Run) -> () ! {IO, FS, AI} = {
+  let f = frame(r.ui, r.nav, r.lastMessage, r.mode, r.remaining, r.path, r.dimensions, r.ansi)
+  print(f.text)
+  print("Choose > ")
+  flush()
+  let line = readLine()
+  if not r.ansi then println("") else ()
+  if line == "" then finish(r) else if r.lines >= 10000 || stringLength(line) > 65536 then {
+    println("Input limit reached; previous committed journal retained")
+    exit(1)
+  } else {
+    let nav = navigation(r.ui, { r.nav | page: f.page }, line)
+    if nav.handled then journeyLoop({ r | nav: nav.nav, lines: r.lines + 1 }) else match route(r.ui, line) {
+      Err(e) => journeyLoop({ r | lastMessage: e, nav: { r.nav | view: "bridge", page: 0 }, lines: r.lines + 1 }),
+      Ok(i) => if i.kind == "quit" then finish(r) else match act({ r | lines: r.lines + 1 }, i) {
         Err(e) => {
           println(e)
           exit(1)
         },
-        Ok(seedValue) => match (begin(policyChoice, seedValue), loadPolicy(options.home)) {
-          (Err(e), _) => {
+        Ok(a) => {
+          let detail = if a.run.ui.seq > r.ui.seq then indicatorChanges(r.ui.session, a.run.ui.session) else ""
+          let message = if a.message == "" then a.run.lastMessage else "${a.message}${detail}"
+          let published = a.run.ui.seq > r.ui.seq && a.message != ""
+          let readNav = if published then remember(a.run.nav, message) else { a.run.nav | view: "bridge", page: 0 }
+          journeyLoop({ a.run | ui: if a.failed then recover(a.run.ui) else a.run.ui, nav: readNav, lastMessage: if a.failed then "${message}\nAction not completed; you can choose again." else message })
+        }
+      }
+    }
+  }
+}
+
+func envNumber(name: string, fallback: int) -> int ! {Env} = match stringToInt(getEnvOr(name, "")) {
+  Some(n) => n,
+  None => fallback
+}
+
+func choosePolicy(mode: string, seed: int, d: Dimensions, ansi: bool, page: int, inputs: int) -> string ! {IO} = {
+  let f = screen(d, ansi, ["Stapledon's Voyage / Bridge", "Before first hello / preparation 0/8", "Seed ${show(seed)}; reading costs no turns"], opening(mode, seed), ["1 Consent: crew must agree", "2 Orders: refusal may cost trust", "0 Quit /n Next /v Previous", "Key + Enter; blank line ends this run."], page)
+  print(f.text)
+  print("Choose > ")
+  flush()
+  let key = readLine()
+  if not ansi then println("") else ()
+  if not onboardingAllowed(inputs, stringLength(key)) then {
+    println("Onboarding input limit reached; no game commands recorded.")
+    exit(1)
+  } else ()
+  if key == "" || key == "0" then {
+    println("Preparation not started. No game commands recorded.")
+    exit(0);
+    ""
+  } else if key == "n" then choosePolicy(mode, seed, d, ansi, f.page + 1, inputs + 1) else if key == "v" then choosePolicy(mode, seed, d, ansi, if f.page <= 0 then 0 else f.page - 1, inputs + 1) else if key == "1" || key == "2" then key else {
+    println("Choose 1 Consent or 2 Orders, or read n/v.")
+    choosePolicy(mode, seed, d, ansi, f.page, inputs + 1)
+  }
+}
+
+func launch(mode: string, modern: bool) -> () ! {IO, Env, FS, AI} = {
+  let home = getEnvOr("HOME", "")
+  let envDims = dimensions(envNumber("COLUMNS", 80), envNumber("LINES", 24))
+  let flags = if modern then journeyOptions(getArgs(), envDims.columns, envDims.rows, styleDefault(getEnvOr("TERM", ""), hasEnv("NO_COLOR"))) else Ok({ args: getArgs(), columns: 80, rows: 28, ansi: false })
+  match flags {
+    Err(e) => {
+      println(e)
+      exit(1)
+    },
+    Ok(f) => match parseArgs(f.args, "${home}/.ailang/crew-lab") {
+      Err(e) => {
+        println(e)
+        exit(1)
+      },
+      Ok(o) => {
+        let d = dimensions(f.columns, f.rows)
+        if modern then () else {
+          println(briefing(mode))
+          if o.hasSeed then println("Seed ${show(o.seed)}: the same seed, policy, library and choices repeat the variation.") else ()
+          println(policyBrief())
+        }
+        let policyChoice = if modern then choosePolicy(mode, o.seed, d, f.ansi, 0, 0) else readLine()
+        let seed = if o.hasSeed then Ok(o.seed) else {
+          println(seedBrief())
+          seedNumber(readLine())
+        }
+        match seed {
+          Err(e) => {
             println(e)
             exit(1)
           },
-          (_, Err(e)) => {
-            println(e)
-            exit(1)
-          },
-          (Ok(ui), Ok(config)) => {
-            let c = command("start", [kv("policy", js(ui.session.policy))])
-            match start(c) {
-              Err(_) => {
-                println("Startup failed")
-                exit(1)
-              },
-              Ok(initial) => {
-                let header = envelope(0, jo([kv("kind", js("start")), kv("host_input", js(c)), kv("host_output", js(initial.trace)), kv("seed", jint(seedValue)), kv("policy_body", js(config.body)), kv("model", js(model())), kv("mode", js(mode))]))
-                match openRun(options.home, "${getPid()}-${seedValue}", header) {
-                  Err(e) => {
-                    println("Run ownership/journal failed: ${e}")
-                    exit(1)
-                  },
-                  Ok(path) => {
-                    println("Welcome to the bridge. Choose your next captain action.")
-                    loop({ ui: ui, home: options.home, path: path, policy: config.policy, policyBody: config.body, mode: mode, remaining: config.policy.callLimit, lines: if options.hasSeed then 1 else 2, lastMessage: "" })
+          Ok(seedValue) => match (begin(policyChoice, seedValue), loadPolicy(o.home)) {
+            (Err(e), _) => {
+              println(e)
+              exit(1)
+            },
+            (_, Err(e)) => {
+              println(e)
+              exit(1)
+            },
+            (Ok(ui), Ok(config)) => {
+              let c = command("start", [kv("policy", js(ui.session.policy))])
+              match start(c) {
+                Err(_) => {
+                  println("Startup failed")
+                  exit(1)
+                },
+                Ok(initialHost) => {
+                  let header = envelope(0, jo([kv("kind", js("start")), kv("host_input", js(c)), kv("host_output", js(initialHost.trace)), kv("seed", jint(seedValue)), kv("policy_body", js(config.body)), kv("model", js(model())), kv("mode", js(mode))]))
+                  match openRun(o.home, "${getPid()}-${seedValue}", header) {
+                    Err(e) => {
+                      println("Run ownership/journal failed: ${e}")
+                      exit(1)
+                    },
+                    Ok(path) => {
+                      if modern then () else println("Welcome to the bridge. Choose your next captain action.")
+                      loop({ ui: ui, home: o.home, path: path, policy: config.policy, policyBody: config.body, mode: mode, remaining: config.policy.callLimit, lines: if o.hasSeed then 1 else 2, lastMessage: "", modern: modern, nav: initial(), dimensions: d, ansi: f.ansi })
+                    }
                   }
                 }
               }
@@ -230,7 +311,12 @@ func launch(mode: string) -> () ! {IO, Env, FS, AI} = {
 -- CLI contracts state the unit-return interface only; installed integration tests
 -- validate publication, usage and dialogue behaviour across these effects.
 export func main() -> () ! {IO, Env, FS, AI}
-ensures { result == () } = launch("live")
+ensures { result == () } = launch("live", false)
 
 export func offline() -> () ! {IO, Env, FS, AI}
-ensures { result == () } = launch("offline")
+ensures { result == () } = launch("offline", false)
+
+-- Installed offline controls validate these effectful entries.
+export func journey() -> () ! {IO, Env, FS, AI} = launch("live", true)
+
+export func journeyOffline() -> () ! {IO, Env, FS, AI} = launch("offline", true)
