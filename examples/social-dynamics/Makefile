@@ -19,7 +19,7 @@ deps:
 scenarios:
 	@mkdir -p "$(OUT)"
 	@for recording in "$(EX)"/recordings/*.ndjson; do name=$$(basename "$$recording" .ndjson); AILANG="$(AILANG)" "$(EX)/run.sh" interpreter "$$recording" > "$(OUT)/$$name.ndjson" || exit; done
-	@jq -s 'last.state | .actors[] | select(.id=="scientist" or .id=="resident") | {id,indicators}' "$(OUT)/ship-care.ndjson" "$(OUT)/ship-collaboration.ndjson" "$(OUT)/ship-renegotiate.ndjson" "$(OUT)/community-repair.ndjson" "$(OUT)/community-festival.ndjson"	
+	@jq -s 'last.state | .actors[] | select(.id=="scientist" or .id=="resident") | {id,indicators}' "$(OUT)/ship-care.ndjson" "$(OUT)/ship-collaboration.ndjson" "$(OUT)/ship-renegotiate.ndjson" "$(OUT)/community-repair.ndjson" "$(OUT)/community-festival.ndjson"
 	@"$(EX)/assert-scenarios.sh" "$(OUT)"
 parity:
 	@mkdir -p "$(OUT)"
