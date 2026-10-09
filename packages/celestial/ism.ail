@@ -287,6 +287,44 @@ export pure func healpixRingVec(nside: int, pix: int) -> Vec3 {
   }
 }
 
+-- The even bits of x, compressed (bit 2k of x -> bit k), k < 31.
+pure func compressBits(x: int, k: int, acc: int) -> int =
+  if k >= 31 then acc else compressBits(x, k + 1, acc + (((x >> (2 * k)) & 1) << k))
+
+pure func jrll(f: int) -> int = if f < 4 then 2 else if f < 8 then 3 else 4
+pure func jpll(f: int) -> int = if f < 4 then 2 * f + 1 else if f < 8 then 2 * (f - 4) else 2 * (f - 8) + 1
+
+-- Centre of NESTED-scheme pixel pix at resolution nside (Gorski et al. 2005; the HEALPix C++
+-- library's pix2loc for NEST: face, the de-interleaved (ix, iy), then the ring and its phase).
+-- The Edenhofer et al. 2024 dust map is NEST-ordered. nside a power of 2.
+export pure func healpixNestVec(nside: int, pix: int) -> Vec3 {
+  let npface = nside * nside;
+  let face = pix / npface;
+  let ipf = pix % npface;
+  let ix = compressBits(ipf, 0, 0);
+  let iy = compressBits(ipf >> 1, 0, 0);
+  let nl4 = 4 * nside;
+  let jr = jrll(face) * nside - ix - iy - 1;
+  let n = intToFloat(nside);
+  let fact2 = 4.0 / (12.0 * n * n);
+  if jr < nside then {
+    let nr = jr;
+    let jp0 = (jpll(face) * nr + ix - iy + 1) / 2;
+    let jp = if jp0 > nl4 then jp0 - nl4 else if jp0 < 1 then jp0 + nl4 else jp0;
+    ringVec(1.0 - intToFloat(nr * nr) * fact2, (intToFloat(jp) - 0.5) * (pi() / 2.0 / intToFloat(nr)))
+  } else if jr > 3 * nside then {
+    let nr = nl4 - jr;
+    let jp0 = (jpll(face) * nr + ix - iy + 1) / 2;
+    let jp = if jp0 > nl4 then jp0 - nl4 else if jp0 < 1 then jp0 + nl4 else jp0;
+    ringVec(intToFloat(nr * nr) * fact2 - 1.0, (intToFloat(jp) - 0.5) * (pi() / 2.0 / intToFloat(nr)))
+  } else {
+    let kshift = (jr - nside) & 1;
+    let jp0 = (jpll(face) * nside + ix - iy + 1 + kshift) / 2;
+    let jp = if jp0 > nl4 then jp0 - nl4 else if jp0 < 1 then jp0 + nl4 else jp0;
+    ringVec(intToFloat(2 * nside - jr) * 2.0 * n * fact2, (intToFloat(jp) - (intToFloat(kshift) + 1.0) * 0.5) * (pi() / 2.0 / n))
+  }
+}
+
 pure func ringVec(z: float, phi: float) -> Vec3 {
   let w = (1.0 - z) * (1.0 + z);
   let st = if w > 0.0 then sqrt(w) else 0.0;
