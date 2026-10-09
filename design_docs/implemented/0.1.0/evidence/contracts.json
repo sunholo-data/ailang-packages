@@ -8,7 +8,7 @@
   "skipped": 32,
   "errors": 3,
   "uncontracted": 0,
-  "wall_seconds": 0.436851875,
+  "wall_seconds": 0.472134333,
   "modules": [
     {
       "module": "sunholo/social_dynamics/conditions",
@@ -20,11 +20,6 @@
       "uncontracted": 0,
       "results": [
         {
-          "function": "reevaluate",
-          "status": "skipped",
-          "reason": "Function \"reevaluate\" calls \"add\" whose signature uses an unencodable type \"Result[int, Error]\""
-        },
-        {
           "function": "boundaryEvidence",
           "status": "skipped",
           "reason": "Function \"boundaryEvidence\" calls \"any\" whose signature uses an unencodable type \"*ast.FuncType\""
@@ -33,6 +28,11 @@
           "function": "transition",
           "status": "skipped",
           "reason": "Function \"transition\" calls \"add\" whose signature uses an unencodable type \"Result[int, Error]\""
+        },
+        {
+          "function": "reevaluate",
+          "status": "skipped",
+          "reason": "Function \"reevaluate\" calls \"add\" whose signature uses an unencodable type \"Result[int, Error]\""
         },
         {
           "function": "due",
@@ -51,9 +51,19 @@
       "uncontracted": 0,
       "results": [
         {
+          "function": "continueAdvance",
+          "status": "skipped",
+          "reason": "Function \"continueAdvance\" calls \"add\" whose signature uses an unencodable type \"Result[int, Error]\""
+        },
+        {
           "function": "init",
           "status": "skipped",
           "reason": "Function \"init\" calls \"any\" whose signature uses an unencodable type \"*ast.FuncType\""
+        },
+        {
+          "function": "abortAdvance",
+          "status": "error",
+          "reason": "Z3 error (exit exit status 1): (error \"line 25 column 121: unknown constant InvalidContinuation (String) \")\n(error \"line 27 column 20: unknown constant result\")\nsat\n(\n  (define-fun $p_p () Principal\n    Host)\n  (define-fun $p_token () Token\n    (mk_Token \"\" 0 0 0))\n  (define-fun $p_s () State\n    (mk_State (as seq.empty (Seq Accepted))\n          (as seq.empty (Seq Actor))\n          (as seq.empty (Seq Commitment))\n          (as seq.empty (Seq Condition))\n          \"\"\n          \"\"\n          None\n          (as seq.empty (Seq Evidence))\n          (as seq.empty (Seq Knowledge))\n          (as seq.empty (Seq Relationship))\n          (as seq.empty (Seq Relief))\n          (as seq.empty (Seq Resource))\n          0\n          0\n          \"\"\n          (as seq.empty (Seq Task))\n          0))\n)"
         },
         {
           "function": "advance",
@@ -64,16 +74,6 @@
           "function": "nextBoundary",
           "status": "skipped",
           "reason": "Function \"nextBoundary\" uses an unencodable builtin: std/list.sortBy; Function \"nextBoundary\" calls \"add\" whose signature uses an unencodable type \"Result[int, Error]\""
-        },
-        {
-          "function": "continueAdvance",
-          "status": "skipped",
-          "reason": "Function \"continueAdvance\" calls \"add\" whose signature uses an unencodable type \"Result[int, Error]\""
-        },
-        {
-          "function": "abortAdvance",
-          "status": "error",
-          "reason": "Z3 error (exit exit status 1): (error \"line 25 column 121: unknown constant InvalidContinuation (String) \")\n(error \"line 27 column 20: unknown constant result\")\nsat\n(\n  (define-fun $p_p () Principal\n    Host)\n  (define-fun $p_token () Token\n    (mk_Token \"\" 0 0 0))\n  (define-fun $p_s () State\n    (mk_State (as seq.empty (Seq Accepted))\n          (as seq.empty (Seq Actor))\n          (as seq.empty (Seq Commitment))\n          (as seq.empty (Seq Condition))\n          \"\"\n          \"\"\n          None\n          (as seq.empty (Seq Evidence))\n          (as seq.empty (Seq Knowledge))\n          (as seq.empty (Seq Relationship))\n          (as seq.empty (Seq Relief))\n          (as seq.empty (Seq Resource))\n          0\n          0\n          \"\"\n          (as seq.empty (Seq Task))\n          0))\n)"
         }
       ]
     },
@@ -87,14 +87,9 @@
       "uncontracted": 0,
       "results": [
         {
-          "function": "applyEffects",
+          "function": "findActor",
           "status": "skipped",
-          "reason": "Function \"applyEffects\" uses higher-order functions; Function \"applyEffects\" uses an unencodable builtin: std/list.any; Function \"applyEffects\" calls \"add\" whose signature uses an unencodable type \"Result[int, Error]\""
-        },
-        {
-          "function": "findIndicator",
-          "status": "skipped",
-          "reason": "Function \"findIndicator\" uses an unencodable builtin: std/list.head; Function \"findIndicator\" calls \"filter\" whose signature uses an unencodable type \"list[a]\""
+          "reason": "Function \"findActor\" uses an unencodable builtin: std/list.head; Function \"findActor\" calls \"filter\" whose signature uses an unencodable type \"Option[a]\""
         },
         {
           "function": "knows",
@@ -102,14 +97,19 @@
           "reason": "Function \"knows\" uses higher-order functions; Function \"knows\" uses an unencodable builtin: std/list.any; Function \"knows\" calls \"any\" whose signature uses an unencodable type \"*ast.FuncType\""
         },
         {
+          "function": "findIndicator",
+          "status": "skipped",
+          "reason": "Function \"findIndicator\" uses an unencodable builtin: std/list.head; Function \"findIndicator\" calls \"filter\" whose signature uses an unencodable type \"Option[a]\""
+        },
+        {
           "function": "validateConfig",
           "status": "skipped",
           "reason": "Function \"validateConfig\" uses higher-order functions; Function \"validateConfig\" uses an unencodable builtin: std/list.any; Function \"validateConfig\" calls \"all\" whose signature uses an unencodable type \"*ast.FuncType\""
         },
         {
-          "function": "findActor",
+          "function": "applyEffects",
           "status": "skipped",
-          "reason": "Function \"findActor\" uses an unencodable builtin: std/list.head; Function \"findActor\" calls \"filter\" whose signature uses an unencodable type \"list[a]\""
+          "reason": "Function \"applyEffects\" uses higher-order functions; Function \"applyEffects\" uses an unencodable builtin: std/list.any; Function \"applyEffects\" calls \"add\" whose signature uses an unencodable type \"Result[int, Error]\""
         }
       ]
     },
@@ -123,18 +123,8 @@
       "uncontracted": 0,
       "results": [
         {
-          "function": "unique",
-          "status": "skipped",
-          "reason": "Function \"unique\" uses an unencodable builtin: std/list.dedup; Function \"unique\" calls \"dedup\" whose signature uses an unencodable type \"list[a]\""
-        },
-        {
-          "function": "principalId",
+          "function": "emptyState",
           "status": "verified"
-        },
-        {
-          "function": "add",
-          "status": "error",
-          "reason": "Z3 error (exit exit status 1): (error \"line 9 column 570: unknown constant NumericOverflow (String) \")\n(error \"line 11 column 20: unknown constant result\")\nsat\n(\n  (define-fun $p_a () Int\n    0)\n  (define-fun $p_b () Int\n    0)\n  (define-fun numericLimit () Int\n    1000000000)\n)"
         },
         {
           "function": "multiply",
@@ -142,15 +132,11 @@
           "reason": "Z3 error (exit exit status 1): (error \"line 9 column 317: unknown constant NumericOverflow (String) \")\n(error \"line 11 column 20: unknown constant result\")\nsat\n(\n  (define-fun $p_a () Int\n    0)\n  (define-fun $p_b () Int\n    0)\n  (define-fun numericLimit () Int\n    1000000000)\n)"
         },
         {
-          "function": "emptyState",
-          "status": "verified"
-        },
-        {
-          "function": "validId",
-          "status": "verified"
-        },
-        {
           "function": "bounded",
+          "status": "verified"
+        },
+        {
+          "function": "numericLimit",
           "status": "verified"
         },
         {
@@ -159,13 +145,27 @@
           "reason": "Function \"sorted\" uses higher-order functions; Function \"sorted\" uses an unencodable builtin: std/list.sortBy; Function \"sorted\" calls \"sortBy\" whose signature uses an unencodable type \"list[a]\""
         },
         {
+          "function": "principalId",
+          "status": "verified"
+        },
+        {
+          "function": "validId",
+          "status": "verified"
+        },
+        {
           "function": "event",
           "status": "skipped",
           "reason": "Function \"event\" calls \"sortBy\" whose signature uses an unencodable type \"list[a]\""
         },
         {
-          "function": "numericLimit",
-          "status": "verified"
+          "function": "unique",
+          "status": "skipped",
+          "reason": "Function \"unique\" uses an unencodable builtin: std/list.dedup; Function \"unique\" calls \"dedup\" whose signature uses an unencodable type \"list[a]\""
+        },
+        {
+          "function": "add",
+          "status": "error",
+          "reason": "Z3 error (exit exit status 1): (error \"line 9 column 570: unknown constant NumericOverflow (String) \")\n(error \"line 11 column 20: unknown constant result\")\nsat\n(\n  (define-fun $p_a () Int\n    0)\n  (define-fun $p_b () Int\n    0)\n  (define-fun numericLimit () Int\n    1000000000)\n)"
         }
       ]
     },
@@ -195,14 +195,14 @@
       "uncontracted": 0,
       "results": [
         {
-          "function": "appraisalContext",
-          "status": "skipped",
-          "reason": "Function \"appraisalContext\" uses an unencodable builtin: std/list.head; Function \"appraisalContext\" calls \"any\" whose signature uses an unencodable type \"*ast.FuncType\""
-        },
-        {
           "function": "deliver",
           "status": "skipped",
           "reason": "Function \"deliver\" uses higher-order functions; Function \"deliver\" uses an unencodable builtin: std/list.any; Function \"deliver\" calls \"add\" whose signature uses an unencodable type \"Result[int, Error]\""
+        },
+        {
+          "function": "appraisalContext",
+          "status": "skipped",
+          "reason": "Function \"appraisalContext\" uses an unencodable builtin: std/list.head; Function \"appraisalContext\" calls \"any\" whose signature uses an unencodable type \"*ast.FuncType\""
         }
       ]
     },
@@ -221,19 +221,14 @@
           "reason": "Function \"findTask\" calls \"filter\" whose signature uses an unencodable type \"Option[a]\""
         },
         {
-          "function": "resolveRelief",
+          "function": "boundaryEvidence",
           "status": "skipped",
-          "reason": "Function \"resolveRelief\" calls \"add\" whose signature uses an unencodable type \"Result[int, Error]\""
+          "reason": "Function \"boundaryEvidence\" calls \"any\" whose signature uses an unencodable type \"*ast.FuncType\""
         },
         {
           "function": "accept",
           "status": "skipped",
           "reason": "Function \"accept\" calls \"acceptReady\" whose signature uses an unencodable type \"Result[Step, Error]\""
-        },
-        {
-          "function": "boundaryEvidence",
-          "status": "skipped",
-          "reason": "Function \"boundaryEvidence\" calls \"any\" whose signature uses an unencodable type \"*ast.FuncType\""
         },
         {
           "function": "complete",
@@ -244,6 +239,11 @@
           "function": "progress",
           "status": "skipped",
           "reason": "Function \"progress\" calls \"context\" whose signature uses an unencodable type \"Result[State, Error]\""
+        },
+        {
+          "function": "resolveRelief",
+          "status": "skipped",
+          "reason": "Function \"resolveRelief\" calls \"add\" whose signature uses an unencodable type \"Result[int, Error]\""
         }
       ]
     },
@@ -257,19 +257,9 @@
       "uncontracted": 0,
       "results": [
         {
-          "function": "encodeEvents",
+          "function": "encodeProposal",
           "status": "skipped",
-          "reason": "Function \"encodeEvents\" uses an unencodable builtin: std/list.map; Function \"encodeEvents\" calls \"map\" whose signature uses an unencodable type \"list[b]\""
-        },
-        {
-          "function": "encodeState",
-          "status": "skipped",
-          "reason": "Function \"encodeState\" uses an unencodable builtin: std/list.map; Function \"encodeState\" calls \"map\" whose signature uses an unencodable type \"list[b]\""
-        },
-        {
-          "function": "encodeError",
-          "status": "skipped",
-          "reason": "SMT declaration closure could not resolve a required sort (cannot encode function body: let body: unresolvable SMT declaration types: calls user function \"encode\" that is not SMT-encodable in this context)"
+          "reason": "Function \"encodeProposal\" uses an unencodable builtin: std/list.map; Function \"encodeProposal\" calls \"map\" whose signature uses an unencodable type \"Result[b, e]\""
         },
         {
           "function": "singleObject",
@@ -277,19 +267,29 @@
           "reason": "Function \"singleObject\" has deeply nested patterns; Function \"singleObject\" uses an unencodable builtin: std/string.trim; Function \"singleObject\" calls \"any\" whose signature uses an unencodable type \"*ast.FuncType\""
         },
         {
+          "function": "encodeState",
+          "status": "skipped",
+          "reason": "Function \"encodeState\" uses an unencodable builtin: std/list.map; Function \"encodeState\" calls \"map\" whose signature uses an unencodable type \"Result[b, e]\""
+        },
+        {
+          "function": "encodeEvents",
+          "status": "skipped",
+          "reason": "Function \"encodeEvents\" uses an unencodable builtin: std/list.map; Function \"encodeEvents\" calls \"map\" whose signature uses an unencodable type \"Result[b, e]\""
+        },
+        {
+          "function": "encodeConfig",
+          "status": "skipped",
+          "reason": "Function \"encodeConfig\" uses an unencodable builtin: std/list.map; Function \"encodeConfig\" calls \"map\" whose signature uses an unencodable type \"Result[b, e]\""
+        },
+        {
           "function": "decodeProposal",
           "status": "skipped",
           "reason": "Function \"decodeProposal\" calls \"any\" whose signature uses an unencodable type \"*ast.FuncType\""
         },
         {
-          "function": "encodeConfig",
+          "function": "encodeError",
           "status": "skipped",
-          "reason": "Function \"encodeConfig\" uses an unencodable builtin: std/list.map; Function \"encodeConfig\" calls \"map\" whose signature uses an unencodable type \"list[b]\""
-        },
-        {
-          "function": "encodeProposal",
-          "status": "skipped",
-          "reason": "Function \"encodeProposal\" uses an unencodable builtin: std/list.map; Function \"encodeProposal\" calls \"map\" whose signature uses an unencodable type \"list[b]\""
+          "reason": "SMT declaration closure could not resolve a required sort (cannot encode function body: let body: unresolvable SMT declaration types: calls user function \"encode\" that is not SMT-encodable in this context)"
         }
       ]
     }

@@ -7,8 +7,8 @@ Implementation branch `sprint/social-dynamics-0.1`, base packages2b3c9b2.
 | Evidence | Result |
 |---|---|
 | Library package check |16 files compile;8 public modules, public exports pure|
-| Native library tests |109 passed,0 failed,0 skipped|
-| Same native library tests strict bytecode |109 passed,0 failed,0 skipped; no fallback|
+| Native library tests |110 passed,0 failed,0 skipped|
+| Same native library tests strict bytecode |110 passed,0 failed,0 skipped; no fallback|
 | Separate consumer/example native tests |8 passed,0 failed,0 skipped|
 | Model source inline/native contract properties |10 passed,0 failed,2 skipped (no State/Config generators)|
 | Config source inline/contract properties |5 passed,0 failed,0 skipped|
@@ -19,7 +19,7 @@ Implementation branch `sprint/social-dynamics-0.1`, base packages2b3c9b2.
 | Compile-success behavioural mutations |8 killed by existing assertions,0 survivors,0 inconclusive|
 | Package quality strict |No blocking gates;38 exported functions,38 pure,0 uncontracted|
 | SMT verification |5/40 verified,32 skipped,3 verifier errors,0 counterexamples|
-| Packaging |Dry run creates31542-byte tarball; nothing uploaded|
+| Packaging |Dry run creates31611-byte tarball; nothing uploaded|
 
 Source contracts are meaningful runtime assertions. Skipped Z3 contracts involve
 lists/Result/Option/HOF builtins. Three verifier errors are missing ADT constructor
@@ -43,7 +43,7 @@ latency claims. All three traces compare identical.
 
 Independent preflight found and drove fixes for swapped observation fields, unsafe
 public mutation helpers, early recovery, missing outcome evidence, source spoofing,
-pending retry inconsistency and lost partial blocked progress. Full config snapshots
+pending retry inconsistency and a final pending-effects helper loophole and lost partial blocked progress. Full config snapshots
 prevent same-ID recipe/cap changes. Outcomes create finite immutable evidence with
 reserved IDs and no automatic knowledge; recipients must receive them explicitly.
 Successful partition/continuation invariance is checked with full state/event
@@ -66,3 +66,5 @@ are handformatted and retained.
 This is experimental, unpublished local work. Full civilisation/life generation,
 live model generation, long-term retention/save migration and game UI adapters
 remain outside this sprint; example policies don't decide final game mechanics.
+
+Final pending-effects correction was test-first: the new indicator regression failed before its guard (21/22), then passed. The current aggregate and strict-VM suites each pass110/110; updated mutation baseline71/71 and all8 killers pass. The registry-aware quality log predates this private guard change but verifies the same unchanged module export set/interface; latest local strict-quality attestation is110/110. Full `verify` exits1 for the three explicitly recorded verifier errors, while the complete `validate` target exits0.

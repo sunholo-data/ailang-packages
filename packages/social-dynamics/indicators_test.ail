@@ -1,7 +1,8 @@
 module sunholo/social_dynamics/indicators_test
-import ./model (Actor, Config, Resource, State, Error, InvalidConfig, InvalidPolicyEffect, NumericOverflow, IndicatorDelta, RelationshipDelta, emptyState)
+import ./model (Actor, Config, Resource, State, Error, PendingAdvance, InvalidConfig, InvalidPolicyEffect, NumericOverflow, IndicatorDelta, RelationshipDelta, emptyState)
 import ./indicators (validateConfig, applyEffects)
 import std/result (Result, Ok, Err)
+import std/option (Some)
 
 export pure func fixtureConfig() -> Config = {
  id: "demo", version: 1, session: "session", timeUnit: "minutes", authorityId: "permit", appraisalId: "react",
@@ -37,3 +38,4 @@ test "causal cycles in initial evidence refuse" { let c = fixtureConfig(); let c
 test "acyclic evidence references accept independent of input order" { let c = fixtureConfig(); let es = [{id: "later", author: "b", kind: "report", text: "y", causes: ["report"]}] ++ c.evidence; match validateConfig({c | evidence: es}, fixtureActors(), fixtureResources()) { Ok(_) => true, _ => false } }
 test "same ID cap mutation refuses on initialized state" { let c = fixtureConfig(); match applyEffects({c | limits: {c.limits | effects: 9}}, fixtureState(), [IndicatorDelta("a", "trust", 1)]) { Err(InvalidConfig(_)) => true, _ => false } }
 test "same ID recipe mutation refuses on initialized state" { let c = fixtureConfig(); let changed = {c | recipes: [{id: "new", duration: 1, allocation: 1, costs: [], effects: []}]}; match applyEffects(changed, fixtureState(), []) { Err(InvalidConfig(_)) => true, _ => false } }
+test "public effects refuse every pending advance input" { let s = fixtureState(); let pending = {s | continuation: Some({config: s.config, revision: s.revision, target: 10, cursor: 0})}; match applyEffects(fixtureConfig(), pending, [IndicatorDelta("a", "trust", 1)]) { Err(PendingAdvance(_)) => true, _ => false } }

@@ -1,5 +1,5 @@
 module sunholo/social_dynamics/indicators
-import ./model (Actor, Indicator, Value, Resource, Evidence, Effect, IndicatorDelta, RelationshipDelta, Config, State, Error, InvalidConfig, InvalidPolicyEffect, CapacityExceeded, UnknownId, bounded, validId, unique, add, emptyState)
+import ./model (Actor, Indicator, Value, Resource, Evidence, Effect, IndicatorDelta, RelationshipDelta, Config, State, Error, PendingAdvance, InvalidConfig, InvalidPolicyEffect, CapacityExceeded, UnknownId, bounded, validId, unique, add, emptyState)
 import ./wire (encodeConfig)
 import std/list (length, map, dedup, contains, any, filter, head)
 import std/option (Option, Some, None)
@@ -91,4 +91,4 @@ pure func applyMany(c: Config, s: State, effects: [Effect]) -> Result[State, Err
 }
 export pure func applyEffects(c: Config, s: State, effects: [Effect]) -> Result[State, Error]
 ensures { match result { Ok(next) => next.tick == s.tick && next.revision == s.revision && next.seq == s.seq, Err(_) => true } } =
- if s.config != c.id || s.session != c.session || s.configBody != encodeConfig(c) then Err(InvalidConfig("session_config")) else if length(effects) > c.limits.effects then Err(CapacityExceeded("effects")) else if any(\e. not effectShape(e), effects) then Err(InvalidPolicyEffect("shape")) else applyMany(c, s, effects)
+ if s.config != c.id || s.session != c.session || s.configBody != encodeConfig(c) then Err(InvalidConfig("session_config")) else if (match s.continuation { Some(_) => true, None => false }) then Err(PendingAdvance("effects")) else if length(effects) > c.limits.effects then Err(CapacityExceeded("effects")) else if any(\e. not effectShape(e), effects) then Err(InvalidPolicyEffect("shape")) else applyMany(c, s, effects)
