@@ -1,0 +1,53 @@
+{
+  "id": "CREW-TERMINAL-CONTROLS",
+  "status": "implementation_complete",
+  "design_doc": "design_docs/implemented/crew-lab/terminal-controls.md",
+  "plan": "design_docs/implemented/crew-lab/terminal-controls-sprint.md",
+  "velocity": {
+    "target_loc_per_day": 300,
+    "estimated_total_loc": 300,
+    "estimated_days": 1
+  },
+  "features": [
+    {
+      "id": "M1_TRANSLATE",
+      "description": "Pure friendly commands and explicit synthetic manual replies",
+      "estimated_loc": 180,
+      "dependencies": [],
+      "acceptance_criteria": [
+        "12 native translator controls pass evaluator and strict VM",
+        "No host permission or scenario changes"
+      ],
+      "passes": true,
+      "completed": "2026-10-09"
+    },
+    {
+      "id": "M2_TERMINAL",
+      "description": "Gauges, interactive state recovery, installed CLI and independent review",
+      "estimated_loc": 120,
+      "dependencies": [
+        "M1_TRANSLATE"
+      ],
+      "acceptance_criteria": [
+        "Both CLI modes and friendly care/order/recovery/oversize controls pass",
+        "Independent local review passes; remote CI is a separate merge gate"
+      ],
+      "passes": true,
+      "completed": "2026-10-09"
+    }
+  ],
+  "registry_reuse": [
+    {
+      "milestone": "M1_TRANSLATE",
+      "action": "none",
+      "reason": "Reuse std libraries and existing crew session helpers; no new dependency"
+    },
+    {
+      "milestone": "M2_TERMINAL",
+      "action": "depend",
+      "package": "sunholo/social_dynamics@0.1.0",
+      "reason": "Unchanged existing state drives pure terminal projections"
+    }
+  ],
+  "ci": "Remote scoped CI required before merge; see pull request checks"
+}

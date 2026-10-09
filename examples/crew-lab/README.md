@@ -95,3 +95,29 @@ trust, materials, pending choices and saved responses. It executes the same host
 as `crew-lab`; the readable view changes no mechanics. Edit `scenario.ail` to tune
 traits, work costs or fixed reaction rules; edit/regenerate a recording to compare
 captain choices and saved replies. Rerun immediately—there is no game build.
+
+Start an interactive terminal session with `~/.ailang/bin/crew-view`. The dashboard
+uses portable ASCII bar gauges, with exact numbers for each indicator. Type `help`
+for commands. A first experiment:
+
+```text
+start consent
+offer science scientist observations
+ask r1 scientist science
+reply r1 accept
+work science
+advance 4
+status
+quit
+```
+
+`reply` is a manually authored offline fixture. It puts probability1 on your chosen
+legal response, zero on the others and records `synthetic:manual`, confidence1 and
+roll0. To explore uncertainty use, for example, `reply r1 accept 0.4 0.2`; the
+existing confidence gate will defer. Full JSON replies can specify distributions.
+Friendly-mode mistakes print an error and retain the session for another command;
+starting with JSON keeps recorded fail-fast behaviour. Help/status count toward the
+finite command limit. There is no automated live AI or hidden randomness.
+
+Try `crew-view < recordings-care.txt` and `< recordings-order.txt` from this folder.
+Change `scenario.ail`, restart the CLI and compare the displayed consequences.

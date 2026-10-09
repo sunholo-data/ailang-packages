@@ -1,0 +1,80 @@
+{
+  "schema": "crew-independent-evaluation/1",
+  "sprint_id": "CREW-TERMINAL-CONTROLS",
+  "round": 1,
+  "result": "pass",
+  "score": 100,
+  "threshold": 70,
+  "hard_failures": [],
+  "evaluator": "/root/crew_final_evaluator",
+  "independent_of_implementation": true,
+  "gate_source": "local",
+  "base": "main a95ad5e",
+  "scores": {
+    "tests": 20,
+    "lint_compile_quality": 10,
+    "acceptance": 30,
+    "code_quality": 15,
+    "documentation": 15,
+    "design_fidelity": 10
+  },
+  "scope": "Pure friendly terminal translator, IO-only viewer gauges/recovery/help/status/quit, installed controls and documentation; unchanged social mechanisms.",
+  "independent_execution": {
+    "translator_tests": {
+      "passed": 12,
+      "failed": 0,
+      "skipped": 0
+    },
+    "installed_cli": "Both commands install from unrelated cwd; five causal JSON trace comparisons and readable checks pass; friendly care/order/recovery, cancellation and invalid fail-fast inputs pass. Final rerun includes raw viewer-control length guard and passes.",
+    "source_session_tests": {
+      "passed": 3,
+      "failed": 0,
+      "skipped": 9,
+      "named_control": "empty recording is explicit failure passed"
+    },
+    "verify": {
+      "verified": 5,
+      "total": 30,
+      "skipped": 24,
+      "encoding_errors": 1,
+      "counterexamples": 0
+    }
+  },
+  "executor_evidence_inspected": {
+    ".ailang/state/crew-lab/terminal-validation.log": "68 evaluator native and68 strict VM native tests pass; scenario inline7pass; five parity/replay recordings and installed controls pass; strictquality no gates.",
+    "source_diff": "session.ail/scenario.ail/actor_policy.ail byte-for-byte unchanged versus a95ad5e.",
+    ".ailang/state/crew-lab/terminal-validation-final.log": "Final validate exits0:68 evaluator native,68 strictVM native,7scenario inline,3session source pass9generator skips; five complete replay/parity paths; installed friendly/raw-line controls; strictquality no gates."
+  },
+  "findings": [
+    "Translation encodes closed host commands safely, does not introduce principal/source/effects overrides.",
+    "Replies require a stored pending request and legal choice, emit complete explicitly synthetic:manual one-hot wire and then pass unchanged host binding, confidence and stale checks.",
+    "Numeric parsing rejects nonnumeric/nonfinite values, validates integer clock/budget and bounded confidence/roll; ordinary commands and JSON passthrough retain wire framing/length checks.",
+    "Friendly errors reuse incoming Session without applying a failed command. JSON-started mode stays fail-fast. Help/status are read-only and count toward10000command bound.",
+    "ASCII gauge extent clamps0..100 but keeps exact numeric value; directed trust and captain outcomes remain separate, cancellation is not labelled a crew response.",
+    "README identifies manual fixtures and absence of live AI/randomness; full JSON command mode remains available.",
+    "Followup uniform raw-line guard checks65536characters before viewer controls in boot/loop; independently installed oversized padded-help control fails1 before domain changes."
+  ],
+  "strongest_remaining_risk": "Recovery mode is chosen by the start-line syntax. JSON-started sessions fail-fast; friendly-started sessions recover even for subsequent JSON input. This is documented and tests cover intended routes; future UX changes should preserve explicit mode semantics.",
+  "nonblocking_observations": [],
+  "limits": [
+    "Synthetic manual one-hot replies are authored fixtures, not calibrated/generated NPC responses.",
+    "Blank stdin is equivalent to EOF on pinned runtime; no terminal TTY/ANSI assumptions.",
+    "No live provider calls, new randomness, game integration, registry publication or original JEV migration.",
+    "Solver5/30verified24skipped1encodingerror is not complete proof. Source test9skips are explicitly retained.",
+    "New PR CI has not executed in this local evaluation; merge still requires scoped CI green.",
+    "Publishing smoke remains absent because unpublished social path dependency requires repository tree; actual installed wrappers are tested."
+  ],
+  "evidence_paths": [
+    "/private/tmp/crew-terminal-independent-cli.log",
+    "/private/tmp/crew-terminal-independent-verify.json",
+    "/private/tmp/crew-terminal-independent-session-inline.log",
+    ".ailang/state/crew-lab/terminal-validation.log",
+    "/private/tmp/crew-terminal-independent-cli-final.log",
+    ".ailang/state/crew-lab/terminal-validation-final.log"
+  ],
+  "post_pass_actions": [
+    "Archive independent report and actual evidence.",
+    "Mark completed design/sprint together after independent evaluation.",
+    "Require green scoped PR CI before main merge."
+  ]
+}

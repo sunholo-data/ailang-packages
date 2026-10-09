@@ -19,6 +19,8 @@ tests:
 	@cd "$(EX)" && "$(AILANG)" test --package .
 	@cd "$(EX)" && "$(AILANG)" test --package . --bytecode --strict-bytecode
 	@cd "$(EX)" && "$(AILANG)" test scenario.ail
+	@cd "$(EX)" && "$(AILANG)" test --allow-skips session.ail
+
 scenarios:
 	@mkdir -p "$(OUT)"
 	@for recording in "$(EX)"/recordings/*.ndjson; do name=$$(basename "$$recording" .ndjson); AILANG="$(AILANG)" "$(EX)/run.sh" interpreter "$$recording" > "$(OUT)/$$name.ndjson" || exit; done

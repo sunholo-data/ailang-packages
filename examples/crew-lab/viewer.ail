@@ -3,11 +3,12 @@ import std/io (readLine, println, exit)
 import std/result (Ok, Err)
 import std/option (Some, None)
 import std/list (map, filter, head, length)
-import std/string (join)
+import std/string (join, trim, repeat, startsWith, length as stringLength)
 import std/json (decode, getString)
 import pkg/sunholo/social_dynamics/model (State)
 import ./session (Session, Output, Bank, start, input, encodeHostError)
 import ./codec (encodeOutcome)
+import ./terminal (begin, translate)
 
 pure func value(s: State, actor: string, id: string) -> int = match head(filter(\a. a.id == actor, s.actors)) {
   None => 0,
@@ -20,11 +21,17 @@ pure func value(s: State, actor: string, id: string) -> int = match head(filter(
 pure func trust(s: State, actor: string) -> string =
   match head(filter(\r. r.from == actor && r.to == "captain" && r.dimension == "trust", s.relationships)) {
     None => "--",
-    Some(r) => show(r.value)
+    Some(r) => gauge(r.value)
   }
 
+pure func gauge(n: int) -> string = {
+  let bounded = if n < 0 then 0 else if n > 100 then 100 else n
+  let filled = bounded / 10
+  "[${repeat("#", filled)}${repeat("-", 10 - filled)}] ${show(n)}"
+}
+
 pure func crew(s: State, actor: string) -> string =
-  "  ${actor}: fatigue ${show(value(s, actor, "fatigue"))} | readiness ${show(value(s, actor, "readiness"))} | observations ${show(value(s, actor, "observations"))} | trust in captain ${trust(s, actor)}"
+  "  ${actor}: fatigue ${gauge(value(s, actor, "fatigue"))}\n    readiness ${gauge(value(s, actor, "readiness"))} | observations ${gauge(value(s, actor, "observations"))}\n    trust -> captain ${trust(s, actor)}"
 
 pure func command(line: string) -> string = match decode(line) {
   Err(_) => "invalid",
@@ -52,33 +59,67 @@ pure func lastBank(xs: [Bank], n: int) -> [Bank] = match xs {
   b :: rest => if n == 0 then [b] else lastBank(rest, n - 1)
 }
 
-func loop(s: Session, count: int) -> () ! {IO} = {
-  let line = readLine()
-  if line == "" then () else if count >= 10000 then {
+pure func help() -> string =
+  "CREW LAB — offline captain/crew sandbox\nstart consent | start orders\noffer <id> <worker> <recipe>\nask <request> <actor> <task>\nreply <request> <choice> [confidence roll]  (manual synthetic reply)\nwork <task>\nadvance <tick> [budget]\nrelief <id> grant|deny\ndeliver <observer> <evidence> <id>\ncancel <request> | abort | status | help | quit\nWorkers: scientist, engineer. Recipes: observations, maintenance, rest_scientist, rest_engineer.\nAll responses are offline fixtures. Exact JSON commands are also accepted."
+
+func loop(s: Session, count: int, recover: bool) -> () ! {IO} = {
+  let raw = readLine()
+  let line = trim(raw)
+  if stringLength(raw) > 65536 then {println("ERROR: line limit");exit(1)} else if line == "" || line == "quit" then () else if count >= 10000 then {
     println("ERROR: command limit")
     exit(1)
-  } else match input(s, line) {
+  } else if line == "help" then {
+    println(help())
+    loop(s, count + 1, recover)
+  } else if line == "status" then {
+    println(render({ session: s, trace: "", failed: false }, "{\"command\":\"status\"}"))
+    loop(s, count + 1, recover)
+  } else match translate(s, raw) {
     Err(e) => {
-      println("ERROR: ${encodeHostError(e)}")
-      exit(1)
+      println("ERROR: ${e}")
+      if recover then loop(s, count + 1, recover) else exit(1)
     },
-    Ok(o) => {
-      println(render(o, line))
-      if o.failed then exit(1) else loop(o.session, count + 1)
+    Ok(commandLine) => match input(s, commandLine) {
+      Err(e) => {
+        println("ERROR: ${encodeHostError(e)}")
+        if recover then loop(s, count + 1, recover) else exit(1)
+      },
+      Ok(o) => {
+        println(render(o, commandLine))
+        if o.failed then exit(1) else loop(o.session, count + 1, recover)
+      }
+    }
+  }
+}
+
+func boot(count: int) -> () ! {IO} = {
+  let raw = readLine()
+  let line = trim(raw)
+  if stringLength(raw) > 65536 then {println("ERROR: line limit");exit(1)} else if line == "" || line == "quit" then () else if count >= 10000 then {
+    println("ERROR: command limit")
+    exit(1)
+  } else if line == "help" then {
+    println(help())
+    boot(count + 1)
+  } else match begin(raw) {
+    Err(e) => {
+      println("ERROR: ${e}")
+      if not startsWith(line, "{") then boot(count + 1) else exit(1)
+    },
+    Ok(commandLine) => match start(commandLine) {
+      Err(e) => {
+        println("ERROR: ${encodeHostError(e)}")
+        if not startsWith(line, "{") then boot(count + 1) else exit(1)
+      },
+      Ok(o) => {
+        println(render(o, commandLine))
+        loop(o.session, count + 1, not startsWith(line, "{"))
+      }
     }
   }
 }
 
 export func main() -> () ! {IO} = {
-  let line = readLine()
-  match start(line) {
-    Err(e) => {
-      println("ERROR: ${encodeHostError(e)}")
-      exit(1)
-    },
-    Ok(o) => {
-      println(render(o, line))
-      loop(o.session, 1)
-    }
-  }
+  println(help())
+  boot(0)
 }

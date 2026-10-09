@@ -48,6 +48,28 @@ set -e
 test "$view_rc" = 1
 rg -q '^ERROR:' "$TMP/invalid.txt"
 jq -e 'has("error")' "$TMP/invalid.ndjson" >/dev/null
+# Friendly terminal aliases retain the same received consequences.
+"$TMP/bin/crew-view" < "$ROOT/examples/crew-lab/recordings-care.txt" > "$TMP/friendly-care.txt"
+rg -q 'scientist: fatigue \[###-------\] 30' "$TMP/friendly-care.txt"
+rg -q 'trust -> captain \[#####-----\] 58' "$TMP/friendly-care.txt"
+rg -q 'materials: available 6, reserved 0, used 0' "$TMP/friendly-care.txt"
+"$TMP/bin/crew-view" < "$ROOT/examples/crew-lab/recordings-order.txt" > "$TMP/friendly-order.txt"
+rg -q 'scientist: fatigue \[#######---\] 70' "$TMP/friendly-order.txt"
+rg -q 'trust -> captain \[####------\] 42' "$TMP/friendly-order.txt"
+cat > "$TMP/recover.txt" <<'RECOVER'
+start consent
+offer science scientist observations
+work science
+ask r1 scientist science
+reply r1 accept
+work science
+advance 4
+quit
+RECOVER
+"$TMP/bin/crew-view" < "$TMP/recover.txt" > "$TMP/recovered.txt"
+rg -q 'ERROR:.*personal consent required' "$TMP/recovered.txt"
+rg -q 'scientist: fatigue \[#######---\] 70' "$TMP/recovered.txt"
+rg -q 'trust -> captain \[#####-----\] 52' "$TMP/recovered.txt"
 # Cancellation is a host action, never a synthetic crew response/roll.
 cat > "$TMP/cancel.ndjson" <<'CANCEL'
 {"command":"start","policy":"consent"}
@@ -57,7 +79,15 @@ cat > "$TMP/cancel.ndjson" <<'CANCEL'
 CANCEL
 "$TMP/bin/crew-view" < "$TMP/cancel.ndjson" > "$TMP/cancel.txt"
 rg -q 'Latest request: scientist/science cancelled' "$TMP/cancel.txt"
-if rg -q 'Latest crew response|roll ' "$TMP/cancel.txt"; then exit 1; fi
+if rg -q 'Latest crew response|completed, roll' "$TMP/cancel.txt"; then exit 1; fi
+# UI control words cannot bypass the raw line bound through whitespace.
+awk 'BEGIN {for(i=0;i<65536;i++) printf " "; print "help"}' > "$TMP/control-oversize.txt"
+set +e
+"$TMP/bin/crew-view" < "$TMP/control-oversize.txt" > "$TMP/control-error.txt"
+control_rc=$?
+set -e
+test "$control_rc" = 1
+rg -q 'ERROR: line limit' "$TMP/control-error.txt"
 # Finite saved-file launcher rejects blank, oversize, empty and too-many lines.
 printf '\n' > "$TMP/blank.ndjson"
 : > "$TMP/empty.ndjson"
@@ -66,4 +96,4 @@ awk 'BEGIN {for(i=0;i<10001;i++) print "{}"}' > "$TMP/too-many.ndjson"
 for invalid in blank empty oversize too-many; do
  if AILANG="$AILANG" "$ROOT/examples/crew-lab/run.sh" interpreter "$TMP/$invalid.ndjson" > /dev/null 2>&1; then printf 'Accepted invalid recording: %s\n' "$invalid" >&2; exit 1; fi
 done
-printf 'Installed crew JSON/readable CLI: five traces identical from unrelated cwd; malformed input exits1; finite framing guards pass\n'
+printf 'Installed crew JSON/readable CLI: five traces identical from unrelated cwd; malformed input exits1; finite framing guards and friendly controls pass\n'
