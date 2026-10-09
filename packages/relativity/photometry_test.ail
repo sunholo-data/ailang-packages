@@ -3,7 +3,7 @@
 module sunholo/relativity/photometry_test
 
 import ./hyper (absf)
-import ./photometry (teffFromBpRp, gMinusV, bpRpInTable, vFromG, illuminanceFromV, fluxRatioFromMags)
+import ./photometry (teffFromBpRp, gMinusV, bpRpInTable, vFromG, illuminanceFromV, fluxRatioFromMags, bolometricCorrectionV, luminositySunFromV, radiusSunFromLuminosity, solarBolometricMagnitude, solarTeffNominal)
 
 pure func relative(got: float, want: float, tol: float) -> bool = absf(got - want) <= tol * want
 pure func close(got: float, want: float, tol: float) -> bool = absf(got - want) <= tol
@@ -67,3 +67,71 @@ pure func check07() -> bool {
   close(vFromG(8.0, 0.823), 8.0 - gMinusV(0.823), 0.000000001)
 }
 test "magnitude, illuminance, and V conversion conventions" { check07() }
+
+-- ------------------------------------------------------------ 0.11.0: radius from V, distance, Teff
+pure func radiusFromV(v: float, pc: float, teff: float) -> float =
+  radiusSunFromLuminosity(luminositySunFromV(v, pc, bolometricCorrectionV(teff)), teff)
+pure func within(got: float, want: float, frac: float) -> bool = absf(got / want - 1.0) <= frac
+
+-- BC_V hits the Pecaut & Mamajek 2022.04.16 nodes (G2V 5770 K -0.085, M4V 3210 K -2.51,
+-- A5V 8100 K 0.00, O3V 44900 K -4.01), interpolates linearly between them, clamps at both
+-- ends (L5V 1710 K -7.87; O3V) and maps NaN to the hot end, finite.
+pure func checkBcNodes() -> bool {
+  let nan = 0.0 / 0.0;
+  close(bolometricCorrectionV(5770.0), 0.0 - 0.085, 0.000000001) && close(bolometricCorrectionV(3210.0), 0.0 - 2.51, 0.000000001)
+  && close(bolometricCorrectionV(8100.0), 0.0, 0.000000001) && close(bolometricCorrectionV(44900.0), 0.0 - 4.01, 0.000000001)
+  && close(bolometricCorrectionV(5815.0), 0.5 * (0.0 - 0.085) + 0.5 * (0.0 - 0.073), 0.000000001)
+  && close(bolometricCorrectionV(1000.0), 0.0 - 7.87, 0.000000001) && close(bolometricCorrectionV(80000.0), 0.0 - 4.01, 0.000000001)
+  && close(bolometricCorrectionV(nan), 0.0 - 4.01, 0.000000001)
+}
+test "BC_V: Pecaut & Mamajek nodes, linear between, clamped ends, NaN to the hot end" { checkBcNodes() }
+
+-- The definitions: V = M_bol,sun at 10 pc with BC 0 is exactly 1 L_sun; each 5 mag is
+-- 100x; R = 1 R_sun at 1 L_sun and 5772 K; R scales as sqrt(L) / T^2.
+pure func checkDefinitions() -> bool =
+  solarBolometricMagnitude() == 4.74 && solarTeffNominal() == 5772.0
+  && close(luminositySunFromV(4.74, 10.0, 0.0), 1.0, 0.000000000001)
+  && relative(luminositySunFromV(4.74, 100.0, 0.0), 100.0, 0.000000000001)
+  && relative(luminositySunFromV(4.74, 10.0, 0.0 - 2.5), 10.0, 0.000000000001)
+  && close(radiusSunFromLuminosity(1.0, 5772.0), 1.0, 0.000000000001)
+  && relative(radiusSunFromLuminosity(16.0, 2886.0), 16.0, 0.000000000001)
+test "luminosity and radius definitions: M_bol,sun 4.74, 5 mag = 100x, R = sqrt(L) (5772/T)^2" { checkDefinitions() }
+
+-- Measured radii (validation; inputs V, distance, Teff as cited). The Sun at 1 AU,
+-- V = -26.74 (Bessell, Castelli & Plez 1998): -0.3 %. alpha Cen A and B (Kervella et al.
+-- 2017, A&A 597, A137: 1.2234 and 0.8632 R_sun, 5790 and 5260 K; Hipparcos V 0.01, 1.33;
+-- 747.17 mas, Akeson et al. 2021): -0.3 %, -1.6 %. Aldebaran (Richichi & Roccatagliata 2005
+-- theta_LD 20.58 mas at 20.4332 pc = 45.21 R_sun; Heiter et al. 2015, 3927 K; V 0.86): -4.5 %.
+-- Arcturus (Ramirez & Allende Prieto 2011: 25.4 R_sun, 4286 K; V -0.05; 11.26 pc): +3.7 %.
+pure func checkFgkAndGiants() -> bool =
+  within(radiusFromV(0.0 - 26.74, 0.0000048481368110954, 5772.0), 1.0, 0.01)
+  && within(radiusFromV(0.01, 1.3384, 5790.0), 1.2234, 0.01)
+  && within(radiusFromV(1.33, 1.3384, 5260.0), 0.8632, 0.03)
+  && within(radiusFromV(0.86, 20.4332, 3927.0), 45.212, 0.06)
+  && within(radiusFromV(0.0 - 0.05, 11.26, 4286.0), 25.4, 0.05)
+test "inferred radii: the Sun, alpha Cen A/B within 3 percent; Aldebaran, Arcturus within 6 percent" { checkFgkAndGiants() }
+
+-- M dwarfs: Barnard's Star (Ribas et al. 2018, Nature 563, 365: 0.178 R_sun, 3278 K;
+-- V 9.511; Gaia DR3 546.98 mas): +0.3 %. TRAPPIST-1 (Agol et al. 2021, PSJ 2, 1: 0.1192 R_sun,
+-- 2566 K; V 18.80, Costa et al. 2006; Gaia DR3 80.21 mas): +9 %. Proxima Cen (Kervella et al.
+-- 2017: 0.1542 R_sun; Segransan et al. 2003: 3042 K; V 11.13; Gaia DR3 768.07 mas): -31 %,
+-- the M-dwarf limit: BC_V falls 0.5 mag per 100 K there, so the published 2,900-3,100 K
+-- spread of Proxima's Teff alone moves R by tens of percent.
+pure func checkMDwarfs() -> bool =
+  within(radiusFromV(9.511, 1000.0 / 546.98, 3278.0), 0.178, 0.02)
+  && within(radiusFromV(18.80, 1000.0 / 80.21, 2566.0), 0.1192, 0.12)
+  && within(radiusFromV(11.13, 1000.0 / 768.07, 3042.0), 0.1542, 0.35)
+  && radiusFromV(11.13, 1000.0 / 768.07, 3042.0) < 0.1542
+test "inferred radii: Barnard's Star within 2 percent, TRAPPIST-1 12 percent, Proxima 35 percent (the M-dwarf limit)" { checkMDwarfs() }
+
+-- Mutants the checks above kill (each emulated through the public functions): M_bol,sun
+-- 4.83 (the Sun's absolute V) moves the Sun's radius 4 %; a sign-flipped BC moves alpha
+-- Cen B 21 %; a T^4 temperature term (no square root) makes R(1 L_sun, 2886 K) 16x, not 4x.
+pure func checkMutantsDiffer() -> bool {
+  let sunPc = 0.0000048481368110954;
+  let bcB = bolometricCorrectionV(5260.0);
+  !within(radiusSunFromLuminosity(luminositySunFromV(0.0 - 26.74, sunPc, bolometricCorrectionV(5772.0) + (4.83 - 4.74)), 5772.0), 1.0, 0.01)
+  && !within(radiusSunFromLuminosity(luminositySunFromV(1.33, 1.3384, 0.0 - bcB), 5260.0), 0.8632, 0.03)
+  && relative(radiusSunFromLuminosity(1.0, 2886.0), 4.0, 0.000000000001)
+}
+test "the radius checks kill M_bol,sun 4.83, a sign-flipped BC and a T^4 radius" { checkMutantsDiffer() }

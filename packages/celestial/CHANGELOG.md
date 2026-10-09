@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.3.0
+
+Feature (minor bump, the repo's convention for new exports; stapledons ledger
+D-58, Mark attended 2026-10-09). Every 0.2.0 signature and result is
+unchanged; the addition is in `kepler`.
+
+- `semiMajorAxisFromPeriod(gm, periodDays)`: Kepler's third law inverted,
+  a = (gm (P / 2 pi)^2)^(1/3) in gm's length unit (gm in length^3 / day^2).
+  The synchronous orbit of a body rotating once per sidereal period sits at
+  this radius (its altitude is a minus the body's radius).
+- Test (1 more): round trip with `period` to 1e-14 from 1e-3 to 1e6 days;
+  1 AU for the Gaussian year; Earth's geostationary radius 42,164.17 km
+  (within 0.05 km) from GM_Earth = 398,600.4418 km^3/s^2 and the sidereal day
+  0.99726968 d.
+
 ## 0.2.0
 
 Feature (minor bump, the repo's convention for new exports): the

@@ -7,7 +7,7 @@
 module sunholo/celestial/kepler_test
 
 import std/math (sin, cos, sqrt, intToFloat)
-import ./kepler (Vec3, State, Orbit, Drift, driftingState, noDrift, solveKepler, stateFromElements, orbitRadius, meanMotion, period, norm, dot, cross, sub, scale, absf, wrapPi, pi, twoPi)
+import ./kepler (Vec3, State, Orbit, Drift, driftingState, noDrift, solveKepler, stateFromElements, orbitRadius, meanMotion, period, semiMajorAxisFromPeriod, norm, dot, cross, sub, scale, absf, wrapPi, pi, twoPi)
 
 pure func rel(got: float, want: float, tol: float) -> bool = absf(got - want) <= tol * absf(want)
 
@@ -176,3 +176,17 @@ pure func checkDriftingState() -> bool {
 }
 
 test "driftingState velocity is d(pos)/dt with all five element drifts" { checkDriftingState() }
+
+-- 0.3.0: Kepler's third law inverted. It round-trips with period (1e-14 relative over
+-- 1e-3 to 1e6 days), gives a = 1 AU for the Gaussian year, and Earth's geostationary
+-- radius 42,164.17 km from GM_Earth 398,600.4418 km^3/s^2 (IERS) and the sidereal day
+-- 0.99726968 d; a mutant without the square on P/2pi gives 205 km, killed.
+pure func checkSemiMajorAxis() -> bool {
+  let gmEarthKmDay = 398600.4418 * 86400.0 * 86400.0;
+  let geo = semiMajorAxisFromPeriod(gmEarthKmDay, 0.99726968);
+  rel(period(gmSun(), semiMajorAxisFromPeriod(gmSun(), 0.001)), 0.001, 0.00000000000001)
+  && rel(period(gmSun(), semiMajorAxisFromPeriod(gmSun(), 1000000.0)), 1000000.0, 0.00000000000001)
+  && rel(semiMajorAxisFromPeriod(gmSun(), 365.2568983), 1.0, 0.0000000001)
+  && absf(geo - 42164.17) < 0.05
+}
+test "semiMajorAxisFromPeriod: inverts period, 1 AU in a Gaussian year, Earth geostationary 42,164 km" { checkSemiMajorAxis() }

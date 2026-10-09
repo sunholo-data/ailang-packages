@@ -10,7 +10,7 @@
 
 module sunholo/relativity/geodesic_test
 
-import std/math (intToFloat, log)
+import std/math (intToFloat, log, asin, sqrt)
 import std/list (length)
 import ./hyper (absf, tanh)
 import ./schwarzschild (pi, criticalImpact, shadowAngularRadius, weakDeflection, weakDeflection2, strongDeflectionBbar, impactFromStaticAngle)
@@ -205,3 +205,19 @@ test "the forward row starts at psi - alpha_sh = 1e-8 alpha_sh" { checkLogMin() 
 
 pure func checkTanhLarge() -> bool = tanh(1000000.0) == 1.0 && tanh(-1000000.0) == -1.0 && tanh(400.0) == 1.0 && tanh(21.0) == 1.0 && tanh(0.5) < 0.5
 test "hyper.tanh is +-1 for huge arguments (0.10.0 fix: NaN beyond |u| ~ 355 before); lensRegular needs it at r = 1e6" { checkTanhLarge() }
+
+-- 0.11.0 doc fix: the integrator's error near the shadow edge (b = b_c (1 + eps)) grows
+-- as 1/eps and falls as h^4. Seen from r = 1000 at eps = 1e-6: h = 0.005 is 1.3e-6 rad and
+-- h = 0.0025 is 8e-8 rad against the exact form (the documented values; eps = 1e-8 gives
+-- 1.3e-4 and 8.2e-6, too slow to run here).
+pure func edgeError(eps: float, h: float) -> float {
+  let r = 1000.0;
+  let psi = asin(criticalImpact() * (1.0 + eps) * sqrt(1.0 - 1.0 / r) / r);
+  absf((escapeAzimuth(r, psi, h)).dphi - (escapeAzimuthExact(r, psi)).dphi)
+}
+pure func checkEdgeStep() -> bool {
+  let coarse = edgeError(0.000001, 0.005);
+  let fine = edgeError(0.000001, 0.0025);
+  coarse > 0.000001 && coarse < 0.000002 && fine > 0.00000005 && fine < 0.0000001 && coarse / fine > 12.0 && coarse / fine < 20.0
+}
+test "integrator step near the shadow edge: 1.3e-6 rad at h 0.005, 8e-8 at h 0.0025 (eps 1e-6, r 1000), h^4" { checkEdgeStep() }

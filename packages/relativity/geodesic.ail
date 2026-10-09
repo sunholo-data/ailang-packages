@@ -118,7 +118,12 @@ export pure func escapes(r: float, psi: float) -> bool =
   psi >= halfPi() || impactFromStaticAngle(r, psi) > criticalImpact()
 
 -- THE integrator (spec section 3): capture from `escapes`, azimuth from RK4 at
--- step h. h = 0.005 gives about 5e-7 rad worst case; 0.001 about 1e-9.
+-- step h. The error grows toward the shadow edge as 1/eps for b = b_c (1 + eps)
+-- and falls as h^4. Measured against escapeAzimuthExact for an ingoing ray seen
+-- from r = 1000: eps = 1e-8 gives 1.3e-4 rad at h = 0.005 and 8.2e-6 rad at
+-- h = 0.0025 (the stapledons lens tables use 0.0025); eps = 1e-6 gives 1.3e-6 and
+-- 8e-8; eps = 1e-2 about 1e-10. (0.10.x said "5e-7 rad worst case": true only
+-- away from the edge.)
 export pure func escapeAzimuth(r: float, psi: float, h: float) -> Ray
   requires { r > 1.5 && h > 0.0 }
 {

@@ -96,11 +96,11 @@ let vLim = limitingMagnitude(skyLum, 2.0);          -- faintest visible star, fi
 | `medium` | `cSI protonMassKg lightYearM julianYearS astronomicalUnitM cmbTemperatureK accelSI`, `photonDriveEnergy(mEff, phi)`, `loadScale(n, phi)`, `kineticFlux(n, phi)`, `mirrorDragForce(n, phi, r)`, `mirrorDragPower(n, phi, r)`, `cruiseDragEnergy(n, phi, r, dCoast)`, `glowInwardFlux(n, phi, eps, fIn)`, `glowEmittanceAt(n, phi, eps, fIn, cosTheta)`, `glowTemperatureAt(n, phi, cosTheta)`, `glowRadianceAt(n, phi, eps, fIn, cosTheta)`, `glowEfficacyAt(n, phi, cosTheta)`, `glowLuminanceAt(n, phi, eps, fIn, cosTheta)`, `TripEnergy {boost, brake, drag, total}`, `tripEnergy(p, mEff, n, r)`, `brakeHoldsAgainstDrag(mEff, a, n, phi, r)`, `hoverPower(mEffKg, gMs2)` |
 | `optics` | `Vec3`, `aberrate`, `deaberrate`, `doppler`, `dopplerApparent`, `gammaOnePlusBetaCos`, `cosSeen`, `dot`, `norm`, `normalize`, `forwardDoppler`, `cmbForwardTemperature`, `cmbSeenTemperature`, `cmbSeenTemperatureApparent`, `angleSeen(theta, phi)`, `ApparentDisc {centre, radius}`, `apparentDisc(cosTheta, alpha, phi)` |
 | `blackbody` | `XYZ`, `RGB`, `cmf`, `planck`, `xyz`, `luminance`, `chromaticity`, `rgbUnitLuminance`, `pointFluxRatio`, `surfaceBrightnessRatio`, `photopicRadiance`, `stefanBoltzmannSI`, `luminousEfficacy(kelvin)` |
-| `photometry` | `teffFromBpRp`, `gMinusV`, `bpRpInTable`, `teffFromBV`, `bvInTable`, `vFromG`, `illuminanceFromV`, `vFromIlluminance`, `fluxRatioFromMags`, `luminanceFromSurfaceMag`, `surfaceMagFromLuminance`, `pointThresholdIlluminance`, `limitingMagnitude` |
-| `photometry_table` | Generated Gaia BP-RP, Teff, G-V and spectral-type node lists, and the Johnson B-V and Teff node lists |
+| `photometry` | `teffFromBpRp`, `gMinusV`, `bpRpInTable`, `teffFromBV`, `bvInTable`, `vFromG`, `illuminanceFromV`, `vFromIlluminance`, `fluxRatioFromMags`, `luminanceFromSurfaceMag`, `surfaceMagFromLuminance`, `pointThresholdIlluminance`, `limitingMagnitude`, `bolometricCorrectionV`, `luminositySunFromV`, `radiusSunFromLuminosity`, `solarBolometricMagnitude`, `solarTeffNominal` |
+| `photometry_table` | Generated Gaia BP-RP, Teff, G-V and spectral-type node lists, the Johnson B-V and Teff node lists, and the BCv-Teff node lists |
 | `blackbody_photometry` | `bbTeffMin`, `bbTeffMax`, `bbBpRp`, `bbGMinusV`, `bbBpRpInvertible`, `bbClampTeff`, `bbTeffFromBpRp`, `bbTeffFromBpRpExact`, `bbGMinusVFromBpRp`, `bbVFromG` |
 | `blackbody_photometry_table` | Generated Gaia G/BP/RP and Bessell-Murphy V response samples, zero points and the 61-node colour table |
-| `schwarzschild` | `photonSphere` (1.5), `criticalImpact` (3√3/2), `shadowAngularRadius(r)`, `weakDeflection(b)`, `staticObserverBlueshift(r)`, `staticClockRate(r)`, `pi`; 0.10.0: `impactFromStaticAngle(r, psi)`, `turningRadius(b)`, `weakDeflection2(b)`, `weakDeflectionFinite(r, psi)`, `strongDeflectionBbar`, `circularOrbitSpeed(r)`, `circularOrbitClockRate(r)`, `orbitalAngularVelocity(r)`, `movingClockRate(r, beta)`, `radialCoordinateRate(r, beta)`, `hoverAcceleration(r)`, `rsPerSolarMassMetres`, `tidalRadial(r)`, `tidalTransverse(r)`, `tidalRadialOrbit(r)`, `tidalAccelSI(mSun, r, lenM)`, `tidalOrbitAccelSI(mSun, r, lenM)`, `tidalSafeRadius(mSun, lenM, aMax)`, `tidalMinMass(lenM, r, aMax)`, `hoverAccelSI(mSun, r)`, `hoverPowerPerKg(mSun, r)` |
+| `schwarzschild` | `photonSphere` (1.5), `criticalImpact` (3√3/2), `shadowAngularRadius(r)`, `weakDeflection(b)`, `staticObserverBlueshift(r)`, `staticClockRate(r)`, `pi`; 0.10.0: `impactFromStaticAngle(r, psi)`, `turningRadius(b)`, `weakDeflection2(b)`, `weakDeflectionFinite(r, psi)`, `strongDeflectionBbar`, `circularOrbitSpeed(r)`, `circularOrbitClockRate(r)`, `orbitalAngularVelocity(r)`, `movingClockRate(r, beta)`, `radialCoordinateRate(r, beta)`, `hoverAcceleration(r)`, `rsPerSolarMassMetres`, `tidalRadial(r)`, `tidalTransverse(r)`, `tidalRadialOrbit(r)`, `tidalAccelSI(mSun, r, lenM)`, `tidalOrbitAccelSI(mSun, r, lenM)`, `tidalSafeRadius(mSun, lenM, aMax)`, `tidalMinMass(lenM, r, aMax)`, `hoverAccelSI(mSun, r)`, `hoverPowerPerKg(mSun, r)`; 0.11.0: `isco` (3 r_s) |
 | `geodesic` | 0.10.0. `Ray {escaped, dphi}`, `Binet {u, v}`, `InvSample {dpsi, slope}`; integrator `binetStep`, `escapeAzimuth(r, psi, h)`, `lensDeflection(r, psi, h)`, `deflectionFromInfinity(b, h)`, `integrateRay`; capture `escapes(r, psi)`; exact `carlsonRF(x, y, z)`, `deflectionExact(b)`, `escapeAzimuthExact(r, psi)`, `deflectionExactAt(r, psi)`; lens map `lensRegular(r, psi, h)`, `imageAngle(r, beta, order)`, `einsteinAngle(r)`, `imageMagnification(r, psi)`, `inverseRow(r, nFwd, nOut)`, `inverseRowLogMin` |
 
 ## Trip plans: `plan*` or the totals?
@@ -160,6 +160,8 @@ let vLim = limitingMagnitude(skyLum, 2.0);          -- faintest visible star, fi
   Linear in both arguments, so a stepped hold sums it times dtau per tick.
 
 ## Photometry
+
+A star's **radius** with no measurement (0.11.0): `radiusSunFromLuminosity(luminositySunFromV(v, distancePc, bolometricCorrectionV(teff)), teff)` (R_sun). FGK dwarfs and K giants come out within a few percent of measured radii; M dwarfs within about 30% (BC_V is steep there: 100 K of Teff is about 25% in R). Extinction is ignored.
 
 Use `photometry` to estimate a **main-sequence dwarf** temperature in Kelvin
 from Gaia BP-RP colour, infer Johnson V magnitude from Gaia G, or convert
@@ -278,7 +280,9 @@ V is good to about +-0.1 mag. Treat results as approximate.
   F = psi - delta from the hole direction (negative: the far side).
 - **Integrator or exact form?** `escapeAzimuth`/`lensDeflection`/`lensRegular`
   (RK4, step h in azimuth) is the general method the spec names; use it in
-  offline tools (h = 0.005 is about 5e-7 rad worst case). The exact form
+  offline tools. Near the shadow edge (b = b_c (1 + eps)) the error grows as
+  1/eps and falls as h^4: at eps = 1e-8 (observer at r = 1000) h = 0.005 gives
+  1.3e-4 rad and h = 0.0025 gives 8.2e-6 rad; at eps = 1e-6, 1.3e-6 and 8e-8. The exact form
   (`escapeAzimuthExact`, `deflectionExact`, `deflectionExactAt`) is the
   oracle: use it in checks, image solving and inverse rows; it and everything
   built on it (images, magnification, inverse rows) require r >= 2. Never call
