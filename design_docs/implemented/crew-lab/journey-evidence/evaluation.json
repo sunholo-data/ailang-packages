@@ -1,0 +1,265 @@
+{
+  "sprint_id": "S-CREW-JOURNEY-TUI",
+  "evaluation_round": 1,
+  "timestamp": "2026-10-09T18:45:50.715620+00:00",
+  "reviewer": "/root/crew_final_evaluator",
+  "independent": true,
+  "implemented_feature": false,
+  "design_doc": "design_docs/planned/crew-journey-terminal.md",
+  "sprint_plan": "design_docs/planned/crew-journey-terminal-sprint.md",
+  "source_head": "3e5659e569a20a4976d019f3bfcb74df150a840a",
+  "base_head": "e7dd3ff",
+  "branch": "sprint/crew-journey-terminal",
+  "result": "pass",
+  "total_score": 98,
+  "pass_threshold": 70,
+  "score_breakdown": {
+    "tests_pass": 20,
+    "lint_clean": 10,
+    "acceptance_criteria": 30,
+    "code_quality": 13,
+    "documentation": 15,
+    "design_fidelity": 10
+  },
+  "hard_fails": [],
+  "gate_source": "ci",
+  "ci": {
+    "url": "https://github.com/sunholo-data/ailang-packages/actions/runs/37973618460",
+    "head_sha": "3e5659e569a20a4976d019f3bfcb74df150a840a",
+    "status": "completed",
+    "conclusion": "success",
+    "steps": [
+      {
+        "name": "Set up job",
+        "conclusion": "success"
+      },
+      {
+        "name": "Run actions/checkout@v4",
+        "conclusion": "success"
+      },
+      {
+        "name": "Install pinned runtime and solver",
+        "conclusion": "success"
+      },
+      {
+        "name": "Crew behaviour, replay, strict VM and installed CLI",
+        "conclusion": "success"
+      },
+      {
+        "name": "Behavioural mutation controls",
+        "conclusion": "success"
+      },
+      {
+        "name": "Existing social lab regression",
+        "conclusion": "success"
+      },
+      {
+        "name": "Post Run actions/checkout@v4",
+        "conclusion": "success"
+      },
+      {
+        "name": "Complete job",
+        "conclusion": "success"
+      }
+    ]
+  },
+  "automated_checks": {
+    "tests_pass": true,
+    "lint_clean": true,
+    "file_sizes_ok": true,
+    "named_tests": {
+      "crew": 125,
+      "content_library": 14,
+      "terminal_ui": 12,
+      "engines": [
+        "evaluator",
+        "strict bytecode VM"
+      ],
+      "named_skips": 0,
+      "vm_fallbacks": 0
+    },
+    "mutations": {
+      "total": 8,
+      "compiled": 8,
+      "killed": 8
+    },
+    "installed_journey_flows": 7,
+    "source_controls": {
+      "journey_flow": {
+        "passed": 8,
+        "skipped": 4
+      },
+      "journey_presenter": {
+        "passed": 7,
+        "skipped": 3
+      },
+      "terminal_ui": {
+        "passed": 8,
+        "skipped": 10
+      },
+      "terminal_demo": {
+        "passed": 4,
+        "skipped": 1
+      }
+    },
+    "full_local_gates_rerun_by_reviewer": false,
+    "existing_social_regression_native": 110
+  },
+  "quality": {
+    "crew": {
+      "compiled_files": 27,
+      "verified": 17,
+      "total_contracts": 83,
+      "skipped": 64,
+      "encoder_errors": 2,
+      "counterexamples": 0,
+      "uncontracted_exports": 0,
+      "interface": "v2",
+      "effects_max": [
+        "AI",
+        "Env",
+        "FS",
+        "IO"
+      ],
+      "release_kind": "feature",
+      "changelog_section": true,
+      "agent_docs": true,
+      "ai_summary": true,
+      "exported_functions": 82,
+      "pure_functions": 75,
+      "gates": 0
+    },
+    "terminal_ui": {
+      "compiled_files": 3,
+      "verified": 2,
+      "total_contracts": 9,
+      "skipped": 7,
+      "encoder_errors": 0,
+      "counterexamples": 0,
+      "uncontracted_exports": 0,
+      "interface": "v2",
+      "effects_max": [
+        "IO"
+      ],
+      "release_kind": "feature",
+      "changelog_section": true,
+      "agent_docs": true,
+      "ai_summary": true,
+      "exported_functions": 9,
+      "pure_functions": 9,
+      "gates": 0
+    },
+    "remaining_encoder_errors": [
+      "journey_flow.remember: unsupported std/list.reverse body encoding",
+      "scenario.policies: existing record type not declared in function signature"
+    ],
+    "informational_limits": [
+      "Local registry export-overlap check unavailable through DNS; no registry publication claimed.",
+      "No _smoke.ail; actual installed CLI/demo controls supply effectful boot evidence.",
+      "terminal_ui license_url badge is informational."
+    ],
+    "contract_semantics": "New launchJourney supported-mode precondition is meaningful; internal bin adapters do not add tautological unit-return contracts. Effectful publication/terminal behavior is tested, not claimed as an SMT proof.",
+    "ci_registry_export_overlap": "Completed without a gate; PUB023 was a local DNS limitation only."
+  },
+  "acceptance_criteria": [
+    {
+      "criterion_id": "AC1",
+      "criterion": "Pure AILANG reusable renderer, IO-only demo, installed journey adapters",
+      "met": true,
+      "evidence": "Source manifests/effects inspected; final installed seven-flow harness; independently executed refreshed journey.ail/offline adapter from unrelated cwd."
+    },
+    {
+      "criterion_id": "AC2",
+      "criterion": "Bounded usable frames and persistent decisions/costs",
+      "met": true,
+      "evidence": "Independently inspected 16 actual80x28 science frames and23 actual60x24 care frames, including prompt row; Start/relief screenshots inspected.512-character accepted cached reply pages retain Start and reserve/consume4.4096-character renderer boundary is native evidence, not an accepted content-library variant. Corrected70-watch reply has actual host wcwidth60/60/20 lines; all6 final frames fit. Root40x16 probe and native controls cover minimum dimensions."
+    },
+    {
+      "criterion_id": "AC3",
+      "criterion": "Trusted redraw, safe plain output and clean exits",
+      "met": true,
+      "evidence": "Source contains clear/home/reset only, no raw mode/alternate buffer/hidden cursor/Process. Four independently executed TERM/NO_COLOR/explicit override cases pass. Plain recap strips ESC/bidi from display while preserving the real raw filesystem journal path."
+    },
+    {
+      "criterion_id": "AC4",
+      "criterion": "Understandable preparation story without invented arrival or score",
+      "met": true,
+      "evidence": "Actual opening identifies captain, bubble ship bridge/Commons, crew fatigue/values, scarce materials and Offer/Hear/Start/Advance workflow. Policy meanings are always visible. Eight-turn review is a factual exercise marker; no win, arrival, physical travel clock or alien-contact simulator is claimed."
+    },
+    {
+      "criterion_id": "AC5",
+      "criterion": "Navigation preserves pending decisions and authoritative state",
+      "met": true,
+      "evidence": "Code returns unchanged complete PlayState. Independent c/w/j/h/n/v/b pending-Start flow has complete10-row journal payload equality with legacy baseline. Actual pending-relief flow remains actionable through reading views. CI seven-flow comparison also covers response errors, shortage, occupied crew and refusal."
+    },
+    {
+      "criterion_id": "AC6",
+      "criterion": "Legacy/offline journal and replay compatibility",
+      "met": true,
+      "evidence": "Exact-head CI installed seven-flow payload comparisons and evaluator/strictVM extracted recovery replay pass. Independent baseline comparison is byte-equivalent at JSON payload level. All independent runs use offline/stub/cache with zero provider calls."
+    },
+    {
+      "criterion_id": "AC7",
+      "criterion": "Factual dialogue, publication and error recovery",
+      "met": true,
+      "evidence": "Actual Start/relief screens distinguish stock narrator from AI wording. Exact512-character cached AI text remains in journal with cache0calls. Waiting header is neutral for both offers and active-work check-ins; IO flush occurs after request publication and before lookup. CI verifies cached origins, pending stock fallback, publication failure and actual indicator deltas."
+    },
+    {
+      "criterion_id": "AC8",
+      "criterion": "Quality, documentation and independent acceptance",
+      "met": true,
+      "evidence": "Exact-head required CI fully succeeds, including eight compiled/killed mutations and existing social regression. Both strict-quality reports have no gates. Raw proof errors and source-property skips are retained, not called proofs. Package/CLI changelogs, AGENT docs, reusable demo and story limits are present. Root owns post-verdict sprint closure/archive."
+    }
+  ],
+  "documentation_check": {
+    "changelog_updated": true,
+    "examples_created": true,
+    "design_doc_status": "Implementation accepted; parent archives design/companion and completes sprint metadata after this verdict.",
+    "closure_owned_by_parent": true
+  },
+  "design_fidelity": {
+    "score": 10,
+    "notes": "Focused pure AILANG screen composition and a coherent crew preparation exercise reuse the original authoritative host, library and policies. Default80x24 refinement is explicit and approved;80x28/60x24 targets remain validated. No mechanic, provider/model, schema or contact simulation changes."
+  },
+  "feedback": [
+    {
+      "file": "examples/crew-lab/play.ail",
+      "line": 242,
+      "function": "launch",
+      "category": "code_quality",
+      "severity": "low",
+      "issue": "Expanded nested startup function remains over50lines, costing2points under the evaluator rubric.",
+      "suggestion": "Future cleanup can extract configuration/policy/startup-publication helpers while preserving legacy output and exact journal payloads. This is nonblocking for landing."
+    }
+  ],
+  "resolved_findings": [
+    "Onboarding raw input and action-count guards added.",
+    "Policy meanings and active project/relief cost context remain visible while reading.",
+    "Prompt row fits total frame dimensions; plain frame-boundary harness corrected.",
+    "Waiting wording no longer falsely says active work has not started.",
+    "Modern recap/fatal displays sanitize controls without rewriting journals.",
+    "Wide symbols undercount fixed with conservative unknown-glyph width; independently measured actual host wcwidth.",
+    "Initial empty-list proof spelling corrected; remember history-bound precondition added; remaining encoder limits explicit.",
+    "New public entry boundary avoids vacuous inventory-only unit contracts."
+  ],
+  "independent_evidence_directory": "/private/tmp/journey-independent-evaluator",
+  "independent_evidence": [
+    "science-ansi.txt",
+    "start.png",
+    "care-ansi.txt",
+    "relief.png",
+    "comparison.json",
+    "long-valid-ansi.txt",
+    "sanitized-recap.txt",
+    "wide-final-ansi.txt",
+    "ci-final.json"
+  ],
+  "strongest_remaining_risk": "Terminal appearance still depends on manual dimensions and conservative codepoint measurement. Full grapheme/emoji shaping, automatic resize/TTY detection and raw-key input are intentionally unsupported; unknown glyphs may use extra space. Actual user taste remains a feedback matter, not established by test counts.",
+  "limitations": [
+    "All reviewer flows were offline; no live AI/provider calls were made.",
+    "Source-property skips and SMT encoder failures are not proofs or named-test failures.",
+    "This is a standalone preparation exercise, not Godot integration, a save/resume system, simulated alien contact or a game-winning score.",
+    "Sprint status/velocity and archive transitions are the parent post-verdict step; no circular requirement for the independent review to be already completed."
+  ],
+  "notes": "PASS is based on actual ANSI frames, newcomer/story review, real pending-choice navigation, independent width/provenance probes and exact-source CI, not test inventory alone. Reviewer changed no sources, installed no commands, committed/pushed/merged nothing and delegated no work."
+}

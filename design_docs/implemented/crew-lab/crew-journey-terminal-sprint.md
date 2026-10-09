@@ -1,6 +1,7 @@
 # S-CREW-JOURNEY-TUI
 
-**Status:** Authorized by attended UI instruction; ready for execution.
+**Status:** Complete, 2026-10-09; merged in PR114. Exact-head CI37973618460 and
+independent acceptance 98/100 passed. [Evidence](journey-evidence/README.md).
 **Design:** [Captain's journey terminal](crew-journey-terminal.md).
 **AILANG prompt version loaded:** v0.16.6, complete prompt read 2026-10-09.
 

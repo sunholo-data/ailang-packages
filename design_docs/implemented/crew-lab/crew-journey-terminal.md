@@ -9,7 +9,9 @@
 | Grounded Strangeness | +1 | First-contact preparation is through observation and signals; no material exchange. |
 | We Are Not Built For This | +2 | Tired crew retain refusal and relief choices. Indicators are inspectable, not a composite score. |
 
-**Status:** Implementable UI slice, attended 2026-10-09.
+**Status:** Implemented and merged to packages main in [PR114](https://github.com/sunholo-data/ailang-packages/pull/114), 2026-10-09.
+Exact source 3e5659e: [CI37973618460](https://github.com/sunholo-data/ailang-packages/actions/runs/37973618460) green;
+independent acceptance 98/100, no blockers. See [evaluation](journey-evidence/evaluation.json).
 **Authorization:** Mark requested serious terminal UI work, permitted a new package,
 selected a strained crew preparing for first contact, and then explicitly preferred
 pure AILANG for the terminal UI. Existing captain/crew rules, AI provider, local
