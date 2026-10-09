@@ -2,6 +2,28 @@
 
 Run from the repository root with the Makefile commands in the package README.
 Requirements: AILANG v0.52.0, Bash, make and jq. No game or AI capability is used.
+
+Install the local CLI from the packages repository root:
+
+```sh
+ailang install --path examples/social-dynamics
+export PATH="$HOME/.ailang/bin:$PATH"
+social-lab < examples/social-dynamics/recordings/ship-care.ndjson
+```
+
+`social-lab` accepts NDJSON on stdin and writes the complete causal trace to
+stdout; redirect it to a file or inspect it with `jq`. It can run from any
+working directory. The command belongs to the experimental runner package
+`sunholo/social_experiments`; the reusable `sunholo/social_dynamics` library
+retains its pure public API. Installation uses this checkout and needs no
+registry publication, game build or provider key.
+
+The direct CLI treats an empty input line as end of input because of the pinned
+runtime's `readLine` semantics. Use `run.sh` or the Makefile for recordings from
+untrusted sources: their preflight rejects blank, oversized and excessive lines.
+The CLI reports malformed commands and blocked advances with exit status 1.
+See [the JEV integration notes](JEV-INTEGRATION.md) for the next experiment.
+
 `deps` regenerates both local locks. `scenarios`, `parity`, `replay` and `validate`
 exercise five recorded paths. `experiment` supports `SCENARIO`, `POLICY`, `INPUT`,
 `ENGINE=interpreter|vm` and `AILANG`; invalid choices and malformed input fail.

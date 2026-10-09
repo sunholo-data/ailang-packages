@@ -7,7 +7,9 @@ POLICY ?= care
 INPUT ?= $(EX)/recordings/$(SCENARIO)-$(POLICY).ndjson
 ENGINE ?= interpreter
 OUT := $(ROOT)/.ailang/state/social-experiments
-.PHONY: experiment scenarios parity replay validate deps timings
+.PHONY: experiment scenarios parity replay validate deps timings cli-test
+cli-test: scenarios
+	@AILANG="$(AILANG)" "$(EX)/test-cli.sh"
 experiment:
 	@mkdir -p "$(OUT)"
 	@AILANG="$(AILANG)" "$(EX)/run.sh" "$(ENGINE)" "$(INPUT)" > "$(OUT)/latest.ndjson"
@@ -38,6 +40,6 @@ validate: deps
 	@"$(AILANG)" check --package "$(EX)"
 	@cd "$(EX)" && "$(AILANG)" test --package .
 	@cd "$(EX)" && "$(AILANG)" test --allow-skips config.ail
-	@$(MAKE) -f "$(EX)/Makefile" scenarios parity replay AILANG="$(AILANG)"
+	@$(MAKE) -f "$(EX)/Makefile" cli-test parity replay AILANG="$(AILANG)"
 	@cd "$(PKG)" && "$(AILANG)" pkg quality --strict .
 	@cd "$(PKG)" && "$(AILANG)" publish --dry-run
