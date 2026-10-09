@@ -65,7 +65,10 @@ pure func help() -> string =
 func loop(s: Session, count: int, recover: bool) -> () ! {IO} = {
   let raw = readLine()
   let line = trim(raw)
-  if stringLength(raw) > 65536 then {println("ERROR: line limit");exit(1)} else if line == "" || line == "quit" then () else if count >= 10000 then {
+  if stringLength(raw) > 65536 then {
+    println("ERROR: line limit")
+    exit(1)
+  } else if line == "" || line == "quit" then () else if count >= 10000 then {
     println("ERROR: command limit")
     exit(1)
   } else if line == "help" then {
@@ -95,7 +98,10 @@ func loop(s: Session, count: int, recover: bool) -> () ! {IO} = {
 func boot(count: int) -> () ! {IO} = {
   let raw = readLine()
   let line = trim(raw)
-  if stringLength(raw) > 65536 then {println("ERROR: line limit");exit(1)} else if line == "" || line == "quit" then () else if count >= 10000 then {
+  if stringLength(raw) > 65536 then {
+    println("ERROR: line limit")
+    exit(1)
+  } else if line == "" || line == "quit" then () else if count >= 10000 then {
     println("ERROR: command limit")
     exit(1)
   } else if line == "help" then {
