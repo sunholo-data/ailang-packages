@@ -42,3 +42,8 @@ unrelated cwd. Report skipped solver contracts separately from verified ones.
 Public module paths: `sunholo/crew_lab/actor_policy`, `sunholo/crew_lab/scenario`,
 `sunholo/crew_lab/session`, `sunholo/crew_lab/codec`. Session is trusted host state;
 application commands are the boundary, not caller-manufactured Session records.
+
+`sunholo/crew_lab/terminal` translates friendly terminal commands into the same
+strict JSON host protocol. Manual one-hot replies identify synthetic:manual and
+never bypass host validation. `crew-view` adds ASCII gauges and recoverable friendly
+errors; starting with JSON retains recorded fail-fast handling.

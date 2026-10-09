@@ -25,3 +25,8 @@ path dependency. A scoped CI job runs the crew and original social lab checks.
 
 Adds `[bin] crew-view` and `make view` for readable per-step interior state, sharing
 the same pure host and saved decisions with the full JSON CLI.
+
+Terminal iteration adds portable ASCII indicator gauges, help/status/quit and
+friendly captain command aliases. Manual replies are labelled synthetic fixtures
+and reuse the same validation and host authority. Friendly errors preserve the
+incoming session; JSON recordings keep fail-fast behaviour.

@@ -1,0 +1,160 @@
+module sunholo/crew_lab/terminal_test
+import ./terminal (begin, translate)
+import ./session (Session, HostError, start, input, offer, ask, complete, snapshot)
+import std/result (Result, Ok, Err)
+import std/option (Some, None)
+import std/list (head, filter, length, map)
+import std/json (Json, decode, get, getString, getNumber, getInt, getBool, encode, jo, kv, js, jnum, jint)
+import std/string (repeat)
+
+pure func base() -> Result[Session, HostError] = match start("{\"command\":\"start\",\"policy\":\"consent\"}") {
+  Ok(o) => Ok(o.session),
+  Err(e) => Err(e)
+}
+
+pure func prepared() -> Result[Session, HostError] = match base() {
+  Err(e) => Err(e),
+  Ok(s) => match offer(s, "scientist", "observations", "science") {
+    Err(e) => Err(e),
+    Ok(o) => match ask(o.session, "scientist", "science", "r1") {
+      Err(e) => Err(e),
+      Ok(a) => Ok(a.session)
+    }
+  }
+}
+
+pure func decoded(r: Result[string, string]) -> Json = match r {
+  Err(_) => jo([]),
+  Ok(s) => match decode(s) {
+    Ok(j) => j,
+    Err(_) => jo([])
+  }
+}
+
+pure func failed(r: Result[string, string]) -> bool = match r {
+  Err(_) => true,
+  Ok(_) => false
+}
+
+pure func manual() -> string =
+  encode(jo([kv("model", js("synthetic:manual")), kv("id", js("manual-r1")), kv("usage", jo([kv("input_tokens", jint(0)), kv("output_tokens", jint(0)), kv("cost", jnum(0.0))])), kv("answers", jo([kv("response", jo([kv("type", js("choice")), kv("choice", js("accept")), kv("confidence", jnum(1.0)), kv("probabilities", jo(map(\key. kv(key, jnum(if key == "accept" then 1.0 else 0.0)), ["accept", "decline", "concern", "defer"])))]))]))]))
+
+test "begin accepts exact policies and normal whitespace" {
+  getString(decoded(begin(" start\tconsent ")), "policy") == Some("consent") && getString(decoded(begin("start orders")), "policy") == Some("orders") && failed(begin("start bad")) && failed(begin("start consent extra")) && failed(begin("consent"))
+}
+
+test "strict JSON passthrough is unchanged and bounded" {
+  let raw = " {\"command\":\"start\",\"policy\":\"orders\"} " in
+  begin(raw) == Ok(raw) && failed(begin("[]")) && failed(begin("{} {}")) && failed(begin("{bad}")) && failed(begin(repeat(" ", 65537)))
+}
+
+test "offer ask work map positional words to existing host schema" {
+  match base() {
+    Err(_) => false,
+    Ok(s) => let o = decoded(translate(s, "offer science scientist observations")) in
+    let a = decoded(translate(s, "ask r1 scientist science")) in
+    let w = decoded(translate(s, "work science")) in
+    getString(o, "command") == Some("offer") && getString(o, "id") == Some("science") && getString(o, "worker") == Some("scientist") && getString(o, "recipe") == Some("observations") && getString(a, "id") == Some("r1") && getString(a, "actor") == Some("scientist") && getString(a, "task") == Some("science") && getString(w, "command") == Some("start_task")
+  }
+}
+
+test "advance defaults budget and accepts explicit bounded integers" {
+  match base() {
+    Err(_) => false,
+    Ok(s) => let a = decoded(translate(s, "advance 4")) in
+    let b = decoded(translate(s, "advance 4 1")) in
+    getInt(a, "tick") == Some(4) && getInt(a, "budget") == Some(64) && getInt(b, "budget") == Some(1) && failed(translate(s, "advance 4.5")) && failed(translate(s, "advance -1")) && failed(translate(s, "advance 4 0.5")) && failed(translate(s, "advance 1000000001"))
+  }
+}
+
+test "relief delivery cancellation abort use closed explicit commands" {
+  match base() {
+    Err(_) => false,
+    Ok(s) => let g = decoded(translate(s, "relief relief-r1 grant")) in
+    let d = decoded(translate(s, "relief relief-r1 deny")) in
+    let received = decoded(translate(s, "deliver engineer report-science receipt-1")) in
+    getBool(g, "release") == Some(true) && getBool(d, "release") == Some(false) && failed(translate(s, "relief relief-r1 maybe")) && getString(received, "observer") == Some("engineer") && getString(received, "evidence") == Some("report-science") && getString(received, "id") == Some("receipt-1") && getString(decoded(translate(s, "cancel r1")), "command") == Some("cancel_request") && getString(decoded(translate(s, "abort")), "command") == Some("abort")
+  }
+}
+
+test "unknown viewer-only words and wrong argument counts rejected" {
+  match base() {
+    Err(_) => false,
+    Ok(s) => failed(translate(s, "help")) && failed(translate(s, "status")) && failed(translate(s, "quit")) && failed(translate(s, "offer science scientist")) && failed(translate(s, "work science extra")) && failed(translate(s, "advance 4 1 extra")) && failed(translate(s, "reply r1 accept 0.8")) && failed(translate(s, "abort extra"))
+  }
+}
+
+test "reply must name stored pending request and legal actor choice" {
+  match prepared() {
+    Err(_) => false,
+    Ok(s) => failed(translate(s, "reply missing accept")) && failed(translate(s, "reply r1 captain_order")) && failed(translate(s, "reply r1 request_relief"))
+  }
+}
+
+test "manual reply has explicit synthetic provenance complete legal onehot and defaults" {
+  match prepared() {
+    Err(_) => false,
+    Ok(s) => let j = decoded(translate(s, "reply r1 accept")) in match getString(j, "body") {
+      None => false,
+      Some(body) => getString(j, "command") == Some("answer") && getString(j, "request") == Some("r1") && getNumber(j, "roll") == Some(0.0) && body == manual()
+    }
+  }
+}
+
+test "reply numbers reject strings null booleans infinity and bounds" {
+  match prepared() {
+    Err(_) => false,
+    Ok(s) => failed(translate(s, "reply r1 accept null 0")) && failed(translate(s, "reply r1 accept true 0")) && failed(translate(s, "reply r1 accept 1e999 0")) && failed(translate(s, "reply r1 accept -0.1 0")) && failed(translate(s, "reply r1 accept 1.1 0")) && failed(translate(s, "reply r1 accept 0.8 1")) && failed(translate(s, "reply r1 accept 0.8 -0.1")) && failed(translate(s, "reply r1 accept 0.8 NaN")) && failed(translate(s, "reply r1 accept \"0.8\" 0"))
+  }
+}
+
+test "translated default reply equals same authored manual host input" {
+  match prepared() {
+    Err(_) => false,
+    Ok(s) => match translate(s, "reply r1 accept") {
+      Err(_) => false,
+      Ok(command) => match (input(s, command), complete(s, "r1", manual(), 0.0)) {
+        (Ok(a), Ok(b)) => snapshot(a.session) == snapshot(b.session) && a.trace == b.trace && length(a.session.bank) == 1 && a.session.bank == b.session.bank,
+        _ => false
+      }
+    }
+  }
+}
+
+test "low confidence manual reply defers through existing host gate" {
+  match prepared() {
+    Err(_) => false,
+    Ok(s) => match translate(s, "reply r1 accept 0.2 0.9") {
+      Err(_) => false,
+      Ok(command) => match input(s, command) {
+        Err(_) => false,
+        Ok(o) => o.session.state == s.state && length(o.session.bank) == 1 && (match head(o.session.bank) {
+          Some(b) => b.selected == "defer",
+          None => false
+        })
+      }
+    }
+  }
+}
+
+test "translation leaves host permissions and stale rejection intact" {
+  match prepared() {
+    Err(_) => false,
+    Ok(s) => match translate(s, "work science") {
+      Err(_) => false,
+      Ok(cmd) => match input(s, cmd) {
+        Ok(_) => false,
+        Err(_) => match input(s, "{\"command\":\"advance\",\"tick\":1,\"budget\":64}") {
+          Err(_) => false,
+          Ok(a) => match translate(a.session, "reply r1 accept") {
+            Err(_) => false,
+            Ok(reply) => match input(a.session, reply) {
+              Err(_) => a.session.state.tick == 1 && length(a.session.bank) == 0 && length(a.session.pending) == 1,
+              Ok(_) => false
+            }
+          }
+        }
+      }
+    }
+  }
+}

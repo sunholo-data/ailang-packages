@@ -1,0 +1,83 @@
+module sunholo/crew_lab/terminal
+import std/result (Result, Ok, Err)
+import std/option (Some, None)
+import std/list (head, filter, contains, map)
+import std/string (words, startsWith, trim, length as stringLength)
+import std/json (Json, decode, encode, jo, kv, js, jnum, jint, jb)
+import ./codec (object, number, integer)
+import ./session (Session, Request)
+
+-- Presentation only: generated commands still pass through the unchanged host.
+pure func command(name: string, fields: [{ key: string, value: Json }]) -> string =
+  encode(jo([kv("command", js(name))] ++ fields))
+
+pure func numeric(token: string) -> Result[float, string] = match decode(token) {
+  Err(_) => Err("expected finite number"),
+  Ok(j) => number(jo([kv("value", j)]), "value")
+}
+
+pure func natural(token: string) -> Result[int, string] = match decode(token) {
+  Err(_) => Err("expected integer tick/budget"),
+  Ok(j) => integer(jo([kv("value", j)]), "value")
+}
+
+pure func jsonLine(line: string) -> Result[string, string] = match object(line) {
+  Err(_) => Err("expected one JSON object, at most 65536 characters"),
+  Ok(_) => Ok(line)
+}
+
+export pure func begin(line: string) -> Result[string, string]
+ensures { match result {
+  Ok(s) => stringLength(s) > 0 && stringLength(s) <= 65536,
+  Err(_) => true
+} } =
+  if stringLength(line) > 65536 then Err("line exceeds 65536 characters") else if startsWith(trim(line), "{") then jsonLine(line) else match words(line) {
+    ["start", "consent"] => Ok(command("start", [kv("policy", js("consent"))])),
+    ["start", "orders"] => Ok(command("start", [kv("policy", js("orders"))])),
+    _ => Err("start consent | start orders")
+  }
+
+pure func manual(r: Request, selected: string, confidence: float) -> string =
+  encode(jo([kv("model", js("synthetic:manual")), kv("id", js("manual-${r.id}")), kv("usage", jo([kv("input_tokens", jint(0)), kv("output_tokens", jint(0)), kv("cost", jnum(0.0))])), kv("answers", jo([kv("response", jo([kv("type", js("choice")), kv("choice", js(selected)), kv("confidence", jnum(confidence)), kv("probabilities", jo(map(\key. kv(key, jnum(if key == selected then 1.0 else 0.0)), r.legal)))]))]))]))
+
+pure func reply(s: Session, id: string, selected: string, confidence: float, roll: float) -> Result[string, string] =
+  if not (confidence >= 0.0 && confidence <= 1.0) then Err("confidence must be finite in [0,1]") else if not (roll >= 0.0 && roll < 1.0) then Err("roll must be finite in [0,1)") else match head(filter(\r. r.id == id, s.pending)) {
+    None => Err("unknown pending request; use ask first"),
+    Some(r) => if not contains(r.legal, selected) then Err("choice is not legal for this request") else let body = manual(r, selected, confidence) in
+    let text = command("answer", [kv("request", js(id)), kv("body", js(body)), kv("roll", jnum(roll))]) in
+    if stringLength(text) > 65536 then Err("reply exceeds wire limit") else Ok(text)
+  }
+
+pure func advance(tick: string, budget: string) -> Result[string, string] = match (natural(tick), natural(budget)) {
+  (Ok(t), Ok(b)) => Ok(command("advance", [kv("tick", jint(t)), kv("budget", jint(b))])),
+  _ => Err("advance requires integer tick and budget in [0,1000000000]")
+}
+
+pure func translated(s: Session, tokens: [string]) -> Result[string, string] = match tokens {
+  ["offer", id, worker, recipe] => Ok(command("offer", [kv("id", js(id)), kv("worker", js(worker)), kv("recipe", js(recipe))])),
+  ["ask", id, actor, task] => Ok(command("ask", [kv("id", js(id)), kv("actor", js(actor)), kv("task", js(task))])),
+  ["reply", id, selected] => reply(s, id, selected, 1.0, 0.0),
+  ["reply", id, selected, c, r] => match (numeric(c), numeric(r)) {
+    (Ok(confidence), Ok(roll)) => reply(s, id, selected, confidence, roll),
+    _ => Err("reply requires finite numeric confidence and roll")
+  },
+  ["work", task] => Ok(command("start_task", [kv("task", js(task))])),
+  ["advance", tick] => advance(tick, "64"),
+  ["advance", tick, budget] => advance(tick, budget),
+  ["relief", id, "grant"] => Ok(command("resolve_relief", [kv("id", js(id)), kv("release", jb(true))])),
+  ["relief", id, "deny"] => Ok(command("resolve_relief", [kv("id", js(id)), kv("release", jb(false))])),
+  ["deliver", observer, evidence, id] => Ok(command("deliver", [kv("observer", js(observer)), kv("evidence", js(evidence)), kv("id", js(id))])),
+  ["cancel", id] => Ok(command("cancel_request", [kv("id", js(id))])),
+  ["abort"] => Ok(command("abort", [])),
+  _ => Err("unknown command or incorrect argument count; use help")
+}
+
+export pure func translate(s: Session, line: string) -> Result[string, string]
+ensures { match result {
+  Ok(text) => stringLength(text) > 0 && stringLength(text) <= 65536,
+  Err(_) => true
+} } =
+  if stringLength(line) > 65536 then Err("line exceeds 65536 characters") else if startsWith(trim(line), "{") then jsonLine(line) else match translated(s, words(line)) {
+    Err(e) => Err(e),
+    Ok(text) => if stringLength(text) > 65536 then Err("command exceeds wire limit") else Ok(text)
+  }
