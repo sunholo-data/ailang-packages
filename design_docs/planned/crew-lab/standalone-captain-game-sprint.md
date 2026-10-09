@@ -41,3 +41,39 @@ M1 recovery completed: published rejected starts return to bridge; seed and doma
 are preserved, while blocked advances retain earlier boundaries. The installed
 shortage/occupancy/refusal harness and recovery replay pass; journal failures stay
 fatal. Native checkpoint:97/97 evaluator and strict VM, zero fallback/skips.
+
+M2 interface completed. Pure presenter supplies the bridge briefing, authority and
+seed guidance, compact panels, configured costs, actual tick progress, directed
+trust, source labels, factual action deltas and exit recap. Help and latest action
+messages remain after the dashboard beside the next menu. No provider calls,
+kernel/recipes/content-library/banked schema/model changes were made.
+
+Acceptance evidence:
+- [x] Briefing and conditional first experiment: newcomer-transcript.txt.
+- [x] Immediate science reservation shortage and later depletion remain playable;
+  rejection does not charge resources or RNG: shortage-transcript.txt + test-play.sh.
+- [x] Consent/occupancy rejection and blocked partial boundaries recover safely:
+  installed fixtures and native recovery controls.
+- [x] Publication failure stays fatal with prior journal/Session/seed intact.
+- [x] Help/navigation preserve host journal payloads, sequence, seed and call budget;
+  guide remains beside the current numbered choices.
+- [x] Scoped validate passes:108/108 named controls on both engines, zero fallback
+  or skips;8/8 compile-success mutants killed; original social regression passes.
+- [x] Actual newcomer transcript inspected by executor and root.
+- [ ] Independent sprint-evaluator verdict: root owns the separate judge handoff.
+
+Quality evidence:11/70 contracts proved,58 skipped and1 encoder limitation,
+0 counterexamples/uncontracted exports;22 files compile;96 interface signatures;
+AI/Env/FS/IO ceiling unchanged;63/69 exports pure;9 native-test files,108 passing;
+no isolated _smoke.ail (installed CLI controls boot the repository graph); no gates.
+Source checks: scenario7 passed; session3 passed/9 skipped; reactions3/4;
+play_flow5/6; presenter7/8 (seven missing structured generators and one unsatisfied
+requires input). Content-library source11/2; native14/14 on both engines.
+Skips and encoder limits are not proofs. Registry export-overlap was unavailable
+because DNS lookup failed; no publication or live-provider claim is made.
+
+Execution used AILANG prompt v0.16.6 whole, runtime v0.52.0 bf2436a. Two sequential
+milestones completed in the isolated checkout. Formatter nested interpolations
+needed extracted local expressions; known upstream defects were not treated as
+passing checks. New code remains under the package file-size bounds. Final scoped
+harness/format evidence includes the last help-placement adjustment.

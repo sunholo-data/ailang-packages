@@ -1,11 +1,12 @@
 module sunholo/crew_lab/play_flow
 import std/result (Result, Ok, Err)
 import std/option (Some, None)
-import std/string (trim, stringToInt, length as stringLength, join, repeat)
+import std/string (trim, stringToInt, length as stringLength, join)
 import std/list (filter, nth, map, length, head)
 import std/json (encode, jo, kv, js)
-import pkg/sunholo/social_dynamics/model (Offered, Working, Task, Actor)
+import pkg/sunholo/social_dynamics/model (Offered, Working, Task)
 import ./session (Session, start, input, encodeHostError)
+import ./presenter (dashboard, projectName)
 
 export type PlayState = { session: Session, seed: int, nextId: int, seq: int, phase: string, target: string } deriving (Eq)
 
@@ -87,7 +88,7 @@ ensures { match result {
   Err(_) => true
 } } =
   if stringLength(line) > 65536 then Err("Input exceeds 65536 characters") else let c = trim(line) in
-  if c == "0" then Ok(intent(if s.phase == "main" || s.phase == "response" then "quit" else "back", "")) else if s.phase == "start" then if c == "1" then Ok(intent("start", s.target)) else if c == "2" then Ok(intent("back", "")) else Err("Choose 1 Start or 2 Leave offered") else if s.phase == "response" then if c == "1" then Ok(intent("retry", s.target)) else if c == "2" then Ok(intent("authored", s.target)) else if c == "3" then Ok(intent("cancel", s.target)) else Err("Choose Retry, authored continuation, cancel or quit") else if s.phase == "working" then taskChoice(s, c, true) else if s.phase == "offered" then taskChoice(s, c, false) else if s.phase == "reliefs" then reliefChoice(s, c) else if s.phase == "relief" then if c == "1" then Ok(intent("grant", s.target)) else if c == "2" then Ok(intent("deny", s.target)) else Err("Choose 1 Grant or 2 Deny") else if s.phase != "main" then Err("Invalid menu phase") else match s.session.state.continuation {
+  if c == "h" || c == "help" then Ok(intent("help", "")) else if c == "0" then Ok(intent(if s.phase == "main" || s.phase == "response" then "quit" else "back", "")) else if s.phase == "start" then if c == "1" then Ok(intent("start", s.target)) else if c == "2" then Ok(intent("back", "")) else Err("Choose 1 Start or 2 Leave offered") else if s.phase == "response" then if c == "1" then Ok(intent("retry", s.target)) else if c == "2" then Ok(intent("authored", s.target)) else if c == "3" then Ok(intent("cancel", s.target)) else Err("Choose Retry, authored continuation, cancel or quit") else if s.phase == "working" then taskChoice(s, c, true) else if s.phase == "offered" then taskChoice(s, c, false) else if s.phase == "reliefs" then reliefChoice(s, c) else if s.phase == "relief" then if c == "1" then Ok(intent("grant", s.target)) else if c == "2" then Ok(intent("deny", s.target)) else Err("Choose 1 Grant or 2 Deny") else if s.phase != "main" then Err("Invalid menu phase") else match s.session.state.continuation {
     Some(token) => if c == "1" then Ok(intent("continue", show(token.target))) else if c == "2" then Ok(intent("abort", "")) else if c == "9" then Ok(intent("status", "")) else Err("Finish or abort the pending advance first"),
     None => if c == "1" then Ok(project("scientist", "observations")) else if c == "2" then Ok(project("engineer", "maintenance")) else if c == "3" then Ok(project("scientist", "rest_scientist")) else if c == "4" then Ok(project("engineer", "rest_engineer")) else if c == "5" then Ok(intent("advance", "")) else if c == "6" then Ok(intent("working", "")) else if c == "7" then Ok(intent("offered", "")) else if c == "8" then Ok(intent("reliefs", "")) else if c == "9" then Ok(intent("status", "")) else Err("Choose a listed captain action")
   }
@@ -99,9 +100,9 @@ pure func numbered(xs: [string], i: int) -> [string] = match xs {
 
 export pure func menu(s: PlayState) -> string
 ensures { stringLength(result) > 0 } =
-  if s.phase == "start" then "1. Start ${s.target}\n2. Leave offered" else if s.phase == "response" then "Crew response unavailable.\n1. Retry library\n2. Explicit authored continuation\n3. Cancel this response\n0. Quit" else if s.phase == "relief" then "1. Grant relief ${s.target}\n2. Deny relief\n0. Back" else if s.phase == "working" || s.phase == "offered" then join("\n", numbered(map(\t. "${t.id}: ${t.recipe}", tasks(s, s.phase == "working")), 1) ++ ["0. Back"]) else if s.phase == "reliefs" then join("\n", numbered(map(\r. "${r.author}: ${r.id}", filter(\r. not r.resolved, s.session.state.reliefs)), 1) ++ ["0. Back"]) else match s.session.state.continuation {
+  if s.phase == "start" then "1. Start ${s.target}\n2. Leave offered" else if s.phase == "response" then "Crew response unavailable.\n1. Retry crew reply\n2. Use stock wording (no AI call)\n3. Cancel this response\n0. Quit" else if s.phase == "relief" then "1. Grant relief ${s.target}\n2. Deny relief\n0. Back" else if s.phase == "working" || s.phase == "offered" then join("\n", numbered(map(\t. "${projectName(t.recipe)} / ${join(", ", t.participants)}", tasks(s, s.phase == "working")), 1) ++ ["0. Back"]) else if s.phase == "reliefs" then join("\n", numbered(map(\r. "${r.author}: ${r.id}", filter(\r. not r.resolved, s.session.state.reliefs)), 1) ++ ["0. Back"]) else match s.session.state.continuation {
     Some(_) => "1. Continue pending advance\n2. Abort pending advance\n9. Status\n0. Quit",
-    None => "1. Offer science\n2. Offer maintenance\n3. Scientist rest\n4. Engineer rest\n5. Advance one tick\n6. Check in with working crew\n7. Review offered projects\n8. Resolve relief\n9. Status\n0. Quit"
+    None => "1. Offer science (4 ticks; reserve/consume 4 materials)\n2. Offer maintenance (3 ticks; reserve 3, consume 2)\n3. Scientist rest (2 ticks; no materials)\n4. Engineer rest (2 ticks; no materials)\n5. Advance one tick\n6. Check in with working crew\n7. Review offered projects\n8. Resolve relief\n9. Status\n0. Quit\nh. Help"
   }
 
 export pure func stage(s: PlayState, command: string, nextSeed: int, phase: string, target: string, nextId: int) -> Result[Stage, string]
@@ -126,26 +127,8 @@ test "numbered policy has no implicit moral default" {
   }
 }
 
-pure func gauge(n: int) -> string = {
-  let bounded = if n < 0 then 0 else if n > 100 then 100 else n
-  let filled = bounded / 10
-  "[${repeat("#", filled)}${repeat("-", 10 - filled)}] ${show(n)}"
-}
-
-pure func crewLine(a: Actor) -> string = {
-  let indicators = join(" | ", map(\v. "${v.id} ${gauge(v.value)}", a.indicators))
-  "  ${a.id}: ${indicators}"
-}
-
 export pure func renderStatus(s: PlayState, remaining: int) -> string
-ensures { stringLength(result) > 0 } = {
-  let state = s.session.state
-  let crew = join("\n", map(crewLine, state.actors))
-  let resources = join("; ", map(\r. "${r.id}: available ${show(r.available)}, reserved ${show(r.reserved)}, consumed ${show(r.consumed)}", state.resources))
-  let relations = join("\n", map(\r. "${r.from} -> ${r.to} ${r.dimension} ${gauge(r.value)}", state.relationships))
-  let projects = if state.tasks == [] then "No projects" else join("; ", map(\t. "${t.id} (${t.recipe}): ${show(t.status)}", state.tasks))
-  "Tick ${show(state.tick)}; policy ${s.session.policy}; AI attempts remaining ${show(remaining)}\n${crew}\n${relations}\n${resources}\n${projects}"
-}
+ensures { stringLength(result) > 0 } = dashboard(s.session, remaining)
 
 -- Only navigation changes after a published rejection. Retain committed domain,
 -- RNG, journal sequence and IDs, including earlier boundaries of a blocked advance.

@@ -1,0 +1,75 @@
+module sunholo/crew_lab/presenter_test
+import std/result (Result, Ok, Err)
+import std/option (Some, None)
+import std/list (head, map, length)
+import std/string (contains)
+import ./session (Session, HostError, start, offer, startTask, input)
+import ./presenter (briefing, policyBrief, projectCost, elapsed, dashboard, guidance, help, dialogue, rejection, consequences, recap)
+
+pure func base() -> Result[Session, HostError] = match start("{\"command\":\"start\",\"policy\":\"orders\"}") {
+  Err(e) => Err(e),
+  Ok(o) => Ok(o.session)
+}
+
+test "onboarding identifies role authority variation and conditional first experiment" {
+  contains(briefing("offline"), "You are the captain") && contains(briefing("offline"), "If they refuse") && contains(briefing("offline"), "no AI calls") && contains(policyBrief(), "Neither policy bypasses crew capacity or supplies")
+}
+
+test "tick progress is bounded and reflects elapsed time rather than arbitrary percent" {
+  elapsed(0, 0, 4) == 0 && elapsed(1, 0, 4) == 1 && elapsed(4, 0, 4) == 4 && elapsed(10, 0, 4) == 4 && elapsed(1, 3, 7) == 0 && elapsed(4, 4, 4) == 0
+}
+
+test "project costs distinguish reservations consumption duration and free rest" {
+  match base() {
+    Err(_) => false,
+    Ok(s) => contains(projectCost(s, "observations"), "4 ticks") && contains(projectCost(s, "observations"), "reserve 4 materials") && contains(projectCost(s, "maintenance"), "reserve 3 materials") && contains(projectCost(s, "maintenance"), "consume 2 materials") && contains(projectCost(s, "rest_scientist"), "no materials")
+  }
+}
+
+test "dashboard reads directed trust instead of inert actor scalar" {
+  match base() {
+    Err(_) => false,
+    Ok(s) => {
+      let changed = { s | state: { s.state | actors: map(\a. { a | indicators: map(\v. if v.id == "trust" then { v | value: 99 } else v, a.indicators) }, s.state.actors), relationships: map(\r. { r | value: 41 }, s.state.relationships) } }
+      let view = dashboard(changed, 2)
+      contains(view, "scientist -> captain trust [####------] 41") && not contains(view, "99")
+    }
+  }
+}
+
+test "working progress and completion consequence use actual host boundary" {
+  match base() {
+    Err(_) => false,
+    Ok(s) => match offer(s, "scientist", "observations", "science") {
+      Err(_) => false,
+      Ok(o) => match startTask(o.session, "science") {
+        Err(_) => false,
+        Ok(w) => match input(w.session, "{\"command\":\"advance\",\"tick\":1,\"budget\":64}") {
+          Err(_) => false,
+          Ok(a) => contains(dashboard(a.session, 2), "Working 1/4 ticks") && (match input(a.session, "{\"command\":\"advance\",\"tick\":4,\"budget\":64}") {
+            Err(_) => false,
+            Ok(c) => contains(consequences(a.session, c.session, "{\"command\":\"advance\"}"), "Completed: Science observations") && contains(recap(c.session, "journal.jsonl"), "Elapsed: 4 ticks. Completed projects: 1")
+          })
+        }
+      }
+    }
+  }
+}
+
+test "contextual help states depleted supplies and produces no host transition" {
+  match base() {
+    Err(_) => false,
+    Ok(s) => {
+      let view = help(s, "start", "science", "offline", 2)
+      contains(view, "waiting will not make maintenance affordable") && contains(view, "Offline: no AI calls") && s.state.tick == 0 && s.state.tasks == []
+    }
+  }
+}
+
+test "stock narrator is distinct from exact cached and newly generated AI dialogue" {
+  contains(dialogue("scientist", "accept", "[authored starter] Response: accept.", "authored"), "Crew reaction (narrator): scientist agrees") && not contains(dialogue("scientist", "accept", "placeholder", "authored"), "scientist:") && contains(dialogue("scientist", "accept", "A precise cached line.", "cache"), "scientist: A precise cached line.") && contains(dialogue("scientist", "accept", "A new line.", "generated"), "New AI wording")
+}
+
+test "rejection guidance never promises missing blocked continuation or replenishment" {
+  contains(rejection("{\"error\":{\"code\":\"insufficient_resource\",\"detail\":\"materials\"}}"), "will not return by waiting") && contains(rejection("{\"blocked\":true}"), "target was not reached") && not contains(rejection("{\"blocked\":true}"), "continue or abort")
+}

@@ -35,6 +35,18 @@ jq -s -e 'last.state.tasks | any(.[]; .recipe=="observations" and .status=="comp
 jq -s -e 'last.state | (.resources[0].available==6 and .resources[0].consumed==0) and any(.tasks[]; .recipe=="rest_scientist" and .status=="completed") and any(.tasks[]; .recipe=="observations" and .status=="stopped")' "$TMP/care-replay.ndjson" > /dev/null
 jq -s -e 'last.state | .resources[0].consumed==4 and any(.tasks[]; .recipe=="observations" and .status=="completed")' "$TMP/deny-replay.ndjson" > /dev/null
 jq -s -e 'last.state | .resources[0].consumed==6 and .resources[0].available==0 and ([.tasks[]|select(.status=="completed")]|length)==2' "$TMP/projects-replay.ndjson" > /dev/null
+# Help at bridge and start menus is pure: identical host journal, seed and usage.
+"$TMP/bin/crew-play-offline" --home "$TMP/newcomer" < "$EX/recordings/play-newcomer.menu" > "$TMP/newcomer.out"
+journals=("$TMP/newcomer"/runs/*/journal.jsonl)
+original=("$TMP/science"/runs/*/journal.jsonl)
+jq -s 'map(.payload)' "${journals[0]}" > "$TMP/newcomer-payload.json"
+jq -s 'map(.payload)' "${original[0]}" > "$TMP/science-payload.json"
+cmp "$TMP/newcomer-payload.json" "$TMP/science-payload.json"
+rg -q 'You are the captain' "$TMP/newcomer.out"
+rg -q "CAPTAIN'S GUIDE" "$TMP/newcomer.out"
+# Help must remain below the latest dashboard until its current numbered menu.
+awk '/^\[ CAPTAIN.S GUIDE \]/{guide=1} guide && /^\[ BRIDGE/{bad=1} /^1\. (Offer|Start)/{guide=0} END{exit bad}' "$TMP/newcomer.out"
+rg -q 'Elapsed: 4 ticks. Completed projects: 1' "$TMP/newcomer.out"
 # Ordinary published resource rejection must leave the captain playing.
 mkdir -p "$TMP/shortage"
 cp "$TMP/projects/response-policy.json" "$TMP/shortage/response-policy.json"
@@ -96,7 +108,14 @@ exec 3>&-
 test "$rc" = 1
 cmp "$journal" "$TMP/before.jsonl"
 rg -q 'Journal failed; prior Session and seed retained' "$TMP/failure.out"
-if rg -q '^scientist:' "$TMP/failure.out"; then printf 'Dialogue exposed before failed journal publication\n' >&2; exit 1; fi
+if rg -q '^scientist:|^Crew reaction \(narrator\):' "$TMP/failure.out"; then printf 'Dialogue exposed before failed journal publication\n' >&2; exit 1; fi
+if [[ -n "${EVIDENCE_DIR:-}" ]]; then
+ mkdir -p "$EVIDENCE_DIR"
+ for path in newcomer shortage occupied refusal; do
+  # Paths/owners are run-specific; preserve all actual game output otherwise.
+  sed "s|$TMP|<temporary-home>|g" "$TMP/$path.out" > "$EVIDENCE_DIR/$path-transcript.txt"
+ done
+fi
 # Installed argument boundary is independent of cwd and has no secret/network access.
 if "$TMP/bin/crew-play-offline" --wat > "$TMP/args.out" 2>&1; then exit 1; fi
-printf 'Guided offline UI: science/care/denial/material competition, extracted replay + strict VM, zero calls, journal rollback and arguments pass\n'
+printf 'Guided offline UI: science/care/denial/material competition/shortage/occupancy/refusal/help, extracted replay + strict VM, zero calls, journal rollback and arguments pass\n'

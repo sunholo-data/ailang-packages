@@ -1,0 +1,507 @@
+Resolving dependencies in /private/tmp/stapledon-crew-tui-20261009/packages/social-dynamics
+⚠ No dependencies to resolve
+✓ Generated ailang.lock (0 packages)
+Resolving dependencies in /private/tmp/stapledon-crew-tui-20261009/examples/social-dynamics
+✓ Generated ailang.lock (1 packages)
+  → sunholo/social_dynamics@0.1.0 (path: ../../packages/social-dynamics)
+→ Checking package sunholo/social_dynamics (8 exported modules)...
+
+  ✓ _smoke.ail
+  ✓ conditions.ail
+  ✓ conditions_test.ail
+  ✓ engine.ail
+  ✓ engine_test.ail
+  ✓ indicators.ail
+  ✓ indicators_test.ail
+  ✓ model.ail
+  ✓ proposals.ail
+  ✓ proposals_test.ail
+  ✓ relationships.ail
+  ✓ relationships_test.ail
+  ✓ tasks.ail
+  ✓ tasks_test.ail
+  ✓ wire.ail
+  ✓ wire_test.ail
+
+  ! module "sunholo/social_dynamics/wire_test" compiled but not listed in [exports].modules
+  ! module "sunholo/social_dynamics/tasks_test" compiled but not listed in [exports].modules
+  ! module "sunholo/social_dynamics/indicators_test" compiled but not listed in [exports].modules
+  ! module "sunholo/social_dynamics/proposals_test" compiled but not listed in [exports].modules
+  ! module "sunholo/social_dynamics/relationships_test" compiled but not listed in [exports].modules
+  ! module "sunholo/social_dynamics/_smoke" compiled but not listed in [exports].modules
+  ! module "sunholo/social_dynamics/conditions_test" compiled but not listed in [exports].modules
+  ! module "sunholo/social_dynamics/engine_test" compiled but not listed in [exports].modules
+
+✓ 16 files checked, all passed!
+→ Package sunholo/social_dynamics
+  9 source modules, 7 test files
+
+
+[1mTest Results[0m
+Module: sunholo/social_dynamics
+
+[1mTests:[0m
+  [32m✓[0m entry requires duration and does not refire while active (113.606125ms)
+      at [2mconditions_test.ail:35:1[0m
+  [32m✓[0m cancelled threshold duration starts over (121.331459ms)
+      at [2mconditions_test.ail:45:1[0m
+  [32m✓[0m recovery hysteresis and cooldown (148.356875ms)
+      at [2mconditions_test.ail:64:1[0m
+  [32m✓[0m continuation preserves sequence and rejects conflicting inputs (121.13675ms)
+      at [2mconditions_test.ail:89:1[0m
+  [32m✓[0m wrong continuation token cannot change pending state (113.351708ms)
+      at [2mconditions_test.ail:112:1[0m
+  [32m✓[0m condition clock partition matches unsplit advance (107.248833ms)
+      at [2mconditions_test.ail:129:1[0m
+  [32m✓[0m recovery cannot execute until next scheduler tick (120.362666ms)
+      at [2mconditions_test.ail:144:1[0m
+  [32m✓[0m condition mutators reject changed config and pending continuation (120.591584ms)
+      at [2mconditions_test.ail:159:1[0m
+  [32m✓[0m reserving and completing conserves inventory (128.984ms)
+      at [2mengine_test.ail:34:1[0m
+  [32m✓[0m capacity prevents aggregate work allocation (112.246917ms)
+      at [2mengine_test.ail:47:1[0m
+  [32m✓[0m advance partition produces identical state and events (119.556916ms)
+      at [2mengine_test.ail:54:1[0m
+  [32m✓[0m rewind and bad budgets preserve state (111.169333ms)
+      at [2mengine_test.ail:67:1[0m
+  [32m✓[0m completion failure leaves tick and reservation unchanged (124.673125ms)
+      at [2mengine_test.ail:77:1[0m
+  [32m✓[0m simultaneous completion precedes and cancels condition entry (128.070792ms)
+      at [2mengine_test.ail:82:1[0m
+  [32m✓[0m task boundaries at same tick sort by stable id (131.067584ms)
+      at [2mengine_test.ail:99:1[0m
+  [32m✓[0m same config id cannot hide a changed frozen config (112.767084ms)
+      at [2mengine_test.ail:113:1[0m
+  [32m✓[0m progress overflow blocks completion without consuming reservation (125.170084ms)
+      at [2mengine_test.ail:115:1[0m
+  [32m✓[0m completion evidence can be explicitly delivered later (116.105375ms)
+      at [2mengine_test.ail:117:1[0m
+  [32m✓[0m completion evidence capacity failure leaves whole boundary unchanged (135.81875ms)
+      at [2mengine_test.ail:118:1[0m
+  [32m✓[0m completion evidence id collision blocks atomically (113.201041ms)
+      at [2mengine_test.ail:119:1[0m
+  [32m✓[0m valid bounded configuration initializes (65.116583ms)
+      at [2mindicators_test.ail:20:1[0m
+  [32m✓[0m duplicate actor refuses (64.897333ms)
+      at [2mindicators_test.ail:21:1[0m
+  [32m✓[0m nonconserved initial resources refuse (63.28975ms)
+      at [2mindicators_test.ail:22:1[0m
+  [32m✓[0m unknown initial knowledge refuses (62.299583ms)
+      at [2mindicators_test.ail:23:1[0m
+  [32m✓[0m invalid range refuses (64.974916ms)
+      at [2mindicators_test.ail:24:1[0m
+  [32m✓[0m invalid recipe resource and duration refuse (66.357583ms)
+      at [2mindicators_test.ail:25:1[0m
+  [32m✓[0m valid directed effect changes only its source (66.155292ms)
+      at [2mindicators_test.ail:26:1[0m
+  [32m✓[0m effects cannot clamp into valid bounds (63.202ms)
+      at [2mindicators_test.ail:27:1[0m
+  [32m✓[0m late effect failure returns only error (64.895875ms)
+      at [2mindicators_test.ail:28:1[0m
+  [32m✓[0m numeric overflow rejected (63.360542ms)
+      at [2mindicators_test.ail:29:1[0m
+  [32m✓[0m actor duplicate indicators refuse (64.454917ms)
+      at [2mindicators_test.ail:30:1[0m
+  [32m✓[0m bad threshold recovery band refuses (63.728959ms)
+      at [2mindicators_test.ail:31:1[0m
+  [32m✓[0m host evidence and explicit knowledge allowed (64.83575ms)
+      at [2mindicators_test.ail:32:1[0m
+  [32m✓[0m actor and config category caps refuse overflow (66.848542ms)
+      at [2mindicators_test.ail:33:1[0m
+  [32m✓[0m atomic effect sequence does not manufacture a relationship (64.784792ms)
+      at [2mindicators_test.ail:34:1[0m
+  [32m✓[0m effect batch cap refuses even individually valid effects (67.405875ms)
+      at [2mindicators_test.ail:35:1[0m
+  [32m✓[0m initial reservations must belong to tasks and no initial tasks exist (63.741292ms)
+      at [2mindicators_test.ail:36:1[0m
+  [32m✓[0m causal cycles in initial evidence refuse (63.51125ms)
+      at [2mindicators_test.ail:37:1[0m
+  [32m✓[0m acyclic evidence references accept independent of input order (64.53375ms)
+      at [2mindicators_test.ail:38:1[0m
+  [32m✓[0m same ID cap mutation refuses on initialized state (66.166333ms)
+      at [2mindicators_test.ail:39:1[0m
+  [32m✓[0m same ID recipe mutation refuses on initialized state (66.45225ms)
+      at [2mindicators_test.ail:40:1[0m
+  [32m✓[0m public effects refuse every pending advance input (66.220166ms)
+      at [2mindicators_test.ail:41:1[0m
+  [32m✓[0m author creates offer and knowledge without reaction or reservation (144.59775ms)
+      at [2mproposals_test.ail:29:1[0m
+  [32m✓[0m last invalid operation rolls back entire proposal (128.276083ms)
+      at [2mproposals_test.ail:36:1[0m
+  [32m✓[0m exact retry beats stale revision and expiry; altered duplicate refused (152.461459ms)
+      at [2mproposals_test.ail:41:1[0m
+  [32m✓[0m AI cannot accept or spoof actor source (128.481209ms)
+      at [2mproposals_test.ail:56:1[0m
+  [32m✓[0m stale input and full ledger refuse new IDs (144.722417ms)
+      at [2mproposals_test.ail:64:1[0m
+  [32m✓[0m commitments require each party consent without implicit reward (164.925459ms)
+      at [2mproposals_test.ail:81:1[0m
+  [32m✓[0m aggregate accept cost overcommit rolls back first reservation and events (147.89825ms)
+      at [2mproposals_test.ail:93:1[0m
+  [32m✓[0m stale nonduplicate and changed same-id configuration refuse (131.551125ms)
+      at [2mproposals_test.ail:104:1[0m
+  [32m✓[0m unseen causes cannot be laundered by authorship (122.935791ms)
+      at [2mproposals_test.ail:114:1[0m
+  [32m✓[0m pending scheduler blocks even exact retries until host continues or aborts (131.1455ms)
+      at [2mproposals_test.ail:122:1[0m
+  [32m✓[0m generated content cannot claim reserved outcome evidence namespace (121.934ms)
+      at [2mproposals_test.ail:135:1[0m
+  [32m✓[0m unseen evidence cannot enter appraisal (85.015542ms)
+      at [2mrelationships_test.ail:26:1[0m
+  [32m✓[0m context shows own outgoing relationship only (90.241792ms)
+      at [2mrelationships_test.ail:27:1[0m
+  [32m✓[0m delivery needs trusted host (86.399ms)
+      at [2mrelationships_test.ail:28:1[0m
+  [32m✓[0m early delivery refuses (87.805375ms)
+      at [2mrelationships_test.ail:29:1[0m
+  [32m✓[0m self known delivery has no reaction or revision (100.003708ms)
+      at [2mrelationships_test.ail:30:1[0m
+  [32m✓[0m received observation grants once with asymmetric reaction (107.831042ms)
+      at [2mrelationships_test.ail:31:1[0m
+  [32m✓[0m policy cannot modify another actor (89.559042ms)
+      at [2mrelationships_test.ail:32:1[0m
+  [32m✓[0m policy invalid second effect rolls back whole delivery (90.633333ms)
+      at [2mrelationships_test.ail:33:1[0m
+  [32m✓[0m knowledge cap refuses grant but known self still no op (107.031667ms)
+      at [2mrelationships_test.ail:34:1[0m
+  [32m✓[0m pending advance refuses input (88.842708ms)
+      at [2mrelationships_test.ail:35:1[0m
+  [32m✓[0m forged outgoing relationship source refuses (90.895875ms)
+      at [2mrelationships_test.ail:36:1[0m
+  [32m✓[0m private evidence contents stay outside context (91.935333ms)
+      at [2mrelationships_test.ail:37:1[0m
+  [32m✓[0m altered reused delivery ID refuses (95.390583ms)
+      at [2mrelationships_test.ail:38:1[0m
+  [32m✓[0m full accepted ledger preserves exact delivery retry (100.244417ms)
+      at [2mrelationships_test.ail:39:1[0m
+  [32m✓[0m policy identity mismatch refuses (92.056209ms)
+      at [2mrelationships_test.ail:40:1[0m
+  [32m✓[0m known self delivery still validates receipt gate (89.72ms)
+      at [2mrelationships_test.ail:41:1[0m
+  [32m✓[0m own indicator policy can replace relationship policy (102.609375ms)
+      at [2mrelationships_test.ail:42:1[0m
+  [32m✓[0m same ID indicator range mutation refuses delivery before duplicate (93.079333ms)
+      at [2mrelationships_test.ail:43:1[0m
+  [32m✓[0m conditional authority verifies all requirements (110.358ms)
+      at [2mtasks_test.ail:33:1[0m
+  [32m✓[0m policy refusal prevents acceptance (101.309666ms)
+      at [2mtasks_test.ail:45:1[0m
+  [32m✓[0m materials remain aggregated across accepted assignments (105.557542ms)
+      at [2mtasks_test.ail:52:1[0m
+  [32m✓[0m relief cancellation returns reservation exactly once (110.255ms)
+      at [2mtasks_test.ail:60:1[0m
+  [32m✓[0m declining relief keeps active reservation (105.575041ms)
+      at [2mtasks_test.ail:74:1[0m
+  [32m✓[0m duration overflow does not reserve anything (102.503917ms)
+      at [2mtasks_test.ail:82:1[0m
+  [32m✓[0m assignment supervisor comes from authenticated accepting principal (101.411375ms)
+      at [2mtasks_test.ail:89:1[0m
+  [32m✓[0m project progress caps at completion and freezes at cancellation (124.237125ms)
+      at [2mtasks_test.ail:99:1[0m
+  [32m✓[0m all task mutators reject changed config and pending continuation (143.320375ms)
+      at [2mtasks_test.ail:101:1[0m
+  [32m✓[0m unknown principal or changed policy ids never accept (108.5345ms)
+      at [2mtasks_test.ail:102:1[0m
+  [32m✓[0m exact proposal golden (54.587125ms)
+      at [2mwire_test.ail:9:1[0m
+  [32m✓[0m malformed rejects (50.305167ms)
+      at [2mwire_test.ail:10:1[0m
+  [32m✓[0m duplicate fields reject (49.559125ms)
+      at [2mwire_test.ail:11:1[0m
+  [32m✓[0m all seven operation variants roundtrip (58.509375ms)
+      at [2mwire_test.ail:15:1[0m
+  [32m✓[0m full otherwise valid duplicate schema rejects (52.360291ms)
+      at [2mwire_test.ail:16:1[0m
+  [32m✓[0m unknown field rejects (52.663417ms)
+      at [2mwire_test.ail:17:1[0m
+  [32m✓[0m fractional and huge integers reject (53.1165ms)
+      at [2mwire_test.ail:18:1[0m
+  [32m✓[0m duplicate IDs reject (53.010833ms)
+      at [2mwire_test.ail:19:1[0m
+  [32m✓[0m wrong operation variant rejects (51.247958ms)
+      at [2mwire_test.ail:20:1[0m
+  [32m✓[0m wrong field types reject (54.631459ms)
+      at [2mwire_test.ail:21:1[0m
+  [32m✓[0m unsupported version typed error (52.240292ms)
+      at [2mwire_test.ail:22:1[0m
+  [32m✓[0m operation object repeated and unknown fields reject (55.20975ms)
+      at [2mwire_test.ail:23:1[0m
+  [32m✓[0m oversized raw input rejects before parse (50.345833ms)
+      at [2mwire_test.ail:24:1[0m
+  [32m✓[0m text size and ID limits (67.555125ms)
+      at [2mwire_test.ail:25:1[0m
+  [32m✓[0m canonical set ordering retains operation order (59.25225ms)
+      at [2mwire_test.ail:26:1[0m
+  [32m✓[0m event golden (48.967209ms)
+      at [2mwire_test.ail:27:1[0m
+  [32m✓[0m typed error golden (55.183042ms)
+      at [2mwire_test.ail:28:1[0m
+  [32m✓[0m state serializes pending work knowledge dedup and continuation (53.278083ms)
+      at [2mwire_test.ail:30:1[0m
+  [32m✓[0m wrong relief boolean and commitment due reject (55.625042ms)
+      at [2mwire_test.ail:31:1[0m
+  [32m✓[0m operation count boundary enforced (58.81875ms)
+      at [2mwire_test.ail:32:1[0m
+  [32m✓[0m empty operations rejects (53.464375ms)
+      at [2mwire_test.ail:33:1[0m
+  [32m✓[0m actor input source roundtrip and integer endpoints (52.07125ms)
+      at [2mwire_test.ail:34:1[0m
+  [32m✓[0m trailing JSON garbage rejected (53.350333ms)
+      at [2mwire_test.ail:35:1[0m
+  [32m✓[0m config collections deterministic (55.576792ms)
+      at [2mwire_test.ail:37:1[0m
+  [32m✓[0m config policy limits and mechanics change identity (63.276125ms)
+      at [2mwire_test.ail:38:1[0m
+  [32m✓[0m state carries immutable config identity (51.866083ms)
+      at [2mwire_test.ail:39:1[0m
+  [32m✓[0m single object syntax and trailing guard (51.303625ms)
+      at [2mwire_test.ail:40:1[0m
+  [32m✓[0m observation event keeps evidence and observer arguments (50.468458ms)
+      at [2mwire_test.ail:41:1[0m
+  [32m✓[0m task outcome evidence full golden (52.884875ms)
+      at [2mwire_test.ail:42:1[0m
+
+──────────────────────────────────────────────────
+[32m✓[0m [1mAll tests passed![0m
+
+110 tests: 110 passed, 0 failed, 0 skipped (9.744064794s)
+  [32m✓ Passed:[0m 110
+  [31m✗ Failed:[0m 0
+
+[1mSeed:[0m
+  mode: derived
+  master seed: 0
+  derivation: ailang-property-seed-v1
+  replay: ailang test --seed 0 --package .
+
+→ Running tests in model.ail
+WARNING MOD010 (relaxed): module 'sunholo/social_dynamics/model' does not match canonical path 'model'
+  Running under --relax-modules; mismatch ignored. For strict checking, omit --relax-modules flag.
+
+[1mTest Results[0m
+Module: All Tests
+
+[1mTests:[0m
+  [32m✓[0m bounded arithmetic rejects overflow (34.834417ms)
+      at [2mmodel.ail:61:1[0m
+  [32m✓[0m ids and duplicate sets (28.822542ms)
+      at [2mmodel.ail:62:1[0m
+
+[1mProperties:[0m
+  [32m✓[0m numericLimit_property_1 (100 cases, 36.761833ms)
+      at [2mmodel.ail:45:50[0m
+  [32m✓[0m bounded_property_1 (100 cases, 23.537584ms)
+      at [2mmodel.ail:46:52[0m
+  [32m✓[0m validId_property_1 (100 cases, 24.220458ms)
+      at [2mmodel.ail:47:56[0m
+  [32m✓[0m unique_property_1 (100 cases, 25.372292ms)
+      at [2mmodel.ail:48:58[0m
+  [32m✓[0m sorted_property_1 (100 cases, 120.355709ms)
+      at [2mmodel.ail:49:62[0m
+  [32m✓[0m principalId_property_1 (100 cases, 22.618875ms)
+      at [2mmodel.ail:50:64[0m
+  [32m✓[0m add_property_1 (100 cases, 23.888792ms)
+      at [2mmodel.ail:51:70[0m
+  [32m✓[0m multiply_property_1 (100 cases, 22.113167ms)
+      at [2mmodel.ail:53:75[0m
+  [33m⊘[0m event_property_1 (12.905833ms)
+      [33mno generator for parameter s: State[0m
+      at [2mmodel.ail:56:88[0m
+  [33m⊘[0m emptyState_property_1 (15.068292ms)
+      [33mno generator for parameter c: Config[0m
+      at [2mmodel.ail:58:99[0m
+
+──────────────────────────────────────────────────
+[31m✗[0m [1m2 properties never ran (no generator) — use --allow-skips to permit[0m
+
+12 tests: 10 passed, 0 failed, 2 skipped (390.499794ms)
+  [32m✓ Passed:[0m 10
+  [31m✗ Failed:[0m 0
+  [33m⊘ Skipped:[0m 2
+
+[1mSeed:[0m
+  mode: derived
+  master seed: 0
+  derivation: ailang-property-seed-v1
+  replay: ailang test --seed 0 model.ail
+
+→ Running tests in _smoke.ail
+WARNING MOD010 (relaxed): module 'sunholo/social_dynamics/_smoke' does not match canonical path '_smoke'
+  Running under --relax-modules; mismatch ignored. For strict checking, omit --relax-modules flag.
+
+[1mTest Results[0m
+Module: All Tests
+
+[1mTests:[0m
+  [32m✓[0m smoke scalar overflow boundary (33.087833ms)
+      at [2m_smoke.ail:9:1[0m
+
+[1mProperties:[0m
+  [32m✓[0m smokeChecks_property_1 (100 cases, 50.963542ms)
+      at [2m_smoke.ail:6:50[0m
+
+──────────────────────────────────────────────────
+[32m✓[0m [1mAll tests passed![0m
+
+2 tests: 2 passed, 0 failed, 0 skipped (84.051375ms)
+  [32m✓ Passed:[0m 2
+  [31m✗ Failed:[0m 0
+
+[1mSeed:[0m
+  mode: derived
+  master seed: 0
+  derivation: ailang-property-seed-v1
+  replay: ailang test --seed 0 _smoke.ail
+
+OK social dynamics invariants
+→ Checking package sunholo/social_experiments (2 exported modules)...
+
+  ✓ config.ail
+  ✓ main.ail
+  ✓ session.ail
+  ✓ session_test.ail
+
+  ! module "sunholo/social_experiments/main" compiled but not listed in [exports].modules
+  ! module "sunholo/social_experiments/session_test" compiled but not listed in [exports].modules
+
+✓ 4 files checked, all passed!
+→ Package sunholo/social_experiments
+  3 source modules, 1 test files
+
+
+[1mTest Results[0m
+Module: sunholo/social_experiments
+
+[1mTests:[0m
+  [32m✓[0m separate consumer sees contrasting ship tradeoffs (254.146208ms)
+      at [2msession_test.ail:25:1[0m
+  [32m✓[0m community imports same pure public API without human attributes (220.642166ms)
+      at [2msession_test.ail:26:1[0m
+  [32m✓[0m runner requires explicit valid start and strict framing (211.760667ms)
+      at [2msession_test.ail:29:1[0m
+  [32m✓[0m runner refuses fractional time and unknown command fields (236.720375ms)
+      at [2msession_test.ail:30:1[0m
+  [32m✓[0m recorder proposal input uses external exported codec and engine (320.110084ms)
+      at [2msession_test.ail:35:1[0m
+  [32m✓[0m outer source cannot be forged by changing generated proposal origin (250.762666ms)
+      at [2msession_test.ail:44:1[0m
+  [32m✓[0m pure recording rejects missing start (217.825375ms)
+      at [2msession_test.ail:52:1[0m
+  [32m✓[0m blocked recorder preserves earlier completion state and events (301.302333ms)
+      at [2msession_test.ail:54:1[0m
+
+──────────────────────────────────────────────────
+[32m✓[0m [1mAll tests passed![0m
+
+8 tests: 8 passed, 0 failed, 0 skipped (2.013269874s)
+  [32m✓ Passed:[0m 8
+  [31m✗ Failed:[0m 0
+
+[1mSeed:[0m
+  mode: derived
+  master seed: 0
+  derivation: ailang-property-seed-v1
+  replay: ailang test --seed 0 --package .
+
+→ Running tests in config.ail
+WARNING MOD010 (relaxed): module 'sunholo/social_experiments/config' does not match canonical path 'config'
+  Running under --relax-modules; mismatch ignored. For strict checking, omit --relax-modules flag.
+
+[1mTest Results[0m
+Module: All Tests
+
+[1mTests:[0m
+  [32m✓[0m unknown scenario and policy refused (79.739ms)
+      at [2mconfig.ail:46:1[0m
+
+[1mProperties:[0m
+  [32m✓[0m config_property_1 (100 cases, 90.79425ms)
+      at [2mconfig.ail:7:11[0m
+  [32m✓[0m actors_property_1 (100 cases, 35.278958ms)
+      at [2mconfig.ail:28:64[0m
+  [32m✓[0m resources_property_1 (100 cases, 34.961833ms)
+      at [2mconfig.ail:35:54[0m
+  [32m✓[0m policies_property_1 (100 cases, 39.076791ms)
+      at [2mconfig.ail:44:65[0m
+
+──────────────────────────────────────────────────
+[32m✓[0m [1mAll tests passed![0m
+
+5 tests: 5 passed, 0 failed, 0 skipped (279.850832ms)
+  [32m✓ Passed:[0m 5
+  [31m✗ Failed:[0m 0
+
+[1mSeed:[0m
+  mode: derived
+  master seed: 0
+  derivation: ailang-property-seed-v1
+  replay: ailang test --seed 0 config.ail
+
+{
+  "id": "resident",
+  "indicators": [
+    {
+      "id": "fatigue",
+      "value": 45
+    },
+    {
+      "id": "observations",
+      "value": 15
+    },
+    {
+      "id": "readiness",
+      "value": 50
+    },
+    {
+      "id": "trust",
+      "value": 50
+    }
+  ]
+}
+Five contrasting outcomes, resource conservation and repeated delivery checks pass
+✓ Lock: /private/tmp/stapledon-crew-tui-20261009/examples/social-dynamics/ailang.lock (existing, 1 packages)
+✓ bin: social-lab → /var/folders/kr/h0wr2sj94vd6ljtmsxv8jkt00000gn/T/social-cli.8rzZr5/bin/social-lab  (sunholo/social_experiments@0.1.0, module main, entry main, caps IO)
+⚠ /var/folders/kr/h0wr2sj94vd6ljtmsxv8jkt00000gn/T/social-cli.8rzZr5/bin is not on your PATH. Add:  export PATH="/var/folders/kr/h0wr2sj94vd6ljtmsxv8jkt00000gn/T/social-cli.8rzZr5/bin:$PATH"
+CLI install: five traces identical from unrelated cwd; malformed command exits 1
+Five interpreter/strict-VM traces identical
+Five recordings replay identically; IO capability only
+→ quality sunholo/social_dynamics@0.1.0 (experimental)
+  compile:   ✓ 16 files
+  contracts: ✓ 5/40 verified, 0 refuted, 0 uncontracted exports (0.5s)
+  interface: ✓ v2 392a04447fe4… (131 signatures)
+  effects:   max [IO]  rank_max IO  ceiling_declared true
+  release:   kind feature  changelog_section true
+  docs:      AGENT.md true  ai_summary true
+  style:     38 exported funcs, 38 pure (100%)
+  tests:     [attested] 7 files, 110 passed, 0 failed
+  smoke:     [attested] present true passed true
+
+  · PUB016 32 contract(s) skipped by Z3 (unencodable types or builtins) — not proved; `ailang verify --package .` lists the reason per function
+  · PUB023 registry export-overlap check did not run: failed to fetch registry index: Get "https://storage.googleapis.com/ailang-registry/index.json?t=1791561998": dial tcp: lookup storage.googleapis.com: no such host
+
+✓ no gates
+Publishing sunholo/social_dynamics@0.1.0...
+→ quality sunholo/social_dynamics@0.1.0 (experimental)
+  compile:   ✓ 16 files
+  contracts: ✓ 5/40 verified, 0 refuted, 0 uncontracted exports (0.5s)
+  interface: ✓ v2 392a04447fe4… (131 signatures)
+  effects:   max [IO]  rank_max IO  ceiling_declared true
+  release:   kind feature  changelog_section true
+  docs:      AGENT.md true  ai_summary true
+  style:     38 exported funcs, 38 pure (100%)
+  tests:     [attested] 7 files, 110 passed, 0 failed
+  smoke:     [attested] present true passed true
+
+  · PUB016 32 contract(s) skipped by Z3 (unencodable types or builtins) — not proved; `ailang verify --package .` lists the reason per function
+  · PUB023 registry export-overlap check did not run: failed to fetch registry index: Get "https://storage.googleapis.com/ailang-registry/index.json?t=1791562010": dial tcp: lookup storage.googleapis.com: no such host
+
+✓ no gates
+
+  Tarball: 31611 bytes (sha256:d02fdab0d52a439bb...)
+  Content hash: sha256:a29fb3b926162f5a0...
+  Interface hash: sha256:c9c965c3763a7f241...
+  Exports: [sunholo/social_dynamics/model sunholo/social_dynamics/indicators sunholo/social_dynamics/relationships sunholo/social_dynamics/tasks sunholo/social_dynamics/conditions sunholo/social_dynamics/engine sunholo/social_dynamics/proposals sunholo/social_dynamics/wire]
+  Effects: [IO]
+
+⚠ Dry run complete. Tarball ready but not uploaded.

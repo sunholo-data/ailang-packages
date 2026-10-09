@@ -1,6 +1,7 @@
 module sunholo/crew_lab/play_flow_test
 import ./play_flow (begin, seedNumber, parseArgs, route, stage, publish, menu, renderStatus, recover, recoveryRecording, PlayState)
 import std/result (Ok, Err)
+import std/option (Some)
 import std/string (contains)
 import std/list (length, map)
 import ./session (start, offer, startTask)
@@ -86,7 +87,7 @@ test "dashboard renders exact crew gauges materials and directed trust" {
     Err(_) => false,
     Ok(s) => {
       let view = renderStatus(s, 2)
-      contains(view, "fatigue [####------] 45") && contains(view, "readiness [#####-----] 50") && contains(view, "scientist -> captain trust [#####-----] 50") && contains(view, "available 6, reserved 0, consumed 0") && contains(view, "AI attempts remaining 2")
+      contains(view, "fatigue [####------] 45") && contains(view, "readiness [#####-----] 50") && contains(view, "scientist -> captain trust [#####-----] 50") && contains(view, "available 6, reserved 0, consumed 0") && contains(view, "BRIDGE / Tick 0")
     }
   }
 }
@@ -130,6 +131,39 @@ test "recovery preserves earlier completion when advance blocks at later boundar
             }
           }
         }
+      }
+    }
+  }
+}
+
+test "help is pure navigation available while start or scheduler is pending" {
+  match base("1", 42) {
+    Err(_) => false,
+    Ok(s) => {
+      let pending = { s | session: { s.session | state: { s.session.state | continuation: Some({ config: s.session.state.config, revision: s.session.state.revision, target: 10, cursor: 0 }) } } }
+      match (route(s, "h"), route({ s | phase: "start", target: "science" }, "help"), route(pending, "h")) {
+        (Ok(a), Ok(b), Ok(c)) => a.kind == "help" && b.kind == "help" && c.kind == "help" && a.target == "" && b.target == "",
+        _ => false
+      }
+    }
+  }
+}
+
+test "new dashboard excludes inert actor trust scalar" {
+  match base("1", 42) {
+    Err(_) => false,
+    Ok(s) => not contains(renderStatus(s, 2), " | trust ")
+  }
+}
+
+test "existing offered review navigates without asking or advancing RNG" {
+  match base("1", 42) {
+    Err(_) => false,
+    Ok(s) => match offer(s.session, "scientist", "observations", "science") {
+      Err(_) => false,
+      Ok(o) => match route({ s | session: o.session, phase: "offered" }, "1") {
+        Err(_) => false,
+        Ok(i) => i.kind == "review_start" && i.target == "science"
       }
     }
   }

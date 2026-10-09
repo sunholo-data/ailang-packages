@@ -2,7 +2,7 @@
 
 Experimental host example, version0.1.0. Saved `main` and `viewer` use IO only.
 The guided `play` adapter uses IO,Env,FS,AI; `store` uses FS,AI. `actor_policy`,
-`scenario`, `session`, `codec`, `reactions` and `play_flow` transitions remain pure.
+`scenario`, `session`, `codec`, `reactions`, `play_flow` and `presenter` remain pure.
 No Net, RNG or clock effect is requested.
 
 Reuse the social kernel and pure decisions0.4.0 API. Do not change core permission
@@ -41,7 +41,9 @@ five traces. `[bin]` installation is tested in a temporary directory from an
 unrelated cwd. Report skipped solver contracts separately from verified ones.
 
 Public module paths: `sunholo/crew_lab/actor_policy`, `sunholo/crew_lab/scenario`,
-`sunholo/crew_lab/session`, `sunholo/crew_lab/codec`. Session is trusted host state;
+`sunholo/crew_lab/session`, `sunholo/crew_lab/codec`, `sunholo/crew_lab/terminal`,
+`sunholo/crew_lab/reactions`, `sunholo/crew_lab/store`, `sunholo/crew_lab/play_flow`,
+`sunholo/crew_lab/play`, `sunholo/crew_lab/presenter`. Session is trusted host state;
 application commands are the boundary, not caller-manufactured Session records.
 
 `sunholo/crew_lab/terminal` translates friendly terminal commands into the same
@@ -62,3 +64,16 @@ then expose accepted state or dialogue. On publication failure stop with prior
 state/seed intact; blocked scheduler outputs still retain earlier successful host
 boundaries. Do not claim fsync durability, resume, hidden repair or cross-run crew
 memory. Native UI controls and test-play.sh cover journal failure and replay.
+
+Standalone onboarding and ASCII panels belong in presenter. Read recipes and Task
+started/due ticks from the existing host; do not invent progress or replenish
+consumed supplies. Display directed relationships, never the inert actor trust
+scalar. Stock wording is a labelled narrator summary; exact selected bundle/text
+remains recorded. Cached/generated quoted dialogue must equal selected text.
+
+Published host rejection is recoverable through play_flow.recover: navigation may
+change but Session, seed, IDs and journal sequence are retained. Partial scheduler
+boundaries remain. Publication/retention failures stop play. Offered review is pure
+navigation to Start/Leave; help changes no domain, seed, sequence or budget.
+Legacy recording/run.sh remains fail-fast; recoveryRecording replays extracted
+journal host commands through every rejection and accepted blocked output.

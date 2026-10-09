@@ -11,9 +11,10 @@ import pkg/sunholo/social_dynamics/model (Offered)
 import ./session (Request, start)
 import ./reactions (Policy, weights, signature, fixtureBody)
 import ./store (Fetch, loadPolicy, resolve, openRun, appendRun)
+import ./presenter (briefing, policyBrief, seedBrief, dashboard, guidance, help, dialogue, rejection, consequences, recap)
 import ./play_flow (PlayState, Stage, Intent, begin, seedNumber, parseArgs, menu, route, stage, publish, renderStatus, recover)
 
-type Run = { ui: PlayState, home: string, path: string, policy: Policy, policyBody: string, mode: string, remaining: int, lines: int }
+type Run = { ui: PlayState, home: string, path: string, policy: Policy, policyBody: string, mode: string, remaining: int, lines: int, lastMessage: string }
 
 type Applied = { run: Run, failed: bool, message: string }
 
@@ -59,7 +60,7 @@ func commit(r: Run, c: string, seed: int, phase: string, target: string, nextId:
         Err(e) => Err("Journal failed; prior Session and seed retained: ${e}"),
         Ok(_) => {
           let publication = publish(r.ui, candidate, true)
-          Ok({ run: { r | ui: publication.state, remaining: r.remaining - calls }, failed: candidate.failed, message: candidate.error })
+          Ok({ run: { r | ui: publication.state, remaining: r.remaining - calls }, failed: candidate.failed, message: if candidate.failed then rejection(candidate.trace) else consequences(r.ui.session, publication.state.session, c) })
         }
       }
     }
@@ -91,7 +92,7 @@ func respond(r: Run, explicitAuthored: bool) -> Result[Applied, string] ! {FS, A
             let offered = anyOffered(r.ui, request.task)
             match commit(r, reply.command, reply.seed, if offered then "start" else "main", if offered then request.task else "", r.ui.nextId, jo([kv("selection", reply.metadata), kv("usage", usage(fetch))]), fetch.calls) {
               Err(e) => Err(e),
-              Ok(applied) => Ok({ applied | message: if applied.failed then applied.message else "${request.actor}: ${reply.text}\nResponse: ${reply.label} (${fetch.source}; authored policy weights)" })
+              Ok(applied) => Ok({ applied | message: if applied.failed then applied.message else dialogue(request.actor, reply.label, reply.text, fetch.source) })
             }
           }
         }
@@ -127,7 +128,10 @@ func act(r: Run, i: Intent) -> Result[Applied, string] ! {FS, AI} = if i.kind ==
   None => Err("No pending advance")
 } else if i.kind == "abort" then commit(r, command("abort", []), r.ui.seed, "main", "", r.ui.nextId, jo([]), 0) else if i.kind == "relief_choice" then Ok({ run: { r | ui: { r.ui | phase: "relief", target: i.target } }, failed: false, message: "" }) else if i.kind == "back" then Ok({ run: { r | ui: { r.ui | phase: "main", target: "" } }, failed: false, message: "" }) else if i.kind == "working" || i.kind == "offered" || i.kind == "reliefs" then Ok({ run: { r | ui: { r.ui | phase: i.kind, target: "" } }, failed: false, message: "" }) else Err("Unknown captain action")
 
-func status(r: Run) -> () ! {IO} = println(renderStatus(r.ui, r.remaining))
+func status(r: Run) -> () ! {IO} {
+  println(dashboard(r.ui.session, r.remaining))
+  println(if r.mode == "offline" then "Dialogue: saved or stock wording / OFFLINE / no AI calls" else "Dialogue: LIVE / AI attempts remaining ${show(r.remaining)}")
+}
 
 func finish(r: Run) -> () ! {IO, FS} =
   match appendRun(r.path, envelope(r.ui.seq + 1, jo([kv("kind", js("quit")), kv("seed", jint(r.ui.seed))]))) {
@@ -135,35 +139,32 @@ func finish(r: Run) -> () ! {IO, FS} =
       println("Journal failed: ${e}")
       exit(1)
     },
-    Ok(_) => println("Run journal: ${r.path}")
+    Ok(_) => println(recap(r.ui.session, r.path))
   }
 
 func loop(r: Run) -> () ! {IO, FS, AI} = {
   status(r)
+  if r.lastMessage != "" then println(r.lastMessage) else ()
+  println(guidance(r.ui.session, r.ui.phase, r.ui.target))
   println(menu(r.ui))
   let line = readLine()
   if line == "" then finish(r) else if r.lines >= 10000 || stringLength(line) > 65536 then {
     println("Input limit reached; previous committed journal retained")
     exit(1)
   } else match route(r.ui, line) {
-    Err(e) => {
-      println(e)
-      loop({ r | lines: r.lines + 1 })
-    },
+    Err(e) => loop({ r | lines: r.lines + 1, lastMessage: e }),
     Ok(i) => if i.kind == "quit" then finish(r) else if i.kind == "status" then {
       loop({ r | lines: r.lines + 1 })
+    } else if i.kind == "help" then {
+      loop({ r | lines: r.lines + 1, lastMessage: help(r.ui.session, r.ui.phase, r.ui.target, r.mode, r.remaining) })
     } else match act({ r | lines: r.lines + 1 }, i) {
       Err(e) => {
         println(e)
         exit(1)
       },
-      Ok(a) => {
-        if a.message != "" then println(a.message) else ()
-        if a.failed then {
-          println("Action not completed. Earlier successful work remains recorded; returning to the bridge.")
-          loop({ a.run | ui: recover(a.run.ui) })
-        } else loop(a.run)
-      }
+      Ok(a) => if a.failed then {
+        loop({ a.run | ui: recover(a.run.ui), lastMessage: "${a.message}\nAction not completed; returning to the bridge." })
+      } else loop({ a.run | lastMessage: if a.message == "" then a.run.lastMessage else a.message })
     }
   }
 }
@@ -176,10 +177,12 @@ func launch(mode: string) -> () ! {IO, Env, FS, AI} = {
       exit(1)
     },
     Ok(options) => {
-      println("Captain policy: 1. Personal consent  2. Orders with cooperation floor")
+      println(briefing(mode))
+      if options.hasSeed then println("Seed ${show(options.seed)}: the same seed, policy, library and choices repeat the variation.") else ()
+      println(policyBrief())
       let policyChoice = readLine()
       let seed = if options.hasSeed then Ok(options.seed) else {
-        println("Experiment seed (1..2147483646):")
+        println(seedBrief())
         seedNumber(readLine())
       }
       match seed {
@@ -211,8 +214,8 @@ func launch(mode: string) -> () ! {IO, Env, FS, AI} = {
                     exit(1)
                   },
                   Ok(path) => {
-                    println("Crew replies use experimental personality weights. Dialogue source is labelled.")
-                    loop({ ui: ui, home: options.home, path: path, policy: config.policy, policyBody: config.body, mode: mode, remaining: config.policy.callLimit, lines: if options.hasSeed then 1 else 2 })
+                    println("Welcome to the bridge. Choose your next captain action.")
+                    loop({ ui: ui, home: options.home, path: path, policy: config.policy, policyBody: config.body, mode: mode, remaining: config.policy.callLimit, lines: if options.hasSeed then 1 else 2, lastMessage: "" })
                   }
                 }
               }

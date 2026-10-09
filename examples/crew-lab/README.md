@@ -1,11 +1,10 @@
-# Captain and crew CLI lab
+# Captain aboard the bubble ship
 
-An experiment combining `sunholo/social_dynamics@0.1.0` with the pure
-request, decoder and confidence gate from `sunholo/decisions@0.4.0`. Three people
-share six units of project materials: the captain, scientist and engineer.
-Saved synthetic decisions choose personal responses. The host applies consent,
-captain authority, work, relief and received trust consequences.
-
+You are captain of a bubble ship between destinations. From the bridge, choose
+science, maintenance, rest and how to handle your crew's requests. Your scientist
+and engineer respond as people with different personalities and values; they may
+agree, refuse, raise concerns or ask for relief. This is a small standalone game:
+there is no winning grade or right route, and no Godot build is needed.
 
 Play as the captain with numbered choices and automatic crew replies:
 
@@ -33,13 +32,33 @@ set effects or choose captain actions. `response-policy.json` under
 traits, values, fatigue and directed trust. These are experimental behavioural
 rules, not validated psychology or a combined moral score.
 
-Try this first in `crew-play-offline --seed 42`: choose **1** for personal consent,
-then **1** to offer science. The scientist replies automatically. Choose **1** to
-start the accepted project, then choose **5** four times to advance work. Review the
-observations, fatigue, trust and materials gauges, then choose **0** to quit. This is
-the saved `recordings/play-science.menu` flow. Starting again creates a new crew
-session; the dialogue library remains in the chosen home. A different seed changes
-weighted choices and wording, while the same seed and saved bundles reproduce them.
+For a first voyage stretch, run `crew-play-offline --seed 42`. Read the bridge
+briefing, then choose **1** for personal consent. Choose **1** to offer science;
+the crew reply automatically. If the scientist agrees, choose **1** to start,
+then **5** four times to advance four ticks. If they refuse or you want to wait,
+choose **2** to leave the project offered and try another assignment. Use **h**
+or **help** at any game menu after startup for guidance. **0** quits at the bridge or goes back
+from a submenu. A blank line ends input, so no extra Enter acknowledgement is needed.
+
+The panels explain who trusts whom, crew fatigue/readiness, supplies and project
+progress. Higher fatigue means more tired; higher readiness means more ready.
+Work effects happen at completion. Science reserves and consumes four of the six
+materials; maintenance needs three to start and consumes two. Once science finishes,
+only two remain: waiting cannot make maintenance affordable. Rest takes two ticks
+and needs no materials. A worker can run one project at a time.
+
+An offer and an agreement are separate from your **Start** decision. Reviewing an
+existing offer opens its costs and Start/Leave panel without changing the agreement
+or generating another reply. Resource, consent or occupancy rejection remains
+recorded and returns you to the bridge. It does not charge the rejected action or
+advance the random seed; any earlier completed scheduler boundaries remain.
+Journal-write failure still stops the game safely. On quit, the recap reports elapsed
+time, completed and unfinished work and actual supplies/crew state; it assigns no
+winner. Restarting creates a fresh crew session, retaining the dialogue library.
+
+Offline stock responses are labelled narrator summaries of the selected reaction.
+Saved/new AI wording is shown as the exact selected crew dialogue. The full selected
+bundle and original text are preserved in the journal in either case.
 
 The default policy permits two provider attempts per run (editable maximum8).
 Transport failures, invalid responses, corrupt cache and exhausted budgets remain
@@ -51,17 +70,38 @@ Use `--home` to compare fresh experiments without changing your usual library.
 
 Runs save `runs/<owner>/journal.jsonl` under the chosen home, including every actual
 host command, full selected bundle, policy weights, both rolls and usage/provenance.
-The host command stream can be extracted and replayed with `run.sh` on either
-engine. Each state/seed transition is accepted and dialogue displayed only after
+The host command stream can be extracted for replay. `run.sh` deliberately stays
+fail-fast for legacy recordings; journals containing rejected commands use the
+pure `recoveryRecording` entry below on either engine. Each state/seed transition is accepted and dialogue displayed only after
 journal publication succeeds. A failed temporary write preserves the prior journal
 and stops play. Journals are bounded at8MiB, replaced atomically, and do not claim
 fsync durability or automatic crash-tail repair/resumption. Bundles persist between
 runs; crew relationships restart with a new session.
 
-`test-play.sh` exercises installed offline science, care, denial and competing
-projects, then extracts and compares complete evaluator/strict-VM replay traces.
+`test-play.sh` exercises installed offline science, care, denial, competing
+projects, immediate/post-completion shortages, occupancy, consent refusal and help,
+then extracts and compares complete evaluator/strict-VM replay traces. Help leaves
+host state, journal sequence, seed and AI budget unchanged.
 It also injects journal-write failure to check that state, seed and dialogue do not
 escape an uncommitted action. Its fixtures require no API keys or network.
+
+An experiment combining `sunholo/social_dynamics@0.1.0` with the pure
+request, decoder and confidence gate from `sunholo/decisions@0.4.0`. Three people
+share six units of project materials: the captain, scientist and engineer.
+Saved synthetic decisions choose personal responses. The host applies consent,
+captain authority, work, relief and received trust consequences.
+
+To replay a recovering journal from the packages repository:
+
+```sh
+jq -r 'select(.payload.host_input != null) | .payload.host_input' "$crew_journal" > /tmp/crew-input.ndjson
+jq -Rs 'split("\n") | map(select(length > 0))' /tmp/crew-input.ndjson > /tmp/crew-replay.json
+ailang run --package-dir examples/crew-lab --entry recoveryRecording --args-file /tmp/crew-replay.json examples/crew-lab/play_flow.ail
+# Add --bytecode --strict-bytecode before --package-dir for strict VM replay.
+```
+
+Set `crew_journal` to the printed journal path. Recovery replay preserves the
+rejection trace and processes subsequent commands; it does not undo or repair the run.
 
 From the packages repository (saved host recordings):
 

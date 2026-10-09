@@ -18,7 +18,7 @@ Completion-only project effects and full reservation refunds on stop remain
 explicit limitations; no partial-work economics or moral winner is introduced.
 
 Received trust deltas are illustrative fixed fixture rules; traits and values enter
-request context, with trait-dependent appraisal deferred. Proof evidence reports
+request context, with trait-dependent appraisal deferred. Initial fixture-only proof evidence reported
 5/28 verified,22skipped and one unsupported function-record encoding; runtime
 contracts remain active. No isolated publish smoke is claimed for the unpublished
 path dependency. A scoped CI job runs the crew and original social lab checks.
@@ -47,3 +47,10 @@ Published guided-play host rejections now return to the bridge without undoing
 committed work or consuming an extra RNG step. Offered review opens Start/Leave
 without re-answering an already accepted agreement. Recovery journal replay
 continues across rejected commands; legacy recording entry stays fail-fast.
+
+Adds a standalone bridge briefing, authority/seed explanations, compact ASCII
+panels, contextual h/help, actual worker/time/reservation/consumption details,
+bounded host tick progress, recorded consequence deltas and a factual quit recap.
+Directed relationship trust is shown instead of the inert actor indicator.
+Stock reactions are labelled narrator summaries; selected AI quotations and full
+journal provenance remain exact. Help/navigation uses no AI or host transition.
