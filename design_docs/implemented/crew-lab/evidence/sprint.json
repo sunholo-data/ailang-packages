@@ -1,0 +1,101 @@
+{
+  "id": "CREW-DECISIONS-LAB",
+  "status": "complete",
+  "design_doc": "design_docs/implemented/crew-lab/crew-decisions-lab.md",
+  "plan": "design_docs/implemented/crew-lab/crew-decisions-lab-sprint.md",
+  "velocity": {
+    "target_loc_per_day": 300,
+    "estimated_total_loc": 1200,
+    "estimated_days": 4
+  },
+  "features": [
+    {
+      "id": "M1_POLICY",
+      "description": "Pure saved choices and exact outcome codec",
+      "estimated_loc": 300,
+      "dependencies": [],
+      "acceptance_criteria": [
+        "Strict response validation and confidence gating",
+        "Normalized sampling endpoint controls"
+      ],
+      "passes": true,
+      "completed": "2026-10-09",
+      "notes": "Native and interpreter/strictVM scenario gates passed; see crew-lab evidence"
+    },
+    {
+      "id": "M2_HOST",
+      "description": "Atomic crew host with project-bound consent and private requests",
+      "estimated_loc": 450,
+      "dependencies": [
+        "M1_POLICY"
+      ],
+      "acceptance_criteria": [
+        "Orders and consent produce distinct consequences",
+        "Clock and revision staleness, identical retries and cancellation",
+        "Atomic rejected transactions retain all state"
+      ],
+      "passes": true,
+      "completed": "2026-10-09",
+      "notes": "Native and interpreter/strictVM scenario gates passed; see crew-lab evidence"
+    },
+    {
+      "id": "M3_CLI",
+      "description": "Installed CLI and five replayable experiments",
+      "estimated_loc": 250,
+      "dependencies": [
+        "M2_HOST"
+      ],
+      "acceptance_criteria": [
+        "Five evaluator/strict VM traces equal",
+        "Replay and invalid process inputs controlled"
+      ],
+      "passes": true,
+      "completed": "2026-10-09",
+      "notes": "Native and interpreter/strictVM scenario gates passed; see crew-lab evidence"
+    },
+    {
+      "id": "M4_EVALUATE",
+      "description": "Quality, regressions and independent evaluation evidence",
+      "estimated_loc": 200,
+      "dependencies": [
+        "M3_CLI"
+      ],
+      "acceptance_criteria": [
+        "Strict quality report and proof limits recorded",
+        "Existing lab unchanged and independently evaluated"
+      ],
+      "passes": true,
+      "notes": "Independent evaluator PASS100/100; native, parity, CLI, mutations and original regression passed. See archived evidence.",
+      "completed": "2026-10-09"
+    }
+  ],
+  "registry_reuse": [
+    {
+      "milestone": "M1_POLICY",
+      "action": "depend",
+      "package": "sunholo/decisions@0.4.0",
+      "reason": "Existing pure request, parse and confidence gate"
+    },
+    {
+      "milestone": "M2_HOST",
+      "action": "depend",
+      "package": "sunholo/social_dynamics@0.1.0",
+      "reason": "Existing task, personal consent, appraisal and bounded scheduler"
+    },
+    {
+      "milestone": "M3_CLI",
+      "action": "none",
+      "reason": "Reuse repository CLI pattern, no new dependency"
+    },
+    {
+      "milestone": "M4_EVALUATE",
+      "action": "none",
+      "reason": "Native compiler, tests and quality tools"
+    }
+  ],
+  "quorum": {
+    "review_a": "PASS",
+    "review_b": "PASS",
+    "scope": "design only"
+  }
+}

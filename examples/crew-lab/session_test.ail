@@ -1,0 +1,382 @@
+module sunholo/crew_lab/session_test
+import std/result (Result, Ok, Err)
+import std/option (Some, None)
+import std/list (head, filter, length, map, range)
+import std/string (contains)
+import std/json (encode, jo, kv, js, jnum, jint)
+import pkg/sunholo/social_dynamics/model (State, AI, ActorPrincipal, AcceptCommitment, Authored, Event, Pending, Done, Working, Offered)
+import pkg/sunholo/social_dynamics/proposals (apply)
+import ./session (Session, Output, HostError, HostFailure, start, input, offer, ask, complete, startTask, resolve, cancel, snapshot)
+import ./scenario (policies)
+
+pure func base(policy: string) -> Result[Session, HostError] =
+  match start("{\"command\":\"start\",\"policy\":\"${policy}\"}") {
+    Err(e) => Err(e),
+    Ok(o) => Ok(o.session)
+  }
+
+pure func project(policy: string) -> Result[Session, HostError] = match base(policy) {
+  Err(e) => Err(e),
+  Ok(s) => match offer(s, "scientist", "observations", "science") {
+    Err(e) => Err(e),
+    Ok(o) => Ok(o.session)
+  }
+}
+
+pure func prepared(policy: string) -> Result[Session, HostError] = match project(policy) {
+  Err(e) => Err(e),
+  Ok(s) => match ask(s, "scientist", "science", "r1") {
+    Err(e) => Err(e),
+    Ok(o) => Ok(o.session)
+  }
+}
+
+pure func response(choice: string, confidence: float, working: bool) -> string =
+  encode(jo([kv("model", js("synthetic:jev")), kv("id", js("synthetic-native")), kv("usage", jo([kv("input_tokens", jint(0)), kv("output_tokens", jint(0)), kv("cost", jnum(0.0))])), kv("answers", jo([kv("response", jo([kv("type", js("choice")), kv("choice", js(choice)), kv("confidence", jnum(confidence)), kv("probabilities", jo(map(\key. kv(key, jnum(if key == choice then 1.0 else 0.0)), if working then ["continue", "request_relief", "defer"] else ["accept", "decline", "concern", "defer"])))]))]))]))
+
+pure func accepted(policy: string) -> Result[Session, HostError] = match prepared(policy) {
+  Err(e) => Err(e),
+  Ok(s) => match complete(s, "r1", response("accept", 0.8, false), 0.1) {
+    Err(e) => Err(e),
+    Ok(o) => Ok(o.session)
+  }
+}
+
+pure func working() -> Result[Session, HostError] = match accepted("consent") {
+  Err(e) => Err(e),
+  Ok(s) => match startTask(s, "science") {
+    Err(e) => Err(e),
+    Ok(o) => Ok(o.session)
+  }
+}
+
+pure func relief() -> Result[Session, HostError] = match working() {
+  Err(e) => Err(e),
+  Ok(s) => match ask(s, "scientist", "science", "r2") {
+    Err(e) => Err(e),
+    Ok(a) => match complete(a.session, "r2", response("request_relief", 0.8, true), 0.0) {
+      Err(e) => Err(e),
+      Ok(o) => Ok(o.session)
+    }
+  }
+}
+
+pure func rejected[a](r: Result[a, HostError]) -> bool = match r {
+  Err(_) => true,
+  Ok(_) => false
+}
+
+pure func trust(s: State, actor: string) -> int =
+  match head(filter(\r. r.from == actor && r.to == "captain", s.relationships)) {
+    None => 0 - 999,
+    Some(r) => r.value
+  }
+
+pure func value(s: State, actor: string, id: string) -> int = match head(filter(\a. a.id == actor, s.actors)) {
+  None => 0 - 999,
+  Some(a) => match head(filter(\v. v.id == id, a.indicators)) {
+    None => 0 - 999,
+    Some(v) => v.value
+  }
+}
+
+pure func resource(s: State, kind: string) -> int = match head(s.resources) {
+  None => 0 - 999,
+  Some(r) => if kind == "available" then r.available else if kind == "reserved" then r.reserved else r.consumed
+}
+
+pure func manyRequests(s: Session, n: int) -> Result[Session, HostError] =
+  if n == 0 then Ok(s) else match ask(s, "scientist", "science", "queue-${n}") {
+    Err(e) => Err(e),
+    Ok(o) => manyRequests(o.session, n - 1)
+  }
+
+pure func paddedKnowledge(s: Session, n: int) -> Session =
+  { s | state: { s.state | knowledge: s.state.knowledge ++ map(\i. { observer: "captain", evidence: "padding-${i}" }, range(1, n - length(s.state.knowledge) + 1)) } }
+
+test "consent policy refuses unaccepted project; orders records no personal consent" {
+  match (project("consent"), project("orders")) {
+    (Ok(c), Ok(s)) => rejected(startTask(c, "science")) && (match startTask(s, "science") {
+      Err(_) => false,
+      Ok(o) => trust(o.session.state, "scientist") == 42 && trust(o.session.state, "engineer") == 50 && not (match head(o.session.state.commitments) {
+        Some(a) => a.active,
+        None => true
+      })
+    }),
+    _ => false
+  }
+}
+
+test "agreed work consumes materials and accrues fatigue only at completion" {
+  match working() {
+    Err(_) => false,
+    Ok(s) => resource(s.state, "reserved") == 4 && value(s.state, "scientist", "fatigue") == 45 && (match input(s, "{\"command\":\"advance\",\"tick\":4,\"budget\":64}") {
+      Err(_) => false,
+      Ok(o) => resource(o.session.state, "consumed") == 4 && value(o.session.state, "scientist", "fatigue") == 70 && value(o.session.state, "scientist", "observations") == 25 && trust(o.session.state, "scientist") == 52
+    })
+  }
+}
+
+test "same parties consent for another task cannot unlock project" {
+  match accepted("consent") {
+    Err(_) => false,
+    Ok(s) => match offer(s, "scientist", "observations", "other") {
+      Err(_) => false,
+      Ok(o) => rejected(startTask(o.session, "other")) && (match startTask(o.session, "science") {
+        Err(_) => false,
+        Ok(_) => true
+      })
+    }
+  }
+}
+
+test "ask is worker local and excludes unseen colleague offers" {
+  match project("consent") {
+    Err(_) => false,
+    Ok(s) => match offer(s, "engineer", "maintenance", "engineering") {
+      Err(_) => false,
+      Ok(o) => rejected(ask(o.session, "engineer", "science", "forged")) && (match ask(o.session, "scientist", "science", "local") {
+        Err(_) => false,
+        Ok(a) => match head(a.session.pending) {
+          None => false,
+          Some(r) => contains(r.context, "openness") && contains(r.context, "agreement-science") && not contains(r.context, "engineering") && not contains(r.context, "reliability") && not contains(r.context, "engineer")
+        }
+      })
+    }
+  }
+}
+
+test "raw AI acceptance rejected while delegated self acceptance succeeds" {
+  match prepared("consent") {
+    Err(_) => false,
+    Ok(s) => match apply(s.config, policies(), s.state, ActorPrincipal("scientist"), AI, { id: "forged", config: s.config.id, baseRevision: s.state.revision, principal: "scientist", origin: AI, expires: 0, causes: [], operations: [AcceptCommitment("agreement-science")] }) {
+      Ok(_) => false,
+      Err(_) => match complete(s, "r1", response("accept", 0.8, false), 0.0) {
+        Err(_) => false,
+        Ok(o) => match head(o.session.state.commitments) {
+          None => false,
+          Some(a) => a.active
+        }
+      }
+    }
+  }
+}
+
+test "uncertain response banks defer without state or resource effects" {
+  match prepared("consent") {
+    Err(_) => false,
+    Ok(s) => match complete(s, "r1", response("accept", 0.4, false), 0.0) {
+      Err(_) => false,
+      Ok(o) => snapshot({ o.session | pending: s.pending, bank: [] }) == snapshot(s) && length(o.session.bank) == 1 && (match head(o.session.bank) {
+        None => false,
+        Some(b) => b.selected == "defer"
+      })
+    }
+  }
+}
+
+test "duplicate complete after later work is full-body-and-roll no-op" {
+  match accepted("consent") {
+    Err(_) => false,
+    Ok(s) => match startTask(s, "science") {
+      Err(_) => false,
+      Ok(w) => match complete(w.session, "r1", response("accept", 0.8, false), 0.1) {
+        Err(_) => false,
+        Ok(o) => snapshot(o.session) == snapshot(w.session) && o.trace != "" && rejected(complete(w.session, "r1", response("accept", 0.9, false), 0.1)) && rejected(complete(w.session, "r1", response("accept", 0.8, false), 0.2))
+      }
+    }
+  }
+}
+
+test "revision mutation invalidates answer and cancellation recovers" {
+  match prepared("consent") {
+    Err(_) => false,
+    Ok(s) => match offer(s, "engineer", "maintenance", "engineering") {
+      Err(_) => false,
+      Ok(o) => rejected(complete(o.session, "r1", response("accept", 0.8, false), 0.0)) && (match cancel(o.session, "r1") {
+        Err(_) => false,
+        Ok(c) => rejected(ask(c.session, "scientist", "science", "r1")) && (match ask(c.session, "scientist", "science", "fresh") {
+          Err(_) => false,
+          Ok(_) => true
+        })
+      })
+    }
+  }
+}
+
+test "idle tick changes without revision still invalidate answer" {
+  match prepared("consent") {
+    Err(_) => false,
+    Ok(s) => match input(s, "{\"command\":\"advance\",\"tick\":1,\"budget\":64}") {
+      Err(_) => false,
+      Ok(o) => o.session.state.revision == s.state.revision && rejected(complete(o.session, "r1", response("accept", 0.8, false), 0.0))
+    }
+  }
+}
+
+test "sixteen stale pending requests explicitly recover one slot" {
+  match project("consent") {
+    Err(_) => false,
+    Ok(s) => match manyRequests(s, 16) {
+      Err(_) => false,
+      Ok(q) => length(q.pending) == 16 && rejected(ask(q, "scientist", "science", "overflow")) && (match input(q, "{\"command\":\"advance\",\"tick\":1,\"budget\":64}") {
+        Err(_) => false,
+        Ok(o) => rejected(complete(o.session, "queue-1", response("accept", 0.8, false), 0.0)) && (match cancel(o.session, "queue-1") {
+          Err(_) => false,
+          Ok(c) => match ask(c.session, "scientist", "science", "new-slot") {
+            Err(_) => false,
+            Ok(f) => length(f.session.pending) == 16 && length(f.session.bank) == 1
+          }
+        })
+      })
+    }
+  }
+}
+
+test "expired agreement equality refuses consent start and new request" {
+  match accepted("consent") {
+    Err(_) => false,
+    Ok(s) => match input(s, "{\"command\":\"advance\",\"tick\":20,\"budget\":64}") {
+      Err(_) => false,
+      Ok(o) => rejected(startTask(o.session, "science")) && rejected(ask(o.session, "scientist", "science", "expired"))
+    }
+  }
+}
+
+test "granted relief refunds untouched reservation while denial completes work" {
+  match relief() {
+    Err(_) => false,
+    Ok(s) => match (resolve(s, "relief-r2", true), resolve(s, "relief-r2", false)) {
+      (Ok(c), Ok(d)) => resource(c.session.state, "available") == 6 && resource(c.session.state, "consumed") == 0 && value(c.session.state, "scientist", "fatigue") == 45 && trust(c.session.state, "scientist") == 56 && trust(d.session.state, "scientist") == 48 && (match input(d.session, "{\"command\":\"advance\",\"tick\":4,\"budget\":64}") {
+        Err(_) => false,
+        Ok(o) => resource(o.session.state, "consumed") == 4
+      }),
+      _ => false
+    }
+  }
+}
+
+test "resource competition rejects second start without committing reservation or report" {
+  match working() {
+    Err(_) => false,
+    Ok(s) => match offer(s, "engineer", "maintenance", "engineering") {
+      Err(_) => false,
+      Ok(o) => match ask(o.session, "engineer", "engineering", "eng") {
+        Err(_) => false,
+        Ok(a) => match complete(a.session, "eng", response("accept", 0.8, false), 0.0) {
+          Err(_) => false,
+          Ok(c) => rejected(startTask(c.session, "engineering")) && resource(c.session.state, "reserved") == 4 && length(c.session.reports) == 1
+        }
+      }
+    }
+  }
+}
+
+test "cooperation floor constrains orders" {
+  match project("orders") {
+    Err(_) => false,
+    Ok(s) => let low = { s | state: { s.state | relationships: map(\r. if r.from == "scientist" then { r | value: 19 } else r, s.state.relationships) } } in
+    rejected(startTask(low, "science"))
+  }
+}
+
+test "offer receipt failure stages all host and domain changes atomically" {
+  match base("orders") {
+    Err(_) => false,
+    Ok(s) => let full = paddedKnowledge(s, 2045) in
+    rejected(offer(full, "scientist", "observations", "science")) && full.bindings == [] && full.state.tasks == []
+  }
+}
+
+test "actor receipt failure cannot commit concern or consume pending request" {
+  match prepared("consent") {
+    Err(_) => false,
+    Ok(s) => let full = paddedKnowledge(s, 2047) in
+    rejected(complete(full, "r1", response("decline", 0.8, false), 0.0)) && length(full.pending) == 1 && length(full.bank) == 0 && length(full.state.evidence) == 2
+  }
+}
+
+test "captain report failure cannot commit work or reserve resources" {
+  match project("orders") {
+    Err(_) => false,
+    Ok(s) => let full = { s | state: { s.state | evidence: s.state.evidence ++ map(\i. { id: "padding-${i}", author: "captain", kind: "note", text: "", causes: [] }, range(1, 511)) } } in
+    rejected(startTask(full, "science")) && resource(full.state, "reserved") == 0
+  }
+}
+
+test "completed retention refuses further answer and cancellation" {
+  match prepared("consent") {
+    Err(_) => false,
+    Ok(s) => match complete(s, "r1", response("defer", 0.8, false), 0.0) {
+      Err(_) => false,
+      Ok(o) => match (ask(o.session, "scientist", "science", "retention"), head(o.session.bank)) {
+        (Ok(a), Some(b)) => let full = { a.session | bank: map(\i. { b | request: { b.request | id: "done-${i}" } }, range(1, 65)) } in
+        rejected(complete(full, "retention", response("defer", 0.8, false), 0.0)) && rejected(cancel(full, "retention")),
+        _ => false
+      }
+    }
+  }
+}
+
+test "received agreement alone cannot delegate another actor consent" {
+  match project("consent") {
+    Err(_) => false,
+    Ok(s) => match input(s, "{\"command\":\"deliver\",\"observer\":\"engineer\",\"evidence\":\"agreement-science\",\"id\":\"heard-agreement\"}") {
+      Err(_) => false,
+      Ok(o) => rejected(ask(o.session, "engineer", "science", "forged"))
+    }
+  }
+}
+
+test "pending scheduler precedes duplicate completion until abort" {
+  match working() {
+    Err(_) => false,
+    Ok(s) => match input(s, "{\"command\":\"advance\",\"tick\":10,\"budget\":1}") {
+      Err(_) => false,
+      Ok(p) => match p.session.state.continuation {
+        None => false,
+        Some(_) => rejected(complete(p.session, "r1", response("accept", 0.8, false), 0.1)) && rejected(ask(p.session, "scientist", "science", "pending")) && (match input(p.session, "{\"command\":\"abort\"}") {
+          Err(_) => false,
+          Ok(a) => match complete(a.session, "r1", response("accept", 0.8, false), 0.1) {
+            Err(_) => false,
+            Ok(o) => snapshot(o.session) == snapshot(a.session)
+          }
+        })
+      }
+    }
+  }
+}
+
+test "blocked advance retains earlier completed rest and does not claim target" {
+  match base("orders") {
+    Err(_) => false,
+    Ok(s) => match offer(s, "scientist", "rest_scientist", "rest") {
+      Err(_) => false,
+      Ok(r) => match startTask(r.session, "rest") {
+        Err(_) => false,
+        Ok(w) => match offer(w.session, "engineer", "maintenance", "repair") {
+          Err(_) => false,
+          Ok(e) => match startTask(e.session, "repair") {
+            Err(_) => false,
+            Ok(t) => let high = { t.session | state: { t.session.state | actors: map(\a. if a.id == "engineer" then { a | indicators: map(\v. if v.id == "readiness" then { v | value: 90 } else v, a.indicators) } else a, t.session.state.actors) } } in
+            match input(high, "{\"command\":\"advance\",\"tick\":10,\"budget\":64}") {
+              Err(_) => false,
+              Ok(o) => o.failed && o.session.state.tick == 2 && value(o.session.state, "scientist", "fatigue") == 30 && resource(o.session.state, "reserved") == 3 && contains(o.trace, "blocked")
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
+test "numeric clock limit and altered captured policy/config are rejected" {
+  match prepared("consent") {
+    Err(_) => false,
+    Ok(s) => let ceiling = { s | state: { s.state | tick: 1000000000 } } in
+    rejected(ask(ceiling, "scientist", "science", "ceiling")) && rejected(offer(ceiling, "engineer", "maintenance", "overflow")) && (match head(s.pending) {
+      None => false,
+      Some(r) => rejected(complete({ s | pending: [{ r | policyId: "forged" }] }, "r1", response("accept", 0.8, false), 0.0)) && rejected(complete({ s | pending: [{ r | configBody: "forged" }] }, "r1", response("accept", 0.8, false), 0.0))
+    })
+  }
+}

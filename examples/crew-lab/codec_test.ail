@@ -1,0 +1,94 @@
+module sunholo/crew_lab/codec_test
+import ./codec (fields, text, integer, number, object, CrewOutcome, AgreedStart, RefusedOrder, GrantedRelief, DeniedRelief, encodeOutcome, decodeOutcome, outcomeDelta)
+import std/json (Json, JArray, ja, jo, kv, js, jint, jnum)
+import std/result (Result, Ok, Err)
+import std/math (sqrt, pow)
+import std/string (repeat)
+
+pure func failedString(r: Result[string, string]) -> bool = match r {
+  Err(_) => true,
+  _ => false
+}
+
+pure func failedInt(r: Result[int, string]) -> bool = match r {
+  Err(_) => true,
+  _ => false
+}
+
+pure func failedNumber(r: Result[float, string]) -> bool = match r {
+  Err(_) => true,
+  _ => false
+}
+
+pure func failedObject(r: Result[Json, string]) -> bool = match r {
+  Err(_) => true,
+  _ => false
+}
+
+test "fields accepts exact unique object keys in either order" {
+  fields(jo([kv("b", jint(2)), kv("a", js("value"))]), ["a", "b"]) && fields(jo([]), [])
+}
+
+test "fields rejects unknown missing duplicate and nonobject shapes" {
+  not fields(jo([kv("a", jint(1)), kv("b", jint(2))]), ["a"]) && not fields(jo([kv("a", jint(1))]), ["a", "b"]) && not fields(jo([kv("a", jint(1)), kv("a", jint(2))]), ["a"]) && not fields(jo([kv("a", jint(1))]), ["a", "a"]) && not fields(ja([]), [])
+}
+
+test "wire duplicate fields remain visible to the strict shape check" {
+  match object("{\"id\":\"captain\",\"id\":\"engineer\"}") {
+    Ok(j) => not fields(j, ["id"]),
+    _ => false
+  }
+}
+
+test "framing correctly ignores escaped braces inside strings" {
+  match object("{\"text\":\"a } { and \\\" quoted\"}") {
+    Ok(j) => fields(j, ["text"]) && text(j, "text") == Ok("a } { and \" quoted"),
+    _ => false
+  }
+}
+
+test "text requires present nonempty string without coercion" {
+  text(jo([kv("id", js("captain"))]), "id") == Ok("captain") && failedString(text(jo([]), "id")) && failedString(text(jo([kv("id", jint(1))]), "id")) && failedString(text(jo([kv("id", js(""))]), "id"))
+}
+
+test "text accepts wire endpoint and refuses one character beyond" {
+  text(jo([kv("body", js(repeat("x", 65536)))]), "body") == Ok(repeat("x", 65536)) && failedString(text(jo([kv("body", js(repeat("x", 65537)))]), "body"))
+}
+
+test "integer accepts zero maximum and integral float representation" {
+  integer(jo([kv("tick", jint(0))]), "tick") == Ok(0) && integer(jo([kv("tick", jint(1000000000))]), "tick") == Ok(1000000000) && integer(jo([kv("tick", jnum(12.0))]), "tick") == Ok(12)
+}
+
+test "integer rejects fractions negative overflow wrong type and absent" {
+  failedInt(integer(jo([kv("tick", jnum(1.5))]), "tick")) && failedInt(integer(jo([kv("tick", jint(0 - 1))]), "tick")) && failedInt(integer(jo([kv("tick", jint(1000000001))]), "tick")) && failedInt(integer(jo([kv("tick", js("1"))]), "tick")) && failedInt(integer(jo([]), "tick"))
+}
+
+test "numbers reject NaN and infinity without conflating finite negatives" {
+  number(jo([kv("roll", jnum(0.25))]), "roll") == Ok(0.25) && number(jo([kv("roll", jnum(0.0 - 0.25))]), "roll") == Ok(0.0 - 0.25) && failedNumber(number(jo([kv("roll", jnum(sqrt(0.0 - 1.0)))]), "roll")) && failedNumber(number(jo([kv("roll", jnum(pow(10.0, 1000.0)))]), "roll")) && failedNumber(number(jo([kv("roll", js("0.25"))]), "roll")) && failedNumber(number(jo([]), "roll"))
+}
+
+test "integer rejects nonfinite before conversion" {
+  failedInt(integer(jo([kv("tick", jnum(sqrt(0.0 - 1.0)))]), "tick")) && failedInt(integer(jo([kv("tick", jnum(pow(10.0, 1000.0)))]), "tick"))
+}
+
+test "object enforces complete framing but leaves field schemas to caller" {
+  match object(" {\"a\":1} \n") {
+    Ok(j) => fields(j, ["a"]),
+    _ => false
+  }
+}
+
+test "object rejects trailing concatenated malformed nonobject and oversize wire" {
+  failedObject(object("{} junk")) && failedObject(object("{}{}")) && failedObject(object("{\"a\":}")) && failedObject(object("[]")) && failedObject(object("{\"a\":\"${repeat("x", 65536)}\"}"))
+}
+
+test "outcomes exact round trips and personal trust deltas" {
+  decodeOutcome(encodeOutcome(AgreedStart)) == Ok(AgreedStart) && decodeOutcome(encodeOutcome(RefusedOrder)) == Ok(RefusedOrder) && decodeOutcome(encodeOutcome(GrantedRelief)) == Ok(GrantedRelief) && decodeOutcome(encodeOutcome(DeniedRelief)) == Ok(DeniedRelief) && outcomeDelta(AgreedStart) == 2 && outcomeDelta(RefusedOrder) == 0 - 8 && outcomeDelta(GrantedRelief) == 4 && outcomeDelta(DeniedRelief) == 0 - 4
+}
+
+test "outcome decoder rejects narrative substrings whitespace and unknown codes" {
+  match (decodeOutcome("granted_relief"), decodeOutcome("not granted_relief"), decodeOutcome(" granted_relief"), decodeOutcome("GRANTED_RELIEF"), decodeOutcome("")) {
+    (Ok(GrantedRelief), Err(_), Err(_), Err(_), Err(_)) => true,
+    _ => false
+  }
+}

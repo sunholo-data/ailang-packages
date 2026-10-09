@@ -1,0 +1,38 @@
+name: Crew CLI lab
+on:
+  pull_request:
+    paths:
+      - 'examples/crew-lab/**'
+      - 'packages/social-dynamics/**'
+      - '.github/workflows/crew-lab.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'examples/crew-lab/**'
+      - 'packages/social-dynamics/**'
+      - '.github/workflows/crew-lab.yml'
+permissions:
+  contents: read
+jobs:
+  crew:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install pinned runtime and solver
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y z3 jq ripgrep
+          mkdir -p /tmp/ailang
+          gh release download v0.52.0 --repo sunholo-data/ailang -p 'linux.x64.ailang.tar.gz' -D /tmp/ailang
+          tar xzf /tmp/ailang/linux.x64.ailang.tar.gz -C /tmp/ailang
+          sudo install /tmp/ailang/ailang /usr/local/bin/ailang
+          ailang --version
+      - name: Crew behaviour, replay, strict VM and installed CLI
+        run: make -f examples/crew-lab/Makefile validate
+      - name: Behavioural mutation controls
+        run: make -f examples/crew-lab/Makefile mutations
+      - name: Existing social lab regression
+        run: make -f examples/social-dynamics/Makefile validate
