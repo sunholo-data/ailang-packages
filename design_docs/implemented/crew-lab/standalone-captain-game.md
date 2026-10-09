@@ -1,6 +1,7 @@
 # Standalone captain game: introduction and consequences
 
-Status: approved scope, implementation in progress, 2026-10-09.
+Status: implemented, 2026-10-09. Merged to packages main in PR112; independent
+evaluation100/100 and final-source CI37958354490 pass.
 
 The guided crew CLI currently assumes a player understands its protocol. A new
 player sees raw task IDs, duplicate trust indicators and placeholder dialogue;
