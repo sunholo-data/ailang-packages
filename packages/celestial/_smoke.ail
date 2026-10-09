@@ -7,13 +7,17 @@
 -- and from 0.2.0 the Earth 4,800 km from the EMB on 2023-11-03, within
 -- 200 km of JPL Horizons (DE441).
 --
--- keplerProbe, orbitsProbe, lightProbe and earthMoonProbe are the VM-vs-interpreter probes: pure, and
+-- From 0.4.0 the ism module: the LIC refit puts the Sun inside, 0.284 pc from
+-- its edge toward alpha Cen, and the LIC flux of >= 1e-13 kg grains is within
+-- a factor of 2 of Krueger et al. 2015.
+--
+-- keplerProbe, orbitsProbe, lightProbe, earthMoonProbe and ismProbe are the VM-vs-interpreter probes: pure, and
 -- the strict bytecode VM must print the same bytes as the interpreter. From
 -- packages/celestial (--relax-modules because the module path is the
 -- package's, not the directory's; main also needs --caps IO):
 --   ailang run --quiet --relax-modules --bytecode --strict-bytecode --entry keplerProbe --args-json 64 _smoke.ail
 --   ailang run --quiet --relax-modules --entry keplerProbe --args-json 64 _smoke.ail
---   (likewise orbitsProbe 64, lightProbe 200 and earthMoonProbe 200; compare with cmp)
+--   (likewise orbitsProbe 64, lightProbe 200, earthMoonProbe 200 and ismProbe 64; compare with cmp)
 --   ailang run --quiet --relax-modules --caps IO --entry main _smoke.ail
 module sunholo/celestial/_smoke
 
@@ -27,6 +31,7 @@ import ./lighttime (retarded, secondsPerDay)
 import ./gravity (GravBody, accelerationAt, accelerationRelativeTo, gmSunNominal, gmEarthNominal, radiusSunNominal, radiusEarthNominal)
 import ./reflect (lambertPhase, minnaertRadiance, minnaertPhase, rhoFromGeometricAlbedo, bondAlbedo, discIlluminance, starIlluminanceAt)
 import ./rings (RingBand, ringLitIF, ringUnlitIF, ringTransmission, ringShadowTransmission, ringPlaneHit)
+import ./ism (Interval, rayExitDistance, starSurfaceCrossings, coneShellChord, ellipsoidChord, slabChord, healpixRingVec, grainDist, grainsAbove, grainRadiusAt, poissonDraw, nHFromExtinction)
 
 pure func rad(d: float) -> float = d * 3.141592653589793 / 180.0
 
@@ -191,6 +196,35 @@ pure func oppositionLonDiff(jd: float) -> float =
   wrapPi(atan2(planetAt(jupEl(), jupRt(), jd).pos.y, planetAt(jupEl(), jupRt(), jd).pos.x)
          - atan2(planetAt(embEl(), embRt(), jd).pos.y, planetAt(embEl(), embRt(), jd).pos.x))
 
+-- ism: LIC exits over HEALPix Nside 2 directions, a Sol -> Aldebaran
+-- crossing, cone, ellipsoid and slab chords, grain densities and inverse-CDF
+-- radii, Poisson draws: every number, in order.
+pure func licCoeffs() -> [float] = [5.10602120415779, 0.4379750325843465, -0.15514366716101505, 0.21630484986380535, -0.1802370109468545, -0.15959544595860856, -0.06209055640526657, -0.5809081289730775, 0.6815497676249773]
+
+pure func licC() -> Vec3 = { x: -0.8, y: 0.7, z: -0.4 }
+
+pure func ivs(is: [Interval], acc: [float]) -> [float] = match is { [] => acc, i :: rest => ivs(rest, i.t0 :: i.t1 :: acc) }
+
+pure func ismRows(k: int, n: int, acc: [float]) -> [float] =
+  if k > n then acc
+  else {
+    let u = healpixRingVec(2, k % 48);
+    let f = intToFloat(k) / intToFloat(n);
+    let d = grainDist(0.0000000000000000000000021, 0.000000005, 0.00000025, 0.000008977026012029025, 2.9 + 0.4 * f, 3300.0);
+    let b = { x: u.x * 20.0, y: u.y * 20.0, z: u.z * 20.0 };
+    let cs = ivs(coneShellChord({ x: 0.0, y: 0.0, z: 1.0 }, 0.5 + 0.4 * f, 0.5, 3.0 + f, { x: -1.0, y: 0.5, z: -2.0 }, b), acc);
+    let es = ivs(ellipsoidChord({ x: 2.0 * f, y: 1.0, z: 0.0 }, { x: 1.0, y: 0.0, z: 0.0 }, { x: 0.0, y: 1.0, z: 0.0 }, { x: 0.0, y: 0.0, z: 1.0 }, 3.0, 2.0, 1.0 + f, { x: -5.0, y: 0.0, z: 0.1 }, b), cs);
+    let ss = ivs(slabChord(u, 1.0, 1.0 + f, { x: 0.0, y: 0.0, z: 0.0 }, b), es);
+    ismRows(k + 1, n,
+      rayExitDistance(licC(), licCoeffs(), u, 10.0) :: grainsAbove(d, 0.000000001 + 0.00001 * f) :: grainRadiusAt(d, 0.0000001, f)
+      :: intToFloat(poissonDraw(0.1 + 60.0 * f, f, 1.0 - f)) :: nHFromExtinction(f, 5800000000000000000000.0, 3.1)
+      :: concatS(starSurfaceCrossings(licC(), licCoeffs(), { x: 0.0, y: 0.0, z: 0.0 }, b), ss))
+  }
+
+pure func concatS(xs: [float], ys: [float]) -> [float] = match xs { [] => ys, x :: rest => x :: concatS(rest, ys) }
+
+export pure func ismProbe(n: int) -> [float] = ismRows(0, n, [])
+
 export func main() -> () ! {IO} {
   let ea = solveKepler(0.01, 0.97);
   let keplerOk = absf(ea - 0.97 * sin(ea) - 0.01) < 0.00000000000001;
@@ -211,7 +245,10 @@ export func main() -> () ! {IO} {
   let ringOk = absf(ringUnlitIF(0.5, 1.3, 0.7, 0.45, 0.45) - 0.5 * 1.3 * 0.7 * 0.21107208779109024 / 1.8) < 0.000000000000001;
   let emErr = earthEmbErrKm(2460251.5);
   let emOk = emErr < 200.0;
-  if keplerOk && oppOk && nepOk && ioOk && holdOk && phaseOk && lagOk && ringOk && emOk
-  then println("OK: celestial Kepler e 0.97 residual < 1e-14, Jupiter opposition 2023-11-03 +-2 d, north ecliptic pole at galactic (96.3840, 29.8114), Io sidereal period 1.769138 d, 0.1254 m/s^2 at 50,000 km above Earth, Lambert Phi(pi/2) = 1/pi, Jupiter light time 2095.8 s at 4.20 au, unlit ring limit finite, Earth-from-EMB 2023-11-03 within 200 km of Horizons")
-  else println("FAIL: kepler ${show(ea)}, opposition ${show(oppositionLonDiff(ref - 2.0))} / ${show(oppositionLonDiff(ref + 2.0))}, NEP ${show(l)} ${show(b)}, Io ${show(o2.meanAnom)}, hold ${show(hold.acc.z)}, lag ${show(lag)}, ring ${show(ringUnlitIF(0.5, 1.3, 0.7, 0.45, 0.45))}, earth-EMB err ${show(emErr)} km")
+  let licEdge = rayExitDistance(licC(), licCoeffs(), { x: 0.7169, y: -0.6972, z: -0.0119 }, 10.0);
+  let flux = grainsAbove(grainDist(0.0000000000000000000000021, 0.000000005, 0.00000025, 0.000008977026012029025, 3.1, 3300.0), 0.0000019340416253633913) * 26000.0;
+  let ismOk = absf(licEdge - 0.2838) < 0.001 && flux >= 0.00000005 && flux <= 0.0000002;
+  if keplerOk && oppOk && nepOk && ioOk && holdOk && phaseOk && lagOk && ringOk && emOk && ismOk
+  then println("OK: celestial Kepler e 0.97 residual < 1e-14, Jupiter opposition 2023-11-03 +-2 d, north ecliptic pole at galactic (96.3840, 29.8114), Io sidereal period 1.769138 d, 0.1254 m/s^2 at 50,000 km above Earth, Lambert Phi(pi/2) = 1/pi, Jupiter light time 2095.8 s at 4.20 au, unlit ring limit finite, Earth-from-EMB 2023-11-03 within 200 km of Horizons, the Sun 0.284 pc inside the LIC toward alpha Cen, LIC >= 1e-13 kg grain flux within 2x of Krueger 2015")
+  else println("FAIL: ism edge ${show(licEdge)} flux ${show(flux)}, kepler ${show(ea)}, opposition ${show(oppositionLonDiff(ref - 2.0))} / ${show(oppositionLonDiff(ref + 2.0))}, NEP ${show(l)} ${show(b)}, Io ${show(o2.meanAnom)}, hold ${show(hold.acc.z)}, lag ${show(lag)}, ring ${show(ringUnlitIF(0.5, 1.3, 0.7, 0.45, 0.45))}, earth-EMB err ${show(emErr)} km")
 }

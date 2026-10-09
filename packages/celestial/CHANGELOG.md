@@ -1,5 +1,43 @@
 # Changelog
 
+## 0.4.0
+
+Feature (minor bump, the repo's convention for new exports; stapledons ledger
+D-60, D-61, Mark attended 2026-10-09). Every 0.3.0 signature and result is
+unchanged; the addition is the new module `ism`, the geometry and
+astrophysics of the local interstellar medium (check values IS-n in
+stapledons-design physics/ism-structure.md and HB-113..HB-123 in
+higgs-bubble.md section 6b; oracle tools/ism_dust_ref.py in stapledons-godot,
+stdlib Python).
+
+- `realSphericalHarmonicAt(l, m, u)`, `realSphericalHarmonic(l, m, theta,
+  phi)`: orthonormal real Y_lm, l <= 2, without the Condon-Shortley phase
+  (m > 0 cos, m < 0 sin).
+- `starSurfaceRadius(coeffs, dir)`, `insideStarSurface(centre, coeffs, p)`,
+  `starSurfaceCrossings(centre, coeffs, a, b)` and `starSurfaceChords` (64-step
+  bracket, 60 bisections), `rayExitDistance(centre, coeffs, u, sMax)`. With the
+  coefficients refit to Linsky et al. 2019 Table 2 (their Table 3's printed
+  coefficients do not reproduce Table 2 in any standard convention; see
+  ism-structure.md section 3) the LIC reproduces the 63 edge distances with a
+  median |delta| of 0.378 pc (paper: 0.40).
+- `Interval {t0, t1}`; `coneShellChord`, `insideConeShell`, `ellipsoidChord`,
+  `insideEllipsoid`, `slabChord`, `chordsOf(boundaries, inside, a, b)`: exact
+  parameter intervals of a segment inside each shape.
+- `nHFromExtinction(avPerPc, nhPerEbv, rV)`: 606.34 cm^-3 per mag/pc at
+  Bohlin's 5.8e21 and R_V 3.1.
+- `healpixRingVec(nside, pix)`: HEALPix RING centres; 13 oracle rows to 1e-14
+  (the oracle agrees with healpy 1.20.1 to 8.2e-15 on 11,433 pixels).
+- `GrainDist {k, aMin, aBreak, aMax, q, rhoGrain}`, `grainDist`,
+  `grainMassDensity`, `grainTailMassFraction`, `grainMass`, `grainsAbove`,
+  `grainRadiusAt`: MRN (a^-3.5, 5 nm-0.25 um) plus the big-grain tail (a^-q to
+  a_max), normalised to a dust mass density. LIC (2.1e-24 kg/m^3, q 3.1,
+  3,300 kg/m^3, a_max 8.98 um): 94.0 % of the mass in the tail, a flux of
+  >= 1e-13 kg grains at 26 km/s of 5.52e-8 m^-2 s^-1 (Krueger 2015: "on the
+  order of 1e-7").
+- `poissonDraw(mean, u, v)`: inversion below 30, a rounded normal from 30.
+- `_smoke.ail`: `ismProbe` (strict VM = interpreter) and an ISM check in main.
+- Tests: `ism_test.ail` (24).
+
 ## 0.3.0
 
 Feature (minor bump, the repo's convention for new exports; stapledons ledger

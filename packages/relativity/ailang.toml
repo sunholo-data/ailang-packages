@@ -1,9 +1,9 @@
 [package]
 name = "sunholo/relativity"
-version = "0.11.0"
+version = "0.12.0"
 edition = "1"
 ailang = ">=0.45.0"
-description = "Pure special and general relativity: exact relativistic motion, trip times and phase plans, Higgs-bubble energetics and the wall glow's blackbody spectrum, aberration, the apparent disc of a nearby sphere, Doppler colour and brightness, absolute sky photometry (blackbody luminance, CMB, naked-eye threshold), Schwarzschild shadow, deflection, exact null geodesics (RK4 integrator and Carlson elliptic form), lensed images, tides and hover"
+description = "Pure special and general relativity: exact relativistic motion, trip times and phase plans, Higgs-bubble energetics and the wall glow's blackbody spectrum, aberration, the apparent disc of a nearby sphere, Doppler colour and brightness, absolute sky photometry (blackbody luminance, CMB, naked-eye threshold), Schwarzschild shadow, deflection, exact null geodesics (RK4 integrator and Carlson elliptic form), lensed images, tides and hover, and the bubble in a structured interstellar medium (drag by column, the drive-hold limit, dust-grain impacts and a labelled wall afterglow)"
 license = "Apache-2.0"
 
 [exports]
@@ -20,6 +20,7 @@ modules = [
   "sunholo/relativity/schwarzschild",
   "sunholo/relativity/medium",
   "sunholo/relativity/geodesic",
+  "sunholo/relativity/dust",
 ]
 
 [effects]
@@ -27,7 +28,7 @@ max = ["IO"]  # every export is pure; IO is used only by _smoke.ail to print its
 
 [metadata]
 tags = ["physics", "relativity", "simulation", "games", "science", "colour"]
-ai_summary = "Pure relativity maths in rapidity form: exact constant-acceleration motion, ship-vs-home trip times (flip-and-burn, burn-coast-burn), trip phase boundaries, boost–cruise–brake plans (optionally ending in a gentler final approach; legs solved for a boost and cruise duration) and Higgs-bubble energetics (photon drive, ISM drag, glow, its angular profile and its blackbody spectrum (temperature, radiance, luminous efficacy, luminance), forward CMB, hover power against gravity), aberration and Doppler for a moving observer, the apparent centre and radius of a nearby sphere, blackbody colour and relativistic brightness of stars, absolute blackbody luminance in cd/m^2 and the CMB temperature seen in any direction, main-sequence dwarf temperature from Gaia BP-RP or Johnson B-V, the V bolometric correction against Teff and a star's luminosity and radius from V, distance and Teff, surface brightness in cd/m^2 and the naked-eye point-source threshold (Crumey 2014), blackbody white-dwarf temperature and V from Gaia colour, closed-form Schwarzschild black-hole values (shadow size, deflection, gravitational shift, clocks and circular orbits, the ISCO, tides across a length and their inversions, hover acceleration and power), and exact Schwarzschild null geodesics for a static observer at r >= 2 r_s (a Binet RK4 integrator, valid for r > 1.5, and Darwin's elliptic form via Carlson R_F, which with everything built on it requires r >= 2, the lens map with a finite regular part, image positions, Einstein angle, magnification, and a monotone inverse row for lens tables). Units c = 1, light-years, years; r_s for black holes."
+ai_summary = "Pure relativity maths in rapidity form: exact constant-acceleration motion, ship-vs-home trip times (flip-and-burn, burn-coast-burn), trip phase boundaries, boost–cruise–brake plans (optionally ending in a gentler final approach; legs solved for a boost and cruise duration) and Higgs-bubble energetics (photon drive, ISM drag, glow, its angular profile and its blackbody spectrum (temperature, radiance, luminous efficacy, luminance), forward CMB, hover power against gravity), aberration and Doppler for a moving observer, the apparent centre and radius of a nearby sphere, blackbody colour and relativistic brightness of stars, absolute blackbody luminance in cd/m^2 and the CMB temperature seen in any direction, main-sequence dwarf temperature from Gaia BP-RP or Johnson B-V, the V bolometric correction against Teff and a star's luminosity and radius from V, distance and Teff, surface brightness in cd/m^2 and the naked-eye point-source threshold (Crumey 2014), blackbody white-dwarf temperature and V from Gaia colour, closed-form Schwarzschild black-hole values (shadow size, deflection, gravitational shift, clocks and circular orbits, the ISCO, tides across a length and their inversions, hover acceleration and power), and exact Schwarzschild null geodesics for a static observer at r >= 2 r_s (a Binet RK4 integrator, valid for r > 1.5, and Darwin's elliptic form via Carlson R_F, which with everything built on it requires r >= 2, the lens map with a finite regular part, image positions, Einstein angle, magnification, and a monotone inverse row for lens tables). From 0.12.0: the mass-equivalent density n_H (mu_H + delta), drag energy by column, the trip ledger by column, the drive-hold limit asinh sqrt(m_eff a / (n m_p c^2 pi R^2)), and module dust: grain kinetic energy 2 sinh^2(phi/2) m c^2, swept counts and rates per ship second, and the wall afterglow G-AG (a labelled game approximation: temperature, emittance and luminance of a decaying greybody spot, and the smallest visible grain against a background). Units c = 1, light-years, years; r_s for black holes."
 repository = "https://github.com/sunholo-data/ailang-packages/tree/main/packages/relativity"
 homepage = "https://ailang.sunholo.com/docs/packages/sunholo/relativity"
 license_url = "https://github.com/sunholo-data/ailang-packages/blob/main/LICENSE"

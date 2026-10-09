@@ -1,5 +1,36 @@
 # Changelog
 
+## 0.12.0
+
+Feature (stapledons ledger D-60, D-61, Mark attended 2026-10-09): the
+Higgs bubble in a structured interstellar medium, and dust-grain impacts.
+Additive: every existing function and digest is value-identical to 0.11.0.
+Check values: stapledons-design higgs-bubble.md section 5 (HB-130..HB-137)
+and section 6b (HB-124..HB-129, HB-138..HB-149), ism-structure.md (IS-25,
+IS-26); oracle tools/ism_dust_ref.py in stapledons-godot (stdlib Python).
+
+- **medium.** `massEquivalentDensity(nH, muH, deltaDust)` = n_H (mu_H +
+  delta): the wall reflects every massive particle, dust included, so drag
+  and glow follow the whole mass flux (3.4706e5 m^-3 at 0.247 cm^-3, 1.4,
+  0.0051). `columnDragEnergy(nCol, phi, r)` = N sinh(phi) m_p c^2 pi R^2,
+  equal to `cruiseDragEnergy` for N = n d (1e-12). `tripEnergyColumn(p, mEff,
+  nColCoast, r)`, equal to `tripEnergy` for a uniform medium.
+  `driveHoldMaxPhi(mEff, a, n, r)` = asinh sqrt(m_eff a / (n m_p c^2 pi R^2)):
+  `brakeHoldsAgainstDrag` flips there (tested 1e-9 either side); canon drive
+  gamma 16,858 in the hot gas, 2,117 in the warm clouds, 19.3 at 4,200 cm^-3.
+- **dust (new module).** `grainMassOf(a, rhoGrain)`, `grainKinetic(m, phi)`
+  = 2 sinh^2(phi/2) m c^2 (1 um at 2,500 kg/m^3: 2.011e4 J at 0.999c, 6.646e5 J
+  at 0.999999c), `sweptCount(nGrainCol, r)` (frame-independent),
+  `grainRate(nGrain, phi, r)` per ship second. The wall afterglow G-AG,
+  labelled a game approximation: `afterglowTemperature(ke, rSpot, tau, t)`,
+  `afterglowEmittance(ke, eps, fIn, rSpot, tau, t)` (its integral over spot
+  and time is eps fIn KE), `afterglowLuminance` (through
+  `blackbody.luminousEfficacy`, as the glow), and `visibleRadius(aMin, aMax,
+  rhoGrain, phi, eps, fIn, rSpot, tau, bgLuminance, contrast)`.
+- `_smoke.ail`: `dustDigest` (strict VM = interpreter) and a dust check in
+  main.
+- Tests: `medium_column_test.ail` (8), `dust_test.ail` (10).
+
 ## 0.11.0
 
 Feature (stapledons ledger D-58, Mark attended 2026-10-09): a star's radius

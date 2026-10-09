@@ -7,7 +7,9 @@
 -- the 0.6.0 glow pole (4 x the mean inward glow at 0.99c), and the 0.8.0
 -- glow spectrum (pole temperature and luminance at 0.99c and the cap), and
 -- the 0.10.0 geodesics and tides (Einstein ring at 10 r_s, Sgr A* tide and
--- hover power at 3 r_s).
+-- hover power at 3 r_s), and the 0.12.0 medium column and dust (the canon
+-- drive's hold limit in the warm clouds, a 1 um grain's energy at 0.999c and a
+-- 5 um grain's afterglow temperature).
 module sunholo/relativity/_smoke
 
 import std/io (println)
@@ -27,6 +29,9 @@ import ./optics (cmbSeenTemperature, cmbSeenTemperatureApparent, apparentDisc)
 import ./medium (hoverPower, glowTemperatureAt, glowLuminanceAt, glowRadianceAt)
 import ./blackbody (luminousEfficacy)
 import ./geodesic (lensRegular, einsteinAngle)
+import ./medium (massEquivalentDensity, columnDragEnergy, driveHoldMaxPhi)
+import ./dust (grainKinetic, grainMassOf, grainRate, afterglowTemperature, afterglowLuminance, visibleRadius)
+import ./hyper (cosh)
 import ./schwarzschild (impactFromStaticAngle, turningRadius, weakDeflection2, weakDeflectionFinite, strongDeflectionBbar, circularOrbitSpeed, circularOrbitClockRate, orbitalAngularVelocity, movingClockRate, radialCoordinateRate, hoverAcceleration, tidalRadialOrbit, tidalAccelSI, tidalOrbitAccelSI, tidalSafeRadius, tidalMinMass, hoverAccelSI, hoverPowerPerKg)
 
 pure func wdNaN() -> float = 0.0 / 0.0
@@ -250,6 +255,25 @@ pure func lensRows(i: int, n: int, acc: float) -> float =
   }
 export pure func lensDigest(n: int) -> float = lensRows(0, n, 0.0) + einsteinAngle(10.0)
 
+-- 0.12.0 digest: the hold limit, column drag, grain energy and rate, the
+-- afterglow and the visible radius over a sweep of densities and speeds
+-- (interpreter and strict VM must print the same bits).
+pure func dustSweep(i: int, n: int, acc: float) -> float =
+  if i > n then acc
+  else {
+    let f = intToFloat(i) / intToFloat(n);
+    let phi = 0.5 + 7.0 * f;
+    let nEff = massEquivalentDensity(pow(10.0, 3.0 + 6.0 * f), 1.4, 0.005 + 0.005 * f);
+    let ke = grainKinetic(grainMassOf(0.0000001 + 0.000009 * f, 3300.0), phi);
+    let row = driveHoldMaxPhi(1.0, 7354987.5, nEff, 100.0) + columnDragEnergy(nEff * 1.0e16 * f, phi, 100.0) / 1.0e20
+      + ke / 1.0e6 + grainRate(0.00000000001 * f, phi, 100.0) / 1000.0 + afterglowTemperature(ke, 0.5, 0.2, 0.1 * f) / 1000.0
+      + afterglowLuminance(ke, 0.0000000001, 0.5, 0.5, 0.2, 0.0) * 100.0;
+    dustSweep(i + 1, n, acc + row)
+  }
+
+export pure func dustDigest(n: int) -> float =
+  dustSweep(0, n, 0.0) + visibleRadius(0.000000005, 0.000008977026012029025, 3300.0, 3.8002011672502, 0.0000000001, 0.5, 0.5, 0.2, 0.0040411915282410745, 1.0) * 1000000.0
+
 export func main() -> () ! {IO} {
   let trip = flipAndBurn(4.37, standardGravity());
   let fwd = { x: 0.0, y: 0.0, z: -1.0 };
@@ -274,7 +298,10 @@ export func main() -> () ! {IO} {
   let specOk = absf(glowTemperatureAt(100000.0, phi099, 1.0) / 1357.5234659678836 - 1.0) < 0.000000000001 && absf(glowTemperatureAt(100000.0, phiCapS, 1.0) / 14114.023335759708 - 1.0) < 0.000000000001 && absf(glowLuminanceAt(100000.0, phi099, 0.00000000001, 0.5, 1.0) / 0.000000007143664288681881 - 1.0) < 0.000000000001 && absf(glowLuminanceAt(100000.0, phiCapS, 0.00000000001, 0.5, 1.0) / 0.15643160647071194 - 1.0) < 0.000000000001;
   let ringDeg = einsteinAngle(10.0) * 180.0 / pi();
   let geoOk = absf(ringDeg - 29.828317906) < 0.000001 && absf(tidalAccelSI(4297000.0, 3.0, 100.0) / 9.80665 / 0.00021077825808856772 - 1.0) < 0.000000000001 && absf(hoverPowerPerKg(4297000.0, 3.0) / 144467333104005.4 - 1.0) < 0.000000000001;
-  if tripOk && angleOk && shadowOk && photometryOk && photometryWdOk && cruiseOk && skyOk && glowOk && discOk && specOk && geoOk
-  then println("OK: relativity alpha-Cen trip 3.5824 ship-yr / 6.0025 yr, 90deg star seen at 25.842deg at 0.9c, shadow at 3 r_s = pi/4, G2V = 5770 K, WD BP-RP 0.30 = 8941.6 K, alpha Cen at 1-beta = 1e-6 2.263 ship-days / 1.510e19 J, forward CMB at the cap 3853.7 K = 1.984e8 cd/m^2, Sun B-V 0.65 = 5770 K, naked-eye limit V 6.94 at 2e-4 cd/m^2, glow pole at 0.99c 9.6288e-5 W/m^2 = 4 x mean, 5 deg sphere at 90 deg seen at 25.928 deg radius 2.184 deg at 0.9c, hover at 0.1254 m/s^2 = 3.759e7 W/kg, glow at eps 1e-11 1357.5 K / 7.144e-9 cd/m^2 at 0.99c, 14114 K / 0.1564 cd/m^2 at the cap, Einstein ring at 10 r_s 29.8283 deg, Sgr A* at 3 r_s tide 2.108e-4 g over 100 m and hover 1.445e14 W/kg")
-  else println("FAIL: trip ${show(trip.shipTime)} / ${show(trip.galaxyTime)}, angle ${show(angle)}, shadow ${show(shadow)}, G2V ${show(teffFromBpRp(0.823))}, WD ${show(bbTeffFromBpRp(0.30))}, cruise ${show(cruise.trip.shipTime)}, CMB ${show(cmbPole)} K ${show(photopicRadiance(cmbPole))} cd/m^2, B-V ${show(teffFromBV(0.65))}, limit ${show(limitingMagnitude(0.0002, 1.0))}, glow pole ${show(glowEmittanceAt(100000.0, phi099, 0.000000001, 0.5, 1.0))}, disc ${show(disc.centre)} / ${show(disc.radius)}, hover ${show(hoverPower(1.0, 0.1254))}, glow T ${show(glowTemperatureAt(100000.0, phi099, 1.0))} lum ${show(glowLuminanceAt(100000.0, phi099, 0.00000000001, 0.5, 1.0))}, ring ${show(ringDeg)}, tide ${show(tidalAccelSI(4297000.0, 3.0, 100.0))}, hover ${show(hoverPowerPerKg(4297000.0, 3.0))}")
+  let holdGamma = cosh(driveHoldMaxPhi(1.0, 7354987.5, 347614.8119798692, 100.0));
+  let dustOk = absf(holdGamma / 2116.6417072370205 - 1.0) < 0.000000001 && absf(grainKinetic(grainMassOf(0.000001, 2500.0), 3.8002011672502) / 20109.384472668207 - 1.0) < 0.000000000001
+    && absf(afterglowTemperature(3318048.4379902543, 0.5, 0.2, 0.0) / 4393.268808506808 - 1.0) < 0.000000000001;
+  if tripOk && angleOk && shadowOk && photometryOk && photometryWdOk && cruiseOk && skyOk && glowOk && discOk && specOk && geoOk && dustOk
+  then println("OK: relativity alpha-Cen trip 3.5824 ship-yr / 6.0025 yr, 90deg star seen at 25.842deg at 0.9c, shadow at 3 r_s = pi/4, G2V = 5770 K, WD BP-RP 0.30 = 8941.6 K, alpha Cen at 1-beta = 1e-6 2.263 ship-days / 1.510e19 J, forward CMB at the cap 3853.7 K = 1.984e8 cd/m^2, Sun B-V 0.65 = 5770 K, naked-eye limit V 6.94 at 2e-4 cd/m^2, glow pole at 0.99c 9.6288e-5 W/m^2 = 4 x mean, 5 deg sphere at 90 deg seen at 25.928 deg radius 2.184 deg at 0.9c, hover at 0.1254 m/s^2 = 3.759e7 W/kg, glow at eps 1e-11 1357.5 K / 7.144e-9 cd/m^2 at 0.99c, 14114 K / 0.1564 cd/m^2 at the cap, Einstein ring at 10 r_s 29.8283 deg, Sgr A* at 3 r_s tide 2.108e-4 g over 100 m and hover 1.445e14 W/kg, warm-cloud hold limit gamma 2,117, a 1 um grain 2.011e4 J at 0.999c, its 5 um afterglow 4,393 K")
+  else println("FAIL: dust hold ${show(holdGamma)}, trip ${show(trip.shipTime)} / ${show(trip.galaxyTime)}, angle ${show(angle)}, shadow ${show(shadow)}, G2V ${show(teffFromBpRp(0.823))}, WD ${show(bbTeffFromBpRp(0.30))}, cruise ${show(cruise.trip.shipTime)}, CMB ${show(cmbPole)} K ${show(photopicRadiance(cmbPole))} cd/m^2, B-V ${show(teffFromBV(0.65))}, limit ${show(limitingMagnitude(0.0002, 1.0))}, glow pole ${show(glowEmittanceAt(100000.0, phi099, 0.000000001, 0.5, 1.0))}, disc ${show(disc.centre)} / ${show(disc.radius)}, hover ${show(hoverPower(1.0, 0.1254))}, glow T ${show(glowTemperatureAt(100000.0, phi099, 1.0))} lum ${show(glowLuminanceAt(100000.0, phi099, 0.00000000001, 0.5, 1.0))}, ring ${show(ringDeg)}, tide ${show(tidalAccelSI(4297000.0, 3.0, 100.0))}, hover ${show(hoverPowerPerKg(4297000.0, 3.0))}")
 }

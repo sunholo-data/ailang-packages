@@ -1,0 +1,98 @@
+-- sunholo/relativity/dust — dust-grain impacts on the Higgs-bubble wall:
+-- kinetic energy, counts and rates, and the wall afterglow G-AG (stapledons
+-- ledger D-60, D-61; stapledons-design physics/higgs-bubble.md section 6b).
+--
+-- A grain of mass m arrives in the ship frame with (gamma - 1) m c^2 =
+-- 2 sinh^2(phi/2) m c^2 and is reflected like every massive particle; an eps
+-- fraction of its kinetic energy becomes light. The number of grains swept
+-- is A int n_gr ds and does not depend on speed; their rate per ship second
+-- is n_gr sinh(phi) c A.
+--
+-- The wall afterglow G-AG is a GAME APPROXIMATION, labelled as such: applied
+-- literally, the glow's local-equilibrium rule makes an impact a femtosecond,
+-- grain-sized hot spot at ~1e8 K (X-rays, no visible light). G-AG releases
+-- the eps fraction from a disc of radius rSpot, decaying as e^(-t/tau); each
+-- instant the disc is a greybody of emissivity eps, so eps cancels in its
+-- temperature, T(t) = (KE / (sigma pi rSpot^2 tau))^(1/4) e^(-t/4 tau), and
+-- the inward emittance is eps fIn KE e^(-t/tau) / (pi rSpot^2 tau). The
+-- total light is eps fIn KE; rSpot and tau only shape it.
+--
+-- SI units; rapidity forms throughout (nothing forms 1 - beta).
+
+module sunholo/relativity/dust
+
+import std/math (sqrt, exp, log)
+import ./hyper (sinh)
+import ./medium (cSI)
+import ./blackbody (stefanBoltzmannSI, luminousEfficacy)
+
+pure func pi() -> float = 3.141592653589793
+
+-- Mass of a spherical grain of radius a (m) and bulk density rhoGrain (kg/m^3).
+export pure func grainMassOf(a: float, rhoGrain: float) -> float = 4.0 / 3.0 * pi() * a * a * a * rhoGrain
+
+-- Ship-frame kinetic energy of a grain of mass m (kg) at rapidity phi:
+-- 2 sinh^2(phi/2) m c^2 (J). A 1 um grain at 2,500 kg/m^3: 2.011e4 J at
+-- 0.999c, 6.646e5 J at 0.999999c (HB-124, HB-125).
+export pure func grainKinetic(m: float, phi: float) -> float {
+  let h = sinh(phi / 2.0);
+  let c = cSI();
+  2.0 * h * h * m * c * c
+}
+
+-- Grains swept through a column of grains nGrainCol (m^-2) by the bubble's
+-- projected area pi r^2: the same in every frame.
+export pure func sweptCount(nGrainCol: float, r: float) -> float = pi() * r * r * nGrainCol
+
+-- Impacts per ship second over the whole wall: n_gr sinh(phi) c pi r^2
+-- (nGrain in m^-3). LIC grains >= 1 um at 0.999c: 1,842 /s (HB-126).
+export pure func grainRate(nGrain: float, phi: float, r: float) -> float = nGrain * sinh(phi) * cSI() * pi() * r * r
+
+-- Afterglow temperature of the spot t seconds after the impact (K):
+-- (KE / (sigma pi rSpot^2 tau))^(1/4) e^(-t/4 tau), by two square roots.
+-- t < 0 (before the impact) and KE <= 0 give 0; NaN gives NaN.
+export pure func afterglowTemperature(ke: float, rSpot: float, tau: float, t: float) -> float {
+  let x = ke / (stefanBoltzmannSI() * pi() * rSpot * rSpot * tau);
+  if x != x || t != t then x + t
+  else if t < 0.0 || !(x > 0.0) then 0.0
+  else sqrt(sqrt(x)) * exp(0.0 - t / (4.0 * tau))
+}
+
+-- Inward emittance of the spot (W/m^2): eps fIn KE e^(-t/tau) / (pi rSpot^2
+-- tau). Its integral over the spot and all time is eps fIn KE. t < 0 gives
+-- 0; NaN gives NaN.
+export pure func afterglowEmittance(ke: float, eps: float, fIn: float, rSpot: float, tau: float, t: float) -> float =
+  if t != t then t
+  else if t < 0.0 then 0.0
+  else eps * fIn * ke * exp(0.0 - t / tau) / (pi() * rSpot * rSpot * tau)
+
+-- Luminance of the spot (cd/m^2): Lambertian radiance E/pi times the
+-- luminous efficacy of blackbody light at afterglowTemperature, the same
+-- photometry as the glow (medium.glowLuminanceAt).
+export pure func afterglowLuminance(ke: float, eps: float, fIn: float, rSpot: float, tau: float, t: float) -> float =
+  afterglowEmittance(ke, eps, fIn, rSpot, tau, t) / pi() * luminousEfficacy(afterglowTemperature(ke, rSpot, tau, t))
+
+pure func peakOk(a: float, rhoGrain: float, phi: float, eps: float, fIn: float, rSpot: float, tau: float, need: float) -> bool =
+  afterglowLuminance(grainKinetic(grainMassOf(a, rhoGrain), phi), eps, fIn, rSpot, tau, 0.0) >= need
+
+pure func bisectLog(lo: float, hi: float, n: int, rhoGrain: float, phi: float, eps: float, fIn: float, rSpot: float, tau: float, need: float) -> float =
+  if n <= 0 then exp(hi)
+  else {
+    let mid = 0.5 * (lo + hi);
+    if peakOk(exp(mid), rhoGrain, phi, eps, fIn, rSpot, tau, need)
+    then bisectLog(lo, mid, n - 1, rhoGrain, phi, eps, fIn, rSpot, tau, need)
+    else bisectLog(mid, hi, n - 1, rhoGrain, phi, eps, fIn, rSpot, tau, need)
+  }
+
+-- The smallest grain radius in [aMin, aMax] whose peak afterglow luminance is
+-- at least contrast x bgLuminance (the local background, cd/m^2): bisection
+-- on log a, 60 steps (the peak luminance rises monotonically with a). aMin
+-- if every grain qualifies; aMax x 1.000001 (above the population) if none
+-- does. HB-142..HB-149.
+export pure func visibleRadius(aMin: float, aMax: float, rhoGrain: float, phi: float, eps: float, fIn: float, rSpot: float, tau: float, bgLuminance: float, contrast: float) -> float {
+  let need = contrast * bgLuminance;
+  if need != need then need
+  else if !peakOk(aMax, rhoGrain, phi, eps, fIn, rSpot, tau, need) then aMax * 1.000001
+  else if peakOk(aMin, rhoGrain, phi, eps, fIn, rSpot, tau, need) then aMin
+  else bisectLog(log(aMin), log(aMax), 60, rhoGrain, phi, eps, fIn, rSpot, tau, need)
+}

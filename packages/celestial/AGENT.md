@@ -11,6 +11,11 @@ or which way its pole points, on a real date, with numbers you can cite:
 - Planetocentric moon positions from JPL mean satellite elements (`ephemeris`).
 - The Earth's centre and the Moon, split out of Standish's Earth-Moon
   barycentre (`earthAt`, `moonAt`, `earthMoonSplit` in `ephemeris`).
+- The local interstellar medium's geometry (`ism`, 0.4.0): a star-shaped
+  cloud surface from real spherical harmonics (the Local Interstellar Cloud),
+  exact intervals of a route segment inside cone shells, ellipsoids and
+  slabs, n_H from dust extinction, HEALPix pixel centres, a grain-size
+  distribution and a Poisson draw.
 - Rotating ecliptic vectors into ICRS or galactic coordinates, and IAU poles
   and prime meridians (`frames`).
 - Where a moving body is *seen*: the light-travel (retarded) time and
@@ -116,6 +121,7 @@ Inner planets (Mercury-Mars) have b = c = s = f = 0.
 | `gravity` | `GravBody {gm, radius, posAt}`, `Gravity {acc, inside, body}`, `accelerationAt(bodies, x, jdTDB)`, `accelerationRelativeTo(bodies, x, ref, jdTDB)`, `pointAcceleration(gm, rKm)`, `gmSunNominal`, `gmEarthNominal`, `gmJupiterNominal`, `radiusSunNominal`, `radiusEarthNominal`, `radiusJupiterNominal` |
 | `reflect` | `starIlluminanceAt(e1AU, rAU)`, `lambertPhase(alpha)`, `lambertRadiance(rho, lux, cosI)`, `minnaertRadiance(rho, k, lux, cosI, cosE)`, `minnaertPhase(alpha, k)`, `phaseFunction(alpha, k)`, `rhoFromGeometricAlbedo(p, k)`, `geometricAlbedoFromRho(rho, k)`, `bondAlbedo(rho, k)`, `bondFromGeometricAlbedo(p, k)`, `discIlluminance(e1AU, p, R, rAU, d, alpha, k)` |
 | `rings` | `ringLitIF`, `ringUnlitIF`, `ringLitRadiance`, `ringUnlitRadiance` (all `(w0, phaseP, tau, mu0, mu[, lux])`), `ringTransmission(tau, mu)`, `RingBand {rIn, rOut, tau, w0}`, `bandAt(bands, r)`, `RingHit {hits, radius, mu}`, `ringPlaneHit(p, dir, pole)`, `ringShadowTransmission(bands, p, sunDir, pole)` |
+| `ism` | 0.4.0. `Interval {t0, t1}`, `realSphericalHarmonicAt(l, m, u)`, `realSphericalHarmonic(l, m, theta, phi)`, `starSurfaceRadius(coeffs, dir)`, `insideStarSurface(centre, coeffs, p)`, `starSurfaceCrossings(centre, coeffs, a, b)`, `starSurfaceChords(...)`, `rayExitDistance(centre, coeffs, u, sMax)`, `chordsOf(boundaries, inside, a, b)`, `coneShellChord(axis, cosHalf, rIn, rOut, a, b)`, `insideConeShell(...)`, `ellipsoidChord(centre, u1, u2, u3, s1, s2, s3, a, b)`, `insideEllipsoid(...)`, `slabChord(normal, d0, d1, a, b)`, `nHFromExtinction(avPerPc, nhPerEbv, rV)`, `healpixRingVec(nside, pix)`, `GrainDist {k, aMin, aBreak, aMax, q, rhoGrain}`, `grainDist(rhoDust, aMin, aBreak, aMax, q, rhoGrain)`, `grainMassDensity(d)`, `grainTailMassFraction(d)`, `grainMass(d, a)`, `grainsAbove(d, a)`, `grainRadiusAt(d, a0, u)`, `poissonDraw(mean, u, v)` |
 | `frames` | `obliquityJ2000`, `eclipticToEquatorial`, `equatorialToEcliptic`, `equatorialToGalactic`, `eclipticToGalactic`, `unitFromAngles(lon, lat)`, `LonLat {lon, lat}`, `lonLat(v)`, `PoleTerm {phase0, rate, ra, dec, w}`, `PoleModel {ra0, ra1, dec0, dec1, w0, w1, w2, terms}`, `Spin {pole, ra, dec, w}`, `poleAndSpin(model, jd)`, `rotationPeriod(model)` |
 
 ## Kepler
@@ -327,6 +333,39 @@ Inner planets (Mercury-Mars) have b = c = s = f = 0.
   to 122,340 km tau 0-0.1; A 122,340-136,780 km tau 0.4-1.0.
 - Single scattering under-predicts dense rings (tau >~ 1) somewhat; the
   opposition surge must be in P.
+
+## The interstellar medium (`ism`, 0.4.0)
+
+- **Units.** Geometry takes any one length unit (the caller's: pc or ly) and
+  returns segment parameters t in [0, 1]; grains are SI (m, kg, kg/m^3, and
+  `grainsAbove` in m^-3).
+- **Harmonics.** `realSphericalHarmonic(l, m, theta, phi)` is orthonormal,
+  without the Condon-Shortley phase, m > 0 with cos m phi and m < 0 with
+  sin |m| phi; in the galactic frame theta = 90 deg - b, phi = l. Coefficient
+  lists for `starSurfaceRadius` are ordered (0,0), (1,-1), (1,0), (1,1),
+  (2,-2), (2,-1), (2,0), (2,1), (2,2).
+- **The LIC.** Linsky, Redfield & Tilipman 2019 (ApJ 886, 41) Table 3's
+  printed coefficients do not reproduce their Table 2 in any standard
+  convention; the stapledons check values (ism-structure.md IS-4..IS-12) are a
+  sigma-weighted refit to Table 2 about the Table 3 centre (-0.8, 0.7, -0.4) pc:
+  median |delta| 0.378 pc over 63 sight lines. The Sun is inside, 0.20 pc from
+  the nearest point of the surface.
+- **Crossings** of the star-shaped surface are bracketed on 64 steps of the
+  segment and bisected 60 times, so two crossings inside one step are not
+  resolved: keep segments shorter than 64 x the surface's smallest feature
+  (a few pc for l <= 2). Cones, spheres, ellipsoids and slabs are closed form.
+  `coneShellChord` has its apex at the origin (the Sun); the mirror nappe is
+  rejected.
+- **Grains.** `grainDist` normalises MRN (a^-3.5) plus a tail (a^-q) to a dust
+  mass density; `grainsAbove(d, a)` is the number density of grains of radius
+  >= a (0 from aMax up) and `grainRadiusAt(d, a0, u)` the inverse CDF above
+  a0 (u = 0 gives a0, u = 1 aMax). The tail is the Ulysses measurement
+  (Krueger et al. 2015), detector-limited at 1e-11 kg: aMax is a parameter,
+  not a physical edge.
+- **Poisson.** `poissonDraw(mean, u, v)` is a pure function of its uniforms,
+  so a caller with a stateless stream (e.g. splitmix64 of a seed and a slot)
+  gets replayable counts. Inversion below 30, a rounded Box-Muller normal from
+  30 (u clamped below 1).
 
 ## Validation
 

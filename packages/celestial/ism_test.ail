@@ -1,0 +1,393 @@
+-- Check values for sunholo/celestial/ism (0.4.0). Every expected number comes
+-- from the independent oracle tools/ism_dust_ref.py (stapledons-godot, stdlib
+-- Python; its HEALPix rows also agree with healpy 1.20.1 to 8.2e-15 over
+-- 11,433 pixels), never from the code under test. IS-n and HB-n are the IDs of
+-- stapledons-design physics/ism-structure.md and higgs-bubble.md section 6b.
+--
+-- The LIC rows are Linsky, Redfield & Tilipman 2019 (ApJ 886, 41) Table 2,
+-- transcribed from the arXiv LaTeX source; the coefficients are the refit of
+-- IS-4..IS-12 (Table 3's printed coefficients do not reproduce Table 2 in any
+-- standard convention: ism-structure.md section 3).
+
+module sunholo/celestial/ism_test
+
+import std/math (sin, cos, sqrt, intToFloat, floatToInt, log)
+import std/list (sortBy, length, nth_or)
+import ./kepler (Vec3, absf)
+import ./frames (unitFromAngles)
+import ./ism (Interval, GrainDist, realSphericalHarmonic, realSphericalHarmonicAt, starSurfaceRadius, insideStarSurface, starSurfaceCrossings, starSurfaceChords, rayExitDistance, coneShellChord, insideConeShell, ellipsoidChord, slabChord, nHFromExtinction, healpixRingVec, grainDist, grainsAbove, grainRadiusAt, grainMass, grainMassDensity, grainTailMassFraction, poissonDraw)
+
+type Row = { l: float, b: float, d: float }
+type HpRow = { nside: int, pix: int, v: Vec3 }
+type PoRow = { mean: float, u: float, v: float, k: int }
+
+pure func rel(got: float, want: float, tol: float) -> bool = absf(got - want) <= tol * absf(want)
+pure func near(got: float, want: float, tol: float) -> bool = absf(got - want) <= tol
+pure func rad(d: float) -> float = d * 3.141592653589793 / 180.0
+pure func pi() -> float = 3.141592653589793
+pure func lb(l: float, b: float) -> Vec3 = unitFromAngles(rad(l), rad(b))
+pure func scale(v: Vec3, s: float) -> Vec3 = { x: v.x * s, y: v.y * s, z: v.z * s }
+pure func origin() -> Vec3 = { x: 0.0, y: 0.0, z: 0.0 }
+pure func licCentre() -> Vec3 = { x: -0.8, y: 0.7, z: -0.4 }
+
+pure func refit() -> [float] = [5.10602120415779, 0.4379750325843465, -0.15514366716101505, 0.21630484986380535, -0.1802370109468545, -0.15959544595860856, -0.06209055640526657, -0.5809081289730775, 0.6815497676249773]
+
+-- Linsky et al. 2019 Table 2, the 63 rows with a sigma: (l deg, b deg, d_edge_obs pc).
+pure func table2() -> [Row] = [
+  { l: 227.2, b: -8.9, d: 0.28 },
+  { l: 227.2, b: -8.9, d: 0.67 },
+  { l: 195.8, b: -48.1, d: 1.11 },
+  { l: 213.7, b: 13.0, d: 1.25 },
+  { l: 336.2, b: -48.0, d: 1.65 },
+  { l: 173.1, b: -73.4, d: 1.58 },
+  { l: 200.8, b: -38.1, d: 1.11 },
+  { l: 122.6, b: -5.1, d: 2.04 },
+  { l: 67.5, b: 19.2, d: 8.1 },
+  { l: 20.5, b: -64.9, d: 2.9 },
+  { l: 188.5, b: -2.7, d: 0.992 },
+  { l: 198.1, b: -46.0, d: 1.18 },
+  { l: 168.5, b: 73.8, d: 1.7 },
+  { l: 178.2, b: -43.1, d: 0.5 },
+  { l: 192.1, b: -58.3, d: 1.4 },
+  { l: 192.2, b: 23.4, d: 1.65 },
+  { l: 141.2, b: -9.6, d: 3.09 },
+  { l: 27.7, b: 45.7, d: 1.62 },
+  { l: 158.4, b: 11.9, d: 2.81 },
+  { l: 162.6, b: 4.6, d: 2.86 },
+  { l: 111.3, b: -32.8, d: 3.04 },
+  { l: 150.6, b: 35.7, d: 2.22 },
+  { l: 187.2, b: -10.3, d: 0.66 },
+  { l: 45.6, b: 67.2, d: 0.5 },
+  { l: 117.5, b: -3.3, d: 2.49 },
+  { l: 217.4, b: -50.3, d: 3.9 },
+  { l: 201.2, b: 46.1, d: 0.79 },
+  { l: 118.5, b: 16.9, d: 1.4 },
+  { l: 138.6, b: -31.4, d: 2.07 },
+  { l: 184.3, b: 67.3, d: 1.04 },
+  { l: 232.1, b: 20.0, d: 2.27 },
+  { l: 109.9, b: -14.5, d: 4.97 },
+  { l: 109.9, b: -14.5, d: 6.3 },
+  { l: 137.2, b: 2.2, d: 3.02 },
+  { l: 94.4, b: 9.1, d: 4.8 },
+  { l: 147.1, b: -37.8, d: 1.82 },
+  { l: 114.6, b: -31.4, d: 1.76 },
+  { l: 127.2, b: -2.4, d: 2.8 },
+  { l: 184.9, b: -41.6, d: 1.193 },
+  { l: 350.0, b: -52.5, d: 7.2 },
+  { l: 142.6, b: 38.9, d: 1.434 },
+  { l: 338.3, b: -56.5, d: 5.5 },
+  { l: 185.1, b: -16.0, d: 1.38 },
+  { l: 180.5, b: -21.4, d: 1.685 },
+  { l: 190.2, b: -27.6, d: 2.0 },
+  { l: 172.5, b: -27.9, d: 2.5 },
+  { l: 174.8, b: -19.1, d: 3.2 },
+  { l: 176.0, b: -15.6, d: 2.2 },
+  { l: 185.1, b: -24.7, d: 1.17 },
+  { l: 182.4, b: -27.9, d: 0.93 },
+  { l: 181.6, b: -20.5, d: 2.1 },
+  { l: 178.8, b: -20.6, d: 2.1 },
+  { l: 183.7, b: -24.7, d: 1.17 },
+  { l: 180.4, b: -22.4, d: 1.572 },
+  { l: 175.4, b: -18.9, d: 2.22 },
+  { l: 180.4, b: -24.3, d: 1.41 },
+  { l: 178.6, b: -22.0, d: 1.6 },
+  { l: 209.6, b: -29.4, d: 1.09 },
+  { l: 161.1, b: 17.3, d: 2.24 },
+  { l: 156.0, b: 7.1, d: 2.38 },
+  { l: 33.6, b: -40.8, d: 1.3 },
+  { l: 165.4, b: 0.3, d: 1.41 },
+  { l: 166.0, b: -50.3, d: 1.61 }
+]
+
+pure func healpixRows() -> [HpRow] = [
+  { nside: 1, pix: 0, v: { x: 0.5270462766947299, y: 0.5270462766947298, z: 0.6666666666666666 } },
+  { nside: 1, pix: 4, v: { x: 1.0, y: 0.0, z: 0.0 } },
+  { nside: 1, pix: 11, v: { x: 0.5270462766947297, y: -0.5270462766947299, z: -0.6666666666666667 } },
+  { nside: 2, pix: 12, v: { x: 0.9428090415820634, y: 0.0, z: 0.33333333333333326 } },
+  { nside: 4, pix: 40, v: { x: 0.8660254037844388, y: 0.0, z: 0.4999999999999999 } },
+  { nside: 4, pix: 100, v: { x: 0.1950903220161283, y: -0.9807852804032304, z: 0.0 } },
+  { nside: 16, pix: 1000, v: { x: 0.6331518545851695, y: 0.6985754203550603, z: 0.33333333333333326 } },
+  { nside: 64, pix: 20000, v: { x: -0.6859902692612873, y: -0.703037054840516, z: 0.1875 } },
+  { nside: 256, pix: 0, v: { x: 0.0022552716212985483, y: 0.002255271621298548, z: 0.9999949137369791 } },
+  { nside: 256, pix: 786431, v: { x: 0.0022552716212985474, y: -0.0022552716212985483, z: -0.9999949137369791 } },
+  { nside: 256, pix: 400000, v: { x: 0.7069892847429298, y: 0.7069892847429297, z: -0.01822916666666674 } },
+  { nside: 256, pix: 130560, v: { x: 0.7453524847126957, y: 0.0022867199580073774, z: 0.6666666666666666 } },
+  { nside: 256, pix: 655871, v: { x: 0.7453524847126956, y: -0.0022867199580078003, z: -0.6666666666666667 } }
+]
+
+pure func poissonRows() -> [PoRow] = [
+  { mean: 0.0, u: 0.1, v: 0.2, k: 0 },
+  { mean: 0.0, u: 0.5, v: 0.5, k: 0 },
+  { mean: 0.0, u: 0.97, v: 0.3, k: 0 },
+  { mean: 0.5, u: 0.1, v: 0.2, k: 0 },
+  { mean: 0.5, u: 0.5, v: 0.5, k: 0 },
+  { mean: 0.5, u: 0.97, v: 0.3, k: 2 },
+  { mean: 4.0, u: 0.1, v: 0.2, k: 2 },
+  { mean: 4.0, u: 0.5, v: 0.5, k: 4 },
+  { mean: 4.0, u: 0.97, v: 0.3, k: 8 },
+  { mean: 29.9, u: 0.1, v: 0.2, k: 23 },
+  { mean: 29.9, u: 0.5, v: 0.5, k: 30 },
+  { mean: 29.9, u: 0.97, v: 0.3, k: 41 },
+  { mean: 30.0, u: 0.1, v: 0.2, k: 31 },
+  { mean: 30.0, u: 0.5, v: 0.5, k: 24 },
+  { mean: 30.0, u: 0.97, v: 0.3, k: 26 },
+  { mean: 1000.0, u: 0.1, v: 0.2, k: 1004 },
+  { mean: 1000.0, u: 0.5, v: 0.5, k: 963 },
+  { mean: 1000.0, u: 0.97, v: 0.3, k: 974 }
+]
+
+-- ---------- real spherical harmonics ----------
+
+pure func ylmAt(l: int, m: int, want: float) -> bool = near(realSphericalHarmonic(l, m, 1.0, 2.0), want, 0.000000000000001)
+
+pure func checkYlmValues() -> bool =
+  ylmAt(0, 0, 0.28209479177387814) && ylmAt(1, -1, 0.3738529422190667) && ylmAt(1, 0, 0.26399306383411286)
+  && ylmAt(1, 1, -0.17109662322637528) && ylmAt(2, -2, -0.29273290870164587) && ylmAt(2, -1, 0.45167143568328566)
+  && ylmAt(2, 0, -0.0391780206039717) && ylmAt(2, 1, -0.2067108446292116) && ylmAt(2, 2, -0.25283082386221145)
+
+test "Y_lm at theta 1, phi 2: orthonormal real harmonics without the Condon-Shortley phase (oracle, 1e-15)" { checkYlmValues() }
+
+-- Orthonormality by a midpoint rule (24 x 48 cells): <Y_a, Y_b> = delta_ab to 5e-3.
+pure func lmOf(i: int) -> (int, int) =
+  if i == 0 then (0, 0) else if i == 1 then (1, -1) else if i == 2 then (1, 0) else if i == 3 then (1, 1)
+  else if i == 4 then (2, -2) else if i == 5 then (2, -1) else if i == 6 then (2, 0) else if i == 7 then (2, 1) else (2, 2)
+
+pure func ylmI(i: int, th: float, ph: float) -> float = match lmOf(i) { (l, m) => realSphericalHarmonic(l, m, th, ph) }
+
+pure func innerRow(i: int, j: int, a: int, b: int, acc: float) -> float =
+  if b >= 48 then acc
+  else {
+    let th = pi() * (intToFloat(a) + 0.5) / 24.0;
+    let ph = 2.0 * pi() * (intToFloat(b) + 0.5) / 48.0;
+    innerRow(i, j, a, b + 1, acc + ylmI(i, th, ph) * ylmI(j, th, ph) * sin(th))
+  }
+
+pure func inner(i: int, j: int, a: int, acc: float) -> float =
+  if a >= 24 then acc * (pi() / 24.0) * (2.0 * pi() / 48.0) else inner(i, j, a + 1, innerRow(i, j, a, 0, acc))
+
+pure func orthoPairs(i: int, j: int) -> bool =
+  if i >= 9 then true
+  else if j >= 9 then orthoPairs(i + 1, i + 1)
+  else near(inner(i, j, 0, 0.0), if i == j then 1.0 else 0.0, 0.005) && orthoPairs(i, j + 1)
+
+test "Y_lm, l <= 2, are orthonormal on the sphere (quadrature, 5e-3)" { orthoPairs(0, 0) }
+
+pure func checkYlmUnitForm() -> bool {
+  let th = 0.7;
+  let ph = 4.1;
+  let u = { x: sin(th) * cos(ph), y: sin(th) * sin(ph), z: cos(th) };
+  near(realSphericalHarmonicAt(2, 1, u), realSphericalHarmonic(2, 1, th, ph), 0.000000000000001)
+}
+
+test "the unit-vector and angle forms agree" { checkYlmUnitForm() }
+
+-- ---------- the LIC surface (AC1, IS-13) ----------
+
+pure func residuals(rows: [Row], acc: [float]) -> [float] = match rows {
+  [] => acc,
+  r :: rest => residuals(rest, absf(rayExitDistance(licCentre(), refit(), lb(r.l, r.b), 10.0) - r.d) :: acc)
+}
+
+pure func cmpF(a: float, b: float) -> int = if a < b then -1 else if a > b then 1 else 0
+
+pure func medianOf(xs: [float]) -> float {
+  let s = sortBy(cmpF, xs);
+  let n = length(s);
+  if n % 2 == 1 then nth_or(s, n / 2, 0.0) else 0.5 * (nth_or(s, n / 2 - 1, 0.0) + nth_or(s, n / 2, 0.0))
+}
+
+pure func checkTable2() -> bool {
+  let m = medianOf(residuals(table2(), []));
+  length(table2()) == 63 && m <= 0.40 && near(m, 0.3781764242135224, 0.000000001)
+}
+
+test "AC1: the LIC surface reproduces Linsky 2019 Table 2's 63 edge distances, median |delta| 0.378 pc <= 0.40 (IS-13)" { checkTable2() }
+
+pure func checkSunInside() -> bool =
+  insideStarSurface(licCentre(), refit(), origin())
+  && near(rayExitDistance(licCentre(), refit(), lb(315.73, -0.68), 10.0), 0.28375427443770607, 0.000000000001)
+
+test "the Sun is inside the LIC; toward alpha Cen the surface is 0.284 pc away (oracle, 1e-12)" { checkSunInside() }
+
+pure func checkAldebaranCrossing() -> bool {
+  let b = scale(lb(180.97, -20.25), 20.43);
+  let ts = starSurfaceCrossings(licCentre(), refit(), origin(), b);
+  let cs = starSurfaceChords(licCentre(), refit(), origin(), b);
+  length(ts) == 1 && near(nth_or(ts, 0, 0.0), 0.08273949758908711, 0.000000000001)
+  && (match cs { [c] => c.t0 == 0.0 && near(c.t1, 0.08273949758908711, 0.000000000001), _ => false })
+}
+
+test "Sol -> Aldebaran leaves the LIC at t = 0.0827 (64-step bracket, 60 bisections; oracle, 1e-12)" { checkAldebaranCrossing() }
+
+pure func checkSurfaceNaN() -> bool {
+  let nan = 0.0 / 0.0;
+  let r = starSurfaceRadius(refit(), { x: nan, y: 0.0, z: 1.0 });
+  r != r
+}
+
+test "NaN direction gives a NaN radius" { checkSurfaceNaN() }
+
+-- ---------- closed-form chords ----------
+
+pure func checkConeShell() -> bool {
+  let axis = { x: -0.9396926207859084, y: 0.00000000000000011507915602278503, z: -0.3420201433256687 };
+  let b = scale(lb(180.97, -20.25), 20.43);
+  let cs = coneShellChord(axis, 0.912248723719174, 1.7741680663129622, 2.6853801264507533, origin(), b);
+  (match cs { [c] => near(c.t0, 0.08684131504223995, 0.000000000001) && near(c.t1, 0.13144298220512743, 0.000000000001), _ => false })
+  && insideConeShell(axis, 0.912248723719174, 1.7741680663129622, 2.6853801264507533, scale(b, 0.1))
+  && !insideConeShell(axis, 0.912248723719174, 1.7741680663129622, 2.6853801264507533, scale(b, 0.2))
+}
+
+test "cone shell (the Hyades cloud) on Sol -> Aldebaran: t in [0.08684, 0.13144] (oracle, 1e-12)" { checkConeShell() }
+
+pure func checkEllipsoid() -> bool {
+  let c = { x: 3.0, y: -1.0, z: 0.5 };
+  let u1 = { x: 0.8528685319524433, y: 0.49240387650610395, z: 0.17364817766693033 };
+  let u2 = { x: -0.49999999999999994, y: 0.8660254037844387, z: -0.000000000000000019278820503002595 };
+  let u3 = { x: -0.1503837331804353, y: -0.08682408883346514, z: 0.9848077530122081 };
+  let cs = ellipsoidChord(c, u1, u2, u3, 2.0, 1.0, 0.5, { x: -1.0, y: -2.0, z: 0.0 }, { x: 6.0, y: 1.5, z: 1.0 });
+  match cs { [i] => near(i.t0, 0.42059415746363615, 0.000000000001) && near(i.t1, 0.6470102290464436, 0.000000000001), _ => false }
+}
+
+test "ellipsoid chord (oracle, 1e-12)" { checkEllipsoid() }
+
+pure func checkSlab() -> bool {
+  let n = lb(226.0, 49.0);
+  let cs = slabChord(n, 11.3, 11.301, origin(), scale(n, 24.0));
+  match cs { [i] => near(i.t0, 0.4708333333333334, 0.000000000001) && near(i.t1, 0.470875, 0.000000000001), _ => false }
+}
+
+test "slab chord: 1 mpc sheet at 11.3 pc toward Regulus (oracle, 1e-12)" { checkSlab() }
+
+pure func checkNoChord() -> bool =
+  length(ellipsoidChord({ x: 30.0, y: 0.0, z: 0.0 }, { x: 1.0, y: 0.0, z: 0.0 }, { x: 0.0, y: 1.0, z: 0.0 }, { x: 0.0, y: 0.0, z: 1.0 }, 1.0, 1.0, 1.0, origin(), { x: 0.0, y: 5.0, z: 0.0 })) == 0
+  && length(slabChord({ x: 0.0, y: 0.0, z: 1.0 }, 1.0, 2.0, origin(), { x: 5.0, y: 0.0, z: 0.0 })) == 0
+
+test "a segment that misses gives no interval" { checkNoChord() }
+
+-- ---------- extinction to gas (IS-29) ----------
+
+pure func checkExtinction() -> bool = rel(nHFromExtinction(1.0, 5800000000000000000000.0, 3.1), 606.3393509283004, 0.000000000001)
+
+test "n_H per mag/pc of A_V at Bohlin's 5.8e21 and R_V 3.1: 606.34 cm^-3 (IS-29)" { checkExtinction() }
+
+-- ---------- HEALPix ----------
+
+pure func hpOk(rows: [HpRow]) -> bool = match rows {
+  [] => true,
+  r :: rest => {
+    let v = healpixRingVec(r.nside, r.pix);
+    near(v.x, r.v.x, 0.00000000000001) && near(v.y, r.v.y, 0.00000000000001) && near(v.z, r.v.z, 0.00000000000001) && hpOk(rest)
+  }
+}
+
+test "HEALPix RING pixel centres (Gorski 2005; oracle rows, healpy-checked, 1e-14)" { hpOk(healpixRows()) }
+
+pure func hpUnit(nside: int, p: int, npix: int) -> bool =
+  if p >= npix then true
+  else {
+    let v = healpixRingVec(nside, p);
+    near(sqrt(v.x * v.x + v.y * v.y + v.z * v.z), 1.0, 0.00000000000001) && hpUnit(nside, p + 97, npix)
+  }
+
+test "every sampled HEALPix centre at Nside 64 is a unit vector" { hpUnit(64, 0, 49152) }
+
+-- ---------- grains (HB-113..HB-123) ----------
+
+pure func licDust() -> GrainDist = grainDist(0.0000000000000000000000021, 0.000000005, 0.00000025, 0.000008977026012029025, 3.1, 3300.0)
+
+pure func checkGrainNorm() -> bool {
+  let d = licDust();
+  rel(grainMassDensity(d), 0.0000000000000000000000021, 0.000000000001)
+  && rel(grainTailMassFraction(d), 0.9397380904560596, 0.000000000001)
+}
+
+test "grainDist recovers rho_d = 2.1e-24 kg/m^3 to 1e-12; 94.0 % of the mass in the tail (HB-118)" { checkGrainNorm() }
+
+pure func checkGrainsAbove() -> bool {
+  let d = licDust();
+  rel(grainsAbove(d, 0.00000001), 0.0000004265460506649572, 0.000000000001)
+  && rel(grainsAbove(d, 0.0000001), 0.0000000013746844468588013, 0.000000000001)
+  && rel(grainsAbove(d, 0.0000003), 0.0000000001107093271209518, 0.000000000001)
+  && rel(grainsAbove(d, 0.000001), 0.000000000008752565346015855, 0.000000000001)
+  && rel(grainsAbove(d, 0.000003), 0.0000000000007920093067374324, 0.000000000001)
+  && rel(grainsAbove(d, 0.0000089), 0.0000000000000016085541486396947, 0.00000000001)
+  && grainsAbove(d, 0.00001) == 0.0
+}
+
+test "grainsAbove: number densities above 10 nm .. 8.9 um (oracle, 1e-12)" { checkGrainsAbove() }
+
+-- Krueger et al. 2015: the flux of >= 1e-13 kg grains is "on the order of
+-- 1e-7 m^-2 s^-1" (26 km/s inflow); the shape gives 5.52e-8 (HB-120).
+pure func checkFlux() -> bool {
+  let d = licDust();
+  let a13 = 0.0000019340416253633913;
+  let f = grainsAbove(d, a13) * 26000.0;
+  rel(grainMass(d, a13), 0.0000000000001, 0.000000000001)
+  && rel(f, 0.00000005523778325916262, 0.000000000001) && f >= 0.00000005 && f <= 0.0000002
+}
+
+test "LIC flux of >= 1e-13 kg grains at 26 km/s is 5.52e-8, within a factor of 2 of Krueger 2015 (HB-120)" { checkFlux() }
+
+pure func checkRadiusAt() -> bool {
+  let d = licDust();
+  rel(grainRadiusAt(d, 0.00000001, 0.25), 0.000000011219642327921929, 0.000000000001)
+  && rel(grainRadiusAt(d, 0.00000001, 0.99), 0.00000006324815554168282, 0.000000000001)
+  && rel(grainRadiusAt(d, 0.000001, 0.5), 0.0000013845136679780615, 0.000000000001)
+  && rel(grainRadiusAt(d, 0.000001, 0.99), 0.000006463139050254389, 0.000000000001)
+  && rel(grainRadiusAt(d, 0.000001, 0.0), 0.000001, 0.000000000001)
+  && grainRadiusAt(d, 0.000001, 1.0) <= 0.000008977026012029025 * 1.000000000001
+}
+
+test "grainRadiusAt: inverse CDF above a0 (oracle, 1e-12); u = 0 gives a0, u = 1 gives a_max" { checkRadiusAt() }
+
+pure func roundTrip(d: GrainDist, a0: float, u: float) -> bool {
+  let a = grainRadiusAt(d, a0, u);
+  rel(grainsAbove(d, a), (1.0 - u) * grainsAbove(d, a0), 0.000000001)
+}
+
+test "grainsAbove(grainRadiusAt(a0, u)) = (1 - u) grainsAbove(a0)" {
+  roundTrip(licDust(), 0.00000001, 0.3) && roundTrip(licDust(), 0.0000002, 0.9) && roundTrip(licDust(), 0.000002, 0.6)
+}
+
+pure func checkGrainNaN() -> bool {
+  let nan = 0.0 / 0.0;
+  let a = grainsAbove(licDust(), nan);
+  let r = grainRadiusAt(licDust(), 0.000001, nan);
+  a != a && r != r
+}
+
+test "NaN in gives NaN out" { checkGrainNaN() }
+
+-- ---------- Poisson draw ----------
+
+pure func poOk(rows: [PoRow]) -> bool = match rows {
+  [] => true,
+  r :: rest => poissonDraw(r.mean, r.u, r.v) == r.k && poOk(rest)
+}
+
+test "poissonDraw: inversion below 30, rounded normal from 30 (oracle rows)" { poOk(poissonRows()) }
+
+pure func poSum(mean: float, i: int, j: int, acc: int) -> int =
+  if i >= 200 then acc
+  else if j >= 50 then poSum(mean, i + 1, 0, acc)
+  else poSum(mean, i, j + 1, acc + poissonDraw(mean, (intToFloat(i) + 0.5) / 200.0, (intToFloat(j) + 0.5) / 50.0))
+
+pure func poMean(mean: float) -> bool = near(intToFloat(poSum(mean, 0, 0, 0)) / 10000.0, mean, 0.02 * mean + 0.02)
+
+test "poissonDraw means over a 200 x 50 grid of (u, v) match 0.5, 4 and 50 to 2 %" { poMean(0.5) && poMean(4.0) && poMean(50.0) }
+
+pure func checkPoissonEdges() -> bool {
+  let nan = 0.0 / 0.0;
+  poissonDraw(nan, 0.5, 0.5) == 0 && poissonDraw(-3.0, 0.5, 0.5) == 0 && poissonDraw(0.0, 0.99, 0.5) == 0
+}
+
+test "poissonDraw of NaN, a negative or a zero mean is 0" { checkPoissonEdges() }
+
+pure func checkPoissonU1() -> bool {
+  let nan = 0.0 / 0.0;
+  let k = poissonDraw(60.0, 1.0, 0.0);
+  k > 60 && k < 200 && poissonDraw(60.0, 0.5, nan) == 0
+}
+
+test "poissonDraw at u = 1 in the normal branch stays finite (clamped); NaN v gives 0" { checkPoissonU1() }

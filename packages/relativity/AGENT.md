@@ -93,7 +93,8 @@ let vLim = limitingMagnitude(skyLum, 2.0);          -- faintest visible star, fi
 | `hyper` | `sinh cosh tanh atanh acosh acosh1p expm1 log1p sinhc absf`. Accurate near 0; std/math has none of these |
 | `kinematics` | `Motion {phi,tau,t,x}`, `rest`, `accelerate(m, a, dtau)`, `coast`, `standardGravity`, `betaOf`, `gammaOf`, `oneMinusBeta`, `gammaOfBeta`, `rapidityOfBeta`, `rapidityOfOneMinusBeta` |
 | `journey` | `Trip {distance, shipTime, galaxyTime, peakBeta, peakGamma}`, `flipAndBurn(d, a)`, `burnCoastBurn(d, a, maxBeta)`, `coastAt(d, beta)`, `TripPlan {trip, a, phiPeak, tauBurn, tauCoast, tauTotal, dBurn, dCoast, fellBack, aApproach, phiApproach, tauApproach, dApproach}`, `planBurnCoastBurn(d, a, phiCruise)`, `planFlipAndBurn(d, a)`, `planBurnCoastBrakeApproach(d, a, phiCruise, aApproach, phiApproach)` (0.9.0), `TripPhase` (`Accelerating Coasting Decelerating Arrived`; the approach is `Decelerating`), `phaseAt(p, tau)`, `motionAt(p, tau)`, `inApproach(p, tau)`, `rapidityForTimedLeg(d, tBoost, tCruise)`, `rapidityForTimedApproach(d, tApproach)` |
-| `medium` | `cSI protonMassKg lightYearM julianYearS astronomicalUnitM cmbTemperatureK accelSI`, `photonDriveEnergy(mEff, phi)`, `loadScale(n, phi)`, `kineticFlux(n, phi)`, `mirrorDragForce(n, phi, r)`, `mirrorDragPower(n, phi, r)`, `cruiseDragEnergy(n, phi, r, dCoast)`, `glowInwardFlux(n, phi, eps, fIn)`, `glowEmittanceAt(n, phi, eps, fIn, cosTheta)`, `glowTemperatureAt(n, phi, cosTheta)`, `glowRadianceAt(n, phi, eps, fIn, cosTheta)`, `glowEfficacyAt(n, phi, cosTheta)`, `glowLuminanceAt(n, phi, eps, fIn, cosTheta)`, `TripEnergy {boost, brake, drag, total}`, `tripEnergy(p, mEff, n, r)`, `brakeHoldsAgainstDrag(mEff, a, n, phi, r)`, `hoverPower(mEffKg, gMs2)` |
+| `medium` | `cSI protonMassKg lightYearM julianYearS astronomicalUnitM cmbTemperatureK accelSI`, `photonDriveEnergy(mEff, phi)`, `loadScale(n, phi)`, `kineticFlux(n, phi)`, `mirrorDragForce(n, phi, r)`, `mirrorDragPower(n, phi, r)`, `cruiseDragEnergy(n, phi, r, dCoast)`, `glowInwardFlux(n, phi, eps, fIn)`, `glowEmittanceAt(n, phi, eps, fIn, cosTheta)`, `glowTemperatureAt(n, phi, cosTheta)`, `glowRadianceAt(n, phi, eps, fIn, cosTheta)`, `glowEfficacyAt(n, phi, cosTheta)`, `glowLuminanceAt(n, phi, eps, fIn, cosTheta)`, `TripEnergy {boost, brake, drag, total}`, `tripEnergy(p, mEff, n, r)`, `brakeHoldsAgainstDrag(mEff, a, n, phi, r)`, `hoverPower(mEffKg, gMs2)`; 0.12.0: `massEquivalentDensity(nH, muH, deltaDust)`, `columnDragEnergy(nCol, phi, r)`, `tripEnergyColumn(p, mEff, nColCoast, r)`, `driveHoldMaxPhi(mEff, a, n, r)` |
+| `dust` | 0.12.0. `grainMassOf(a, rhoGrain)`, `grainKinetic(m, phi)`, `sweptCount(nGrainCol, r)`, `grainRate(nGrain, phi, r)`, `afterglowTemperature(ke, rSpot, tau, t)`, `afterglowEmittance(ke, eps, fIn, rSpot, tau, t)`, `afterglowLuminance(ke, eps, fIn, rSpot, tau, t)`, `visibleRadius(aMin, aMax, rhoGrain, phi, eps, fIn, rSpot, tau, bgLuminance, contrast)` |
 | `optics` | `Vec3`, `aberrate`, `deaberrate`, `doppler`, `dopplerApparent`, `gammaOnePlusBetaCos`, `cosSeen`, `dot`, `norm`, `normalize`, `forwardDoppler`, `cmbForwardTemperature`, `cmbSeenTemperature`, `cmbSeenTemperatureApparent`, `angleSeen(theta, phi)`, `ApparentDisc {centre, radius}`, `apparentDisc(cosTheta, alpha, phi)` |
 | `blackbody` | `XYZ`, `RGB`, `cmf`, `planck`, `xyz`, `luminance`, `chromaticity`, `rgbUnitLuminance`, `pointFluxRatio`, `surfaceBrightnessRatio`, `photopicRadiance`, `stefanBoltzmannSI`, `luminousEfficacy(kelvin)` |
 | `photometry` | `teffFromBpRp`, `gMinusV`, `bpRpInTable`, `teffFromBV`, `bvInTable`, `vFromG`, `illuminanceFromV`, `vFromIlluminance`, `fluxRatioFromMags`, `luminanceFromSurfaceMag`, `surfaceMagFromLuminance`, `pointThresholdIlluminance`, `limitingMagnitude`, `bolometricCorrectionV`, `luminositySunFromV`, `radiusSunFromLuminosity`, `solarBolometricMagnitude`, `solarTeffNominal` |
@@ -158,6 +159,30 @@ let vLim = limitingMagnitude(skyLum, 2.0);          -- faintest visible star, fi
   F c with F = m_eff |g| (higgs-bubble.md §10, HB-90). 0.1254 m/s^2 (50,000 km
   above Earth) is 3.759e7 W per kg of m_eff; Sgr A* at 3 r_s is 1.44e14 W/kg.
   Linear in both arguments, so a stepped hold sums it times dtau per tick.
+- **A structured medium (0.12.0).** Pass n as the mass-equivalent density
+  `massEquivalentDensity(nH, muH, deltaDust)` (mu_H 1.4; delta the dust mass
+  per H nucleon, both in proton masses). Over a route whose density varies,
+  sum `columnDragEnergy(N, phi, R)` over the pieces (N = int n ds in m^-2);
+  for a uniform medium it is `cruiseDragEnergy` exactly, so the ledger still
+  closes. `driveHoldMaxPhi(mEff, a, n, R)` is the fastest cruise the photon
+  drive can hold (and brake from) at density n: plan against the PEAK n of the
+  whole cruise.
+
+## Dust grains and the wall afterglow (`dust`, 0.12.0)
+
+- A grain's ship-frame kinetic energy is `grainKinetic(m, phi)` =
+  2 sinh^2(phi/2) m c^2. The count swept on a route, `sweptCount(N_gr, R)`,
+  does not depend on speed; the rate per ship second, `grainRate(n_gr, phi,
+  R)`, does (it is the count divided by the ship time, tested).
+- The afterglow is a GAME APPROXIMATION (G-AG), labelled: the eps fraction of
+  the grain's KE comes out from a disc of radius rSpot over e^(-t/tau), as a
+  greybody of emissivity eps, so eps cancels in the temperature. The total
+  light is eps fIn KE whatever rSpot and tau are. `afterglowLuminance` uses
+  the same `luminousEfficacy` as `glowLuminanceAt`, so a flash and the glow
+  share one exposure. t < 0 gives 0 (no light before the impact).
+- `visibleRadius(...)` bisects log a for the smallest grain whose PEAK
+  luminance reaches contrast x background; it returns aMax x 1.000001 when no
+  grain does (a caller can test `> aMax`).
 
 ## Photometry
 
