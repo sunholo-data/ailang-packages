@@ -57,14 +57,15 @@ Acceptance evidence:
 - [x] Publication failure stays fatal with prior journal/Session/seed intact.
 - [x] Help/navigation preserve host journal payloads, sequence, seed and call budget;
   guide remains beside the current numbered choices.
-- [x] Scoped validate passes:108/108 named controls on both engines, zero fallback
+- [x] Final CI validate passes:109/109 named controls on both engines, zero fallback
   or skips;8/8 compile-success mutants killed; original social regression passes.
 - [x] Actual newcomer transcript inspected by executor and root.
-- [ ] Independent sprint-evaluator verdict: root owns the separate judge handoff.
+- [x] Independent sprint-evaluator:100/100; final-source CI37958354490 green;
+  PR112 merged to packages main (93f4884).
 
 Quality evidence:11/70 contracts proved,58 skipped and1 encoder limitation,
 0 counterexamples/uncontracted exports;22 files compile;96 interface signatures;
-AI/Env/FS/IO ceiling unchanged;63/69 exports pure;9 native-test files,108 passing;
+AI/Env/FS/IO ceiling unchanged;63/69 exports pure;9 native-test files,109 passing;
 no isolated _smoke.ail (installed CLI controls boot the repository graph); no gates.
 Source checks: scenario7 passed; session3 passed/9 skipped; reactions3/4;
 play_flow5/6; presenter7/8 (seven missing structured generators and one unsatisfied
@@ -77,3 +78,12 @@ milestones completed in the isolated checkout. Formatter nested interpolations
 needed extracted local expressions; known upstream defects were not treated as
 passing checks. New code remains under the package file-size bounds. Final scoped
 harness/format evidence includes the last help-placement adjustment.
+
+Final correction: cached authored bundles are labelled saved stock narration,
+while saved/new AI quotations remain exact. Fetch provenance and selection metadata
+are unchanged. Native totals are now109 app controls on each engine;14 library
+controls remain unchanged. Final CI runs the complete scoped gates on ecdebb1.
+
+Actual change:236 implementation additions/46 removals;231 test/harness additions/6
+removals;30 recording lines. Completed in one attended working session. Provider
+calls:0. Independent report is tui-evidence/evaluation.json.

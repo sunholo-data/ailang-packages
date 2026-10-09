@@ -1,8 +1,8 @@
 {
   "sprint_id": "CREW-TUI",
   "status": "completed",
-  "design_doc": "design_docs/planned/crew-lab/standalone-captain-game.md",
-  "sprint_plan": "design_docs/planned/crew-lab/standalone-captain-game-sprint.md",
+  "design_doc": "design_docs/implemented/crew-lab/standalone-captain-game.md",
+  "sprint_plan": "design_docs/implemented/crew-lab/standalone-captain-game-sprint.md",
   "features": [
     {
       "id": "M1_RECOVERY",
@@ -32,7 +32,7 @@
       ],
       "passes": true,
       "completed": "2026-10-09T16:13:06.368017+00:00",
-      "notes": "Briefing, costs/progress, directed trust, source labels, pure contextual help and factual recap implemented. Latest messages/help remain after dashboard beside current choices. Expanded installed offline harness passes, including help journal identity and visibility; newcomer/shortage/occupancy/refusal transcripts saved. 108 named tests pass on evaluator and strict VM, no fallback/skips. Full validate,8 killed mutants and original social regression pass; independent judge pending."
+      "notes": "Briefing, costs/progress, directed trust, source labels, pure contextual help and factual recap implemented. Latest messages/help remain after dashboard beside current choices. Expanded installed offline harness passes, including help journal identity and visibility; newcomer/shortage/occupancy/refusal transcripts saved. 109 named tests pass on evaluator and strict VM, no fallback/skips. Full validate,8 killed mutants and original social regression pass; Independent judge100/100 and final CI passed. Cached-origin correction adds a native control (109 total); final-source CI and independent evaluation100/100 passed."
     }
   ],
   "registry_reuse": [
@@ -51,10 +51,18 @@
   ],
   "velocity": {
     "estimated_total_loc": 500,
-    "estimated_days": 1
+    "estimated_days": 1,
+    "actual_implementation_added": 236,
+    "actual_implementation_removed": 46,
+    "actual_tests_added": 231,
+    "actual_tests_removed": 6,
+    "actual_example_lines": 30,
+    "actual_days": 1
   },
-  "github_issues": [],
-  "independent_evaluation": "cached-origin correction completed; root rejudge pending",
+  "github_issues": [
+    112
+  ],
+  "independent_evaluation": "tui-evidence/evaluation.json",
   "completed": "2026-10-09T16:13:06.368017+00:00",
   "ailang_prompt_version_loaded": "v0.16.6",
   "runtime": "v0.52.0 bf2436a",
@@ -68,7 +76,11 @@
     "quality": "tui-evidence/quality.json",
     "format": "tui-evidence/format.log",
     "newcomer_transcript": "tui-evidence/newcomer-transcript.txt",
-    "shortage_transcript": "tui-evidence/shortage-transcript.txt"
+    "shortage_transcript": "tui-evidence/shortage-transcript.txt",
+    "cached_origin_native": "tui-evidence/cached-origin-native.json",
+    "cached_origin_vm": "tui-evidence/cached-origin-vm.json",
+    "cached_origin_installed": "tui-evidence/cached-origin-play.log",
+    "cached_origin_quality": "tui-evidence/cached-origin-quality.json"
   },
   "quality_summary": {
     "compile_files": 22,
@@ -102,5 +114,15 @@
     "scope": "Presenter receives validated Bundle.origin; transport/journal source untouched",
     "tests": "9/9 targeted presenter controls on evaluator and strict VM, zero fallback; expanded installed harness/cache-stock selection identity passes; package check and format pass; strict quality109/109, no gates",
     "evidence_prefix": "tui-evidence/cached-origin-"
+  },
+  "validation": {
+    "ci": "https://github.com/sunholo-data/ailang-packages/actions/runs/37958354490",
+    "source_head": "ecdebb1db841c9193a9b62b89e8fed795a2b3c55",
+    "merge_commit": "93f488407abfbaf4ab144c348bf86795302e0316",
+    "independent_score": 100,
+    "native_app_each_engine": 109,
+    "native_library_each_engine": 14,
+    "mutants_killed": 8,
+    "fresh_provider_calls": 0
   }
 }
