@@ -1,0 +1,59 @@
+module sunholo/crew_lab/journey_flow_test
+import std/result (Ok, Err)
+import std/string (contains)
+import ./journey_flow (navigation, initial, options, remember, styleDefault, onboardingAllowed)
+import ./session (start)
+import ./play_flow (PlayState)
+
+pure func base(phase: string) -> Result[PlayState, string] =
+  match start("{\"command\":\"start\",\"policy\":\"consent\"}") {
+    Err(_) => Err("host"),
+    Ok(o) => Ok({ session: o.session, seed: 42, nextId: 4, seq: 5, phase: phase, target: "project-1" })
+  }
+
+test "reading retains whole active start response relief and bridge state" {
+  match (base("start"), base("response"), base("relief"), base("main")) {
+    (Ok(a), Ok(b), Ok(c), Ok(d)) => (navigation(a, initial(), "c")).state == a && (navigation(b, initial(), "n")).state == b && (navigation(c, initial(), "h")).state == c && (navigation(d, initial(), "j")).state == d,
+    _ => false
+  }
+}
+
+test "bridge returns to active decision not host phase" {
+  match base("start") {
+    Ok(s) => (navigation(s, (navigation(s, initial(), "w")).nav, "b")).state == s && (navigation(s, initial(), "c")).nav.view == "crew",
+    _ => false
+  }
+}
+
+test "numbers remain captain actions and page counters bounded" {
+  match base("relief") {
+    Ok(s) => not (navigation(s, initial(), "1")).handled && (navigation(s, initial(), "v")).nav.page == 0 && (navigation(s, { view: "bridge", page: 10000, history: [] }, "n")).nav.page == 10000,
+    _ => false
+  }
+}
+
+test "default seed and UI flags separate from legacy args" {
+  match options(["--columns", "60", "--rows", "24", "--ansi", "--home", "/tmp/lab"], 80, 28, false) {
+    Ok(o) => o.columns == 60 && o.rows == 24 && o.ansi && o.args == ["--home", "/tmp/lab", "--seed", "42"],
+    _ => false
+  }
+}
+
+test "unknown repeated malformed dimensions rejected" {
+  match (options(["--rows", "bad"], 80, 28, false), options(["--ansi", "--plain"], 80, 28, false), options(["--columns", "60", "--columns", "70"], 80, 28, false)) {
+    (Err(_), Err(_), Err(_)) => true,
+    _ => false
+  }
+}
+
+test "history holds only last64 published notices" {
+  (remember(initial(), "first")).history == ["first"] && (remember(initial(), "")).history == []
+}
+
+test "TERM and NO_COLOR honor explicit visual default" {
+  styleDefault("xterm", false) && not styleDefault("dumb", false) && not styleDefault("", false) && not styleDefault("xterm", true)
+}
+
+test "onboarding bound is inclusive size exclusive action count" {
+  onboardingAllowed(9999, 65536) && not onboardingAllowed(10000, 1) && not onboardingAllowed(0, 65537) && not onboardingAllowed(-1, 1)
+}

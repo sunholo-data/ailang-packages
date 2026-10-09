@@ -1,0 +1,223 @@
+module sunholo/crew_lab/journey_presenter
+import std/string (repeat, toUpper, join, length as slength)
+import std/list (map, filter, length, head)
+import std/option (Option, Some, None)
+import pkg/sunholo/terminal_ui/ui (Dimensions, Screen, screen, gauge, safeText)
+import pkg/sunholo/social_dynamics/model (Relationship, Actor, Task, Recipe, Value, Effect, IndicatorDelta, RelationshipDelta, Working, Offered, Completed, Stopped)
+import ./session (Session)
+import ./play_flow (PlayState, menu)
+import ./journey_flow (Navigation)
+import ./presenter (projectName, elapsed, guidance)
+
+export pure func chapter(tick: int) -> int ! {}
+ensures { result >= 0 && result <= 8 }
+  tests [
+    (-1, 0),
+    (0, 0),
+    (8, 8),
+    (100, 8)
+  ] {
+  if tick < 0 then 0 else if tick > 8 then 8 else tick
+}
+
+export pure func opening(mode: string, seed: int) -> string ! {}
+ensures { slength(result) > 0 } = {
+  let source = if mode == "offline" then "Offline uses saved/stock wording; no AI calls." else "Live uses the saved library and bounded new AI wording on misses."
+  "[ BEFORE THE FIRST HELLO ]\n\nYou are captain of a bubble ship. The bridge and Commons are home between destinations. Possible first contact lies ahead: prepare people as well as equipment.\n\nScientist: fatigue 45; values curiosity and autonomy. Engineer: fatigue 30; values reliability and fairness. They can agree, refuse, raise concerns or ask for relief.\n\nSix internal materials: science needs 4, maintenance 3 to start. Both cannot start together. Rest needs none. There is no correct route or winning score.\n\nOffer -> hear crew -> choose Start/Leave -> advance turns -> observe consequences. Agreement never starts work. One turn is a step of this lab, not physical travel. Reading is free.\n\nEight turns mark a preparation review, not a deadline or alien contact simulation. Seed ${show(seed)} repeats variation with the same choices/library. ${source}"
+}
+
+pure func supplies(s: PlayState) -> string =
+  join("\n", map(\r. "${r.id}: ${show(r.available)} available / ${show(r.reserved)} reserved / ${show(r.consumed)} consumed", s.session.state.resources))
+
+pure func value(a: Actor, id: string) -> int = match head(filter(\v. v.id == id, a.indicators)) {
+  Some(v) => v.value,
+  None => 0
+}
+
+pure func values(xs: [Value]) -> string = join(", ", map(\v. "${v.id} ${show(v.value)}", xs))
+
+pure func participant(xs: [string], id: string) -> bool = match xs {
+  [] => false,
+  x :: rest => x == id || participant(rest, id)
+}
+
+pure func busyTasks(xs: [Task], id: string) -> [string] = match xs {
+  [] => [],
+  t :: rest => if t.status == Working && participant(t.participants, id) then projectName(t.recipe) :: busyTasks(rest, id) else busyTasks(rest, id)
+}
+
+pure func trustLines(xs: [Relationship], id: string) -> [string] = match xs {
+  [] => [],
+  r :: rest => if r.from == id then "${r.from} -> ${r.to} ${r.dimension} ${show(r.value)}" :: trustLines(rest, id) else trustLines(rest, id)
+}
+
+pure func crewMember(s: PlayState, a: Actor) -> string = {
+  let work = join(", ", busyTasks(s.session.state.tasks, a.id))
+  let occupied = if work == "" then "Available" else "Working: ${work}"
+  let preferences = values(a.values)
+  let traits = values(a.attributes)
+  let trust = join(", ", trustLines(s.session.state.relationships, a.id))
+  let fatigue = gauge(value(a, "fatigue"), 8)
+  let readiness = value(a, "readiness")
+  let observations = value(a, "observations")
+  "[ ${a.id} ]\nFatigue ${fatigue} / readiness ${show(readiness)}\nObservations ${show(observations)}; ${occupied}\nValues: ${preferences}\n${trust}\nExperimental OCEAN context: ${traits}"
+}
+
+pure func crew(s: PlayState) -> string =
+  join("\n\n", map(\a. crewMember(s, a), filter(\a. a.id != "captain", s.session.state.actors)))
+
+pure func costs(r: Recipe) -> string =
+  if r.costs == [] then "no materials" else join(", ", map(\c. "reserve ${show(c.reserve)} /consume ${show(c.consume)} ${c.resource}", r.costs))
+
+pure func effects(xs: [Effect]) -> string = join("; ", map(\e. match e {
+  IndicatorDelta(actor, id, n) => "${actor} ${id} ${show(n)}",
+  RelationshipDelta(from, to, id, n) => "${from} -> ${to} ${id} ${show(n)}"
+}, xs))
+
+pure func taskDetail(s: PlayState, t: Task) -> string = {
+  let status = match t.status {
+    Offered => "Offered; not started",
+    Working => "Working ${show(elapsed(s.session.state.tick, t.started, t.due))}/${show(t.due - t.started)} turns",
+    Completed => "Completed",
+    Stopped => "Stopped"
+  }
+  let recipe = match head(filter(\r. r.id == t.recipe, s.session.config.recipes)) {
+    None => "Recipe unavailable",
+    Some(r) => {
+      let price = costs(r)
+      let effect = effects(r.effects)
+      "${show(r.duration)} turns; ${price}\nAt completion: ${effect}"
+    }
+  }
+  let workers = join(", ", t.participants)
+  let name = projectName(t.recipe)
+  "[ ${name} ]\n${workers} / ${status}\n${recipe}\nRecipe ${t.recipe}; ID ${t.id}"
+}
+
+pure func work(s: PlayState) -> string = {
+  let tasks = join("\n\n", map(\t. taskDetail(s, t), s.session.state.tasks))
+  let inventory = if tasks == "" then "No work offered yet." else tasks
+  let material = supplies(s)
+  let agreements = join("; ", map(\a. {
+    let accepted = join(", ", a.accepted)
+    let active = if a.active then "active" else "inactive"
+    "${a.id}: ${accepted} agreed / ${active}"
+  }, s.session.state.commitments))
+  "[ WORK AND SUPPLIES ]\n${material}\nConsumed supplies never replenish by waiting.\n\n${inventory}\n\nAgreements: ${agreements}"
+}
+
+pure func bridge(s: PlayState, message: string) -> string = {
+  let working = length(filter(\t. t.status == Working, s.session.state.tasks))
+  let completed = length(filter(\t. t.status == Completed, s.session.state.tasks))
+  let scientist = match oldActor(s.session.state.actors, "scientist") {
+    None => "Scientist unavailable",
+    Some(a) => "Scientist fatigue ${show(value(a, "fatigue"))} / observations ${show(value(a, "observations"))}"
+  }
+  let engineer = match oldActor(s.session.state.actors, "engineer") {
+    None => "Engineer unavailable",
+    Some(a) => "Engineer fatigue ${show(value(a, "fatigue"))} / readiness ${show(value(a, "readiness"))}"
+  }
+  let review = if s.session.state.tick >= 8 then "[ PREPARATION REVIEW ]\n${show(completed)} completed; ${show(working)} working. Exercise marker, not arrival or grade. Play can continue." else "${scientist}\n${engineer}"
+  let material = supplies(s)
+  let conversation = if message == "" then "No conversation yet. Offer an assignment or rest to begin." else "[ CONVERSATION / CONSEQUENCE ]\n${message}"
+  "${review}\n${material}\n${show(working)} working / ${show(completed)} completed\n\n${conversation}"
+}
+
+export pure func guide(mode: string, remaining: int, path: string) -> string ! {}
+ensures { slength(result) > 0 } = {
+  let source = if mode == "offline" then "OFFLINE: saved AI or stock narration; no AI calls." else "LIVE: ${show(remaining)} AI attempts remaining. Saved wording needs no new call."
+  "[ CAPTAIN'S GUIDE ]\nOffer invites a crew reply; Start reserves supplies and occupies its worker. Leave keeps an offer open. Advance applies effects at completion; fatigue/readiness do not change gradually. Check-ins can prompt relief. Resolve a request separately.\n\nObservations prepare us to interpret possible contact; maintenance prepares equipment. These are authored meanings, not alien simulation or trade. Eight turns is a preparation marker only.\n\nScience: 4 turns, reserve/consume 4 materials. Maintenance: 3 turns, reserve 3/consume 2. Rest: 2 turns, no supplies, fatigue -15 on completion. Science completion leaves 2; waiting never makes maintenance affordable.\n\nCrew view shows actual values, OCEAN-like context and directed captain trust. These experimental reaction rules are not a psychological diagnosis. Peers do not automatically receive each other's experiences.\n\n${source} AI supplies wording only; trusted rules own costs and consequences. Stock reactions are narrator summaries; generated/saved AI quotes keep selected wording. Display strips controls; raw text stays journalled.\n\nReading/view/page keys cause no host command, seed draw, AI call or journal write. b returns to the active decision, including Start or relief. Numbers choose active actions on any page. n/v page; 0 goes back or quits as labelled.\n\nManual dimensions 40..160 columns /16..60 rows; default 80x24. No automatic resize or TTY detection. TERM/NO_COLOR select ANSI/plain; flags override. Pipes use --plain. Relaunch with new dimensions; keys need Enter. Core request inbox_1791568104057_d08245d1.\n\nJournal: ${path}\nFresh launch starts a new crew; the library persists. Journal records this run, not a resumable save."
+}
+
+pure func actions(s: PlayState) -> [string] = {
+  let choice = if s.phase == "main" then match s.session.state.continuation {
+    Some(_) => ["1 Continue /2 Abort /0 Quit"],
+    None => ["1 Offer science /2 Offer maintenance", "3 Rest: scientist /4 Rest: engineer", "5 Advance a turn /6 Check-in"]
+  } else if s.phase == "start" then ["1 Start /2 Leave open /0 Back"] else if s.phase == "response" then ["1 Retry /2 Stock /3 Cancel /0 Quit"] else if s.phase == "relief" then ["1 Grant /2 Deny /0 Back"] else ["Project/request number selects /0 Back"]
+  let context = if s.phase == "start" then match head(filter(\t. t.id == s.target, s.session.state.tasks)) {
+    None => ["[ DECISION: unavailable offer ]"],
+    Some(t) => match head(filter(\r. r.id == t.recipe, s.session.config.recipes)) {
+      None => ["[ DECISION: unavailable recipe ]"],
+      Some(r) => {
+        let name = projectName(t.recipe)
+        let price = costs(r);
+        ["[ START / ${name} ]", "${show(r.duration)} turns; ${price}"]
+      }
+    }
+  } else if s.phase == "response" then match head(filter(\q. q.id == s.target, s.session.pending)) {
+    None => ["[ DECISION: reply still pending ]"],
+    Some(q) => {
+      let name = match head(filter(\t. t.id == q.task, s.session.state.tasks)) {
+        None => q.task,
+        Some(t) => projectName(t.recipe)
+      };
+      ["[ Reply pending / ${q.actor} ]", name, "Retry may call AI; stock uses none."]
+    }
+  } else if s.phase == "relief" then match head(filter(\r. r.id == s.target, s.session.state.reliefs)) {
+    None => ["[ Relief request unavailable ]"],
+    Some(r) => {
+      let name = match head(filter(\t. t.id == r.task, s.session.state.tasks)) {
+        None => r.task,
+        Some(t) => projectName(t.recipe)
+      };
+      ["[ Relief / ${r.author} / ${name} ]", "Grant stops work, returns reservation.", "Deny keeps current work running."]
+    }
+  } else ["[ ${if s.phase == "main" then "NEXT WATCH / CAPTAIN CHOICES" else if s.phase == "offered" then "REVIEW AN OFFER" else if s.phase == "working" then "CHECK IN WITH CREW" else "REVIEW RELIEF REQUESTS"} ]"]
+  context ++ choice ++ (if s.phase == "main" then ["7 Offers /8 Relief /0 Quit"] else []) ++ ["c Crew w Work j Log h Guide b Bridge", "Key + Enter; blank line ends this run."]
+}
+
+export pure func frame(s: PlayState, nav: Navigation, message: string, mode: string, remaining: int, path: string, d: Dimensions, ansi: bool) -> Screen ! {}
+ensures { result.pages >= 1 && result.page >= 0 && result.page < result.pages } = {
+  let view = nav.view
+  let log = join("\n\n", nav.history)
+  let listing = if s.phase == "working" || s.phase == "offered" || s.phase == "reliefs" then "\n${menu(s)}" else ""
+  let selector = s.phase == "working" || s.phase == "offered" || s.phase == "reliefs"
+  let selectedBody = if selector then "[ NUMBERED CHOICES ]\n${menu(s)}\n\n${guidance(s.session, s.phase, s.target)}" else bridge(s, message)
+  let body = if view == "crew" then crew(s) else if view == "work" then work(s) else if view == "guide" then guide(mode, remaining, path) else if view == "log" then "[ READING LOG / last 64 notices ]\n${log}\n\nJournal: ${path}" else selectedBody
+  let filled = repeat("#", chapter(s.session.state.tick))
+  let empty = repeat("-", 8 - chapter(s.session.state.tick))
+  let tabs = join(" ", map(\name. if view == name then "${name}*" else name, ["bridge", "crew", "work", "log", "guide"]))
+  let title = toUpper(view)
+  screen(d, ansi, ["VOYAGE / ${title} / turn ${show(s.session.state.tick)}", "Before first hello [${filled}${empty}] ${show(chapter(s.session.state.tick))}/8", "Views: ${tabs}"], body, actions(s), nav.page)
+}
+
+-- Actual completion deltas; never inferred from text or predicted AI effects.
+export pure func indicatorChanges(before: Session, after: Session) -> string ! {}
+ensures { if before.state.actors == after.state.actors then result == "" else true } = {
+  let changes = join("\n", actorChanges(before.state.actors, after.state.actors))
+  if changes == "" then "" else "\n${changes}"
+}
+
+pure func actorChanges(before: [Actor], after: [Actor]) -> [string] = match after {
+  [] => [],
+  a :: rest => match oldActor(before, a.id) {
+    None => actorChanges(before, rest),
+    Some(old) => valueChanges(a.id, old.indicators, a.indicators) ++ actorChanges(before, rest)
+  }
+}
+
+pure func oldActor(xs: [Actor], id: string) -> Option[Actor] = match xs {
+  [] => None,
+  a :: rest => if a.id == id then Some(a) else oldActor(rest, id)
+}
+
+pure func oldValue(xs: [Value], id: string) -> Option[Value] = match xs {
+  [] => None,
+  a :: rest => if a.id == id then Some(a) else oldValue(rest, id)
+}
+
+pure func valueChanges(actor: string, before: [Value], after: [Value]) -> [string] = match after {
+  [] => [],
+  v :: rest => match oldValue(before, v.id) {
+    None => valueChanges(actor, before, rest),
+    Some(old) => if old.value == v.value then valueChanges(actor, before, rest) else "${actor} ${v.id}: ${show(old.value)} -> ${show(v.value)}" :: valueChanges(actor, before, rest)
+  }
+}
+
+export pure func journeyRecap(s: PlayState, path: string) -> string ! {}
+ensures { slength(result) > 0 } = {
+  let complete = length(filter(\t. t.status == Completed, s.session.state.tasks))
+  let unfinished = length(filter(\t. t.status == Offered || t.status == Working, s.session.state.tasks))
+  let material = supplies(s)
+  safeText("END OF THE PREPARATION WATCH\n${show(s.session.state.tick)} turns elapsed / ${show(complete)} projects completed / ${show(unfinished)} unfinished.\n${material}\n${crew(s)}\nJournal: ${path}\nNo arrival or grade is simulated. Fresh launch starts a new crew; library persists.")
+}

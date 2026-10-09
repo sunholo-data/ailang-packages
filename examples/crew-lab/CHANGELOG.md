@@ -58,3 +58,11 @@ journal provenance remain exact. Help/navigation uses no AI or host transition.
 Cached authored bundles now remain labelled saved stock narrator reactions.
 Cached/generated AI dialogue remains quoted exactly; Fetch and journal source
 metadata are unchanged. Native and installed cached-origin controls cover both.
+
+### Captain journey terminal
+New pure AILANG crew-journey/live and offline entries use reusable bounded ANSI/plain
+screens, independent reading views and paged exact dialogue; line keys+Enter.
+Before the first hello is an8-turn preparation marker, not a contact or deadline.
+Costs, seed draws, provider, library/journal and legacy player remain unchanged.
+Published messages and actual completion indicator deltas are visible; view/page
+navigation retains pending choices. Installed baseline payload/replay controls.

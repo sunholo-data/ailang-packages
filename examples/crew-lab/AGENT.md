@@ -77,3 +77,23 @@ boundaries remain. Publication/retention failures stop play. Offered review is p
 navigation to Start/Leave; help changes no domain, seed, sequence or budget.
 Legacy recording/run.sh remains fail-fast; recoveryRecording replays extracted
 journal host commands through every rejection and accepted blocked output.
+
+Modern pure AILANG presentation: `sunholo/crew_lab/journey_flow` and
+`sunholo/crew_lab/journey_presenter`, depending on `sunholo/terminal_ui/ui`.
+crew-journey and crew-journey-offline use the same play/respond/commit host adapter.
+Their `journey.ail` CLI wrappers are internal, outside the reusable module export
+inventory. Public `play.launchJourney` requires a supported live/offline mode;
+installed controls establish effectful behavior, without a unit-return proof claim.
+TERM nonempty/not dumb and absent NO_COLOR chooses trusted ANSI; explicit flags
+--plain/--ansi override. This is not TTY detection: redirected output uses --plain.
+Default80x24; COLUMNS/LINES or --columns/--rows clamp40..160/16..60. Input is line
+keys+Enter, no Process/foreign terminal host, raw mode, hidden cursor or alt buffer.
+Screen includes an empty prompt row; print text without appended newline before
+Choose >. Plain reading adds a separating newline after input for pipe readability.
+Views/pages preserve PlayState, allowance and journal; b returns to active decision.
+History stores last64 published messages in session only; never a replacement save.
+Preparation8-turn marker is UI projection, no deadline/arrival/alien simulation.
+Recipe costs/host configuration, authority, response schema, model and library unchanged.
+Native controls must test evaluator AND strict VM; installed test-journey compares
+all journal payloads against legacy paths and replays recovery recordings both ways.
+Core raw-key/size request: inbox_1791568104057_d08245d1; not implemented here.

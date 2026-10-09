@@ -1,0 +1,29 @@
+module sunholo/terminal_ui/demo
+import std/io (print, flush, readLine, println)
+import std/string (repeat)
+import ./ui (screen, dimensions)
+
+export pure func nextPage(page: int, key: string) -> int ! {}
+requires { page >= 0 && page <= 10000 }
+ensures { result >= 0 && result <= 10000 }
+  tests [
+    ((0, "v"), 0),
+    ((3, "n"), 4),
+    ((2, "h"), 0)
+  ] {
+  if key == "n" then if page >= 10000 then 10000 else page + 1 else if key == "v" then if page == 0 then 0 else page - 1 else 0
+}
+
+func loop(page: int, guide: bool, ansi: bool) -> () ! {IO} {
+  let body = if guide then "Pure AILANG terminal showcase. Line keys + Enter; EOF quits. Body pages keep the action footer visible. This demo uses plain mode for readable redirected output. The game can choose trusted ANSI redraw. No terminal modes are changed." else "A small terminal can still hold a long conversation.\n${repeat("The ship is home. Reading is not a game action. ", 60)}\nEnd of the conversation."
+  let frame = screen(dimensions(60, 24), ansi, ["Terminal UI / standalone showcase"], body, ["h Guide / b Main / a ANSI toggle / 0 Quit"], page)
+  print(frame.text)
+  print("Choose > ")
+  flush()
+  let key = readLine()
+  if not ansi then println("") else ()
+  if key == "" || key == "0" then println("Demo ended; normal terminal input retained.") else loop(nextPage(frame.page, key), if key == "h" then true else if key == "b" then false else guide, if key == "a" then not ansi else ansi)
+}
+
+-- Entry correctness is exercised by the installed shell control, not a unit postcondition.
+export func main() -> () ! {IO} = loop(0, false, false)

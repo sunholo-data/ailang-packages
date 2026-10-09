@@ -1,3 +1,75 @@
+# Captain's preparation watch
+
+Run `crew-journey` for the modern ship console, or `crew-journey-offline` to play
+with saved and stock dialogue without AI calls. You are the captain of a bubble
+ship, preparing a strained crew for possible first contact. Eight lab turns mark
+a factual preparation review; you can keep playing afterward. No alien encounter,
+arrival deadline, winning score or preferred policy is simulated here.
+
+```sh
+ailang install --path examples/crew-lab
+crew-journey-offline
+crew-journey --ansi --columns 80 --rows 24
+```
+
+The briefing explains your role and supplies. Choose **1 consent** or **2 orders**
+explicitly. The new entry uses disclosed seed 42; `--seed N` changes the experiment
+without a seed questionnaire. Offer an assignment, hear the crew, then choose
+Start or Leave. Only advancing time progresses work. Reading never moves time.
+
+Use keys followed by **Enter**: `c` Crew, `w` Work, `j` Log, `h` Guide, `b` the active
+Bridge decision; `n`/`v` page text. Numeric action keys stay visible on every page. A blank line ends the run because
+the pinned runtime returns the same value for empty input and EOF.
+The main view keeps crew/supply context and the latest published conversation or
+consequence; full OCEAN, values and directed trust live in Crew. Work shows actual
+costs, duration/progress and completion effects. Log keeps 64 session-local notices.
+
+Try two different experiments. **Equipment first:** offer maintenance (2), hear
+the engineer and choose Start if agreement/authority permits. Advance three turns
+(5), then offer science (1). Maintenance consumes 2 and releases 1 of its 3 reserved
+materials, so 4 remain for science. **Observations then care:** offer science (1)
+and choose Start if permitted. Check in (6) with the working scientist; if they
+request relief, review requests (8) and decide Grant or Deny. Grant stops science
+and refunds its reservation. You can then offer scientist rest (3), choose Start,
+and advance two turns. Replies vary; leave refused offers open, retry a pending
+reply or use explicitly selected stock wording. These paths are experiments,
+not prescribed outcomes.
+
+If science completes instead, it consumes 4 of the original 6 materials, leaving 2.
+Maintenance needs 3 to start: waiting never replenishes consumed supplies. The UI
+explains ordinary rejection and retains the accepted state. Journal publication
+failure stops the run before exposing an uncommitted state or reply.
+
+ANSI redraw uses bright blue/gold chrome and safe clear/home/reset only. TERM set
+and not `dumb`, with NO_COLOR absent, selects ANSI; `--plain`/`--ansi` override.
+**Pipes use `--plain`**: there is no TTY detection. Default dimensions 80x24; supplied
+COLUMNS/LINES and `--columns`/`--rows` clamp 40..160 columns and 16..60 rows. One row
+is reserved for the input prompt. There is no automatic resize, arrow-key input,
+raw mode, cursor hiding, alternate buffer or foreign-language terminal host.
+Relaunch with new dimensions. Core capability request: inbox_1791568104057_d08245d1.
+
+Stock reactions are labeled narrator summaries, including cached authored bundles.
+Cached/new AI quotations retain selected wording; display removes controls and
+wraps/pages it. The exact source bundle, text, rolls, costs and provenance remain
+in the journal. No provider spending is needed for the installed controls.
+
+The independent reusable `sunholo/terminal_ui` package ships `terminal-ui-demo`:
+
+```sh
+ailang install --path packages/terminal-ui
+terminal-ui-demo
+```
+
+Its core is pure AILANG; the demo uses IO only. Cell sizing supports ASCII, European
+punctuation/box drawing and wide CJK conservatively; no full grapheme/emoji claim.
+Run `test-journey.sh` for installed navigation/baseline equality and both-engine
+recovery replay; `make -f examples/crew-lab/Makefile validate` includes the old gates.
+
+The original `crew-play`, `crew-view` and recording commands remain available.
+The following technical guide documents those compatible interfaces and host limits.
+
+---
+
 # Captain aboard the bubble ship
 
 You are captain of a bubble ship between destinations. From the bridge, choose

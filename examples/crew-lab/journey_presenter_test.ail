@@ -1,0 +1,86 @@
+module sunholo/crew_lab/journey_presenter_test
+import std/result (Ok, Err)
+import std/string (contains, repeat)
+import ./session (start)
+import ./journey_presenter (chapter, opening, frame, indicatorChanges, journeyRecap)
+import ./journey_flow (initial)
+import pkg/sunholo/terminal_ui/ui (dimensions, cells)
+
+pure func base() = start("{\"command\":\"start\",\"policy\":\"consent\"}")
+
+test "chapter marker never invents arrival deadline" {
+  chapter(-1) == 0 && chapter(8) == 8 && chapter(100) == 8 && contains(opening("offline", 42), "not a deadline") && contains(opening("offline", 42), "Seed 42")
+}
+
+test "bridge hides detailed personality but decision visible" {
+  match base() {
+    Err(_) => false,
+    Ok(o) => {
+      let s = { session: o.session, seed: 42, nextId: 1, seq: 0, phase: "main", target: "" }
+      let f = frame(s, initial(), "latest dialogue", "offline", 2, "journal", dimensions(80, 28), false)
+      contains(f.text, "latest dialogue") && contains(f.text, "1 Offer science") && contains(f.text, "bridge*") && not contains(f.text, "neuroticism")
+    }
+  }
+}
+
+test "long reply pages keep active response actions" {
+  match base() {
+    Err(_) => false,
+    Ok(o) => {
+      let s = { session: o.session, seed: 42, nextId: 1, seq: 0, phase: "response", target: "reply-1" }
+      let f = frame(s, initial(), repeat("x", 4096), "offline", 2, "journal", dimensions(60, 24), false)
+      f.pages > 1 && contains(f.text, "reply still pending") && contains(f.text, "1 Retry /2 Stock")
+    }
+  }
+}
+
+test "factual review past marker and no fabricated contact" {
+  match base() {
+    Err(_) => false,
+    Ok(o) => {
+      let s = { session: { o.session | state: { o.session.state | tick: 8 } }, seed: 42, nextId: 1, seq: 0, phase: "main", target: "" }
+      contains((frame(s, initial(), "", "offline", 2, "journal", dimensions(80, 28), false)).text, "PREPARATION REVIEW")
+    }
+  }
+}
+
+test "unchanged indicators have no fabricated delta" {
+  match base() {
+    Err(_) => false,
+    Ok(o) => indicatorChanges(o.session, o.session) == ""
+  }
+}
+
+test "crew inspect includes actual OCEAN values directed trust and occupancy" {
+  match base() {
+    Err(_) => false,
+    Ok(o) => {
+      let s = { session: o.session, seed: 42, nextId: 1, seq: 0, phase: "main", target: "" }
+      let f = frame(s, { view: "crew", page: 0, history: [] }, "", "offline", 2, "journal", dimensions(80, 60), false)
+      contains(f.text, "neuroticism 60") && contains(f.text, "scientist -> captain trust 50") && contains(f.text, "curiosity 80") && contains(f.text, "Available")
+    }
+  }
+}
+
+test "actual rest completion projection has exact fatigue change" {
+  match base() {
+    Err(_) => false,
+    Ok(o) => match o.session.state.actors {
+      captain :: scientist :: engineer :: [] => {
+        let changed = { o.session | state: { o.session.state | actors: [captain, { scientist | indicators: [{ id: "fatigue", value: 30 }, { id: "readiness", value: 50 }, { id: "observations", value: 0 }, { id: "trust", value: 50 }] }, engineer] } }
+        indicatorChanges(o.session, changed) == "\nscientist fatigue: 45 -> 30"
+      },
+      _ => false
+    }
+  }
+}
+
+test "quit recap sanitizes only display path controls" {
+  match base() {
+    Err(_) => false,
+    Ok(o) => {
+      let s = { session: o.session, seed: 42, nextId: 1, seq: 0, phase: "main", target: "" };
+      not contains(journeyRecap(s, "path\u{1B}[31m\u{202E}journal"), "\u{1B}") && not contains(journeyRecap(s, "path\u{1B}[31m\u{202E}journal"), "\u{202E}") && contains(journeyRecap(s, "path\u{1B}[31m\u{202E}journal"), "path[31mjournal")
+    }
+  }
+}

@@ -5,6 +5,7 @@ on:
       - 'examples/crew-lab/**'
       - 'packages/social-dynamics/**'
       - 'packages/content-library/**'
+      - 'packages/terminal-ui/**'
       - '.github/workflows/crew-lab.yml'
   push:
     branches: [main]
@@ -12,13 +13,14 @@ on:
       - 'examples/crew-lab/**'
       - 'packages/social-dynamics/**'
       - 'packages/content-library/**'
+      - 'packages/terminal-ui/**'
       - '.github/workflows/crew-lab.yml'
 permissions:
   contents: read
 jobs:
   crew:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
       - name: Install pinned runtime and solver

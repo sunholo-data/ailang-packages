@@ -23,6 +23,8 @@ tests:
 	@cd "$(EX)" && "$(AILANG)" test --allow-skips reactions.ail
 	@cd "$(EX)" && "$(AILANG)" test --allow-skips play_flow.ail
 	@cd "$(EX)" && "$(AILANG)" test --allow-skips presenter.ail
+	@cd "$(EX)" && "$(AILANG)" test --allow-skips journey_flow.ail
+	@cd "$(EX)" && "$(AILANG)" test --allow-skips journey_presenter.ail
 
 scenarios:
 	@mkdir -p "$(OUT)"
@@ -57,3 +59,14 @@ mutations:
 .PHONY: view
 view:
 	@"$(AILANG)" run --package-dir "$(EX)" --caps IO --entry main "$(EX)/viewer.ail" < "$(INPUT)"
+.PHONY: terminal-tests journey-test
+terminal-tests:
+	@"$(AILANG)" check --package "$(ROOT)/packages/terminal-ui"
+	@cd "$(ROOT)/packages/terminal-ui" && "$(AILANG)" test --package .
+	@cd "$(ROOT)/packages/terminal-ui" && "$(AILANG)" test --package . --bytecode --strict-bytecode
+	@cd "$(ROOT)/packages/terminal-ui" && "$(AILANG)" test --allow-skips ui.ail
+	@cd "$(ROOT)/packages/terminal-ui" && "$(AILANG)" test --allow-skips demo.ail
+	@cd "$(ROOT)/packages/terminal-ui" && "$(AILANG)" pkg quality --strict .
+journey-test:
+	@AILANG="$(AILANG)" "$(EX)/test-journey.sh"
+validate: terminal-tests journey-test

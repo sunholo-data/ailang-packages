@@ -1,0 +1,134 @@
+module sunholo/terminal_ui/ui
+import std/string (chars, charCode, concat, repeat, join, contains, startsWith, split, words)
+import std/list (map, filter, foldl, flatMap, length, take, drop)
+
+export type Dimensions = { columns: int, rows: int } deriving (Eq)
+
+export type Screen = { lines: [string], text: string, page: int, pages: int } deriving (Eq)
+
+export pure func dimensions(columns: int, rows: int) -> Dimensions ! {}
+ensures { result.columns >= 40 && result.columns <= 160 && result.rows >= 16 && result.rows <= 60 } =
+  { columns: if columns < 40 then 40 else if columns > 160 then 160 else columns, rows: if rows < 16 then 16 else if rows > 60 then 60 else rows }
+
+pure func safe(c: string) -> bool = {
+  let n = charCode(c)
+  n == 10 || n >= 32 && n < 127 || n >= 160 && not (n >= 8234 && n <= 8238) && not (n >= 8294 && n <= 8297) && n != 8206 && n != 8207 && n != 1564
+}
+
+-- Remove C0/C1 and bidi controls. Keep newline for layout; replace tab with a space.
+export pure func safeText(text: string) -> string ! {}
+ensures { not contains(result, "\u{1B}") && not contains(result, "\u{7}") && not contains(result, "\u{202E}") } =
+  sanitizeChars(chars(text))
+
+pure func sanitizeChars(xs: [string]) -> string = match xs {
+  [] => "",
+  c :: rest => {
+    let clean = if c == "\t" then " " else if safe(c) then c else ""
+    "${clean}${sanitizeChars(rest)}"
+  }
+}
+
+pure func cellChars(xs: [string]) -> int = match xs {
+  [] => 0,
+  c :: rest => width(c) + cellChars(rest)
+}
+
+pure func width(c: string) -> int = {
+  let n = charCode(c)
+  -- Known narrow Latin, punctuation and box/block glyphs. Unknown symbols count
+  -- as two cells: overestimate rather than let wide symbols overflow a frame.
+  if not safe(c) || n == 10 then 0 else if n <= 591 || n >= 8192 && n <= 8303 || n >= 9472 && n <= 9631 then 1 else 2
+}
+
+-- Conservative codepoint cells, not Unicode grapheme segmentation.
+export pure func cells(text: string) -> int ! {}
+ensures { result >= 0 } = cellChars(chars(text))
+
+pure func breakChars(xs: [string], columns: int, line: string, used: int, out: [string]) -> [string] = match xs {
+  [] => if line == "" then out else out ++ [line],
+  c :: rest => if used + width(c) > columns then breakChars(rest, columns, c, width(c), out ++ [line]) else breakChars(rest, columns, "${line}${c}", used + width(c), out)
+}
+
+pure func wordLines(xs: [string], columns: int, line: string, out: [string]) -> [string] = match xs {
+  [] => out ++ (if line == "" then [] else [line]),
+  w :: rest => if cells(w) > columns then {
+    let parts = breakChars(chars(w), columns, "", 0, [])
+    wordLines(rest, columns, "", out ++ (if line == "" then [] else [line]) ++ parts)
+  } else if line == "" then wordLines(rest, columns, w, out) else if cells(line) + 1 + cells(w) <= columns then wordLines(rest, columns, "${line} ${w}", out) else wordLines(rest, columns, w, out ++ [line])
+}
+
+pure func wrapLines(xs: [string], columns: int) -> [string] = match xs {
+  [] => [],
+  line :: rest => (if line == "" then [""] else wordLines(words(line), columns, "", [])) ++ wrapLines(rest, columns)
+}
+
+pure func manyWrap(xs: [string], columns: int) -> [string] = match xs {
+  [] => [],
+  s :: rest => wrap(s, columns) ++ manyWrap(rest, columns)
+}
+
+export pure func wrap(text: string, columns: int) -> [string] ! {}
+requires { columns >= 2 && columns <= 160 }
+ensures { length(result) >= 1 } = {
+  let lines = wrapLines(split(safeText(text), "\n"), columns)
+  if lines == [] then [""] else lines
+}
+
+export pure func pad(text: string, columns: int) -> string ! {}
+requires { columns >= 0 && columns <= 160 && cells(safeText(text)) <= columns }
+ensures { cells(result) == columns } = {
+  let s = safeText(text)
+  "${s}${repeat(" ", columns - cells(s))}"
+}
+
+export pure func rule(columns: int) -> string ! {}
+requires { columns >= 0 && columns <= 160 }
+ensures { cells(result) == columns } = repeat("-", columns)
+
+export pure func gauge(value: int, size: int) -> string ! {}
+requires { size >= 1 && size <= 40 }
+ensures { cells(result) >= size + 2 } = {
+  let n = if value < 0 then 0 else if value > 100 then 100 else value
+  let filled = n * size / 100
+  "[${repeat("#", filled)}${repeat("-", size - filled)}] ${show(value)}"
+}
+
+export pure func clampPage(page: int, pages: int) -> int ! {}
+requires { pages >= 1 }
+ensures { result >= 0 && result < pages }
+  tests [
+    ((-1, 3), 0),
+    ((99, 3), 2),
+    ((1, 3), 1)
+  ] {
+  if page < 0 then 0 else if page >= pages then pages - 1 else page
+}
+
+-- Header limited to two wrapped rows; all caller action rows retained; body always paged.
+-- Explicit footers must be concise. Remaining body and messages are never clipped.
+export pure func screen(d: Dimensions, ansi: bool, header: [string], body: string, actions: [string], page: int) -> Screen ! {}
+requires { d.columns >= 40 && d.columns <= 160 && d.rows >= 16 && d.rows <= 60 && length(manyWrap(actions, d.columns)) + length(manyWrap(header, d.columns)) <= d.rows - 5 }
+ensures { result.page >= 0 && result.page < result.pages && length(result.lines) == d.rows } = {
+  let top = manyWrap(header, d.columns)
+  let footer = manyWrap(actions, d.columns)
+  let height = d.rows - length(top) - length(footer) - 4
+  let lines = wrap(body, d.columns)
+  let pages = (length(lines) + height - 1) / height
+  let current = clampPage(page, pages)
+  let shown = take(height, drop(current * height, lines))
+  let spacer = repeatLines(height - length(shown))
+  let allLines = top ++ [rule(d.columns)] ++ shown ++ spacer ++ [rule(d.columns), "Page ${show(current + 1)}/${show(pages)} | n Next / v Previous"] ++ footer ++ [""]
+  let plain = join("\n", allLines);
+  { lines: allLines, text: if ansi then "\u{1B}[2J\u{1B}[H\u{1B}[94m${join("\n", top)}\u{1B}[0m\n\u{1B}[93m${repeat("─", d.columns)}\u{1B}[0m\n${styledLines(drop(length(top) + 1, allLines), d.columns)}\u{1B}[0m" else plain, page: current, pages: pages }
+}
+
+pure func repeatLines(n: int) -> [string] = if n <= 0 then [] else "" :: repeatLines(n - 1)
+
+-- Styling tokens are trusted renderer output; source text is sanitized first.
+pure func styledLines(xs: [string], columns: int) -> string = match xs {
+  [] => "",
+  s :: rest => {
+    let styled = if s == rule(columns) then "\u{1B}[93m${repeat("─", columns)}\u{1B}[0m" else if startsWith(s, "[ ") then "\u{1B}[93m${s}\u{1B}[0m" else s
+    if rest == [] then styled else "${styled}\n${styledLines(rest, columns)}"
+  }
+}
