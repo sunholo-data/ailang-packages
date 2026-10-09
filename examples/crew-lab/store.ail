@@ -1,0 +1,191 @@
+module sunholo/crew_lab/store
+import std/result (Result, Ok, Err)
+import std/option (Some, None)
+import std/list (length, foldl, filter)
+import std/string (length as stringLength, endsWith, split, charCode, foldChars)
+import std/json (Json, JObject, get, getString, decode, encode)
+import std/fs (mkdirAllResult, mkdirResult, readFileResult, writeFileResult, renameFileResult, removeFileResult, fileExists)
+import std/ai (step, Message)
+import pkg/sunholo/content_library/library (Bundle, cacheKey, decodeBundle, encodeBundle, decodeGenerated, starterBundle)
+import ./codec (object, fields, integer)
+import ./reactions (Policy, decodePolicy, defaultPolicyBody, prompt)
+
+export type PolicyFile = { policy: Policy, body: string }
+
+export type Fetch = { outcome: Result[Bundle, string], source: string, calls: int, inputTokens: int, outputTokens: int, usageKnown: bool }
+
+export pure func validOwner(owner: string) -> bool
+ensures { not result || stringLength(owner) > 0 && stringLength(owner) <= 64 } =
+  stringLength(owner) > 0 && stringLength(owner) <= 64 && foldChars(\valid ch. valid && (charCode(ch) >= 48 && charCode(ch) <= 57 || charCode(ch) >= 65 && charCode(ch) <= 90 || charCode(ch) >= 97 && charCode(ch) <= 122 || ch == "-" || ch == "_"), true, owner)
+
+export pure func validRecord(raw: string, sequence: int) -> bool
+ensures { not result || sequence >= 0 && sequence <= 1000000000 && stringLength(raw) <= 1048576 } =
+  if sequence < 0 || sequence > 1000000000 || stringLength(raw) > 1048576 then false else match decode(raw) {
+    Err(_) => false,
+    Ok(j) => encode(j) == raw && fields(j, ["version", "seq", "payload"]) && integer(j, "version") == Ok(1) && integer(j, "seq") == Ok(sequence) && (match get(j, "payload") {
+      Some(JObject(_)) => true,
+      _ => false
+    })
+  }
+
+-- Journal records are canonical std/json.encode envelopes. Exact re-encoding
+-- rejects trailing JSON/whitespace without borrowing the smaller command bound.
+-- A partial temporary write never replaces the previous complete journal.
+export pure func validJournal(body: string, count: int) -> bool
+ensures { not result || count > 0 && count <= 40000 && stringLength(body) <= 8388608 } =
+  if count <= 0 || count > 40000 || stringLength(body) > 8388608 || not endsWith(body, "\n") then false else {
+    let lines = split(body, "\n")
+    let state = foldl(\acc line. if acc.index == count then { index: acc.index + 1, valid: acc.valid && line == "" } else { index: acc.index + 1, valid: acc.valid && validRecord(line, acc.index) }, { index: 0, valid: true }, lines)
+    state.valid && state.index == count + 1
+  }
+
+pure func failed(message: string, calls: int, i: int, o: int, known: bool) -> Fetch =
+  { outcome: Err(message), source: "error", calls: calls, inputTokens: i, outputTokens: o, usageKnown: known }
+
+pure func loaded(bundle: Bundle, source: string, calls: int, i: int, o: int) -> Fetch =
+  { outcome: Ok(bundle), source: source, calls: calls, inputTokens: i, outputTokens: o, usageKnown: true }
+
+func ensureHome(home: string) -> Result[(), string] ! {FS} =
+  if stringLength(home) == 0 || stringLength(home) > 4096 then Err("invalid library home") else match mkdirAllResult("${home}/cache") {
+    Err(_) => Err("cannot create library cache directory"),
+    Ok(_) => Ok()
+  }
+
+func atomic(path: string, temporary: string, body: string) -> Result[(), string] ! {FS} =
+  match writeFileResult(temporary, body) {
+    Err(_) => Err("temporary write failed; previous committed file retained"),
+    Ok(_) => match renameFileResult(temporary, path) {
+      Err(_) => Err("atomic rename failed; previous committed file retained"),
+      Ok(_) => Ok()
+    }
+  }
+
+func policyRead(path: string) -> Result[PolicyFile, string] ! {FS} = match readFileResult(path) {
+  Err(_) => Err("cannot read local policy"),
+  Ok(body) => match decodePolicy(body) {
+    Err(e) => Err("invalid local policy: ${e}"),
+    Ok(p) => Ok({ policy: p, body: body })
+  }
+}
+
+func policyLocked(home: string, path: string, lock: string) -> Result[PolicyFile, string] ! {FS} = {
+  let result = if fileExists(path) then policyRead(path) else match atomic(path, "${lock}/policy.tmp", defaultPolicyBody()) {
+    Err(e) => Err(e),
+    Ok(_) => policyRead(path)
+  }
+  match removeFileResult("${lock}/policy.tmp") {
+    _ => match removeFileResult(lock) {
+      Err(_) => Err("cannot release policy lock"),
+      Ok(_) => result
+    }
+  }
+}
+
+export func loadPolicy(home: string) -> Result[PolicyFile, string] ! {FS}
+ensures { match result {
+  Ok(p) => stringLength(p.body) > 0,
+  Err(_) => true
+} } = match ensureHome(home) {
+  Err(e) => Err(e),
+  Ok(_) => {
+    let path = "${home}/response-policy.json"
+    let lock = "${home}/policy.lock"
+    if fileExists(path) then policyRead(path) else match mkdirResult(lock) {
+      Err(_) => Err("policy initialisation busy; existing config retained"),
+      Ok(_) => policyLocked(home, path, lock)
+    }
+  }
+}
+
+func cacheRead(path: string, signature: string, legal: [string], model: string) -> Fetch ! {FS} =
+  match readFileResult(path) {
+    Err(_) => failed("cannot read cached dialogue", 0, 0, 0, true),
+    Ok(body) => match decodeBundle(body, signature, legal) {
+      Err(e) => failed("invalid cached dialogue: ${e}", 0, 0, 0, true),
+      Ok(bundle) => if bundle.origin == "ai" && bundle.model != model then failed("cached model metadata mismatch", 0, 0, 0, true) else loaded(bundle, "cache", 0, 0, 0)
+    }
+  }
+
+pure func message(role: string, body: string) -> Message =
+  { role: role, content: body, tool_calls: [], tool_call_id: "", images: [] }
+
+func generate(path: string, lock: string, signature: string, legal: [string], model: string) -> Fetch ! {FS, AI @limit=1} =
+  match step(model, [message("system", "You write bounded JSON dialogue variants for a fictional crew lab. Return JSON only. Never change game mechanics or invent facts."), message("user", prompt(signature, legal))], []) {
+    Err(e) => failed("AI generation unavailable (${e.code}); request retained", 1, 0, 0, false),
+    Ok(reply) => match decodeGenerated(reply.message.content, signature, legal, model, reply.input_tokens, reply.output_tokens) {
+      Err(e) => failed("AI output rejected: ${e}", 1, reply.input_tokens, reply.output_tokens, true),
+      Ok(bundle) => {
+        let body = encodeBundle(bundle)
+        if stringLength(body) > 65536 then failed("generated bundle exceeds file bound", 1, reply.input_tokens, reply.output_tokens, true) else match atomic(path, "${lock}/bundle.tmp", body) {
+          Err(e) => failed(e, 1, reply.input_tokens, reply.output_tokens, true),
+          Ok(_) => loaded(bundle, "generated", 1, reply.input_tokens, reply.output_tokens)
+        }
+      }
+    }
+  }
+
+func locked(path: string, lock: string, signature: string, legal: [string], model: string, remaining: int) -> Fetch ! {FS, AI @limit=1} =
+  {
+    -- A writer may have completed between the first miss and lock acquisition.
+    let result = if fileExists(path) then cacheRead(path, signature, legal, model) else if remaining <= 0 then failed("generation limit reached; request retained", 0, 0, 0, true) else generate(path, lock, signature, legal, model)
+    match removeFileResult("${lock}/bundle.tmp") {
+      _ => match removeFileResult(lock) {
+        Err(_) => failed("cannot release dialogue lock", result.calls, result.inputTokens, result.outputTokens, result.usageKnown),
+        Ok(_) => result
+      }
+    }
+  }
+
+export func resolve(home: string, signature: string, legal: [string], model: string, mode: string, remaining: int) -> Fetch ! {FS, AI @limit=1}
+ensures { result.calls >= 0 && result.calls <= 1 } =
+  if stringLength(signature) > 32768 || stringLength(signature) == 0 || mode != "live" && mode != "offline" || remaining < 0 || remaining > 8 then failed("invalid dialogue resolver settings", 0, 0, 0, true) else match ensureHome(home) {
+    Err(e) => failed(e, 0, 0, 0, true),
+    Ok(_) => {
+      let key = cacheKey(signature)
+      let path = "${home}/cache/${key}.json"
+      let lock = "${home}/cache/${key}.lock"
+      if fileExists(path) then cacheRead(path, signature, legal, model) else if mode == "offline" then match starterBundle(signature, legal) {
+        Err(e) => failed(e, 0, 0, 0, true),
+        Ok(bundle) => loaded(bundle, "authored", 0, 0, 0)
+      } else match mkdirResult(lock) {
+        Err(_) => failed("dialogue cache busy; request retained", 0, 0, 0, true),
+        Ok(_) => locked(path, lock, signature, legal, model, remaining)
+      }
+    }
+  }
+
+export func openRun(home: string, owner: string, header: string) -> Result[string, string] ! {FS}
+ensures { match result {
+  Ok(path) => stringLength(path) > 0,
+  Err(_) => true
+} } =
+  if not validOwner(owner) || not validRecord(header, 0) then Err("invalid run owner/header") else match mkdirAllResult("${home}/runs") {
+    Err(_) => Err("cannot create runs directory"),
+    Ok(_) => {
+      let dir = "${home}/runs/${owner}"
+      let path = "${dir}/journal.jsonl"
+      match mkdirResult(dir) {
+        Err(_) => Err("run owner already exists or unavailable; no journal overwritten"),
+        Ok(_) => match atomic(path, "${dir}/journal.tmp", "${header}\n") {
+          Err(e) => Err(e),
+          Ok(_) => Ok(path)
+        }
+      }
+    }
+  }
+
+export func appendRun(path: string, record: string) -> Result[(), string] ! {FS}
+ensures { match result {
+  Ok(_) => stringLength(record) > 0 && stringLength(record) <= 1048576,
+  Err(_) => true
+} } = match readFileResult(path) {
+  Err(_) => Err("cannot read committed journal"),
+  Ok(body) => {
+    let count = length(split(body, "\n")) - 1
+    if not validJournal(body, count) || not validRecord(record, count) || stringLength(body) + stringLength(record) + 1 > 8388608 then Err("journal framing/sequence/size bound; prior state retained") else atomic(path, "${path}.tmp", "${body}${record}\n")
+  }
+}
+
+test "valid run name is bounded and path local" {
+  validOwner("crew-7") && not validOwner("crew/7")
+}

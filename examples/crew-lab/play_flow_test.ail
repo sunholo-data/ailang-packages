@@ -1,0 +1,92 @@
+module sunholo/crew_lab/play_flow_test
+import ./play_flow (begin, seedNumber, parseArgs, route, stage, publish, menu, renderStatus, PlayState)
+import std/result (Ok, Err)
+import std/string (contains)
+import std/list (length)
+import ./session (start)
+
+-- Initialise host fixtures directly, matching the existing native host tests.
+-- Installed UI tests separately execute the composed begin/start path.
+pure func base(choice: string, seed: int) -> Result[PlayState, string] =
+  if choice != "1" && choice != "2" then Err("choice") else if seed < 1 || seed > 2147483646 then Err("seed") else match start("{\"command\":\"start\",\"policy\":\"${if choice == "1" then "consent" else "orders"}\"}") {
+    Err(_) => Err("host"),
+    Ok(o) => Ok({ session: o.session, seed: seed, nextId: 1, seq: 0, phase: "main", target: "" })
+  }
+
+test "startup guards reject invalid authority and seed alongside host policy fixtures" {
+  match (base("1", 42), base("2", 42), begin("3", 42), begin("1", 0)) {
+    (Ok(a), Ok(b), Err(_), Err(_)) => a.session.policy == "consent" && b.session.policy == "orders" && a.seed == 42,
+    _ => false
+  }
+}
+
+test "seed rejects fractions zero overflow and missing value" {
+  seedNumber("1") == Ok(1) && seedNumber("2147483646") == Ok(2147483646) && (match (seedNumber("0"), seedNumber("1.5"), seedNumber("2147483647"), seedNumber("")) {
+    (Err(_), Err(_), Err(_), Err(_)) => true,
+    _ => false
+  })
+}
+
+test "arguments reject unknown flags duplicate flags and missing values" {
+  match (parseArgs(["--seed", "42", "--home", "/tmp/lab"], "/tmp/default"), parseArgs(["--wat"], "/tmp/default"), parseArgs(["--seed"], "/tmp/default"), parseArgs(["--seed", "42", "--seed", "43"], "/tmp/default")) {
+    (Ok(o), Err(_), Err(_), Err(_)) => o.home == "/tmp/lab" && o.seed == 42 && o.hasSeed,
+    _ => false
+  }
+}
+
+test "captain menu chooses owned science and rest recipes without manual IDs" {
+  match base("1", 42) {
+    Err(_) => false,
+    Ok(s) => match (route(s, "1"), route(s, "3"), route(s, "0"), route(s, "manual reply")) {
+      (Ok(a), Ok(b), Ok(q), Err(_)) => a.kind == "offer" && a.worker == "scientist" && a.recipe == "observations" && b.recipe == "rest_scientist" && q.kind == "quit",
+      _ => false
+    }
+  }
+}
+
+test "publication failure retains prior Session seed sequence and ID counter" {
+  match base("1", 42) {
+    Err(_) => false,
+    Ok(s) => match stage(s, "{\"command\":\"offer\",\"worker\":\"scientist\",\"recipe\":\"observations\",\"id\":\"project-1\"}", 123, "start", "project-1", 2) {
+      Err(_) => false,
+      Ok(candidate) => {
+        let failed = publish(s, candidate, false)
+        let accepted = publish(s, candidate, true)
+        failed.state == s && not failed.accepted && accepted.accepted && accepted.state.seed == 123 && accepted.state.nextId == 2 && accepted.state.seq == s.seq + 1 && length(accepted.state.session.state.tasks) == 1
+      }
+    }
+  }
+}
+
+test "offered task requires separate explicit start or leave choice" {
+  match base("2", 42) {
+    Err(_) => false,
+    Ok(s) => match stage(s, "{\"command\":\"offer\",\"worker\":\"scientist\",\"recipe\":\"observations\",\"id\":\"project-1\"}", 42, "start", "project-1", 2) {
+      Err(_) => false,
+      Ok(o) => match (route(o.state, "1"), route(o.state, "2")) {
+        (Ok(a), Ok(b)) => a.kind == "start" && b.kind == "back" && contains(menu(o.state), "Start"),
+        _ => false
+      }
+    }
+  }
+}
+
+test "failed host operation stages error without changing domain or seed" {
+  match base("1", 42) {
+    Err(_) => false,
+    Ok(s) => match stage(s, "{\"command\":\"start_task\",\"task\":\"missing\"}", 123, "start", "missing", 2) {
+      Err(_) => false,
+      Ok(o) => o.failed && o.state.session == s.session && o.state.seed == s.seed && o.state.nextId == s.nextId && o.state.seq == s.seq + 1 && contains(o.trace, "error")
+    }
+  }
+}
+
+test "dashboard renders exact crew gauges materials and directed trust" {
+  match base("1", 42) {
+    Err(_) => false,
+    Ok(s) => {
+      let view = renderStatus(s, 2)
+      contains(view, "fatigue [####------] 45") && contains(view, "readiness [#####-----] 50") && contains(view, "scientist -> captain trust [#####-----] 50") && contains(view, "available 6, reserved 0, consumed 0") && contains(view, "AI attempts remaining 2")
+    }
+  }
+}

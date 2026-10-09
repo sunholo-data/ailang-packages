@@ -1,0 +1,150 @@
+module sunholo/crew_lab/reactions_test
+import ./reactions (decodePolicy, defaultPolicyBody, weights, signature, fixtureBody)
+import ./actor_policy (evaluate)
+import pkg/sunholo/content_library/library (WeightedLabel)
+import ./session (Request, start, offer, ask, complete, startTask)
+import std/result (Ok, Err)
+import std/json (encode, decode, jo, kv, js, ja, jint, getArray, getString, asObject)
+import std/option (Some, None)
+import std/string (replace, substring, length as stringLength)
+import std/list (map, length, foldl, head, filter, dedup, any, contains)
+
+pure func request() -> Request =
+  { id: "q", actor: "scientist", task: "t", tick: 0, revision: 0, expires: 1, configBody: "{}", policyId: "p", threshold: 0.6, legal: ["accept", "decline", "concern", "defer"], context: encode(jo([kv("actor", js("scientist")), kv("task", js("t")), kv("recipe", js("observations")), kv("attributes", ja(map(\id. jo([kv("id", js(id)), kv("value", jint(50))]), ["openness", "conscientiousness", "extraversion", "agreeableness", "neuroticism"]))), kv("values", ja([jo([kv("id", js("curiosity")), kv("value", jint(50))])])), kv("indicators", ja([jo([kv("id", js("fatigue")), kv("value", jint(50))])])), kv("relationships", ja([jo([kv("to", js("captain")), kv("dimension", js("trust")), kv("value", jint(50))])])), kv("visible", ja([]))])), body: "{}" }
+
+test "default policy yields bounded legal weights from perception" {
+  match decodePolicy(defaultPolicyBody()) {
+    Ok(p) => p.callLimit == 2 && (match weights(p, request()) {
+      Ok(xs) => length(xs) == 4,
+      _ => false
+    }),
+    _ => false
+  }
+}
+
+test "malformed config fails closed" {
+  match decodePolicy("{}") {
+    Err(_) => true,
+    _ => false
+  }
+}
+
+pure func modify(field: string, id: string, n: int) -> Request =
+  let r = request() in
+  let key = if field == "relationships" then "dimension" else "id" in
+  let old = "\"${key}\":\"${id}\",\"value\":50" in
+  let newer = "\"${key}\":\"${id}\",\"value\":${encode(jint(n))}" in
+  { r | context: replace(r.context, old, newer) }
+
+pure func evaluated(r: Request) -> Result[[WeightedLabel], string] = match decodePolicy(defaultPolicyBody()) {
+  Err(e) => Err(e),
+  Ok(p) => weights(p, r)
+}
+
+pure func score(r: Request, label: string) -> int = match evaluated(r) {
+  Err(_) => 0 - 1,
+  Ok(xs) => foldl(\a x. if x.label == label then x.weight else a, 0 - 1, xs)
+}
+
+test "each OCEAN lever changes a response weight individually" {
+  score(modify("attributes", "openness", 60), "accept") > score(request(), "accept") && score(modify("attributes", "conscientiousness", 60), "accept") > score(request(), "accept") && score(modify("attributes", "agreeableness", 60), "accept") > score(request(), "accept") && score(modify("attributes", "neuroticism", 60), "accept") < score(request(), "accept") && score(modify("attributes", "extraversion", 60), "concern") > score(request(), "concern")
+}
+
+test "fatigue values and directed trust exert separate influences" {
+  score(modify("indicators", "fatigue", 60), "accept") < score(request(), "accept") && score(modify("values", "curiosity", 60), "accept") > score(request(), "accept") && score(modify("relationships", "trust", 60), "accept") > score(request(), "accept")
+}
+
+test "weights clamp under extreme but valid policy coefficients" {
+  match decodePolicy(defaultPolicyBody()) {
+    Err(_) => false,
+    Ok(p) => match weights({ p | rules: map(\r. { r | base: 1000, influences: map(\i. { i | coefficient: 100 }, r.influences) }, p.rules) }, modify("attributes", "openness", 100)) {
+      Ok(xs) => foldl(\valid x. valid && x.weight >= 1 && x.weight <= 1000, true, xs),
+      _ => false
+    }
+  }
+}
+
+test "missing duplicate and out of range observations do not default zero" {
+  let r = request() in
+  match (evaluated({ r | context: replace(r.context, "openness", "missing") }), evaluated(modify("attributes", "openness", 101)), evaluated({ r | context: replace(r.context, "\"actor\":\"scientist\"", "\"actor\":\"engineer\"") })) {
+    (Err(_), Err(_), Err(_)) => true,
+    _ => false
+  }
+}
+
+test "policy duplicate keys bad limits unknown fields and noninteger coefficients fail" {
+  badPolicy(replace(defaultPolicyBody(), "\"callLimit\":2", "\"callLimit\":9")) && badPolicy(replace(defaultPolicyBody(), "\"coefficient\":1", "\"coefficient\":1.5")) && badPolicy(replace(defaultPolicyBody(), "\"callLimit\":2", "\"callLimit\":2,\"callLimit\":2")) && badPolicy(replace(defaultPolicyBody(), "\"callLimit\":2", "\"callLimit\":2,\"secret\":0")) && badPolicy("${defaultPolicyBody()} {}")
+}
+
+pure func badPolicy(s: string) -> bool = match decodePolicy(s) {
+  Err(_) => true,
+  _ => false
+}
+
+test "signature omits external request clock but preserves exact perception and policy" {
+  let r = request() in
+  let p = defaultPolicyBody() in
+  let s = signature(r, p, "m") in
+  s == signature({ r | id: "other", tick: 99, revision: 100 }, p, "m") && s != signature(modify("indicators", "fatigue", 60), p, "m") && s != signature(r, "${p} ", "m") && s != signature(r, p, "other") && s != signature({ r | legal: ["defer", "accept", "decline", "concern"] }, p, "m") && s != signature({ r | context: replace(r.context, "\"task\":\"t\"", "\"task\":\"other\"") }, p, "m")
+}
+
+test "onehot selected legal response reaches existing decisions decoder" {
+  let r = request() in match evaluate(fixtureBody(r, "decline"), r.legal, 0.6, 0.9999999999999999) {
+    Ok(c) => c.selected == "decline" && c.confidence == 1.0 && c.decision.model == "synthetic:library-v1" && not c.gated,
+    _ => false
+  }
+}
+
+test "fixture uses unchanged host consent pathway" {
+  match start("{\"command\":\"start\",\"policy\":\"consent\"}") {
+    Err(_) => false,
+    Ok(o) => match offer(o.session, "scientist", "observations", "science") {
+      Err(_) => false,
+      Ok(a) => match ask(a.session, "scientist", "science", "r1") {
+        Err(_) => false,
+        Ok(q) => match head(q.session.pending) {
+          None => false,
+          Some(r) => match complete(q.session, r.id, fixtureBody(r, "accept"), 0.0) {
+            Err(_) => false,
+            Ok(done) => match startTask(done.session, "science") {
+              Ok(_) => true,
+              _ => false
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
+test "working phase uses relief weights and offered rules cannot leak" {
+  let r = { request() | legal: ["continue", "request_relief", "defer"] } in
+  score(r, "continue") > 0 && score({ modify("indicators", "fatigue", 90) | legal: r.legal }, "request_relief") > score(r, "request_relief") && (match evaluated({ r | legal: ["accept", "continue", "defer"] }) {
+    Err(_) => true,
+    _ => false
+  })
+}
+
+pure func duplicateAttrs(c: Json) -> Json = match (asObject(c), getArray(c, "attributes")) {
+  (Some(es), Some(x :: xs)) => jo(map(\entry. if entry.key == "attributes" then kv("attributes", ja(x :: x :: xs)) else entry, es)),
+  _ => c
+}
+
+test "duplicate required observations reject ambiguity" {
+  let r = request() in match decode(r.context) {
+    Err(_) => false,
+    Ok(c) => match evaluated({ r | context: encode(duplicateAttrs(c)) }) {
+      Err(_) => true,
+      _ => false
+    }
+  }
+}
+
+test "recipe specific value requirement applies only to its own recipe" {
+  let r = request() in
+  let maintenance = { r | context: replace(replace(r.context, "observations", "maintenance"), "curiosity", "reliability") } in
+  score(maintenance, "accept") == score(r, "accept") && (match evaluated({ r | context: replace(r.context, "observations", "maintenance") }) {
+    Err(_) => true,
+    _ => false
+  })
+}

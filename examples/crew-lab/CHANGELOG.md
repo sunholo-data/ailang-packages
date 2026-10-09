@@ -8,12 +8,12 @@ personal work agreements, captain assignment and relief, bounded request retenti
 and directed trust consequences on receipt. Five contrasting recordings demonstrate
 completion, refused orders, care, denied relief and competing materials.
 
-The library and host transitions remain pure; only stdin/output use IO. Includes
+The original library and host transitions remain pure; saved stdin/output use IO. Includes
 strict response/command controls, native tests, saved replay, pure strict-VM parity,
 temporary `[bin]` installation tests and package quality commands. Requires the
 pinned AILANG0.52.0 runtime for the documented checks. Strict VM replay uses the
 pure recording entry because stdin `readLine` is evaluator-only on that runtime.
-No live decisions, provider costs, game integration or registry publication.
+The saved fixture paths use no provider calls. No game integration or registry publication.
 Completion-only project effects and full reservation refunds on stop remain
 explicit limitations; no partial-work economics or moral winner is introduced.
 
@@ -30,3 +30,15 @@ Terminal iteration adds portable ASCII indicator gauges, help/status/quit and
 friendly captain command aliases. Manual replies are labelled synthetic fixtures
 and reuse the same validation and host authority. Friendly errors preserve the
 incoming session; JSON recordings keep fail-fast behaviour.
+
+Adds `crew-play` and `crew-play-offline`: numbered captain choices, automatic crew
+reactions, explicit start/leave decisions and refreshed exact indicator gauges.
+Authored reaction rules use all five OCEAN traits and received context; bounded
+GLM dialogue bundles grow a persistent exact-context library on live misses.
+Offline mode uses cache or generic authored variants with zero provider calls.
+Visible pending failures permit explicit retry, authored continuation or cancellation.
+Two seeded rolls, complete selected bundles, policy weights and usage are recorded
+with every actual host command before state/seed/dialogue publication. New native
+UI controls and installed offline tests cover science, care, denial, materials
+competition, extracted strict-VM replay and atomic journal-write rollback.
+The original fixed host trust appraisal and completion-only work effects remain.

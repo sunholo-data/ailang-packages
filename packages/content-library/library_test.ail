@@ -1,0 +1,137 @@
+module sunholo/content_library/library_test
+import ./library (Bundle, pickLabel, nextRoll, pickVariant, decodeGenerated, decodeBundle, encodeBundle, starterBundle, cacheKey)
+import std/result (Ok, Err)
+import std/list (map, filter, length, dedup, contains, any, foldl)
+import std/string (chars, charCode, repeat, replace)
+import std/json (Json, encode, jo, kv, js, jint, ja)
+import std/math (sqrt, exp)
+
+pure func selected(xs: [{ label: string, weight: int }], r: float) -> string = match pickLabel(xs, r) {
+  Ok(s) => s,
+  Err(e) => e
+}
+
+test "CDF preserves caller order with strict boundaries" {
+  let xs = [{ label: "b", weight: 1 }, { label: "a", weight: 3 }] in
+  selected(xs, 0.0) == "b" && selected(xs, 0.249999) == "b" && selected(xs, 0.25) == "a" && selected(xs, 0.9999999999999999) == "a"
+}
+
+test "draw refuses invalid weights labels and rolls" {
+  match (pickLabel([], 0.0), pickLabel([{ label: "x", weight: 0 }], 0.0), pickLabel([{ label: "x", weight: 1 }, { label: "x", weight: 1 }], 0.0), pickLabel([{ label: "x", weight: 1 }], 1.0)) {
+    (Err(_), Err(_), Err(_), Err(_)) => true,
+    _ => false
+  }
+}
+
+test "seed control is explicit deterministic Park Miller" {
+  match (nextRoll(1), nextRoll(0), nextRoll(2147483647)) {
+    (Ok(a), Err(_), Err(_)) => a.seed == 48271 && a.roll > 0.0 && a.roll < 1.0 && nextRoll(1) == Ok(a),
+    _ => false
+  }
+}
+
+test "generated roundtrip binds exact signature metadata and usage" {
+  match decodeGenerated(generated([v("a1", "accept", "Ready.", 1), v("d1", "defer", "A moment.", 3)]), "context", ["accept", "defer"], "model", 4, 5) {
+    Ok(b) => b.origin == "ai" && b.model == "model" && b.inputTokens == 4 && b.outputTokens == 5 && b.key == cacheKey("context") && (match decodeBundle(encodeBundle(b), "context", ["accept", "defer"]) {
+      Ok(c) => c.key == b.key && c.variants == b.variants,
+      Err(_) => false
+    }),
+    Err(_) => false
+  }
+}
+
+test "variants preserve weighted endpoints and legal label" {
+  match decodeGenerated(generated([v("one", "accept", "Yes.", 1), v("two", "accept", "Agreed.", 3), v("d", "defer", "Later.", 1)]), "context", ["accept", "defer"], "model", 0, 0) {
+    Ok(b) => variantID(b, "accept", 0.0) == "one" && variantID(b, "accept", 0.25) == "two" && variantID(b, "accept", 0.9999999999999999) == "two" && (match pickVariant(b, "unknown", 0.0) {
+      Err(_) => true,
+      _ => false
+    }),
+    _ => false
+  }
+}
+
+test "missing extra labels and duplicate ids fail" {
+  rejected([v("x", "accept", "Yes.", 1)]) && rejected([v("x", "accept", "Yes.", 1), v("x", "defer", "Later.", 1)]) && rejected([v("x", "accept", "Yes.", 1), v("y", "defer", "Later.", 1), v("z", "nope", "Other.", 1)])
+}
+
+test "noninteger nonpositive overweight and controls fail" {
+  rejected([v("x", "accept", "Yes.", 0), v("y", "defer", "Later.", 1)]) && rejected([v("x", "accept", "Yes.", 1001), v("y", "defer", "Later.", 1)]) && rejected([v("x", "accept", "Yes.\n", 1), v("y", "defer", "Later.", 1)]) && (match decodeGenerated("{\"schema\":\"generated_dialogue/1\",\"variants\":[{\"id\":\"x\",\"label\":\"accept\",\"text\":\"yes\",\"weight\":1.5}]}", "x", ["accept"], "m", 0, 0) {
+    Err(_) => true,
+    _ => false
+  })
+}
+
+test "schema exact keys framing and version fail closed" {
+  let raw = generated([v("x", "accept", "Yes.", 1), v("y", "defer", "Later.", 1)]) in
+  badRaw("${raw} {}") && badRaw("{\"schema\":\"generated_dialogue/2\",\"variants\":[]}") && badRaw("{\"schema\":\"generated_dialogue/1\",\"schema\":\"generated_dialogue/1\",\"variants\":[]}") && badRaw("{\"schema\":\"generated_dialogue/1\",\"variants\":[],\"model\":\"fake\"}")
+}
+
+test "cache context change and altered metadata fail" {
+  match starterBundle("original", ["accept", "defer"]) {
+    Ok(b) => let wire = encodeBundle(b) in (match decodeBundle(wire, "changed", ["accept", "defer"]) {
+      Err(_) => true,
+      _ => false
+    }) && (match decodeBundle(replace(wire, "crew-dialogue-v1", "crew-dialogue-v2"), "original", ["accept", "defer"]) {
+      Err(_) => true,
+      _ => false
+    }) && (match decodeBundle(replace(wire, b.key, "bad"), "original", ["accept", "defer"]) {
+      Err(_) => true,
+      _ => false
+    }),
+    _ => false
+  }
+}
+
+test "bounds reject oversized text signature and too many per label" {
+  rejected([v("x", "accept", repeat("x", 513), 1), v("y", "defer", "Wait.", 1)]) && rejected([v("1", "accept", "a", 1), v("2", "accept", "a", 1), v("3", "accept", "a", 1), v("4", "accept", "a", 1), v("5", "accept", "a", 1), v("d", "defer", "d", 1)]) && (match starterBundle(repeat("x", 32769), ["accept"]) {
+    Err(_) => true,
+    _ => false
+  })
+}
+
+test "authored starter has zero usage and no invented facts" {
+  match starterBundle("context", ["accept", "defer"]) {
+    Ok(b) => b.origin == "authored" && b.inputTokens == 0 && b.outputTokens == 0 && variantID(b, "accept", 0.0) == "accept" && (match pickVariant(b, "accept", 0.0) {
+      Ok(v) => v.text == "[authored starter] Response: accept.",
+      _ => false
+    }),
+    _ => false
+  }
+}
+
+test "sampling rejects NaN infinity and seed maximum stays bounded" {
+  match (pickLabel([{ label: "x", weight: 1 }], sqrt(0.0 - 1.0)), pickLabel([{ label: "x", weight: 1 }], exp(1000.0)), nextRoll(2147483646)) {
+    (Err(_), Err(_), Ok(s)) => s.seed >= 1 && s.seed <= 2147483646 && s.roll < 1.0,
+    _ => false
+  }
+}
+
+pure func v(id: string, label: string, text: string, weight: int) -> Json =
+  jo([kv("id", js(id)), kv("label", js(label)), kv("text", js(text)), kv("weight", jint(weight))])
+
+pure func generated(xs: [Json]) -> string =
+  encode(jo([kv("schema", js("generated_dialogue/1")), kv("variants", ja(xs))]))
+
+pure func badRaw(raw: string) -> bool = match decodeGenerated(raw, "context", ["accept", "defer"], "model", 0, 0) {
+  Err(_) => true,
+  _ => false
+}
+
+pure func rejected(xs: [Json]) -> bool = badRaw(generated(xs))
+
+pure func variantID(b: Bundle, l: string, r: float) -> string = match pickVariant(b, l, r) {
+  Ok(v) => v.id,
+  Err(e) => e
+}
+
+test "metadata and bounds reject negative usage and oversized wire" {
+  let raw = generated([v("a", "accept", "Yes.", 1), v("d", "defer", "Wait.", 1)]) in
+  match (decodeGenerated(raw, "context", ["accept", "defer"], "m", 0 - 1, 0), decodeGenerated(raw, "context", ["accept", "defer"], "", 0, 0), decodeGenerated(repeat(" ", 65537), "context", ["accept", "defer"], "m", 0, 0), starterBundle("x", ["same", "same"])) {
+    (Err(_), Err(_), Err(_), Err(_)) => true,
+    _ => false
+  }
+}
+
+test "duplicate variant field and DEL text cannot pass decoder" {
+  badRaw("{\"schema\":\"generated_dialogue/1\",\"variants\":[{\"id\":\"a\",\"id\":\"b\",\"label\":\"accept\",\"text\":\"yes\",\"weight\":1}]}") && rejected([v("a", "accept", "\u{7F}", 1), v("d", "defer", "wait", 1)])
+}

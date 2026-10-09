@@ -1,8 +1,9 @@
 # sunholo/crew_lab
 
-Experimental offline host example, version0.1.0. Effects ceiling IO; `main` reads
-finite stdin and prints causal JSON. `actor_policy`, `scenario`, `session` and
-`codec` exports are pure. No Net, Env, AI, FS, RNG or clock effect is requested.
+Experimental host example, version0.1.0. Saved `main` and `viewer` use IO only.
+The guided `play` adapter uses IO,Env,FS,AI; `store` uses FS,AI. `actor_policy`,
+`scenario`, `session`, `codec`, `reactions` and `play_flow` transitions remain pure.
+No Net, RNG or clock effect is requested.
 
 Reuse the social kernel and pure decisions0.4.0 API. Do not change core permission
 rules or trust model-provided principals, sources, raw effects or authority.
@@ -47,3 +48,17 @@ application commands are the boundary, not caller-manufactured Session records.
 strict JSON host protocol. Manual one-hot replies identify synthetic:manual and
 never bypass host validation. `crew-view` adds ASCII gauges and recoverable friendly
 errors; starting with JSON retains recorded fail-fast handling.
+
+Guided captain controls use `crew-play` and `crew-play-offline`. Reaction weights
+are authored from actor-local received context (including all five OCEAN traits);
+AI supplies bounded dialogue variants, never effects or permission. Two explicit
+seeded rolls choose the label and text, and both plus the full bundle are journalled.
+Live cache misses use the pinned OpenRouter GLM model with the policy call limit (0..8).
+Failures remain pending; retries and explicit authored continuation are captain
+choices. Offline tests must use stubs/fixtures and make zero provider calls.
+
+Stage each host Session and seed change purely, publish the bounded atomic journal,
+then expose accepted state or dialogue. On publication failure stop with prior
+state/seed intact; blocked scheduler outputs still retain earlier successful host
+boundaries. Do not claim fsync durability, resume, hidden repair or cross-run crew
+memory. Native UI controls and test-play.sh cover journal failure and replay.

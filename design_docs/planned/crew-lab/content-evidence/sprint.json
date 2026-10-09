@@ -1,0 +1,82 @@
+{
+  "sprint_id": "CREW-CONTENT-LIBRARY",
+  "status": "in_progress",
+  "design_doc": "design_docs/planned/crew-lab/crew-content-library.md",
+  "sprint_plan": "design_docs/planned/crew-lab/crew-content-library-sprint.md",
+  "features": [
+    {
+      "id": "M1_LIBRARY_REACTIONS",
+      "description": "Pure content library and OCEAN-weighted reactions",
+      "estimated_loc": 450,
+      "dependencies": [],
+      "acceptance_criteria": [
+        "Strict codec/sample native controls on both engines",
+        "Each OCEAN dimension and current strain changes response weights"
+      ],
+      "passes": true,
+      "started": "2026-10-09",
+      "completed": "2026-10-09",
+      "notes": "Implementation complete; scoped combined checks and independent review pending."
+    },
+    {
+      "id": "M2_STORAGE_GENERATION",
+      "description": "Persistent validated bundles and bounded generation",
+      "estimated_loc": 300,
+      "dependencies": [
+        "M1_LIBRARY_REACTIONS"
+      ],
+      "acceptance_criteria": [
+        "Fixture miss generates once then identical context cache hit calls no AI",
+        "Corrupt data locks budget and journal errors are visible"
+      ],
+      "passes": true,
+      "started": "2026-10-09",
+      "completed": "2026-10-09",
+      "notes": "Implementation complete; scoped combined checks and independent review pending."
+    },
+    {
+      "id": "M3_GUIDED_PLAY",
+      "description": "Captain menus installed commands and replay",
+      "estimated_loc": 350,
+      "dependencies": [
+        "M1_LIBRARY_REACTIONS",
+        "M2_STORAGE_GENERATION"
+      ],
+      "acceptance_criteria": [
+        "Numbered captain sessions execute real science rest relief outcomes",
+        "Journal replays through unchanged host and legacy regressions pass",
+        "Independent evaluation and scoped CI pass before main merge"
+      ],
+      "passes": false,
+      "started": "2026-10-09",
+      "completed": null,
+      "notes": "Guided offline flows/replay/journal rollback pass. OpenRouter GLM5.3Flash live miss generated once then same-context zero-call cache repeat passed; final independent review and PR CI pending."
+    }
+  ],
+  "registry_reuse": [
+    {
+      "milestone": "M1_LIBRARY_REACTIONS",
+      "action": "none",
+      "package": "sunholo/content_library",
+      "reason": "Registry response/cache searches found no content library; new pure package"
+    },
+    {
+      "milestone": "M2_STORAGE_GENERATION",
+      "action": "none",
+      "package": "stdlib/fs+ai",
+      "reason": "config0.1.2 docs confirm Env only; application owns FS persistence using stdlib"
+    },
+    {
+      "milestone": "M3_GUIDED_PLAY",
+      "action": "depend",
+      "package": "sunholo/social_dynamics+sunholo/decisions",
+      "reason": "Reuse unchanged captain host and strict decision decoding"
+    }
+  ],
+  "velocity": {
+    "target_loc_per_day": 550,
+    "estimated_total_loc": 1100,
+    "estimated_days": 2
+  },
+  "github_issues": []
+}

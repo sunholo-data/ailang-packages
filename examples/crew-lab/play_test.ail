@@ -1,0 +1,44 @@
+module sunholo/crew_lab/play_test
+import std/result (Result, Ok, Err)
+import std/option (Some, None)
+import std/list (head, length)
+import std/string (contains)
+import std/json (encode)
+import pkg/sunholo/content_library/library (starterBundle)
+import pkg/sunholo/social_dynamics/model (Offered)
+import ./session (Session, HostError, start, offer, ask, input)
+import ./reactions (decodePolicy, defaultPolicyBody, signature)
+import ./play (selectReply)
+
+pure func pending() -> Result[Session, HostError] = match start("{\"command\":\"start\",\"policy\":\"consent\"}") {
+  Err(e) => Err(e),
+  Ok(s) => match offer(s.session, "scientist", "observations", "science") {
+    Err(e) => Err(e),
+    Ok(o) => match ask(o.session, "scientist", "science", "r1") {
+      Err(e) => Err(e),
+      Ok(a) => Ok(a.session)
+    }
+  }
+}
+
+test "automatic reply records two rolls and full bundle without starting offered work" {
+  match (pending(), decodePolicy(defaultPolicyBody())) {
+    (Ok(s), Ok(p)) => match head(s.pending) {
+      None => false,
+      Some(r) => match starterBundle(signature(r, defaultPolicyBody(), "z-ai/glm-5.3-flash"), r.legal) {
+        Err(_) => false,
+        Ok(b) => match (selectReply(r, p, b, 42), selectReply(r, p, b, 42)) {
+          (Ok(a), Ok(c)) => a.command == c.command && a.seed == c.seed && a.label == c.label && a.text == c.text && a.seed != 42 && contains(encode(a.metadata), "response_roll") && contains(encode(a.metadata), "text_roll") && contains(encode(a.metadata), "bundle") && contains(encode(a.metadata), "weights") && (match input(s, a.command) {
+            Err(_) => false,
+            Ok(o) => length(o.session.pending) == 0 && (match head(o.session.state.tasks) {
+              None => false,
+              Some(t) => t.status == Offered
+            })
+          }),
+          _ => false
+        }
+      }
+    },
+    _ => false
+  }
+}

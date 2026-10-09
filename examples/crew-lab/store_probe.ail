@@ -1,0 +1,53 @@
+module sunholo/crew_lab/store_probe
+import std/result (Ok, Err)
+import std/json (jo, kv, js, jint, jb, encode)
+import std/io (println, exit)
+import ./store (loadPolicy, resolve, openRun, appendRun)
+import pkg/sunholo/content_library/library (encodeBundle, cacheKey)
+import ./reactions (prompt)
+
+export func promptProbe(signature: string) -> () ! {IO} =
+  println(prompt(signature, ["accept", "decline", "concern", "defer"]))
+
+export func cacheProbe(args: { home: string, signature: string, mode: string, remaining: int }) -> () ! {IO, FS, AI @limit=1} =
+  {
+    let found = resolve(args.home, args.signature, ["accept", "decline", "concern", "defer"], "z-ai/glm-5.3-flash", args.mode, args.remaining)
+    let body = match found.outcome {
+      Ok(b) => encodeBundle(b),
+      Err(e) => e
+    }
+    println(encode(jo([kv("ok", jb(match found.outcome {
+      Ok(_) => true,
+      Err(_) => false
+    })), kv("source", js(found.source)), kv("calls", jint(found.calls)), kv("input_tokens", jint(found.inputTokens)), kv("output_tokens", jint(found.outputTokens)), kv("usage_known", jb(found.usageKnown)), kv("key", js(cacheKey(args.signature))), kv("body", js(body))])))
+  }
+
+export func policyProbe(home: string) -> () ! {IO, FS} = match loadPolicy(home) {
+  Err(e) => {
+    println("ERROR: ${e}")
+    exit(1)
+  },
+  Ok(p) => println(p.body)
+}
+
+export func openProbe(home: string) -> () ! {IO, FS} = {
+  let header = encode(jo([kv("version", jint(1)), kv("seq", jint(0)), kv("payload", jo([kv("kind", js("start"))]))]))
+  match openRun(home, "probe-7", header) {
+    Err(e) => {
+      println("ERROR: ${e}")
+      exit(1)
+    },
+    Ok(p) => println(p)
+  }
+}
+
+export func appendProbe(path: string) -> () ! {IO, FS} = {
+  let record = encode(jo([kv("version", jint(1)), kv("seq", jint(1)), kv("payload", jo([kv("kind", js("action"))]))]))
+  match appendRun(path, record) {
+    Err(e) => {
+      println("ERROR: ${e}")
+      exit(1)
+    },
+    Ok(_) => println("committed")
+  }
+}
