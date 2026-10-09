@@ -113,7 +113,7 @@ test "inferred radii: the Sun, alpha Cen A/B within 3 percent; Aldebaran, Arctur
 
 -- M dwarfs: Barnard's Star (Ribas et al. 2018, Nature 563, 365: 0.178 R_sun, 3278 K;
 -- V 9.511; Gaia DR3 546.98 mas): +0.3 %. TRAPPIST-1 (Agol et al. 2021, PSJ 2, 1: 0.1192 R_sun,
--- 2566 K; V 18.80, Costa et al. 2006; Gaia DR3 80.21 mas): +9 %. Proxima Cen (Kervella et al.
+-- 2566 K; V 18.80, Costa et al. 2006; Gaia DR3 80.21 mas): about +10 %. Proxima Cen (Kervella et al.
 -- 2017: 0.1542 R_sun; Segransan et al. 2003: 3042 K; V 11.13; Gaia DR3 768.07 mas): -31 %,
 -- the M-dwarf limit: BC_V falls 0.5 mag per 100 K there, so the published 2,900-3,100 K
 -- spread of Proxima's Teff alone moves R by tens of percent.
@@ -121,7 +121,7 @@ pure func checkMDwarfs() -> bool =
   within(radiusFromV(9.511, 1000.0 / 546.98, 3278.0), 0.178, 0.02)
   && within(radiusFromV(18.80, 1000.0 / 80.21, 2566.0), 0.1192, 0.12)
   && within(radiusFromV(11.13, 1000.0 / 768.07, 3042.0), 0.1542, 0.35)
-  && radiusFromV(11.13, 1000.0 / 768.07, 3042.0) < 0.1542
+  && radiusFromV(11.13, 1000.0 / 768.07, 3042.0) < 0.1542 && radiusFromV(11.13, 1000.0 / 768.07, 3042.0) > 0.1
 test "inferred radii: Barnard's Star within 2 percent, TRAPPIST-1 12 percent, Proxima 35 percent (the M-dwarf limit)" { checkMDwarfs() }
 
 -- Mutants the checks above kill (each emulated through the public functions): M_bol,sun
