@@ -1,0 +1,22 @@
+module sunholo/crew_lab/store_test
+import std/json (encode, jo, kv, jint, js)
+import ./store (validRecord, validJournal, validOwner)
+
+pure func envelope(sequence: int) -> string =
+  encode(jo([kv("version", jint(1)), kv("seq", jint(sequence)), kv("payload", jo([]))]))
+
+test "journal envelope requires exact fields and consecutive sequence" {
+  validRecord(envelope(0), 0) && not validRecord("{\"version\":1,\"seq\":2,\"payload\":{}}", 1) && not validRecord("{\"version\":2,\"seq\":0,\"payload\":{}}", 0) && not validRecord("{\"version\":1,\"seq\":0,\"seq\":0,\"payload\":{}}", 0)
+}
+
+test "journal payload must be an object with one complete envelope" {
+  not validRecord("{\"version\":1,\"seq\":0,\"payload\":[]}", 0) && not validRecord("{\"version\":1,\"seq\":0,\"payload\":{}}{}", 0) && not validRecord("{\"version\":1,\"seq\":0,\"payload\":{},\"extra\":true}", 0) && not validRecord("{\"version\":1,\"seq\":0.5,\"payload\":{}}", 0)
+}
+
+test "journal prefix and final newline are checked before replacement" {
+  validJournal("${envelope(0)}\n${envelope(1)}\n", 2) && not validJournal("{\"version\":1,\"seq\":0,\"payload\":{}}", 1) && not validJournal("{\"version\":1,\"seq\":0,\"payload\":{}}\n\n", 1) && not validJournal("{\"version\":1,\"seq\":0,\"payload\":{}}\n{\"version\":1,\"seq\":3,\"payload\":{}}\n", 2)
+}
+
+test "run owners cannot escape their exclusive directory" {
+  validOwner("501-7") && not validOwner("../501-7") && not validOwner("a/b") && not validOwner("") && not validOwner("a\n")
+}

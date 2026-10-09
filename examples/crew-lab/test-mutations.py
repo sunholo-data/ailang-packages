@@ -28,6 +28,7 @@ for name, filename, edits in mutants:
         package = workspace / "examples/crew-lab"
         shutil.copytree(root / "examples/crew-lab", package)
         shutil.copytree(root / "packages/social-dynamics", workspace / "packages/social-dynamics")
+        shutil.copytree(root / "packages/content-library", workspace / "packages/content-library")
         source = package / filename
         original = source.read_text()
         changed = original

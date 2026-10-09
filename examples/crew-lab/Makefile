@@ -4,7 +4,7 @@ AILANG ?= ailang
 INPUT ?= $(EX)/recordings/agreed-science.ndjson
 ENGINE ?= interpreter
 OUT := $(ROOT)/.ailang/state/crew-lab
-.PHONY: experiment deps tests scenarios parity replay cli-test quality validate fixtures
+.PHONY: experiment deps tests library-tests store-test play-test scenarios parity replay cli-test quality validate fixtures
 experiment:
 	@mkdir -p "$(OUT)"
 	@AILANG="$(AILANG)" "$(EX)/run.sh" "$(ENGINE)" "$(INPUT)" > "$(OUT)/latest.ndjson"
@@ -20,6 +20,8 @@ tests:
 	@cd "$(EX)" && "$(AILANG)" test --package . --bytecode --strict-bytecode
 	@cd "$(EX)" && "$(AILANG)" test scenario.ail
 	@cd "$(EX)" && "$(AILANG)" test --allow-skips session.ail
+	@cd "$(EX)" && "$(AILANG)" test --allow-skips reactions.ail
+	@cd "$(EX)" && "$(AILANG)" test --allow-skips play_flow.ail
 
 scenarios:
 	@mkdir -p "$(OUT)"
@@ -35,9 +37,19 @@ replay:
 	@printf 'Five saved recordings replay identically\n'
 cli-test: scenarios
 	@AILANG="$(AILANG)" "$(EX)/test-cli.sh"
+library-tests:
+	@"$(AILANG)" check --package "$(ROOT)/packages/content-library"
+	@cd "$(ROOT)/packages/content-library" && "$(AILANG)" test --package .
+	@cd "$(ROOT)/packages/content-library" && "$(AILANG)" test --package . --bytecode --strict-bytecode
+	@cd "$(ROOT)/packages/content-library" && "$(AILANG)" test --allow-skips library.ail
+	@cd "$(ROOT)/packages/content-library" && "$(AILANG)" pkg quality --strict .
+store-test:
+	@AILANG="$(AILANG)" "$(EX)/test-store.sh"
+play-test:
+	@AILANG="$(AILANG)" "$(EX)/test-play.sh"
 quality:
 	@cd "$(EX)" && "$(AILANG)" pkg quality --strict .
-validate: deps tests scenarios replay parity cli-test quality
+validate: deps library-tests tests scenarios replay parity cli-test store-test play-test quality
 .PHONY: mutations
 mutations:
 	@AILANG="$(AILANG)" python3 "$(EX)/test-mutations.py"

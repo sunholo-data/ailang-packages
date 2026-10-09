@@ -23,7 +23,8 @@ crew-view requires manual crew replies and request IDs. Mark approved numbered
 captain choices, automatic responses shaped by OCEAN, and a content library that
 AI expands on a miss then reuses probabilistically. Library grows across runs;
 relationships, promises and discovered facts belong to one run. Mark chose the
-existing laptop AI setup and specifically the newest Gemini Lite model.
+existing laptop AI setup. After Google rejected its configured key, Mark selected
+OpenRouter with GLM5.3Flash (z-ai/glm-5.3-flash).
 
 ## Design
 
@@ -61,8 +62,8 @@ mechanic. Start policy chosen through numbered consent/orders options; integer
 seed is explicit. GUI inputs bounded10000 lines/65536chars, EOF exits.
 
 M3 adds FS storage and AI text generation, outside the pure reusable package.
-Installed crew-play uses Gemini3.5Flash-Lite (API gemini-3.5-flash-lite; AILANG alias
-may use hyphens), --ai-no-adc and the existing GOOGLE_API_KEY. crew-play-offline
+Installed crew-play uses GLM5.3Flash through OpenRouter (z-ai/glm-5.3-flash),
+with the existing OPENROUTER_API_KEY. crew-play-offline
 binds stub but never calls it. No new secrets, provider routing or core edits.
 Local home defaults ~/.ailang/crew-lab; --home overrides for tests/separate libraries.
 First use copies default JSON config under a per-config directory lock, rechecking
@@ -137,10 +138,12 @@ recipes. std/ai.step docs/source show Result/token usage and per-call same-provi
 models. std/fs docs show Result IO, mkdirResult and renameFileResult. std/crypto
 sha256Hex is pure/documented. Installed manifest source supports [bin].run_flags.
 Compile/native probes discharge these premises before landing.
-Google model list at https://ai.google.dev/gemini-api/docs/models and
-https://ai.google.dev/gemini-api/docs/models/gemini-3.5-flash-lite confirms newest
-text Lite endpoint. Actual account availability remains PENDING bounded live smoke.
-GOOGLE_API_KEY presence verified, value not printed. No scientific calibration claim.
+OpenRouter model page https://openrouter.ai/z-ai/glm-5.3-flash confirms the selected
+model ID. Attended smoke passed: one generated bundle (1058input/2692output tokens),
+then identical context reused the full selection and seed from cache with zero calls.
+OPENROUTER_API_KEY presence verified, value not printed. Google key was rejected
+as API_KEY_INVALID; the user explicitly selected OpenRouter instead. No scientific
+calibration claim.
 
 Registry searches response/cache: no content selector/cache package; http_helpers
 is HTTP plumbing. config0.1.2 docs: environment loading, not JSON content policies.
@@ -163,7 +166,7 @@ v0.4.0 decisions use-case-map expressly excludes free text. This feature is dist
 | Exact host recording replay independent of cache/provider | journal NDJSON extraction + parity |
 | Existing mechanics unchanged | crew/social validate + mutations |
 | Formatting, budgets, quality, proof limits | fmt/strict quality/verify report |
-| Latest Lite available, second request cached | attended maximum2-call live smoke |
+| Selected GLM Flash available, second request cached | attended maximum2-call live smoke |
 | Independent evaluation and CI green | evaluator report + PR checks before merge |
 
 ## Axiom compliance

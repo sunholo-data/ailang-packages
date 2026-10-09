@@ -1,0 +1,233 @@
+module sunholo/crew_lab/play
+import std/io (readLine, println, exit)
+import std/env (getArgs, getEnvOr, getPid)
+import std/result (Result, Ok, Err)
+import std/option (Some, None)
+import std/list (head, filter, map)
+import std/string (length as stringLength)
+import std/json (Json, encode, decode, jo, ja, kv, js, jint, jnum, jb)
+import pkg/sunholo/content_library/library (Bundle, encodeBundle, starterBundle, nextRoll, pickLabel, pickVariant)
+import pkg/sunholo/social_dynamics/model (Offered)
+import ./session (Request, start)
+import ./reactions (Policy, weights, signature, fixtureBody)
+import ./store (Fetch, loadPolicy, resolve, openRun, appendRun)
+import ./play_flow (PlayState, Stage, Intent, begin, seedNumber, parseArgs, menu, route, stage, publish, renderStatus)
+
+type Run = { ui: PlayState, home: string, path: string, policy: Policy, policyBody: string, mode: string, remaining: int, lines: int }
+
+type Applied = { run: Run, failed: bool, message: string }
+
+export type Reply = { command: string, seed: int, label: string, text: string, metadata: Json }
+
+pure func command(name: string, fields: [{ key: string, value: Json }]) -> string =
+  encode(jo([kv("command", js(name))] ++ fields))
+
+pure func envelope(seq: int, payload: Json) -> string =
+  encode(jo([kv("version", jint(1)), kv("seq", jint(seq)), kv("payload", payload)]))
+
+pure func model() -> string = "z-ai/glm-5.3-flash"
+
+export pure func selectReply(r: Request, policy: Policy, bundle: Bundle, seed: int) -> Result[Reply, string]
+ensures { match result {
+  Ok(p) => p.seed >= 1 && p.seed <= 2147483646 && stringLength(p.command) > 0,
+  Err(_) => true
+} } = match (weights(policy, r), nextRoll(seed)) {
+  (Ok(ws), Ok(responseRoll)) => match (pickLabel(ws, responseRoll.roll), nextRoll(responseRoll.seed)) {
+    (Ok(label), Ok(textRoll)) => match pickVariant(bundle, label, textRoll.roll) {
+      Err(e) => Err(e),
+      Ok(v) => match decode(encodeBundle(bundle)) {
+        Err(e) => Err(e),
+        Ok(encoded) => Ok({ command: command("answer", [kv("request", js(r.id)), kv("body", js(fixtureBody(r, label))), kv("roll", jnum(responseRoll.roll))]), seed: textRoll.seed, label: label, text: v.text, metadata: jo([kv("weights", ja(map(\w. jo([kv("label", js(w.label)), kv("weight", jint(w.weight))]), ws))), kv("response_roll", jnum(responseRoll.roll)), kv("text_roll", jnum(textRoll.roll)), kv("selected_label", js(label)), kv("variant_id", js(v.id)), kv("bundle", encoded), kv("dialogue", js(v.text))]) })
+      }
+    },
+    (Err(e), _) => Err(e),
+    (_, Err(e)) => Err(e)
+  },
+  (Err(e), _) => Err(e),
+  (_, Err(e)) => Err(e)
+}
+
+pure func usage(fetch: Fetch) -> Json =
+  jo([kv("source", js(fetch.source)), kv("calls", jint(fetch.calls)), kv("input_tokens", jint(fetch.inputTokens)), kv("output_tokens", jint(fetch.outputTokens)), kv("usage_known", jb(fetch.usageKnown))])
+
+func commit(r: Run, c: string, seed: int, phase: string, target: string, nextId: int, metadata: Json, calls: int) -> Result[Applied, string] ! {FS} =
+  match stage(r.ui, c, seed, phase, target, nextId) {
+    Err(e) => Err(e),
+    Ok(candidate) => {
+      let payload = jo([kv("kind", js("host")), kv("host_input", js(c)), kv("host_output", js(candidate.trace)), kv("seed_before", jint(r.ui.seed)), kv("seed_after", jint(candidate.state.seed)), kv("metadata", metadata)])
+      match appendRun(r.path, envelope(candidate.state.seq, payload)) {
+        Err(e) => Err("Journal failed; prior Session and seed retained: ${e}"),
+        Ok(_) => {
+          let publication = publish(r.ui, candidate, true)
+          Ok({ run: { r | ui: publication.state, remaining: r.remaining - calls }, failed: candidate.failed, message: candidate.error })
+        }
+      }
+    }
+  }
+
+func noteFailure(r: Run, fetch: Fetch, error: string) -> Result[Run, string] ! {FS} =
+  if r.ui.seq >= 10000 then Err("Journal command limit") else match appendRun(r.path, envelope(r.ui.seq + 1, jo([kv("kind", js("library_error")), kv("error", js(error)), kv("usage", usage(fetch)), kv("seed", jint(r.ui.seed))]))) {
+    Err(e) => Err("Journal failed; stopping after attempted provider call: ${e}"),
+    Ok(_) => Ok({ r | ui: { r.ui | seq: r.ui.seq + 1, phase: "response" }, remaining: r.remaining - fetch.calls })
+  }
+
+func respond(r: Run, explicitAuthored: bool) -> Result[Applied, string] ! {FS, AI} =
+  match head(filter(\q. q.id == r.ui.target, r.ui.session.pending)) {
+    None => Err("No pending response"),
+    Some(request) => {
+      let sig = signature(request, r.policyBody, model())
+      let fetch = if explicitAuthored then { outcome: starterBundle(sig, request.legal), source: "explicit-authored", calls: 0, inputTokens: 0, outputTokens: 0, usageKnown: true } else resolve(r.home, sig, request.legal, model(), r.mode, r.remaining)
+      match fetch.outcome {
+        Err(e) => match noteFailure(r, fetch, e) {
+          Err(j) => Err(j),
+          Ok(n) => Ok({ run: n, failed: false, message: "Library unavailable: ${e}. Request remains pending." })
+        },
+        Ok(bundle) => match selectReply(request, r.policy, bundle, r.ui.seed) {
+          Err(e) => match noteFailure(r, fetch, e) {
+            Err(j) => Err(j),
+            Ok(n) => Ok({ run: n, failed: false, message: "Response unavailable: ${e}. Request remains pending." })
+          },
+          Ok(reply) => {
+            let offered = anyOffered(r.ui, request.task)
+            match commit(r, reply.command, reply.seed, if offered then "start" else "main", if offered then request.task else "", r.ui.nextId, jo([kv("selection", reply.metadata), kv("usage", usage(fetch))]), fetch.calls) {
+              Err(e) => Err(e),
+              Ok(applied) => Ok({ applied | message: if applied.failed then applied.message else "${request.actor}: ${reply.text}\nResponse: ${reply.label} (${fetch.source}; authored policy weights)" })
+            }
+          }
+        }
+      }
+    }
+  }
+
+pure func anyOffered(s: PlayState, task: string) -> bool = match head(filter(\t. t.id == task, s.session.state.tasks)) {
+  Some(t) => t.status == Offered,
+  None => false
+}
+
+func askProject(r: Run, task: string) -> Result[Applied, string] ! {FS, AI} =
+  match head(filter(\b. b.task == task, r.ui.session.bindings)) {
+    None => Err("Unknown project"),
+    Some(b) => {
+      let id = "reply-${r.ui.nextId}"
+      match commit(r, command("ask", [kv("actor", js(b.worker)), kv("task", js(task)), kv("id", js(id))]), r.ui.seed, "response", id, r.ui.nextId + 1, jo([]), 0) {
+        Err(e) => Err(e),
+        Ok(a) => if a.failed then Ok(a) else respond(a.run, false)
+      }
+    }
+  }
+
+func act(r: Run, i: Intent) -> Result[Applied, string] ! {FS, AI} = if i.kind == "offer" then {
+  let id = "project-${r.ui.nextId}"
+  match commit(r, command("offer", [kv("worker", js(i.worker)), kv("recipe", js(i.recipe)), kv("id", js(id))]), r.ui.seed, "main", "", r.ui.nextId + 1, jo([]), 0) {
+    Err(e) => Err(e),
+    Ok(a) => if a.failed then Ok(a) else askProject(a.run, id)
+  }
+} else if i.kind == "ask" then askProject(r, i.target) else if i.kind == "retry" || i.kind == "authored" then respond(r, i.kind == "authored") else if i.kind == "start" then commit(r, command("start_task", [kv("task", js(i.target))]), r.ui.seed, "main", "", r.ui.nextId, jo([]), 0) else if i.kind == "cancel" then commit(r, command("cancel_request", [kv("id", js(i.target))]), r.ui.seed, "main", "", r.ui.nextId, jo([]), 0) else if i.kind == "grant" || i.kind == "deny" then commit(r, command("resolve_relief", [kv("id", js(i.target)), kv("release", jb(i.kind == "grant"))]), r.ui.seed, "main", "", r.ui.nextId, jo([]), 0) else if i.kind == "advance" then commit(r, command("advance", [kv("tick", jint(r.ui.session.state.tick + 1)), kv("budget", jint(64))]), r.ui.seed, "main", "", r.ui.nextId, jo([]), 0) else if i.kind == "continue" then match r.ui.session.state.continuation {
+  Some(t) => commit(r, command("advance", [kv("tick", jint(t.target)), kv("budget", jint(64))]), r.ui.seed, "main", "", r.ui.nextId, jo([]), 0),
+  None => Err("No pending advance")
+} else if i.kind == "abort" then commit(r, command("abort", []), r.ui.seed, "main", "", r.ui.nextId, jo([]), 0) else if i.kind == "relief_choice" then Ok({ run: { r | ui: { r.ui | phase: "relief", target: i.target } }, failed: false, message: "" }) else if i.kind == "back" then Ok({ run: { r | ui: { r.ui | phase: "main", target: "" } }, failed: false, message: "" }) else if i.kind == "working" || i.kind == "offered" || i.kind == "reliefs" then Ok({ run: { r | ui: { r.ui | phase: i.kind, target: "" } }, failed: false, message: "" }) else Err("Unknown captain action")
+
+func status(r: Run) -> () ! {IO} = println(renderStatus(r.ui, r.remaining))
+
+func finish(r: Run) -> () ! {IO, FS} =
+  match appendRun(r.path, envelope(r.ui.seq + 1, jo([kv("kind", js("quit")), kv("seed", jint(r.ui.seed))]))) {
+    Err(e) => {
+      println("Journal failed: ${e}")
+      exit(1)
+    },
+    Ok(_) => println("Run journal: ${r.path}")
+  }
+
+func loop(r: Run) -> () ! {IO, FS, AI} = {
+  status(r)
+  println(menu(r.ui))
+  let line = readLine()
+  if line == "" then finish(r) else if r.lines >= 10000 || stringLength(line) > 65536 then {
+    println("Input limit reached; previous committed journal retained")
+    exit(1)
+  } else match route(r.ui, line) {
+    Err(e) => {
+      println(e)
+      loop({ r | lines: r.lines + 1 })
+    },
+    Ok(i) => if i.kind == "quit" then finish(r) else if i.kind == "status" then {
+      loop({ r | lines: r.lines + 1 })
+    } else match act({ r | lines: r.lines + 1 }, i) {
+      Err(e) => {
+        println(e)
+        exit(1)
+      },
+      Ok(a) => {
+        if a.message != "" then println(a.message) else ()
+        if a.failed then {
+          println("Action failed; prior successful boundaries are in the journal")
+          exit(1)
+        } else loop(a.run)
+      }
+    }
+  }
+}
+
+func launch(mode: string) -> () ! {IO, Env, FS, AI} = {
+  let home = getEnvOr("HOME", "")
+  match parseArgs(getArgs(), "${home}/.ailang/crew-lab") {
+    Err(e) => {
+      println(e)
+      exit(1)
+    },
+    Ok(options) => {
+      println("Captain policy: 1. Personal consent  2. Orders with cooperation floor")
+      let policyChoice = readLine()
+      let seed = if options.hasSeed then Ok(options.seed) else {
+        println("Experiment seed (1..2147483646):")
+        seedNumber(readLine())
+      }
+      match seed {
+        Err(e) => {
+          println(e)
+          exit(1)
+        },
+        Ok(seedValue) => match (begin(policyChoice, seedValue), loadPolicy(options.home)) {
+          (Err(e), _) => {
+            println(e)
+            exit(1)
+          },
+          (_, Err(e)) => {
+            println(e)
+            exit(1)
+          },
+          (Ok(ui), Ok(config)) => {
+            let c = command("start", [kv("policy", js(ui.session.policy))])
+            match start(c) {
+              Err(_) => {
+                println("Startup failed")
+                exit(1)
+              },
+              Ok(initial) => {
+                let header = envelope(0, jo([kv("kind", js("start")), kv("host_input", js(c)), kv("host_output", js(initial.trace)), kv("seed", jint(seedValue)), kv("policy_body", js(config.body)), kv("model", js(model())), kv("mode", js(mode))]))
+                match openRun(options.home, "${getPid()}-${seedValue}", header) {
+                  Err(e) => {
+                    println("Run ownership/journal failed: ${e}")
+                    exit(1)
+                  },
+                  Ok(path) => {
+                    println("Crew replies use experimental personality weights. Dialogue source is labelled.")
+                    loop({ ui: ui, home: options.home, path: path, policy: config.policy, policyBody: config.body, mode: mode, remaining: config.policy.callLimit, lines: if options.hasSeed then 1 else 2 })
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
+-- CLI contracts state the unit-return interface only; installed integration tests
+-- validate publication, usage and dialogue behaviour across these effects.
+export func main() -> () ! {IO, Env, FS, AI}
+ensures { result == () } = launch("live")
+
+export func offline() -> () ! {IO, Env, FS, AI}
+ensures { result == () } = launch("offline")

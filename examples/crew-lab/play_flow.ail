@@ -1,0 +1,148 @@
+module sunholo/crew_lab/play_flow
+import std/result (Result, Ok, Err)
+import std/option (Some, None)
+import std/string (trim, stringToInt, length as stringLength, join, repeat)
+import std/list (filter, nth, map, length, head)
+import std/json (encode, jo, kv, js)
+import pkg/sunholo/social_dynamics/model (Offered, Working, Task, Actor)
+import ./session (Session, start, input, encodeHostError)
+
+export type PlayState = { session: Session, seed: int, nextId: int, seq: int, phase: string, target: string } deriving (Eq)
+
+export type Stage = { state: PlayState, command: string, trace: string, failed: bool, error: string } deriving (Eq)
+
+export type Publication = { state: PlayState, accepted: bool } deriving (Eq)
+
+export type Intent = { kind: string, worker: string, recipe: string, target: string } deriving (Eq)
+
+export type Options = { home: string, seed: int, hasSeed: bool } deriving (Eq)
+
+export pure func seedNumber(line: string) -> Result[int, string]
+ensures { match result {
+  Ok(n) => n >= 1 && n <= 2147483646,
+  Err(_) => true
+} } = if stringLength(line) > 65536 then Err("Input exceeds 65536 characters") else match stringToInt(trim(line)) {
+  Some(n) => if n >= 1 && n <= 2147483646 then Ok(n) else Err("Seed must be 1..2147483646"),
+  None => Err("Seed must be an integer 1..2147483646")
+}
+
+export pure func begin(policyChoice: string, seed: int) -> Result[PlayState, string]
+ensures { match result {
+  Ok(s) => s.seed == seed && s.seq == 0 && s.nextId == 1,
+  Err(_) => true
+} } =
+  if seed < 1 || seed > 2147483646 then Err("Invalid seed") else if policyChoice != "1" && policyChoice != "2" then Err("Choose 1 consent or 2 orders") else {
+    let policy = if policyChoice == "1" then "consent" else "orders"
+    match start("{\"command\":\"start\",\"policy\":\"${policy}\"}") {
+      Err(e) => Err(encodeHostError(e)),
+      Ok(o) => Ok({ session: o.session, seed: seed, nextId: 1, seq: 0, phase: "main", target: "" })
+    }
+  }
+
+pure func argsLoop(xs: [string], o: Options, seenHome: bool) -> Result[Options, string] = match xs {
+  [] => Ok(o),
+  "--home" :: path :: rest => if seenHome || stringLength(path) == 0 || stringLength(path) > 4096 then Err("Invalid or repeated --home") else argsLoop(rest, { o | home: path }, true),
+  "--seed" :: value :: rest => if o.hasSeed then Err("Repeated --seed") else match seedNumber(value) {
+    Err(e) => Err(e),
+    Ok(n) => argsLoop(rest, { o | seed: n, hasSeed: true }, seenHome)
+  },
+  _ => Err("Usage: crew-play [--home PATH] [--seed INTEGER]")
+}
+
+export pure func parseArgs(xs: [string], defaultHome: string) -> Result[Options, string]
+ensures { match result {
+  Ok(o) => stringLength(o.home) > 0 && (not o.hasSeed || o.seed >= 1 && o.seed <= 2147483646),
+  Err(_) => true
+} } =
+  if stringLength(defaultHome) == 0 then Err("Missing home directory") else argsLoop(xs, { home: defaultHome, seed: 0, hasSeed: false }, false)
+
+pure func intent(kind: string, target: string) -> Intent = { kind: kind, worker: "", recipe: "", target: target }
+
+pure func project(worker: string, recipe: string) -> Intent =
+  { kind: "offer", worker: worker, recipe: recipe, target: "" }
+
+pure func tasks(s: PlayState, working: bool) -> [Task] =
+  filter(\t. t.status == (if working then Working else Offered), s.session.state.tasks)
+
+pure func taskChoice(s: PlayState, choice: string, working: bool) -> Result[Intent, string] =
+  match stringToInt(choice) {
+    Some(i) => match nth(tasks(s, working), i - 1) {
+      Some(t) => Ok(intent("ask", t.id)),
+      None => Err("Choose a listed project")
+    },
+    None => Err("Choose a project number")
+  }
+
+pure func reliefChoice(s: PlayState, choice: string) -> Result[Intent, string] = match stringToInt(choice) {
+  Some(i) => match nth(filter(\r. not r.resolved, s.session.state.reliefs), i - 1) {
+    Some(r) => Ok(intent("relief_choice", r.id)),
+    None => Err("Choose a listed relief request")
+  },
+  None => Err("Choose a request number")
+}
+
+export pure func route(s: PlayState, line: string) -> Result[Intent, string]
+ensures { match result {
+  Ok(i) => stringLength(i.kind) > 0,
+  Err(_) => true
+} } =
+  if stringLength(line) > 65536 then Err("Input exceeds 65536 characters") else let c = trim(line) in
+  if c == "0" then Ok(intent(if s.phase == "main" || s.phase == "response" then "quit" else "back", "")) else if s.phase == "start" then if c == "1" then Ok(intent("start", s.target)) else if c == "2" then Ok(intent("back", "")) else Err("Choose 1 Start or 2 Leave offered") else if s.phase == "response" then if c == "1" then Ok(intent("retry", s.target)) else if c == "2" then Ok(intent("authored", s.target)) else if c == "3" then Ok(intent("cancel", s.target)) else Err("Choose Retry, authored continuation, cancel or quit") else if s.phase == "working" then taskChoice(s, c, true) else if s.phase == "offered" then taskChoice(s, c, false) else if s.phase == "reliefs" then reliefChoice(s, c) else if s.phase == "relief" then if c == "1" then Ok(intent("grant", s.target)) else if c == "2" then Ok(intent("deny", s.target)) else Err("Choose 1 Grant or 2 Deny") else if s.phase != "main" then Err("Invalid menu phase") else match s.session.state.continuation {
+    Some(token) => if c == "1" then Ok(intent("continue", show(token.target))) else if c == "2" then Ok(intent("abort", "")) else if c == "9" then Ok(intent("status", "")) else Err("Finish or abort the pending advance first"),
+    None => if c == "1" then Ok(project("scientist", "observations")) else if c == "2" then Ok(project("engineer", "maintenance")) else if c == "3" then Ok(project("scientist", "rest_scientist")) else if c == "4" then Ok(project("engineer", "rest_engineer")) else if c == "5" then Ok(intent("advance", "")) else if c == "6" then Ok(intent("working", "")) else if c == "7" then Ok(intent("offered", "")) else if c == "8" then Ok(intent("reliefs", "")) else if c == "9" then Ok(intent("status", "")) else Err("Choose a listed captain action")
+  }
+
+pure func numbered(xs: [string], i: int) -> [string] = match xs {
+  [] => [],
+  x :: rest => "${i}. ${x}" :: numbered(rest, i + 1)
+}
+
+export pure func menu(s: PlayState) -> string
+ensures { stringLength(result) > 0 } =
+  if s.phase == "start" then "1. Start ${s.target}\n2. Leave offered" else if s.phase == "response" then "Crew response unavailable.\n1. Retry library\n2. Explicit authored continuation\n3. Cancel this response\n0. Quit" else if s.phase == "relief" then "1. Grant relief ${s.target}\n2. Deny relief\n0. Back" else if s.phase == "working" || s.phase == "offered" then join("\n", numbered(map(\t. "${t.id}: ${t.recipe}", tasks(s, s.phase == "working")), 1) ++ ["0. Back"]) else if s.phase == "reliefs" then join("\n", numbered(map(\r. "${r.author}: ${r.id}", filter(\r. not r.resolved, s.session.state.reliefs)), 1) ++ ["0. Back"]) else match s.session.state.continuation {
+    Some(_) => "1. Continue pending advance\n2. Abort pending advance\n9. Status\n0. Quit",
+    None => "1. Offer science\n2. Offer maintenance\n3. Scientist rest\n4. Engineer rest\n5. Advance one tick\n6. Check in with working crew\n7. Review offered projects\n8. Resolve relief\n9. Status\n0. Quit"
+  }
+
+export pure func stage(s: PlayState, command: string, nextSeed: int, phase: string, target: string, nextId: int) -> Result[Stage, string]
+ensures { match result {
+  Ok(o) => o.state.seq == s.seq + 1 && (not o.failed || o.state.seed == s.seed),
+  Err(_) => true
+} } =
+  if s.seq >= 10000 || nextId < 1 || nextId > 10000 || nextSeed < 1 || nextSeed > 2147483646 then Err("Play retention/seed limit") else match input(s.session, command) {
+    Err(e) => let error = encodeHostError(e) in
+    Ok({ state: { s | seq: s.seq + 1 }, command: command, trace: "{\"error\":${error}}", failed: true, error: error }),
+    Ok(o) => Ok({ state: { s | session: o.session, seq: s.seq + 1, seed: if o.failed then s.seed else nextSeed, nextId: if o.failed then s.nextId else nextId, phase: if o.failed then s.phase else phase, target: if o.failed then s.target else target }, command: command, trace: o.trace, failed: o.failed, error: if o.failed then "Blocked advance; earlier boundaries retained" else "" })
+  }
+
+export pure func publish(previous: PlayState, candidate: Stage, persisted: bool) -> Publication
+ensures { result.accepted == persisted && (if persisted then result.state == candidate.state else result.state == previous) } =
+  { state: if persisted then candidate.state else previous, accepted: persisted }
+
+test "numbered policy has no implicit moral default" {
+  match begin("", 42) {
+    Err(_) => true,
+    _ => false
+  }
+}
+
+pure func gauge(n: int) -> string = {
+  let bounded = if n < 0 then 0 else if n > 100 then 100 else n
+  let filled = bounded / 10
+  "[${repeat("#", filled)}${repeat("-", 10 - filled)}] ${show(n)}"
+}
+
+pure func crewLine(a: Actor) -> string = {
+  let indicators = join(" | ", map(\v. "${v.id} ${gauge(v.value)}", a.indicators))
+  "  ${a.id}: ${indicators}"
+}
+
+export pure func renderStatus(s: PlayState, remaining: int) -> string
+ensures { stringLength(result) > 0 } = {
+  let state = s.session.state
+  let crew = join("\n", map(crewLine, state.actors))
+  let resources = join("; ", map(\r. "${r.id}: available ${show(r.available)}, reserved ${show(r.reserved)}, consumed ${show(r.consumed)}", state.resources))
+  let relations = join("\n", map(\r. "${r.from} -> ${r.to} ${r.dimension} ${gauge(r.value)}", state.relationships))
+  let projects = if state.tasks == [] then "No projects" else join("; ", map(\t. "${t.id} (${t.recipe}): ${show(t.status)}", state.tasks))
+  "Tick ${show(state.tick)}; policy ${s.session.policy}; AI attempts remaining ${show(remaining)}\n${crew}\n${relations}\n${resources}\n${projects}"
+}

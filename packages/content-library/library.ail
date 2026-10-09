@@ -1,0 +1,183 @@
+module sunholo/content_library/library
+import std/result (Result, Ok, Err)
+import std/option (Some, None)
+import std/json (Json, JObject, decode, encode, asObject, keys, getString, getNumber, getInt, getArray, jo, kv, js, jint, ja)
+import std/list (map, foldl, filter, length, dedup, contains, any)
+import std/string (length as size, chars, charCode, trim, startsWith, endsWith)
+import std/math (intToFloat)
+import std/crypto (sha256Hex)
+
+export type WeightedLabel = { label: string, weight: int } deriving (Eq)
+
+export type Variant = { id: string, label: string, text: string, weight: int } deriving (Eq)
+
+export type Bundle = { key: string, signature: string, origin: string, model: string, promptVersion: string, inputTokens: int, outputTokens: int, variants: [Variant] } deriving (Eq)
+
+export type SeedRoll = { seed: int, roll: float } deriving (Eq)
+
+pure func rollOK(n: float) -> bool
+ensures { result == (n >= 0.0 && n < 1.0) }
+  tests [
+    (0.0, true),
+    (0.999, true),
+    (1.0, false),
+    (1.1, false)
+  ] {
+  n >= 0.0 && n < 1.0
+}
+
+pure func cleanChars(xs: [string]) -> bool = match xs {
+  [] => true,
+  c :: rest => charCode(c) >= 32 && charCode(c) != 127 && cleanChars(rest)
+}
+
+pure func textOK(s: string, max: int) -> bool = size(s) > 0 && size(s) <= max && cleanChars(chars(s))
+
+pure func legalOK(xs: [string]) -> bool =
+  length(xs) > 0 && length(xs) <= 16 && length(dedup(xs)) == length(xs) && (if any(\s. if textOK(s, 64) then false else true, xs) then false else true)
+
+pure func signatureOK(s: string) -> bool = size(s) > 0 && size(s) <= 32768
+
+pure func weightsOK(xs: [WeightedLabel]) -> bool =
+  legalOK(map(\x. x.label, xs)) && (if any(\x. x.weight < 1 || x.weight > 1000, xs) then false else true)
+
+pure func draw(xs: [WeightedLabel], target: float, cumulative: int, last: string) -> string = match xs {
+  [] => last,
+  x :: rest => let next = cumulative + x.weight in
+  if target < intToFloat(next) then x.label else draw(rest, target, next, x.label)
+}
+
+export pure func pickLabel(xs: [WeightedLabel], roll: float) -> Result[string, string]
+ensures { match result {
+  Ok(s) => contains(map(\x. x.label, xs), s),
+  Err(_) => true
+} } =
+  if weightsOK(xs) && rollOK(roll) then Ok(draw(xs, roll * intToFloat(foldl(\a x. a + x.weight, 0, xs)), 0, "")) else Err("invalid_weighted_draw")
+
+export pure func nextRoll(seed: int) -> Result[SeedRoll, string]
+ensures { match result {
+  Ok(s) => s.seed >= 1 && s.seed <= 2147483646 && rollOK(s.roll),
+  Err(_) => true
+} } =
+  if seed < 1 || seed > 2147483646 then Err("invalid_seed") else let n = seed * 48271 % 2147483647 in
+  Ok({ seed: n, roll: intToFloat(n) / 2.147483647e+09 })
+
+export pure func cacheKey(signature: string) -> string
+ensures { size(result) == 64 } = sha256Hex(signature)
+
+-- Pinned std/json permits trailing data: frame one full object before decoding.
+pure func frameTail(xs: [string], depth: int, quoted: bool, escaped: bool) -> bool = match xs {
+  [] => false,
+  c :: rest => if quoted then if escaped then frameTail(rest, depth, true, false) else if c == "\\" then frameTail(rest, depth, true, true) else if c == "\"" then frameTail(rest, depth, false, false) else frameTail(rest, depth, true, false) else if c == "\"" then frameTail(rest, depth, true, false) else if c == "{" || c == "[" then frameTail(rest, depth + 1, false, false) else if c == "}" || c == "]" then if depth == 1 then length(rest) == 0 else frameTail(rest, depth - 1, false, false) else frameTail(rest, depth, false, false)
+}
+
+pure func object(body: string) -> Result[Json, string] =
+  if size(body) > 65536 then Err("wire_size") else match chars(trim(body)) {
+    "{" :: rest => if frameTail(rest, 1, false, false) then match decode(body) {
+      Ok(JObject(xs)) => Ok(JObject(xs)),
+      _ => Err("json_object")
+    } else Err("json_framing"),
+    _ => Err("json_object")
+  }
+
+pure func fields(j: Json, expected: [string]) -> bool = match asObject(j) {
+  None => false,
+  Some(_) => let ks = keys(j) in
+  length(ks) == length(expected) && length(dedup(ks)) == length(ks) && (if any(\k. if contains(ks, k) then false else true, expected) then false else true)
+}
+
+pure func str(j: Json, k: string) -> string = match getString(j, k) {
+  Some(s) => s,
+  None => ""
+}
+
+pure func num(j: Json, k: string) -> int = match getInt(j, k) {
+  Some(i) => i,
+  None => 0
+}
+
+pure func integer(j: Json, k: string, lo: int, hi: int) -> bool = match (getNumber(j, k), getInt(j, k)) {
+  (Some(n), Some(i)) => n >= intToFloat(lo) && n <= intToFloat(hi) && n == intToFloat(i),
+  _ => false
+}
+
+pure func variant(j: Json) -> Result[Variant, string] =
+  if fields(j, ["id", "label", "text", "weight"]) && textOK(str(j, "id"), 64) && textOK(str(j, "label"), 64) && textOK(str(j, "text"), 512) && integer(j, "weight", 1, 1000) then Ok({ id: str(j, "id"), label: str(j, "label"), text: str(j, "text"), weight: num(j, "weight") }) else Err("variant_schema")
+
+@allow_empty_ok("Recursive tail; public entry requires nonempty bounded variants")
+pure func variants(xs: [Json]) -> Result[[Variant], string] = match xs {
+  [] => Ok([]),
+  x :: rest => match variant(x) {
+    Err(e) => Err(e),
+    Ok(v) => match variants(rest) {
+      Err(e) => Err(e),
+      Ok(vs) => Ok(v :: vs)
+    }
+  }
+}
+
+pure func variantsOK(xs: [Variant], legal: [string]) -> bool =
+  length(xs) > 0 && length(xs) <= 16 && length(dedup(map(\v. v.id, xs))) == length(xs) && (if any(\v. if contains(legal, v.label) && textOK(v.id, 64) && textOK(v.text, 512) && v.weight >= 1 && v.weight <= 1000 then false else true, xs) then false else true) && (if any(\l. let n = length(filter(\v. v.label == l, xs)) in
+  n < 1 || n > 4, legal) then false else true)
+
+pure func variantJson(v: Variant) -> Json =
+  jo([kv("id", js(v.id)), kv("label", js(v.label)), kv("text", js(v.text)), kv("weight", jint(v.weight))])
+
+export pure func encodeBundle(b: Bundle) -> string
+ensures { startsWith(result, "{") && endsWith(result, "}") } =
+  encode(jo([kv("schema", js("content_bundle/1")), kv("key", js(b.key)), kv("signature", js(b.signature)), kv("origin", js(b.origin)), kv("model", js(b.model)), kv("promptVersion", js(b.promptVersion)), kv("inputTokens", jint(b.inputTokens)), kv("outputTokens", jint(b.outputTokens)), kv("variants", ja(map(variantJson, b.variants)))]))
+
+pure func makeBundle(xs: [Variant], signature: string, legal: [string], origin: string, model: string, inputTokens: int, outputTokens: int) -> Result[Bundle, string] =
+  if not signatureOK(signature) || not legalOK(legal) || not variantsOK(xs, legal) || not textOK(model, 256) || inputTokens < 0 || inputTokens > 1000000000 || outputTokens < 0 || outputTokens > 1000000000 then Err("bundle_bounds") else let b = { key: cacheKey(signature), signature: signature, origin: origin, model: model, promptVersion: "crew-dialogue-v1", inputTokens: inputTokens, outputTokens: outputTokens, variants: xs } in
+  if size(encodeBundle(b)) > 65536 then Err("wire_size") else Ok(b)
+
+export pure func decodeGenerated(raw: string, signature: string, legal: [string], model: string, inputTokens: int, outputTokens: int) -> Result[Bundle, string]
+ensures { match result {
+  Ok(b) => b.signature == signature && b.key == cacheKey(signature) && b.origin == "ai" && b.model == model,
+  Err(_) => true
+} } = match object(raw) {
+  Err(e) => Err(e),
+  Ok(j) => if not fields(j, ["schema", "variants"]) || str(j, "schema") != "generated_dialogue/1" then Err("generated_schema") else match getArray(j, "variants") {
+    None => Err("variants"),
+    Some(xs) => if length(xs) > 16 then Err("variants_size") else match variants(xs) {
+      Err(e) => Err(e),
+      Ok(vs) => makeBundle(vs, signature, legal, "ai", model, inputTokens, outputTokens)
+    }
+  }
+}
+
+export pure func decodeBundle(body: string, signature: string, legal: [string]) -> Result[Bundle, string]
+ensures { match result {
+  Ok(b) => b.signature == signature && b.key == cacheKey(signature) && variantsOK(b.variants, legal),
+  Err(_) => true
+} } = match object(body) {
+  Err(e) => Err(e),
+  Ok(j) => if not fields(j, ["schema", "key", "signature", "origin", "model", "promptVersion", "inputTokens", "outputTokens", "variants"]) || str(j, "schema") != "content_bundle/1" || str(j, "signature") != signature || str(j, "key") != cacheKey(signature) || str(j, "promptVersion") != "crew-dialogue-v1" || not (str(j, "origin") == "ai" || str(j, "origin") == "authored") || not integer(j, "inputTokens", 0, 1000000000) || not integer(j, "outputTokens", 0, 1000000000) then Err("bundle_schema") else match getArray(j, "variants") {
+    None => Err("variants"),
+    Some(xs) => if length(xs) > 16 then Err("variants_size") else match variants(xs) {
+      Err(e) => Err(e),
+      Ok(vs) => makeBundle(vs, signature, legal, str(j, "origin"), str(j, "model"), num(j, "inputTokens"), num(j, "outputTokens"))
+    }
+  }
+}
+
+export pure func starterBundle(signature: string, legal: [string]) -> Result[Bundle, string]
+ensures { match result {
+  Ok(b) => b.origin == "authored" && b.inputTokens == 0 && b.outputTokens == 0,
+  Err(_) => true
+} } =
+  makeBundle(map(\l. { id: l, label: l, text: "[authored starter] Response: ${l}.", weight: 1 }, legal), signature, legal, "authored", "synthetic:starter-v1", 0, 0)
+
+export pure func pickVariant(bundle: Bundle, label: string, roll: float) -> Result[Variant, string]
+ensures { match result {
+  Ok(v) => v.label == label && contains(bundle.variants, v),
+  Err(_) => true
+} } =
+  let xs = filter(\v. v.label == label, bundle.variants) in
+  if length(bundle.variants) > 16 || length(xs) == 0 || length(xs) > 4 || length(dedup(map(\v. v.id, bundle.variants))) != length(bundle.variants) || not variantsOK(bundle.variants, dedup(map(\v. v.label, bundle.variants))) then Err("invalid_variants") else match pickLabel(map(\v. { label: v.id, weight: v.weight }, xs), roll) {
+    Err(e) => Err(e),
+    Ok(id) => match filter(\v. v.id == id, xs) {
+      [v] => Ok(v),
+      _ => Err("missing_variant")
+    }
+  }
