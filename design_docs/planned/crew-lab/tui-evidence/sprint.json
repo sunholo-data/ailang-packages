@@ -1,0 +1,106 @@
+{
+  "sprint_id": "CREW-TUI",
+  "status": "completed",
+  "design_doc": "design_docs/planned/crew-lab/standalone-captain-game.md",
+  "sprint_plan": "design_docs/planned/crew-lab/standalone-captain-game-sprint.md",
+  "features": [
+    {
+      "id": "M1_RECOVERY",
+      "description": "Recover published host rejections without undo or unrecorded state",
+      "estimated_loc": 150,
+      "dependencies": [],
+      "acceptance_criteria": [
+        "Science/maintenance shortage continues play with unchanged failed-action seed/resources",
+        "Publication failure still stops safely",
+        "Partial scheduler boundaries retained"
+      ],
+      "passes": true,
+      "completed": "2026-10-09T15:59:10.724057+00:00",
+      "notes": "Red shortage process exit reproduced; green installed harness covers immediate reserved shortage, post-completion depletion, occupancy, refusal, recovery replay both engines and fatal journal rollback. Native 97/97 both engines; no fallback."
+    },
+    {
+      "id": "M2_INTERFACE",
+      "description": "Self-explaining standalone captain game interface",
+      "estimated_loc": 350,
+      "dependencies": [
+        "M1_RECOVERY"
+      ],
+      "acceptance_criteria": [
+        "Briefing and readable costs/progress/trust",
+        "Pure help and contextual guidance",
+        "Factual exit recap and newcomer transcript review"
+      ],
+      "passes": true,
+      "completed": "2026-10-09T16:13:06.368017+00:00",
+      "notes": "Briefing, costs/progress, directed trust, source labels, pure contextual help and factual recap implemented. Latest messages/help remain after dashboard beside current choices. Expanded installed offline harness passes, including help journal identity and visibility; newcomer/shortage/occupancy/refusal transcripts saved. 108 named tests pass on evaluator and strict VM, no fallback/skips. Full validate,8 killed mutants and original social regression pass; independent judge pending."
+    }
+  ],
+  "registry_reuse": [
+    {
+      "milestone": "M1_RECOVERY",
+      "action": "contribute",
+      "package": "sunholo/crew_lab",
+      "reason": "Extend existing application; unchanged social_dynamics handles permissions and resources"
+    },
+    {
+      "milestone": "M2_INTERFACE",
+      "action": "contribute",
+      "package": "sunholo/crew_lab",
+      "reason": "Registry terminal/crew searches returned no results; simple pure stdlib presentation belongs in existing application"
+    }
+  ],
+  "velocity": {
+    "estimated_total_loc": 500,
+    "estimated_days": 1
+  },
+  "github_issues": [],
+  "independent_evaluation": "cached-origin correction completed; root rejudge pending",
+  "completed": "2026-10-09T16:13:06.368017+00:00",
+  "ailang_prompt_version_loaded": "v0.16.6",
+  "runtime": "v0.52.0 bf2436a",
+  "evidence": {
+    "validate": "tui-evidence/validate.log",
+    "native": "tui-evidence/m2-native.json",
+    "strict_vm": "tui-evidence/m2-vm.json",
+    "installed_ui": "tui-evidence/m2-play.log",
+    "mutations": "tui-evidence/mutations.log",
+    "original_social_regression": "tui-evidence/social-regression.log",
+    "quality": "tui-evidence/quality.json",
+    "format": "tui-evidence/format.log",
+    "newcomer_transcript": "tui-evidence/newcomer-transcript.txt",
+    "shortage_transcript": "tui-evidence/shortage-transcript.txt"
+  },
+  "quality_summary": {
+    "compile_files": 22,
+    "contracts_verified": 11,
+    "contracts_total": 70,
+    "contracts_skipped": 58,
+    "contracts_encoding_errors": 1,
+    "counterexamples": 0,
+    "uncontracted_exports": 0,
+    "interface_signatures": 96,
+    "effects": [
+      "AI",
+      "Env",
+      "FS",
+      "IO"
+    ],
+    "exported_functions": 69,
+    "pure_functions": 63,
+    "named_tests": 109,
+    "failed_tests": 0,
+    "smoke_present": false,
+    "gates": [],
+    "limits": [
+      "Structured source properties lack generators; presenter also skips one invalid requires input.",
+      "Registry export-overlap unavailable due DNS; no publication performed.",
+      "SMT skipped/encoder-limited contracts are runtime assertions, not proofs."
+    ]
+  },
+  "review_fix": {
+    "issue": "Cached authored bundles mislabelled saved AI",
+    "scope": "Presenter receives validated Bundle.origin; transport/journal source untouched",
+    "tests": "9/9 targeted presenter controls on evaluator and strict VM, zero fallback; expanded installed harness/cache-stock selection identity passes; package check and format pass; strict quality109/109, no gates",
+    "evidence_prefix": "tui-evidence/cached-origin-"
+  }
+}

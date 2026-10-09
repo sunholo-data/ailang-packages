@@ -1,0 +1,85 @@
+{
+  "schema": "ailang.package-quality/v1",
+  "package": "sunholo/crew_lab",
+  "version": "0.1.0",
+  "stability": "experimental",
+  "mode": "publisher",
+  "compile": {
+    "source": "server",
+    "ok": true,
+    "files": 22
+  },
+  "contracts": {
+    "source": "server",
+    "verified": 11,
+    "total": 70,
+    "counterexample": 0,
+    "skipped": 58,
+    "errors": 1,
+    "uncontracted_exports": 0,
+    "wall_seconds": 1.41900575
+  },
+  "tests": {
+    "source": "attested",
+    "files": 9,
+    "passed": 108,
+    "failed": 0
+  },
+  "smoke": {
+    "source": "attested",
+    "present": false,
+    "passed": false
+  },
+  "interface": {
+    "source": "server",
+    "hash_v1": "sha256:3ca11fc778f594e727e441cf51805c7977c7f4b413ed759a2f61e8391cae54b4",
+    "hash_v2": "sha256:ifacev2:e1f23f3068cd766c28e248d7b7d48537b855aa0c86551f81b48420b1043f4201",
+    "signatures": 96
+  },
+  "effects": {
+    "source": "server",
+    "max": [
+      "AI",
+      "Env",
+      "FS",
+      "IO"
+    ],
+    "ceiling_declared": true,
+    "rank_max": "FS"
+  },
+  "release": {
+    "source": "server",
+    "kind": "feature",
+    "changelog_section": true,
+    "notes": "Adds an independent captain-and-crew CLI experiment using saved synthetic typed\ndecisions, explicit confidence gates and sampling rolls, actor-local perception,\npersonal work agreements, captain assignment and relief, bounded request retention\nand directed trust consequences on receipt. Five contrasting recordings demonstrate\ncompletion, refused orders, care, denied relief and competing materials.\n\nThe original library and host transitions remain pure; saved stdin/output use IO. Includes\nstrict response/command controls, native tests, saved replay, pure strict-VM parity,\ntemporary `[bin]` installation tests and package quality commands. Requires the\npinned AILANG0.52.0 runtime for the documented checks. Strict VM replay uses the\npure recording entry because stdin `readLine` is evaluator-only on that runtime.\nThe saved fixture paths use no provider calls. No game integration or registry publication.\nCompletion-only project effects and full reservation refunds on stop remain\nexplicit limitations; no partial-work economics or moral winner is introduced.\n\nReceived trust deltas are illustrative fixed fixture rules; traits and values enter\nrequest context, with trait-dependent appraisal deferred. Proof evidence reports\n5/28 verified,22skipped and one unsupported function-record encoding; runtime\ncontracts remain active. No isolated publish smoke is claimed for the unpublished\npath dependency. A scoped CI job runs the crew and original social lab checks.\n\nAdds `[bin] crew-view` and `make view` for readable per-step interior state, sharing\nthe same pure host and saved decisions with the full JSON CLI.\n\nTerminal iteration adds portable ASCII indicator gauges, help/status/quit and\nfriendly captain command aliases. Manual replies are labelled synthetic fixtures\nand reuse the same validation and host authority. Friendly errors preserve the\nincoming session; JSON recordings keep fail-fast behaviour.\n\nAdds `crew-play` and `crew-play-offline`: numbered captain choices, automatic crew\nreactions, explicit start/leave decisions an"
+  },
+  "docs": {
+    "agent_md": true,
+    "ai_summary": true,
+    "agent_doc_exports_covered": 5,
+    "export_overlap_error": "failed to fetch registry index: Get \"https://storage.googleapis.com/ailang-registry/index.json?t=1791562147\": dial tcp: lookup storage.googleapis.com: no such host"
+  },
+  "style": {
+    "exported_funcs": 69,
+    "pure_exports": 63,
+    "pure_ratio": 0.9130434782608695
+  },
+  "gates": [],
+  "badges": [
+    {
+      "code": "PUB016",
+      "level": "info",
+      "msg": "58 contract(s) skipped by Z3 (unencodable types or builtins) — not proved; `ailang verify --package .` lists the reason per function"
+    },
+    {
+      "code": "PUB023",
+      "level": "info",
+      "msg": "registry export-overlap check did not run: failed to fetch registry index: Get \"https://storage.googleapis.com/ailang-registry/index.json?t=1791562147\": dial tcp: lookup storage.googleapis.com: no such host"
+    },
+    {
+      "code": "PUB014",
+      "level": "info",
+      "msg": "no _smoke.ail — publish runs no boot check in a clean workdir"
+    }
+  ]
+}

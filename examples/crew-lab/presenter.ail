@@ -1,0 +1,178 @@
+module sunholo/crew_lab/presenter
+import std/result (Ok, Err)
+import std/option (Some, None)
+import std/list (map, filter, head, length, flatMap)
+import std/string (join, repeat, length as stringLength)
+import std/json (decode, get, getString)
+import pkg/sunholo/social_dynamics/model (Actor, Task, Offered, Working, Completed, Stopped)
+import ./session (Session)
+
+pure func panel(title: string, body: string) -> string = "[ ${title} ]\n${repeat("-", 64)}\n${body}\n${repeat("-", 64)}"
+
+export pure func briefing(mode: string) -> string
+ensures { stringLength(result) > 0 } = {
+  let modeLine = if mode == "offline" then "Offline game: saved or stock dialogue; no AI calls." else "Live game: new AI dialogue on a library miss, within your call allowance."
+  panel("BUBBLE SHIP / THE BRIDGE", "You are the captain, travelling between star systems.\nYour scientist and engineer have work, needs and their own responses.\nChoose assignments, rest and how to handle requests for relief.\nThere is no winning score: your choices leave different consequences.\n\nFirst experiment: offer science (1), listen to the crew, then choose\nwhether to start. If they agree and you start, advance time (5)\nfour times. If they refuse, leave it offered or try another assignment.\nType h or help after startup. Nothing advances while you read.\n${modeLine}")
+}
+
+export pure func policyBrief() -> string
+ensures { stringLength(result) > 0 } =
+  "How will you exercise authority?\n1. Personal consent: work needs the worker's agreement.\n2. Captain's orders: you may start despite refusal while cooperation\n   stays above its floor; doing so can cost their trust.\nNeither policy bypasses crew capacity or supplies. Choose 1 or 2:"
+
+export pure func seedBrief() -> string
+ensures { stringLength(result) > 0 } =
+  "Choose a seed (integer 1..2147483646; try 42).\nThe same seed, policy, library and captain choices repeat the variation."
+
+export pure func projectName(recipe: string) -> string
+ensures { stringLength(result) > 0 } =
+  if recipe == "observations" then "Science observations" else if recipe == "maintenance" then "Ship maintenance" else if recipe == "rest_scientist" then "Scientist rest" else if recipe == "rest_engineer" then "Engineer rest" else "Unknown project"
+
+export pure func projectCost(s: Session, recipe: string) -> string
+ensures { stringLength(result) > 0 } = match head(filter(\r. r.id == recipe, s.config.recipes)) {
+  None => "Unknown recipe; no cost estimate available.",
+  Some(r) => {
+    let costs = if r.costs == [] then "no materials" else join("; ", map(\c. "    Start: reserve ${show(c.reserve)} ${c.resource}.\n    Completion: consume ${show(c.consume)} ${c.resource}.", r.costs))
+    "${projectName(recipe)}: ${show(r.duration)} ticks.\n${costs}"
+  }
+}
+
+export pure func elapsed(tick: int, started: int, due: int) -> int
+requires { tick >= 0 && tick <= 1000000000 && started >= 0 && started <= 1000000000 && due >= 0 && due <= 1000000000 }
+ensures { result >= 0 && (due <= started || result <= due - started) } =
+  if due <= started || tick <= started then 0 else if tick >= due then due - started else tick - started
+
+pure func gauge(n: int) -> string = {
+  let bounded = if n < 0 then 0 else if n > 100 then 100 else n
+  let filled = bounded / 10
+  "[${repeat("#", filled)}${repeat("-", 10 - filled)}] ${show(n)}"
+}
+
+pure func indicator(a: Actor, id: string) -> string = match head(filter(\v. v.id == id, a.indicators)) {
+  None => "--",
+  Some(v) => gauge(v.value)
+}
+
+pure func crewLine(a: Actor) -> string =
+  "  ${a.id}: fatigue ${indicator(a, "fatigue")}\n    readiness ${indicator(a, "readiness")} | observations ${indicator(a, "observations")}"
+
+pure func taskLine(s: Session, t: Task) -> string = {
+  let status = match t.status {
+    Offered => "Offered - not working",
+    Working => "Working ${show(elapsed(s.state.tick, t.started, t.due))}/${show(t.due - t.started)} ticks",
+    Completed => "Completed",
+    Stopped => "Stopped"
+  }
+  let workers = join(", ", t.participants)
+  "  ${projectName(t.recipe)} / ${workers}: ${status} [${t.id}]"
+}
+
+export pure func projectReview(s: Session, id: string) -> string
+ensures { stringLength(result) > 0 } = match head(filter(\t. t.id == id, s.state.tasks)) {
+  None => "This project is unavailable.",
+  Some(t) => "${taskLine(s, t)}\n${projectCost(s, t.recipe)}\nStarting is your decision; agreement alone has not reserved materials."
+}
+
+export pure func dashboard(s: Session, remaining: int) -> string
+ensures { stringLength(result) > 0 } = {
+  let crew = join("\n", map(crewLine, s.state.actors))
+  let relationships = join("\n", map(\r. "  ${r.from} -> ${r.to} ${r.dimension} ${gauge(r.value)}", s.state.relationships))
+  let supplies = join("\n", map(\r. "  ${r.id}: available ${show(r.available)}, reserved ${show(r.reserved)}, consumed ${show(r.consumed)}", s.state.resources))
+  let projects = if s.state.tasks == [] then "  No projects yet. Offer an assignment to begin." else join("\n", map(\t. taskLine(s, t), s.state.tasks))
+  let crewPanel = panel("BRIDGE / Tick ${show(s.state.tick)} / ${s.policy}", crew)
+  let trustPanel = panel("WHO TRUSTS WHOM", relationships)
+  let supplyPanel = panel("SUPPLIES", supplies)
+  let projectPanel = panel("PROJECTS", projects)
+  "${crewPanel}\nFatigue: higher means more tired. Readiness: higher means more ready.\n${trustPanel}\n${supplyPanel}\nReserved supplies are held for work; consumed supplies do not return.\n${projectPanel}"
+}
+
+export pure func guidance(s: Session, phase: string, target: string) -> string
+ensures { stringLength(result) > 0 } =
+  if phase == "start" then projectReview(s, target) else if phase == "response" then "The reply is still pending. Retry may use an AI attempt; stock wording\nis an explicit alternative. Cancel leaves the project offered." else if phase == "relief" then "Granting relief stops this project and returns its reservation.\nDenying it keeps work going. The dashboard shows received trust changes." else if phase == "working" then "Choose a working project to ask its worker how it is going." else if phase == "offered" then "Choose an existing offer to review its costs and Start/Leave decision." else if phase == "reliefs" then "Choose an unresolved request. If none are listed, use 0 to return." else match s.state.continuation {
+    Some(t) => "An advance to tick ${show(t.target)} is unfinished. Continue or abort it\nbefore assigning more work; earlier completed work is retained.",
+    None => "Offer work or rest, check in with crew, or advance one tick.\nWork effects arrive at completion. No supplies replenish in this slice."
+  }
+
+export pure func help(s: Session, phase: string, target: string, mode: string, remaining: int) -> string
+ensures { stringLength(result) > 0 } = {
+  let modeLine = if mode == "offline" then "Offline: no AI calls. Dialogue uses saved AI wording or stock lines." else "Live AI attempts remaining: ${show(remaining)}. Saved wording uses no new call."
+  let contextLine = guidance(s, phase, target)
+  panel("CAPTAIN'S GUIDE", "At the bridge: 1/2 offer science/maintenance; 3/4 offer rest.\n5 advances one tick.\n6 checks in on working crew; 7 reviews existing offers; 8 handles relief.\n9 shows status; 0 quits from the bridge or goes back from a submenu.\n\nAn offer invites a reply; it does not start work. You choose Start next.\nScience reserves/consumes 4 of the initial 6 materials over 4 ticks.\nMaintenance needs 3 to start, consumes 2 over 3 ticks. Rest needs none.\nScience completion leaves 2: waiting will not make maintenance affordable.\nCrew can do one project each. Waiting can free a busy worker; relief can\nstop work. Completion applies fatigue/readiness changes all at once.\nDirected trust belongs to the named observer and changes on receipt.\nCrew reaction chances use personality, values, fatigue and received trust;\nthese are experimental rules. AI only supplies possible dialogue wording.\n${modeLine}\n\n${contextLine}")
+}
+
+pure func sourceLabel(source: string, origin: string) -> string =
+  if source == "cache" then if origin == "authored" then "Saved stock wording; no AI call" else "Saved AI wording; no new AI call" else if source == "authored" || source == "explicit-authored" then "Stock wording; no AI call" else if source == "generated" then "New AI wording" else "Dialogue source: ${source}"
+
+pure func stockSummary(actor: string, label: string) -> string =
+  if label == "accept" then "${actor} agrees to the assignment." else if label == "decline" then "${actor} refuses the assignment." else if label == "concern" then "${actor} raises a concern about the assignment." else if label == "defer" then "${actor} has no definite answer yet." else if label == "continue" then "${actor} is willing to keep working." else if label == "request_relief" then "${actor} asks to be relieved from this work." else "${actor} has no clear reply."
+
+-- A stock fallback is a narrator summary of the selected legal reaction, not
+-- rewritten AI dialogue. The exact selected bundle/text remains in the journal.
+export pure func dialogue(actor: string, label: string, text: string, source: string, origin: string) -> string
+ensures { stringLength(result) > 0 } = {
+  let line = if origin == "authored" then "Crew reaction (narrator): ${stockSummary(actor, label)}" else "${actor}: ${text}"
+  let consequence = if label == "accept" then "Agreement received. You still decide whether to start." else if label == "request_relief" then "A relief request is now waiting in menu 8." else if label == "decline" then "Refusal received. Under consent, work cannot start. Orders may cost trust." else "Reply received; no project starts automatically."
+  "${line}\n[${sourceLabel(source, origin)}]\n${consequence}"
+}
+
+export pure func rejection(trace: string) -> string
+ensures { stringLength(result) > 0 } = match decode(trace) {
+  Err(_) => "Action could not be completed; recorded details are in the journal.",
+  Ok(j) => match get(j, "error") {
+    None => "Advance stopped at a blocked boundary; its target was not reached.\nEarlier completions remain. Inspect the dashboard and choose an action.",
+    Some(e) => {
+      let code = match getString(e, "code") {
+        Some(c) => c,
+        None => "host"
+      }
+      let detail = match getString(e, "detail") {
+        Some(d) => d,
+        None => match getString(e, "host") {
+          Some(h) => h,
+          None => "Unknown rejection"
+        }
+      }
+      let advice = if code == "insufficient_resource" then "Not enough available materials to start. Any reserved supplies are\nheld for other work. Consumed supplies will not return by waiting." else if code == "capacity_exceeded" then "The worker is already occupied. Wait for their current work to finish\nor handle a requested relief; the new project stays offered." else "The action was refused. Check agreement, authority and project state."
+      "${advice}\nReason: ${code} (${detail}). No rejected action was applied."
+    }
+  }
+}
+
+pure func changes(before: Session, after: Session) -> string = {
+  let resources = flatMap(\r. match head(filter(\old. old.id == r.id, before.state.resources)) {
+    None => [],
+    Some(old) => if old.available == r.available && old.reserved == r.reserved && old.consumed == r.consumed then [] else ["${r.id}: available ${show(old.available)} -> ${show(r.available)}, reserved ${show(old.reserved)} -> ${show(r.reserved)};\nconsumed ${show(old.consumed)} -> ${show(r.consumed)}."]
+  }, after.state.resources)
+  let trust = flatMap(\r. match head(filter(\old. old.from == r.from && old.to == r.to && old.dimension == r.dimension, before.state.relationships)) {
+    None => [],
+    Some(old) => if old.value == r.value then [] else ["${r.from} -> ${r.to} ${r.dimension}: ${show(old.value)} -> ${show(r.value)}."]
+  }, after.state.relationships)
+  let report = join("\n", resources ++ trust)
+  if length(resources ++ trust) == 0 then "" else "\n${report}"
+}
+
+export pure func consequences(before: Session, after: Session, c: string) -> string
+ensures { stringLength(result) > 0 } = {
+  let completed = filter(\t. t.status == Completed && length(filter(\old. old.id == t.id && old.status == Completed, before.state.tasks)) == 0, after.state.tasks)
+  let names = join(", ", map(\t. projectName(t.recipe), completed))
+  let finished = if length(completed) == 0 then "" else "\nCompleted: ${names}.\nCompletion effects are now visible."
+  let action = match decode(c) {
+    Err(_) => "action",
+    Ok(j) => match getString(j, "command") {
+      None => "action",
+      Some(n) => n
+    }
+  }
+  let summary = if action == "start_task" then "Work started. Advance time to progress it." else if action == "advance" then "Time: tick ${show(before.state.tick)} -> ${show(after.state.tick)}." else if action == "resolve_relief" then "Relief decision recorded. The dashboard shows the outcome." else "Action recorded."
+  "${summary}${finished}${changes(before, after)}"
+}
+
+export pure func recap(s: Session, path: string) -> string
+ensures { stringLength(result) > 0 } = {
+  let completed = length(filter(\t. t.status == Completed, s.state.tasks))
+  let unfinished = filter(\t. t.status == Offered || t.status == Working, s.state.tasks)
+  let unfinishedLines = join("\n", map(\t. taskLine(s, t), unfinished))
+  let projects = if length(unfinished) == 0 then "No unfinished projects." else "Unfinished:\n${unfinishedLines}"
+  let summary = panel("END OF THIS VOYAGE STRETCH", "Elapsed: ${show(s.state.tick)} ticks. Completed projects: ${show(completed)}.\n${projects}")
+  let finalState = dashboard(s, 0)
+  "${summary}\n${finalState}\nRun journal: ${path}\nRestarting begins a fresh crew session. The dialogue library is retained.\nThe journal records this run; it is not a resumable save."
+}

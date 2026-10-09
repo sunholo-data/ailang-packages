@@ -1,9 +1,10 @@
 module sunholo/crew_lab/play_flow_test
-import ./play_flow (begin, seedNumber, parseArgs, route, stage, publish, menu, renderStatus, PlayState)
+import ./play_flow (begin, seedNumber, parseArgs, route, stage, publish, menu, renderStatus, recover, recoveryRecording, PlayState)
 import std/result (Ok, Err)
+import std/option (Some)
 import std/string (contains)
-import std/list (length)
-import ./session (start)
+import std/list (length, map)
+import ./session (start, offer, startTask)
 
 -- Initialise host fixtures directly, matching the existing native host tests.
 -- Installed UI tests separately execute the composed begin/start path.
@@ -86,7 +87,84 @@ test "dashboard renders exact crew gauges materials and directed trust" {
     Err(_) => false,
     Ok(s) => {
       let view = renderStatus(s, 2)
-      contains(view, "fatigue [####------] 45") && contains(view, "readiness [#####-----] 50") && contains(view, "scientist -> captain trust [#####-----] 50") && contains(view, "available 6, reserved 0, consumed 0") && contains(view, "AI attempts remaining 2")
+      contains(view, "fatigue [####------] 45") && contains(view, "readiness [#####-----] 50") && contains(view, "scientist -> captain trust [#####-----] 50") && contains(view, "available 6, reserved 0, consumed 0") && contains(view, "BRIDGE / Tick 0")
+    }
+  }
+}
+
+test "published rejection returns to bridge without undoing RNG journal or host" {
+  match base("1", 42) {
+    Err(_) => false,
+    Ok(s) => match stage({ s | phase: "start", target: "missing" }, "{\"command\":\"start_task\",\"task\":\"missing\"}", 123, "main", "", 2) {
+      Err(_) => false,
+      Ok(o) => let recovered = recover((publish(s, o, true)).state) in
+      recovered.phase == "main" && recovered.target == "" && recovered.session == s.session && recovered.seed == 42 && recovered.seq == s.seq + 1 && recovered.nextId == s.nextId
+    }
+  }
+}
+
+test "recovery replay records rejection and still processes following tick" {
+  contains(recoveryRecording(["{\"command\":\"start\",\"policy\":\"consent\"}", "{\"command\":\"start_task\",\"task\":\"missing\"}", "{\"command\":\"advance\",\"tick\":1,\"budget\":64}"]), "\"tick\":1")
+}
+
+test "recovery preserves earlier completion when advance blocks at later boundary" {
+  match base("2", 42) {
+    Err(_) => false,
+    Ok(s) => match offer(s.session, "scientist", "rest_scientist", "rest") {
+      Err(_) => false,
+      Ok(r) => match startTask(r.session, "rest") {
+        Err(_) => false,
+        Ok(w) => match offer(w.session, "engineer", "maintenance", "repair") {
+          Err(_) => false,
+          Ok(e) => match startTask(e.session, "repair") {
+            Err(_) => false,
+            Ok(t) => {
+              let high = { t.session | state: { t.session.state | actors: map(\a. if a.id == "engineer" then { a | indicators: map(\v. if v.id == "readiness" then { v | value: 90 } else v, a.indicators) } else a, t.session.state.actors) } }
+              let ui = { s | session: high }
+              match stage(ui, "{\"command\":\"advance\",\"tick\":10,\"budget\":64}", 123, "main", "", 2) {
+                Err(_) => false,
+                Ok(candidate) => {
+                  let accepted = recover((publish(ui, candidate, true)).state)
+                  candidate.failed && accepted.session == candidate.state.session && accepted.session != ui.session && accepted.session.state.tick == 2 && accepted.seed == 42 && accepted.seq == 1 && accepted.nextId == 1 && contains(candidate.trace, "blocked")
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
+test "help is pure navigation available while start or scheduler is pending" {
+  match base("1", 42) {
+    Err(_) => false,
+    Ok(s) => {
+      let pending = { s | session: { s.session | state: { s.session.state | continuation: Some({ config: s.session.state.config, revision: s.session.state.revision, target: 10, cursor: 0 }) } } }
+      match (route(s, "h"), route({ s | phase: "start", target: "science" }, "help"), route(pending, "h")) {
+        (Ok(a), Ok(b), Ok(c)) => a.kind == "help" && b.kind == "help" && c.kind == "help" && a.target == "" && b.target == "",
+        _ => false
+      }
+    }
+  }
+}
+
+test "new dashboard excludes inert actor trust scalar" {
+  match base("1", 42) {
+    Err(_) => false,
+    Ok(s) => not contains(renderStatus(s, 2), " | trust ")
+  }
+}
+
+test "existing offered review navigates without asking or advancing RNG" {
+  match base("1", 42) {
+    Err(_) => false,
+    Ok(s) => match offer(s.session, "scientist", "observations", "science") {
+      Err(_) => false,
+      Ok(o) => match route({ s | session: o.session, phase: "offered" }, "1") {
+        Err(_) => false,
+        Ok(i) => i.kind == "review_start" && i.target == "science"
+      }
     }
   }
 }

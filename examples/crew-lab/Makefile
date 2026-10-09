@@ -22,6 +22,7 @@ tests:
 	@cd "$(EX)" && "$(AILANG)" test --allow-skips session.ail
 	@cd "$(EX)" && "$(AILANG)" test --allow-skips reactions.ail
 	@cd "$(EX)" && "$(AILANG)" test --allow-skips play_flow.ail
+	@cd "$(EX)" && "$(AILANG)" test --allow-skips presenter.ail
 
 scenarios:
 	@mkdir -p "$(OUT)"
