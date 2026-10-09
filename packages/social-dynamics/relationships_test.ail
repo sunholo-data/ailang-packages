@@ -1,0 +1,43 @@
+module sunholo/social_dynamics/relationships_test
+import ./model (Actor, Config, Resource, State, emptyState, Policies, Delivery, Host, ActorPrincipal, Allowed, IndicatorDelta, RelationshipDelta, Error, Unauthorized, UnseenEvidence, InvalidPolicyEffect, PendingAdvance, InvalidTransition, CapacityExceeded, Applied, Duplicate)
+import ./indicators (validateConfig)
+import ./relationships (appraisalContext, deliver)
+import std/result (Ok, Err)
+import std/option (Some)
+import std/list (length, head, filter)
+
+pure func fixtureConfig() -> Config = {
+ id: "demo", version: 1, session: "session", timeUnit: "minutes", authorityId: "permit", appraisalId: "react",
+ limits: {actors: 8, tasks: 8, commitments: 8, reliefs: 8, evidence: 16, knowledge: 32, accepted: 32, operations: 8, effects: 8, text: 512, wire: 10000},
+ indicators: [{id: "trust", minimum: 0, maximum: 100}], recipes: [], rules: [],
+ evidence: [{id: "report", author: "a", kind: "report", text: "hello", causes: []}],
+ knowledge: [{observer: "a", evidence: "report"}],
+ relationships: [{from: "a", to: "b", dimension: "trust", value: 50}, {from: "b", to: "a", dimension: "trust", value: 70}]
+}
+pure func fixtureActors() -> [Actor] = [{id: "a", capacity: 2, attributes: [], values: [], indicators: [{id: "trust", value: 50}]}, {id: "b", capacity: 2, attributes: [], values: [], indicators: [{id: "trust", value: 70}]}]
+pure func fixtureResources() -> [Resource] = [{id: "material", initial: 10, available: 10, reserved: 0, consumed: 0, transferredIn: 0, transferredOut: 0}]
+pure func fixtureStateFor(c: Config) -> State = match validateConfig(c, fixtureActors(), fixtureResources()) { Ok(s) => s, Err(_) => emptyState(c, fixtureActors(), fixtureResources()) }
+pure func fixtureState() -> State = fixtureStateFor(fixtureConfig())
+
+
+pure func policies() -> Policies = {authorityId: "permit", appraisalId: "react", authority: \s p t. Allowed, appraisal: \a. [RelationshipDelta(a.observer.id, "a", "trust", 5)]}
+pure func delivery() -> Delivery = {id: "d1", observer: "b", evidence: "report", causes: [], notBefore: 0, source: "host"}
+
+test "unseen evidence cannot enter appraisal" { appraisalContext(fixtureState(), "b", "report") == Err(UnseenEvidence("report")) }
+test "context shows own outgoing relationship only" { match appraisalContext(fixtureState(), "a", "report") { Ok(c) => c.observer.id == "a" && length(c.relationships) == 1 && match head(c.relationships) { Some(r) => r.from == "a" && r.to == "b" && r.value == 50, _ => false } && length(c.visible) == 1, _ => false } }
+test "delivery needs trusted host" { match deliver(fixtureConfig(), policies(), fixtureState(), ActorPrincipal("b"), delivery()) { Err(Unauthorized(_)) => true, _ => false } }
+test "early delivery refuses" { let d = delivery(); match deliver(fixtureConfig(), policies(), fixtureState(), Host, {d | notBefore: 1}) { Err(InvalidTransition(_)) => true, _ => false } }
+test "self known delivery has no reaction or revision" { let d = delivery(); match deliver(fixtureConfig(), policies(), fixtureState(), Host, {d | observer: "a"}) { Ok(step) => step.state == fixtureState() && step.events == [] && step.disposition == Duplicate, _ => false } }
+test "received observation grants once with asymmetric reaction" { match deliver(fixtureConfig(), policies(), fixtureState(), Host, delivery()) { Ok(step) => step.state.revision == 1 && step.state.seq == 2 && step.state.relationships == [{from: "a", to: "b", dimension: "trust", value: 50}, {from: "b", to: "a", dimension: "trust", value: 75}] && match deliver(fixtureConfig(), policies(), step.state, Host, delivery()) { Ok(repeat) => repeat.state == step.state && repeat.events == [] && repeat.disposition == Duplicate, _ => false }, _ => false } }
+test "policy cannot modify another actor" { let p = policies(); let evil = {p | appraisal: \a. [IndicatorDelta("a", "trust", 1)]}; match deliver(fixtureConfig(), evil, fixtureState(), Host, delivery()) { Err(InvalidPolicyEffect(_)) => true, _ => false } }
+test "policy invalid second effect rolls back whole delivery" { let p = policies(); let evil = {p | appraisal: \a. [IndicatorDelta("b", "trust", 1), IndicatorDelta("b", "trust", 99)]}; match deliver(fixtureConfig(), evil, fixtureState(), Host, delivery()) { Err(InvalidPolicyEffect(_)) => true, _ => false } }
+test "knowledge cap refuses grant but known self still no op" { let c = fixtureConfig(); let small = {c | limits: {c.limits | knowledge: 2}, evidence: c.evidence ++ [{id: "report2", author: "a", kind: "report", text: "second", causes: []}], knowledge: c.knowledge ++ [{observer: "a", evidence: "report2"}]}; let d = delivery(); match deliver(small, policies(), fixtureStateFor(small), Host, d) { Err(CapacityExceeded(_)) => match deliver(small, policies(), fixtureStateFor(small), Host, {d | observer: "a"}) { Ok(step) => step.disposition == Duplicate && step.events == [], _ => false }, _ => false } }
+test "pending advance refuses input" { let s = fixtureState(); match deliver(fixtureConfig(), policies(), {s | continuation: Some({config: s.config, revision: 0, target: 10, cursor: 0})}, Host, delivery()) { Err(PendingAdvance(_)) => true, _ => false } }
+test "forged outgoing relationship source refuses" { let p = policies(); match deliver(fixtureConfig(), {p | appraisal: \a. [RelationshipDelta("a", "b", "trust", 2)]}, fixtureState(), Host, delivery()) { Err(InvalidPolicyEffect(_)) => true, _ => false } }
+test "private evidence contents stay outside context" { let s = fixtureState(); let private = {id: "secret", author: "b", kind: "private", text: "hidden", causes: []}; let hidden = {s | evidence: s.evidence ++ [private], knowledge: s.knowledge ++ [{observer: "b", evidence: "secret"}]}; match appraisalContext(hidden, "a", "report") { Ok(c) => length(c.visible) == 1 && c.observer.id == "a", _ => false } }
+test "altered reused delivery ID refuses" { let d = delivery(); match deliver(fixtureConfig(), policies(), fixtureState(), Host, d) { Ok(step) => match deliver(fixtureConfig(), policies(), step.state, Host, {d | source: "different"}) { Err(_) => true, _ => false }, _ => false } }
+test "full accepted ledger preserves exact delivery retry" { let c = fixtureConfig(); let small = {c | limits: {c.limits | accepted: 1}}; match deliver(small, policies(), fixtureStateFor(small), Host, delivery()) { Ok(step) => match deliver(small, policies(), step.state, Host, delivery()) { Ok(repeat) => repeat.disposition == Duplicate && repeat.state == step.state, _ => false }, _ => false } }
+test "policy identity mismatch refuses" { let p = policies(); match deliver(fixtureConfig(), {p | appraisalId: "other"}, fixtureState(), Host, delivery()) { Err(_) => true, _ => false } }
+test "known self delivery still validates receipt gate" { let d = delivery(); match deliver(fixtureConfig(), policies(), fixtureState(), Host, {d | observer: "a", notBefore: 1}) { Err(InvalidTransition(_)) => true, _ => false } }
+test "own indicator policy can replace relationship policy" { let p = policies(); match deliver(fixtureConfig(), {p | appraisal: \a. [IndicatorDelta(a.observer.id, "trust", 2)]}, fixtureState(), Host, delivery()) { Ok(step) => step.state.relationships == fixtureState().relationships && match head(filter(\a. a.id == "b", step.state.actors)) { Some(a) => match head(a.indicators) { Some(v) => v.id == "trust" && v.value == 72, _ => false }, _ => false }, _ => false } }
+test "same ID indicator range mutation refuses delivery before duplicate" { let c = fixtureConfig(); let d = delivery(); match deliver(c, policies(), fixtureState(), Host, d) { Ok(step) => match deliver({c | indicators: [{id: "trust", minimum: 0, maximum: 200}]}, policies(), step.state, Host, d) { Err(_) => true, _ => false }, _ => false } }

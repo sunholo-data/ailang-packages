@@ -1,0 +1,40 @@
+{
+  "review": "independent reject-by-default design re-review, round 2",
+  "requested_reviewer_model": "gpt-6-sol",
+  "actual_reviewer_model": "unverified by reviewer runtime",
+  "date": "2026-10-09",
+  "document": "/private/tmp/stapledon-social-packages-20261009/design_docs/planned/social-dynamics-0.1.0.md",
+  "sprint": "/private/tmp/stapledon-social-packages-20261009/design_docs/planned/social-dynamics-0.1.0-sprint.md",
+  "verdict": "PASS",
+  "scope_of_pass": "Design is sufficiently specified to proceed to an approval-ready sprint; this is not an implementation, compiler, game-balance or publication approval.",
+  "resolved_blockers": [
+    {
+      "topic": "API and event schema",
+      "evidence": "Normative appendix names exported pure calls, State/Config/Step/AdvanceResult contents, closed Event and Error variants, seven operation payloads, proposal canonical field order, a golden proposal and separate consumer/codec fixtures. The sprint assigns interface, strict codec and evidence gates to S1/S3."
+    },
+    {
+      "topic": "Clock ordering",
+      "evidence": "One authoritative integer clock per Session, ordered dueTick/phase/objectId boundaries, explicit host-delivered cross-session input, and narrowly stated partition/continuation invariance remove the cross-clock numeric-order error."
+    },
+    {
+      "topic": "Bounded idempotence and resources",
+      "evidence": "Accepted (id, canonicalBody) entries never evict; capacity refuses new IDs while exact duplicates remain no-ops. Inventory conservation and named consumption sinks are separated from renewable work-allocation capacity, with staged aggregate validation."
+    }
+  ],
+  "strongest_remaining_objection": "The proposed boundary still uses schematic type signatures and gives a full field-order golden only for proposals. Event variant payload encodings, state encoding, and the Host principal representation need exact exported definitions during S1/S3; otherwise an implementation could pass its own round trips while consumer expectations drift.",
+  "required_sprint_checks": [
+    "Compile a separate consumer against the exported AILANG types and calls, including Host versus Actor principals and Conditional requirements.",
+    "Check fixed golden bytes for each proposal operation, event kind and error code; document event/state encoding order and version tags before treating the wire boundary as frozen.",
+    "Test task acceptance rather than pending offers for aggregate affordability, because OfferTask itself reserves nothing.",
+    "Demonstrate no-knowledge observers cannot see private evidence or emit effects on another actor's dimensions; validate policy outputs as one transaction.",
+    "Report actual LOC/time and split scope if the 2500-LOC, eight-day estimate threatens boundary tests or the second domain."
+  ],
+  "scope_assessment": {
+    "pure_reusable_package": "Pass: host-defined Config/Policies, no game/provider dependency, and an unrelated community consumer are appropriate reuse checks.",
+    "directed_trust_and_policy": "Pass: observer-specific evidence and outgoing relationship limits prevent global trust propagation; callbacks are explicitly trusted pure host code.",
+    "dynamic_ai_claim": "Pass: the text says live AI generation/provider routing is deferred. Recorded structured proposals and the standalone runner test the acceptance boundary only.",
+    "player_agency": "Pass: no overall score, optimum or mandated balancing policy is introduced; example trajectories are described as fixtures rather than balance proof.",
+    "delivery_estimate": "Plausible as a provisional plan after narrowing to one clock, though strict codec and separate consumer work leave little margin. The sprint includes review buffer and evidence gates."
+  },
+  "decision": "The round-one architectural blockers are resolved at design level. Proceed to user approval of the sprint, then implement only within that approved scope."
+}

@@ -1,0 +1,102 @@
+module sunholo/social_dynamics/tasks_test
+import ./model (Config, Actor, Resource, Policies, State, Task, Offered, Allowed, Conditional, Refused, Host, emptyState, Done, Pending, Blocked, IndicatorDelta)
+import ./engine (init, advance, continueAdvance, abortAdvance)
+import ./tasks (accept, complete, resolveRelief, progress)
+import ./conditions (reevaluate)
+import std/result (Ok, Err)
+import std/option (Some, None)
+
+pure func config() -> Config =
+  { id: "test", version: 1, session: "one", timeUnit: "minute", authorityId: "allow", appraisalId: "noop", limits: { actors: 4, tasks: 16, commitments: 16, reliefs: 16, evidence: 16, knowledge: 32, accepted: 32, operations: 16, effects: 16, text: 256, wire: 20000 }, indicators: [{ id: "stress", minimum: 0, maximum: 100 }], recipes: [{ id: "repair", duration: 3, allocation: 2, costs: [{ resource: "material", reserve: 5, consume: 3 }], effects: [] }], rules: [], evidence: [], knowledge: [], relationships: [] }
+
+pure func actors() -> [Actor] =
+  [{ id: "a", capacity: 3, attributes: [], values: [], indicators: [{ id: "stress", value: 60 }] }]
+
+pure func resources() -> [Resource] =
+  [{ id: "material", initial: 9, available: 9, reserved: 0, consumed: 0, transferredIn: 0, transferredOut: 0 }]
+
+pure func policies() -> Policies =
+  { authorityId: "allow", appraisalId: "noop", authority: \s p t. Allowed, appraisal: \a. [] }
+
+pure func task(id: string) -> Task =
+  { id: id, recipe: "repair", participants: ["a"], causes: [], supervisor: "a", status: Offered, started: 0, due: 0 }
+
+pure func state()->State = match init(config(),actors(),resources()) { Ok(s)=>{s | tasks:[task("t")]},Err(_)=>emptyState(config(),actors(),resources()) }
+pure func working() -> State = match accept(config(), policies(), state(), Host, "t") {
+  Ok(step) => step.state,
+  Err(_) => state()
+}
+
+pure func sameState(a: State, b: State) -> bool =
+  a.tick == b.tick && a.revision == b.revision && a.seq == b.seq && a.resources == b.resources && a.tasks == b.tasks && a.conditions == b.conditions
+
+test "conditional authority verifies all requirements" {
+  let missing = { policies() | authority: \s p t. Conditional([{ actor: "a", indicator: "stress", minimum: 70 }]) } in
+  let met = { policies() | authority: \s p t. Conditional([{ actor: "a", indicator: "stress", minimum: 50 }]) } in
+  match accept(config(), missing, state(), Host, "t") {
+    Err(_) => match accept(config(), met, state(), Host, "t") {
+      Ok(_) => true,
+      Err(_) => false
+    },
+    Ok(_) => false
+  }
+}
+
+test "policy refusal prevents acceptance" {
+  let no = { policies() | authority: \s p t. Refused("no") } in match accept(config(), no, state(), Host, "t") {
+    Err(_) => true,
+    Ok(_) => false
+  }
+}
+
+test "materials remain aggregated across accepted assignments" {
+  let s = { working() | actors: [{ id: "a", capacity: 10, attributes: [], values: [], indicators: [{ id: "stress", value: 60 }] }] } in
+  match accept(config(), policies(), { s | tasks: [task("u")] ++ s.tasks }, Host, "u") {
+    Err(_) => s.resources == [{ id: "material", initial: 9, available: 4, reserved: 5, consumed: 0, transferredIn: 0, transferredOut: 0 }],
+    Ok(_) => false
+  }
+}
+
+test "relief cancellation returns reservation exactly once" {
+  let s = { working() | reliefs: [{ id: "r", task: "t", author: "a", resolved: false }] } in
+  match resolveRelief(config(), s, Host, "r", true) {
+    Err(_) => false,
+    Ok(step) => step.state.resources == resources() && (match resolveRelief(config(), step.state, Host, "r", true) {
+      Err(_) => true,
+      Ok(_) => false
+    }) && (match complete(config(), { step.state | tick: 5 }, "t") {
+      Err(_) => true,
+      Ok(_) => false
+    })
+  }
+}
+
+test "declining relief keeps active reservation" {
+  let s = { working() | reliefs: [{ id: "r", task: "t", author: "a", resolved: false }] } in
+  match resolveRelief(config(), s, Host, "r", false) {
+    Err(_) => false,
+    Ok(step) => step.state.resources == s.resources && step.state.tasks == s.tasks
+  }
+}
+
+test "duration overflow does not reserve anything" {
+  match accept(config(), policies(), { state() | tick: 999999999 }, Host, "t") {
+    Err(_) => true,
+    Ok(_) => false
+  }
+}
+
+test "assignment supervisor comes from authenticated accepting principal" {
+  match accept(config(), policies(), state(), ActorPrincipal("a"), "t") {
+    Err(_) => false,
+    Ok(step) => match step.state.tasks {
+      t :: _ => t.supervisor == "a",
+      _ => false
+    }
+  }
+}
+
+test "project progress caps at completion and freezes at cancellation" { let s=working() in progress(config(),s,"t") == Ok(0) && progress(config(),{s | tick:2},"t") == Ok(4) && progress(config(),{s | tick:20},"t") == Ok(6) && match resolveRelief(config(),{s | tick:1,reliefs:[{id:"r",task:"t",author:"a",resolved:false}]},Host,"r",true) { Err(_)=>false,Ok(stopped)=>progress(config(),{stopped.state | tick:20},"t") == Ok(2) } }
+
+test "all task mutators reject changed config and pending continuation" { let c={config() | timeUnit:"changed"} in let s=working() in let pending={s | continuation:Some({config:s.config,revision:s.revision,target:10,cursor:1})} in match accept(c,policies(),state(),Host,"t") { Ok(_)=>false,Err(_)=>match complete(c,{s | tick:3},"t") { Ok(_)=>false,Err(_)=>match resolveRelief(c,{s | reliefs:[{id:"r",task:"t",author:"a",resolved:false}]},Host,"r",true) { Ok(_)=>false,Err(_)=>match accept(config(),policies(),{state() | continuation:pending.continuation},Host,"t") { Ok(_)=>false,Err(_)=>match complete(config(),{pending | tick:3},"t") { Ok(_)=>false,Err(_)=>match resolveRelief(config(),{pending | reliefs:[{id:"r",task:"t",author:"a",resolved:false}]},Host,"r",true) { Ok(_)=>false,Err(_)=>true } } } } } } }
+test "unknown principal or changed policy ids never accept" { match accept(config(),policies(),state(),ActorPrincipal("missing"),"t") { Ok(_)=>false,Err(_)=>match accept(config(),{policies() | authorityId:"changed"},state(),Host,"t") { Ok(_)=>false,Err(_)=>true } } }

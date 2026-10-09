@@ -1,0 +1,46 @@
+module sunholo/social_experiments/config
+import std/result (Result, Ok, Err)
+import pkg/sunholo/social_dynamics/model (Config, Actor, Resource, Policies, Principal, Host, ActorPrincipal, State, Task, Authority, Allowed, Refused, Appraisal, Effect, IndicatorDelta, RelationshipDelta, Error, InvalidConfig)
+
+-- Host-authored tuning, not an asserted model of human behaviour.
+export pure func config(scenario: string, policy: string) -> Result[Config, Error]
+ensures { match result { Ok(c) => c.version == 1 && c.timeUnit == "turn", Err(_) => true } } = {
+  let ship = scenario == "ship";
+  let valid = if ship then policy == "care" || policy == "collaboration" || policy == "renegotiate" else scenario == "community" && (policy == "repair" || policy == "festival");
+  let worker = if ship then "scientist" else "resident";
+  let leader = if ship then "captain" else "council";
+  let external = if ship then "counterpart" else "neighbour";
+  if not valid then Err(InvalidConfig("scenario/policy")) else Ok({
+    id: if ship then "ship_v1" else "community_v1", version: 1, session: "${scenario}-${policy}", timeUnit: "turn", authorityId: "assignment-v1", appraisalId: "${policy}-v1",
+    limits: {actors: 128, tasks: 64, commitments: 64, reliefs: 64, evidence: 512, knowledge: 2048, accepted: 4096, operations: 16, effects: 16, text: 4096, wire: 65536},
+    indicators: [{id: "fatigue", minimum: 0, maximum: 100}, {id: "readiness", minimum: 0, maximum: 100}, {id: "observations", minimum: 0, maximum: 100}, {id: "trust", minimum: 0, maximum: 100}],
+    recipes: [
+      {id: "maintenance", duration: 3, allocation: 1, costs: [{resource: "materials", reserve: 3, consume: 2}], effects: [IndicatorDelta(worker, "readiness", 20), IndicatorDelta(worker, "fatigue", 10)]},
+      {id: "observations", duration: 4, allocation: 1, costs: [{resource: "materials", reserve: 4, consume: 4}], effects: [IndicatorDelta(worker, "observations", 25), IndicatorDelta(worker, "fatigue", 25), IndicatorDelta(worker, "readiness", 0 - 5)]},
+      {id: "rest", duration: 2, allocation: 1, costs: [], effects: [IndicatorDelta(worker, "fatigue", 0 - 15)]},
+      {id: "public_event", duration: 4, allocation: 1, costs: [{resource: "materials", reserve: 4, consume: 3}], effects: [IndicatorDelta(worker, "observations", 15), IndicatorDelta(worker, "fatigue", 15)]}],
+    rules: [{id: "overextended", actor: worker, indicator: "fatigue", above: true, threshold: 60, recovery: 40, duration: 2, cooldown: 3}],
+    evidence: [{id: "request1", author: external, kind: "request", text: if ship then "We would welcome observations on your next visit." else "Can we repair the hall and hold a gathering?", causes: []}],
+    knowledge: [{observer: worker, evidence: "request1"}, {observer: leader, evidence: "request1"}, {observer: external, evidence: "request1"}, {observer: "host", evidence: "request1"}],
+    relationships: [{from: worker, to: leader, dimension: "trust", value: 50}, {from: leader, to: worker, dimension: "trust", value: 70}, {from: external, to: worker, dimension: "trust", value: 40}]
+  })
+}
+export pure func actors(scenario: string) -> [Actor] ensures { result != [] } = {
+  let ship = scenario == "ship";
+  [
+    {id: if ship then "captain" else "council", capacity: 2, attributes: [], values: [], indicators: [{id: "fatigue", value: 10}, {id: "readiness", value: 50}, {id: "observations", value: 0}, {id: "trust", value: 50}]},
+    {id: if ship then "scientist" else "resident", capacity: 2, attributes: if ship then [{id: "openness", value: 80}] else [], values: [{id: "curiosity", value: 80}], indicators: [{id: "fatigue", value: 30}, {id: "readiness", value: 50}, {id: "observations", value: 0}, {id: "trust", value: 50}]},
+    {id: if ship then "counterpart" else "neighbour", capacity: 1, attributes: [], values: [], indicators: [{id: "fatigue", value: 0}, {id: "readiness", value: 50}, {id: "observations", value: 0}, {id: "trust", value: 50}]}]
+}
+export pure func resources() -> [Resource] ensures { result != [] } = [{id: "materials", initial: 10, available: 10, reserved: 0, consumed: 0, transferredIn: 0, transferredOut: 0}]
+pure func authority(s: State, p: Principal, task: Task) -> Authority = match p { Host => Allowed, ActorPrincipal(id) => if id == "captain" || id == "council" then Allowed else Refused("assignment authority") }
+pure func appraisal(policy: string, a: Appraisal) -> [Effect] = {
+  let worker = a.observer.id == "scientist" || a.observer.id == "resident";
+  let leader = if a.observer.id == "scientist" then "captain" else "council";
+  if worker then [RelationshipDelta(a.observer.id, leader, "trust", if policy == "care" || policy == "repair" then 3 else if policy == "renegotiate" then 1 else 2)]
+  else if a.observer.id == "counterpart" || a.observer.id == "neighbour" then [RelationshipDelta(a.observer.id, if a.observer.id == "counterpart" then "scientist" else "resident", "trust", if policy == "renegotiate" then 0 - 2 else 4)]
+  else []
+}
+export pure func policies(policy: string) -> Policies ensures { result.authorityId == "assignment-v1" && result.appraisalId == "${policy}-v1" } = {authorityId: "assignment-v1", appraisalId: "${policy}-v1", authority: authority, appraisal: \a. appraisal(policy, a)}
+
+test "unknown scenario and policy refused" { config("ship", "win") == Err(InvalidConfig("scenario/policy")) && config("unknown", "care") == Err(InvalidConfig("scenario/policy")) }

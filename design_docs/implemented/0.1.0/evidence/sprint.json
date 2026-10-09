@@ -1,0 +1,202 @@
+{
+  "sprint_id": "SOCIAL-DYNAMICS-0.1",
+  "status": "completed",
+  "approved": {
+    "by": "Mark",
+    "channel": "attended",
+    "date": "2026-10-09",
+    "answer": "yep approved"
+  },
+  "created": "2026-10-09",
+  "design_doc": "design_docs/implemented/0.1.0/social-dynamics-0.1.0.md",
+  "sprint_plan": "design_docs/implemented/0.1.0/social-dynamics-0.1.0-sprint.md",
+  "package": "sunholo/social_dynamics",
+  "version": "0.1.0",
+  "base_commit": "2b3c9b2",
+  "ailang_version": "0.52.0",
+  "prompt_version_loaded": "0.16.6",
+  "features": [
+    {
+      "id": "S1",
+      "description": "Bounded domain model, indicators and directed evidence-gated relationships",
+      "estimated_loc": 500,
+      "dependencies": [],
+      "acceptance_criteria": [
+        "AC1",
+        "AC2"
+      ],
+      "passes": true,
+      "started": "2026-10-09",
+      "completed": "2026-10-09",
+      "notes": "Immutable config, bounds, filtered context, evidence-gated directed reactions; foundation native40/40."
+    },
+    {
+      "id": "S2",
+      "description": "Resource-safe tasks, temporal conditions and partition-invariant scheduling",
+      "estimated_loc": 700,
+      "dependencies": [
+        "S1"
+      ],
+      "acceptance_criteria": [
+        "AC3",
+        "AC4",
+        "AC5"
+      ],
+      "passes": true,
+      "started": "2026-10-09",
+      "completed": "2026-10-09",
+      "notes": "Conserved tasks, checked progress, duration/recovery/cooldown, outcome evidence and guarded scheduler continuations; native30/30."
+    },
+    {
+      "id": "S3",
+      "description": "Atomic structured-proposal validation, canonical codecs and replay identity",
+      "estimated_loc": 650,
+      "dependencies": [
+        "S1",
+        "S2"
+      ],
+      "acceptance_criteria": [
+        "AC3",
+        "AC6"
+      ],
+      "passes": true,
+      "started": "2026-10-09",
+      "completed": "2026-10-09",
+      "notes": "Atomic proposals, source binding, retries/caps, strict wire goldens; proposal11/11, wire29/29."
+    },
+    {
+      "id": "S4",
+      "description": "Standalone experiment runner, two domains and package evidence",
+      "estimated_loc": 650,
+      "dependencies": [
+        "S1",
+        "S2",
+        "S3"
+      ],
+      "acceptance_criteria": [
+        "AC7",
+        "AC8",
+        "AC9"
+      ],
+      "passes": true,
+      "started": "2026-10-09",
+      "completed": "2026-10-09",
+      "notes": "Ship3 and community2 contrasting recordings; consumer8/8; strictVM110/110; trace parity/replay5/5; quality no gates; dry-run no upload."
+    }
+  ],
+  "registry_reuse": [
+    {
+      "milestone": "S1",
+      "package": null,
+      "action": "none",
+      "search_terms": [
+        "social",
+        "event",
+        "simulation",
+        "personality"
+      ],
+      "inspected": [
+        "sunholo/agui (registry info/docs)",
+        "sunholo/decisions (local AGENT.md)"
+      ],
+      "reason": "No social-simulation kernel found; AG-UI is a transport lifecycle codec and decisions is a model API. Use stdlib and application-supplied policies."
+    },
+    {
+      "milestone": "S2",
+      "package": null,
+      "action": "none",
+      "search_terms": [
+        "social",
+        "event",
+        "simulation",
+        "personality"
+      ],
+      "inspected": [
+        "sunholo/agui (registry info/docs)",
+        "sunholo/decisions (local AGENT.md)"
+      ],
+      "reason": "No social-simulation kernel found; AG-UI is a transport lifecycle codec and decisions is a model API. Use stdlib and application-supplied policies."
+    },
+    {
+      "milestone": "S3",
+      "package": null,
+      "action": "none",
+      "search_terms": [
+        "social",
+        "event",
+        "simulation",
+        "personality"
+      ],
+      "inspected": [
+        "sunholo/agui (registry info/docs)",
+        "sunholo/decisions (local AGENT.md)"
+      ],
+      "reason": "No social-simulation kernel found; AG-UI is a transport lifecycle codec and decisions is a model API. Use stdlib and application-supplied policies."
+    },
+    {
+      "milestone": "S4",
+      "package": null,
+      "action": "none",
+      "search_terms": [
+        "social",
+        "event",
+        "simulation",
+        "personality"
+      ],
+      "inspected": [
+        "sunholo/agui (registry info/docs)",
+        "sunholo/decisions (local AGENT.md)"
+      ],
+      "reason": "No social-simulation kernel found; AG-UI is a transport lifecycle codec and decisions is a model API. Use stdlib and application-supplied policies."
+    }
+  ],
+  "velocity": {
+    "target_loc_per_day": 400,
+    "estimated_total_loc": 2500,
+    "estimated_days": 8,
+    "provenance": "Provisional 400 LOC/day from ship plan, revised after review; about 25% review buffer; no measured social-package velocity.",
+    "actual_ailang_loc": 1738,
+    "actual_milestones": 4,
+    "execution_mode": "One accelerated attended implementation session; 8-day planning estimate retained, not a measured LOC/day claim."
+  },
+  "github_issues": [],
+  "publishing_authorized": false,
+  "review_status": "independent_evaluation_pass",
+  "scope_exclusions": [
+    "game source/assets/UI",
+    "provider calls and spend",
+    "publication",
+    "mutiny or universal moral scoring"
+  ],
+  "design_review": {
+    "round": 2,
+    "requested_reviewers": [
+      "gpt-6-astra",
+      "gpt-6-sol"
+    ],
+    "reports": [
+      ".ailang/state/evaluations/social_design_astra_round2.json",
+      ".ailang/state/evaluations/social_design_sol_round2.json"
+    ],
+    "status": "pass"
+  },
+  "implementation_checks": [
+    "Reevaluate condition rules after init and committed apply/deliver as well as scheduling boundaries.",
+    "Compile separate consumer and pin actual state/event codec goldens.",
+    "Unaffordable acceptance fixture must use AcceptTask, not resource-free OfferTask."
+  ],
+  "completed": "2026-10-09",
+  "evidence_report": "design_docs/implemented/0.1.0/social-dynamics-validation.md",
+  "mutation_controls": {
+    "compiled_and_killed": 8,
+    "survivors": 0
+  },
+  "evaluation": {
+    "score": 100,
+    "max": 100,
+    "status": "pass",
+    "reviewed_commit": "18e8ba1",
+    "independent_probes": 11,
+    "report": "design_docs/implemented/0.1.0/evidence/independent-evaluation.json"
+  }
+}

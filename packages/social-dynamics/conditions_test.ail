@@ -1,0 +1,159 @@
+module sunholo/social_dynamics/conditions_test
+import ./model (Config, Actor, Resource, Policies, Allowed, State, Done, Pending, Blocked, Host, ActorPrincipal)
+import ./engine (init, advance, continueAdvance, abortAdvance)
+import ./conditions (reevaluate, transition)
+import std/result (Ok, Err)
+import std/option (None, Some)
+import std/list (length)
+
+pure func config() -> Config =
+  { id: "test", version: 1, session: "one", timeUnit: "minute", authorityId: "allow", appraisalId: "noop", limits: { actors: 4, tasks: 16, commitments: 16, reliefs: 16, evidence: 16, knowledge: 32, accepted: 32, operations: 16, effects: 16, text: 256, wire: 20000 }, indicators: [{ id: "stress", minimum: 0, maximum: 100 }], recipes: [{ id: "repair", duration: 3, allocation: 2, costs: [{ resource: "material", reserve: 5, consume: 3 }], effects: [] }], rules: [], evidence: [], knowledge: [], relationships: [] }
+
+pure func actors() -> [Actor] =
+  [{ id: "a", capacity: 3, attributes: [], values: [], indicators: [{ id: "stress", value: 60 }] }]
+
+pure func resources() -> [Resource] =
+  [{ id: "material", initial: 9, available: 9, reserved: 0, consumed: 0, transferredIn: 0, transferredOut: 0 }]
+
+pure func policies() -> Policies =
+  { authorityId: "allow", appraisalId: "noop", authority: \s p t. Allowed, appraisal: \a. [] }
+
+pure func sameState(a: State, b: State) -> bool =
+  a.tick == b.tick && a.revision == b.revision && a.seq == b.seq && a.resources == b.resources && a.tasks == b.tasks && a.conditions == b.conditions
+
+pure func ruleConfig() -> Config =
+  { config() | rules: [{ id: "stress_rule", actor: "a", indicator: "stress", above: true, threshold: 50, recovery: 30, duration: 2, cooldown: 3 }] }
+
+pure func initial() -> State = match init(ruleConfig(), actors(), resources()) {
+  Ok(s) => s,
+  Err(_) => { config: "invalid", configBody: "", session: "one", tick: 0, revision: 0, seq: 0, actors: [], resources: [], relationships: [], tasks: [], reliefs: [], commitments: [], evidence: [], knowledge: [], conditions: [], accepted: [], continuation: None }
+}
+
+pure func stress(s: State, n: int) -> State =
+  { s | actors: [{ id: "a", capacity: 3, attributes: [], values: [], indicators: [{ id: "stress", value: n }] }] }
+
+test "entry requires duration and does not refire while active" {
+  match advance(ruleConfig(), policies(), initial(), 1, 20) {
+    Done(one, e1) => length(e1) == 0 && (match advance(ruleConfig(), policies(), one, 20, 20) {
+      Done(last, e2) => length(e2) == 1 && last.conditions == [{ id: "stress_rule", since: 0 - 1, active: true, cooldownUntil: 0 }],
+      _ => false
+    }),
+    _ => false
+  }
+}
+
+test "cancelled threshold duration starts over" {
+  match advance(ruleConfig(), policies(), initial(), 1, 20) {
+    Done(one, _) => match reevaluate(ruleConfig(), stress(one, 40)) {
+      Err(_) => false,
+      Ok(low) => match advance(ruleConfig(), policies(), low, 3, 20) {
+        Done(three, e) => length(e) == 0 && (match reevaluate(ruleConfig(), stress(three, 60)) {
+          Err(_) => false,
+          Ok(high) => match advance(ruleConfig(), policies(), high, 4, 20) {
+            Done(_, early) => length(early) == 0,
+            _ => false
+          }
+        }),
+        _ => false
+      }
+    },
+    _ => false
+  }
+}
+
+test "recovery hysteresis and cooldown" {
+  match advance(ruleConfig(), policies(), initial(), 3, 20) {
+    Done(active, _) => match reevaluate(ruleConfig(), stress(active, 40)) {
+      Err(_) => false,
+      Ok(mid) => match advance(ruleConfig(), policies(), mid, 4, 20) {
+        Done(still, none) => length(none) == 0 && (match reevaluate(ruleConfig(), stress(still, 20)) {
+          Err(_) => false,
+          Ok(low) => match advance(ruleConfig(), policies(), low, 5, 20) {
+            Done(recovered, events) => length(events) == 1 && recovered.conditions == [{ id: "stress_rule", since: 0 - 1, active: false, cooldownUntil: 8 }] && (match reevaluate(ruleConfig(), stress(recovered, 60)) {
+              Err(_) => false,
+              Ok(high) => match advance(ruleConfig(), policies(), high, 10, 20) {
+                Done(_, entry) => length(entry) == 1,
+                _ => false
+              }
+            }),
+            _ => false
+          }
+        }),
+        _ => false
+      }
+    },
+    _ => false
+  }
+}
+
+test "continuation preserves sequence and rejects conflicting inputs" {
+  let c = { ruleConfig() | rules: [{ id: "b", actor: "a", indicator: "stress", above: true, threshold: 50, recovery: 30, duration: 2, cooldown: 3 }, { id: "a", actor: "a", indicator: "stress", above: true, threshold: 50, recovery: 30, duration: 2, cooldown: 3 }] } in
+  match init(c, actors(), resources()) {
+    Err(_) => false,
+    Ok(s) => match advance(c, policies(), s, 10, 20) {
+      Done(big, all) => match advance(c, policies(), s, 10, 1) {
+        Pending(part, e1, token) => match advance(c, policies(), part, 10, 10) {
+          Blocked(_, _, _, _, _) => match continueAdvance(c, policies(), part, token, 10) {
+            Done(last, e2) => sameState(last, big) && e1 ++ e2 == all && (match abortAdvance(part, ActorPrincipal("a"), token) {
+              Err(_) => true,
+              Ok(_) => false
+            }),
+            _ => false
+          },
+          _ => false
+        },
+        _ => false
+      },
+      _ => false
+    }
+  }
+}
+
+test "wrong continuation token cannot change pending state" {
+  let c = { ruleConfig() | rules: [{ id: "b", actor: "a", indicator: "stress", above: true, threshold: 50, recovery: 30, duration: 2, cooldown: 3 }, { id: "a", actor: "a", indicator: "stress", above: true, threshold: 50, recovery: 30, duration: 2, cooldown: 3 }] } in
+  match init(c, actors(), resources()) {
+    Err(_) => false,
+    Ok(s) => match advance(c, policies(), s, 10, 1) {
+      Pending(part, _, token) => match continueAdvance(c, policies(), part, { token | cursor: token.cursor + 1 }, 10) {
+        Blocked(n, _, _, _, _) => sameState(n, part) && (match abortAdvance(part, Host, token) {
+          Ok(cleared) => sameState(cleared, part),
+          Err(_) => false
+        }),
+        _ => false
+      },
+      _ => false
+    }
+  }
+}
+
+test "condition clock partition matches unsplit advance" {
+ let c = ruleConfig();
+ let s = initial();
+ match advance(c, policies(), s, 10, 20) {
+  Done(big, es) => match advance(c, policies(), s, 1, 20) {
+   Done(first, e1) => match advance(c, policies(), first, 10, 20) {
+    Done(last, e2) => sameState(last, big) && e1 ++ e2 == es,
+    _ => false
+   },
+   _ => false
+  },
+  _ => false
+ }
+}
+
+test "recovery cannot execute until next scheduler tick" {
+ match advance(ruleConfig(),policies(),initial(),3,20) {
+  Done(active,_) => match reevaluate(ruleConfig(),stress(active,20)) {
+   Err(_) => false,
+   Ok(low) => match transition(ruleConfig(),low,"stress_rule") {
+    Ok(_) => false,
+    Err(_) => match transition(ruleConfig(),{low | tick:4},"stress_rule") {
+     Err(_) => false,
+     Ok(step) => step.state.knowledge == low.knowledge && step.state.evidence != []
+    }
+   }
+  },
+  _ => false
+ }
+}
+test "condition mutators reject changed config and pending continuation" { let s=initial() in let changed={ruleConfig() | timeUnit:"changed"} in let pending={s | continuation:Some({config:s.config,revision:s.revision,target:10,cursor:1})} in match reevaluate(changed,s) { Ok(_)=>false,Err(_)=>match transition(changed,{s | tick:2},"stress_rule") { Ok(_)=>false,Err(_)=>match reevaluate(ruleConfig(),pending) { Ok(_)=>false,Err(_)=>match transition(ruleConfig(),{pending | tick:2},"stress_rule") { Ok(_)=>false,Err(_)=>true } } } } }

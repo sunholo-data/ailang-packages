@@ -1,0 +1,93 @@
+module sunholo/social_dynamics/conditions
+import ./model (Config, State, Rule, Condition, Error, Step, Applied, NumericOverflow, InvalidTransition, UnknownId, ConditionEntered, ConditionRecovered, add, event, InvalidConfig, PendingAdvance, CapacityExceeded)
+import ./wire (encodeConfig)
+import ./indicators (findActor)
+import std/result (Result, Ok, Err)
+import std/option (Option, Some, None)
+import std/list (filter, map, any, length)
+import std/string (length as stringLength)
+
+pure func context(c:Config,s:State)->Result[State,Error] = if c.id != s.config || c.session != s.session || encodeConfig(c) != s.configBody then Err(InvalidConfig("identity")) else match s.continuation { Some(_)=>Err(PendingAdvance("condition")),None=>Ok(s) }
+pure func boundaryEvidence(c:Config,s:State,kind:string,text:string,causes:[string])->Result[State,Error]
+ensures { match result { Ok(n)=>length(n.evidence) == length(s.evidence)+1 && n.knowledge == s.knowledge,Err(_)=>true } } = match context(c,s) { Err(e)=>Err(e),Ok(_)=>evidenceReady(c,s,kind,text,causes) }
+pure func evidenceReady(c:Config,s:State,kind:string,text:string,causes:[string])->Result[State,Error] =
+ if s.seq >= 1000000000 then Err(NumericOverflow("event")) else let id="event-${s.seq+1}" in
+ if stringLength(text) > c.limits.text || length(causes) > c.limits.operations then Err(CapacityExceeded("evidence_body")) else if length(s.evidence) >= c.limits.evidence then Err(CapacityExceeded("evidence")) else if any(\e. e.id == id,s.evidence) then Err(InvalidTransition(id)) else Ok({s | evidence:s.evidence ++ [{id:id,author:"host",kind:kind,text:text,causes:causes}]})
+
+pure func value(s: State, r: Rule) -> int = match findActor(s, r.actor) {
+  None => 0,
+  Some(a) => match filter(\v. v.id == r.indicator, a.indicators) {
+    [] => 0,
+    v :: _ => v.value
+  }
+}
+
+pure func triggered(s: State, r: Rule) -> bool =
+  if r.above then value(s, r) >= r.threshold else value(s, r) <= r.threshold
+
+pure func recovered(s: State, r: Rule) -> bool =
+  if r.above then value(s, r) <= r.recovery else value(s, r) >= r.recovery
+
+pure func refresh(s: State, rs: [Rule], cs: [Condition]) -> Result[[Condition], Error] = match rs {
+  [] => Ok(cs),
+  r :: tail => let old = match filter(\x. x.id == r.id, cs) {
+    [] => { id: r.id, since: 0 - 1, active: false, cooldownUntil: 0 },
+    x :: _ => x
+  } in let starts = not old.active && triggered(s, r) && s.tick >= old.cooldownUntil && old.since < 0 || old.active && recovered(s, r) && old.since < 0 in
+  let stops = not old.active && not triggered(s, r) && old.since >= 0 || old.active && not recovered(s, r) && old.since >= 0 in
+  let next = if starts then { old | since: s.tick } else if stops then { old | since: 0 - 1 } else old in
+  if starts then match add(s.tick, if old.active then 1 else r.duration) {
+    Err(e) => Err(e),
+    Ok(_) => refresh(s, tail, next :: filter(\x. x.id != r.id, cs))
+  } else refresh(s, tail, next :: filter(\x. x.id != r.id, cs))
+}
+
+export pure func reevaluate(c: Config, s: State) -> Result[State, Error]
+ensures { match result {
+  Ok(n) => n.tick == s.tick && n.revision == s.revision,
+  Err(_) => true
+} } = match context(c,s) { Err(e)=>Err(e),Ok(_)=>refreshReady(c,s) }
+pure func refreshReady(c:Config,s:State)->Result[State,Error] = match refresh(s, c.rules, s.conditions) {
+  Err(e) => Err(e),
+  Ok(cs) => Ok({ s | conditions: cs })
+}
+
+-- Active recovery commits immediately at next scheduler tick; never recursive same-time.
+export pure func due(c: Config, s: State, id: string) -> Option[int]
+ensures { match result {
+  Some(t) => t >= s.tick,
+  None => true
+} } = match filter(\r. r.id == id, c.rules) {
+  [] => None,
+  r :: _ => match filter(\x. x.id == id, s.conditions) {
+    [] => None,
+    x :: _ => if x.active && x.since >= 0 && recovered(s, r) then match add(x.since, 1) {
+      Err(_) => None,
+      Ok(t) => Some(if t < s.tick then s.tick else t)
+    } else if not x.active && x.since >= 0 then match add(x.since, r.duration) {
+      Err(_) => None,
+      Ok(t) => Some(if t < s.tick then s.tick else t)
+    } else if not x.active && triggered(s, r) && x.cooldownUntil > s.tick then Some(x.cooldownUntil) else None
+  }
+}
+
+export pure func transition(c: Config, s: State, id: string) -> Result[Step, Error]
+ensures { match result {
+  Ok(n) => n.state.tick == s.tick,
+  Err(_) => true
+} } = match context(c,s) { Err(e)=>Err(e),Ok(_)=>transitionReady(c,s,id) }
+pure func transitionReady(c:Config,s:State,id:string)->Result[Step,Error] = match filter(\r. r.id == id, c.rules) {
+  [] => Err(UnknownId(id)),
+  r :: _ => match filter(\x. x.id == id, s.conditions) {
+    [] => Err(UnknownId(id)),
+    x :: _ => if s.seq >= 1000000000 || s.revision >= 1000000000 then Err(NumericOverflow("event")) else if x.active && x.since >= 0 && s.tick > x.since && recovered(s, r) then match add(s.tick, r.cooldown) {
+      Err(e) => Err(e),
+      Ok(cd) => match boundaryEvidence(c,s,"condition_recovered",id,[]) { Err(e)=>Err(e),Ok(observed)=>let e = {event(s, ConditionRecovered(id), []) | evidence:Some("event-${s.seq+1}")} in
+      Ok({ state: { observed | conditions: map(\v. if v.id == id then { v | active: false, since: 0 - 1, cooldownUntil: cd } else v, s.conditions), seq: e.seq, revision: e.revision }, disposition: Applied, events: [e] }) }
+    } else if not x.active && x.since >= 0 && s.tick - x.since >= r.duration && triggered(s, r) then match boundaryEvidence(c,s,"condition_entered",id,[]) { Err(e)=>Err(e),Ok(observed)=>let e = {event(s, ConditionEntered(id), []) | evidence:Some("event-${s.seq+1}")} in
+    Ok({ state: { observed | conditions: map(\v. if v.id == id then { v | active: true, since: 0 - 1 } else v, s.conditions), seq: e.seq, revision: e.revision }, disposition: Applied, events: [e] }) } else if not x.active && x.since < 0 && s.tick >= x.cooldownUntil && triggered(s, r) then match add(s.tick, r.duration) {
+      Err(e) => Err(e),
+      Ok(_) => Ok({ state: { s | conditions: map(\v. if v.id == id then { v | since: s.tick } else v, s.conditions) }, disposition: Applied, events: [] })
+    } else Err(InvalidTransition(id))
+  }
+}

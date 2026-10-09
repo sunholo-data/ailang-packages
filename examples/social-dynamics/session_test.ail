@@ -1,0 +1,69 @@
+module sunholo/social_experiments/session_test
+import std/result (Ok, Err)
+import std/string (contains)
+import std/list (length, filter, map)
+import pkg/sunholo/social_dynamics/model (ActorPrincipal, Authored, OfferTask, AcceptTask, Proposal, Operation, IndicatorDelta, Done, Pending, State, Event, Error)
+import pkg/sunholo/social_dynamics/engine (init, advance)
+import pkg/sunholo/social_dynamics/proposals (apply)
+import pkg/sunholo/social_dynamics/wire (encodeProposal, encodeState, encodeEvents)
+import ./config (config, actors, resources, policies)
+import ./session (start, input, recording)
+pure func proposal(id: string, rev: int, who: string, ops: [Operation]) -> Proposal = {id:id,config:"ship_v1",baseRevision:rev,principal:who,origin:Authored,expires:60,causes:[],operations:ops}
+pure func value(s: State, indicator: string) -> int = match filter(\a. a.id == "scientist", s.actors) { [] => 0 - 999, a :: _ => match filter(\v. v.id == indicator, a.indicators) { [] => 0 - 999, v :: _ => v.value } }
+pure func outcome(policy: string, recipes: [string]) -> [int] = match config("ship", policy) {
+  Err(_) => [], Ok(c) => match init(c, actors("ship"), resources()) {
+    Err(_) => [], Ok(s) => {
+      let ops = if policy == "care" then [OfferTask("a","maintenance",["scientist"],[]),OfferTask("b","rest",["scientist"],[])] else if policy == "collaboration" then [OfferTask("a","observations",["scientist"],[]),OfferTask("b","observations",["scientist"],[])] else [OfferTask("a","maintenance",["scientist"],[])];
+      match apply(c, policies(policy), s, ActorPrincipal("scientist"), Authored, proposal("p1",0,"scientist",ops)) {
+        Err(_) => [], Ok(offered) => match apply(c, policies(policy), offered.state, ActorPrincipal("captain"), Authored, proposal("p2",1,"captain", if policy == "renegotiate" then [AcceptTask("a")] else [AcceptTask("a"),AcceptTask("b")])) {
+          Err(_) => [], Ok(working) => match advance(c,policies(policy),working.state,8,64) { Done(n,_) => [value(n,"fatigue"),value(n,"readiness"),value(n,"observations")], _ => [] }
+        }
+      }
+    }
+  }
+}
+test "separate consumer sees contrasting ship tradeoffs" { outcome("care",[]) == [25,70,0] && outcome("collaboration",[]) == [80,40,50] && outcome("renegotiate",[]) == [40,70,0] }
+test "community imports same pure public API without human attributes" {
+  match config("community","repair") { Err(_) => false, Ok(c) => match init(c,actors("community"),resources()) { Err(_) => false, Ok(s) => s.config == "community_v1" && length(s.actors) == 3 && s.tick == 0 } }
+}
+test "runner requires explicit valid start and strict framing" { match start("{\"command\":\"start\",\"scenario\":\"ship\",\"policy\":\"care\"} junk") { Err(_) => true, _ => false } }
+test "runner refuses fractional time and unknown command fields" {
+  match start("{\"command\":\"start\",\"scenario\":\"ship\",\"policy\":\"care\"}") {
+    Err(_) => false, Ok(o) => match (input(o.session,"{\"command\":\"advance\",\"tick\":1.5,\"budget\":1}"), input(o.session,"{\"command\":\"advance\",\"tick\":1,\"budget\":1,\"extra\":true}")) { (Err(_),Err(_)) => true, _ => false }
+  }
+}
+test "recorder proposal input uses external exported codec and engine" {
+ match start("{\"command\":\"start\",\"scenario\":\"ship\",\"policy\":\"care\"}") {
+  Err(_) => false, Ok(o) => {
+   let p = proposal("p1",0,"scientist",[OfferTask("o","observations",["scientist"],[])]);
+   match input(o.session,"{\"command\":\"proposal\",\"principal\":\"scientist\",\"source\":\"authored\",\"proposal\":${encodeProposal(p)}}") { Err(_) => false, Ok(n) => n.session.state.revision == 1 && length(n.session.state.tasks) == 1 && n.session.state.resources == o.session.state.resources }
+  }
+ }
+}
+
+test "outer source cannot be forged by changing generated proposal origin" {
+ match start("{\"command\":\"start\",\"scenario\":\"ship\",\"policy\":\"care\"}") {
+  Err(_) => false, Ok(o) => {
+   let p = proposal("p1",0,"captain",[AcceptTask("missing")]);
+   match input(o.session,"{\"command\":\"proposal\",\"principal\":\"captain\",\"source\":\"ai\",\"proposal\":${encodeProposal(p)}}") { Err(_) => true, _ => false }
+  }
+ }
+}
+test "pure recording rejects missing start" { recording([]) == "{\"error\":\"empty_recording\"}" }
+
+test "blocked recorder preserves earlier completion state and events" {
+ match config("ship","collaboration") {
+  Err(_) => false, Ok(base) => {
+   let c = {base | recipes: map(\r. if r.id == "observations" then {r | effects: [IndicatorDelta("scientist","fatigue",100)]} else r, base.recipes)};
+   match init(c,actors("ship"),resources()) {
+    Err(_) => false, Ok(s) => match apply(c,policies("collaboration"),s,ActorPrincipal("scientist"),Authored,proposal("p1",0,"scientist",[OfferTask("a","maintenance",["scientist"],[]),OfferTask("b","observations",["scientist"],[])])) {
+     Err(_) => false, Ok(o) => match apply(c,policies("collaboration"),o.state,ActorPrincipal("captain"),Authored,proposal("p2",1,"captain",[AcceptTask("a"),AcceptTask("b")])) {
+      Err(_) => false, Ok(w) => match input({config:c,policies:policies("collaboration"),state:w.state},"{\"command\":\"advance\",\"tick\":10,\"budget\":64}") {
+       Err(_) => false, Ok(blocked) => blocked.failed && blocked.session.state.tick == 3 && value(blocked.session.state,"readiness") == 70 && contains(blocked.trace,"task_completed") && contains(blocked.trace,"blocked")
+      }
+     }
+    }
+   }
+  }
+ }
+}

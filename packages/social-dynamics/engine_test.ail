@@ -1,0 +1,119 @@
+module sunholo/social_dynamics/engine_test
+import ./model (Config, Actor, Resource, Policies, State, Task, Offered, Allowed, Host, emptyState, Done, Pending, Blocked, IndicatorDelta, TaskCompleted)
+import ./engine (init, advance, continueAdvance, abortAdvance)
+import ./relationships (deliver)
+import ./tasks (accept, complete, resolveRelief)
+import ./conditions (reevaluate)
+import std/result (Ok, Err)
+import std/option (Some, None)
+
+pure func config() -> Config =
+  { id: "test", version: 1, session: "one", timeUnit: "minute", authorityId: "allow", appraisalId: "noop", limits: { actors: 4, tasks: 16, commitments: 16, reliefs: 16, evidence: 16, knowledge: 32, accepted: 32, operations: 16, effects: 16, text: 256, wire: 20000 }, indicators: [{ id: "stress", minimum: 0, maximum: 100 }], recipes: [{ id: "repair", duration: 3, allocation: 2, costs: [{ resource: "material", reserve: 5, consume: 3 }], effects: [] }], rules: [], evidence: [], knowledge: [], relationships: [] }
+
+pure func actors() -> [Actor] =
+  [{ id: "a", capacity: 3, attributes: [], values: [], indicators: [{ id: "stress", value: 60 }] }]
+
+pure func resources() -> [Resource] =
+  [{ id: "material", initial: 9, available: 9, reserved: 0, consumed: 0, transferredIn: 0, transferredOut: 0 }]
+
+pure func policies() -> Policies =
+  { authorityId: "allow", appraisalId: "noop", authority: \s p t. Allowed, appraisal: \a. [] }
+
+pure func task(id: string) -> Task =
+  { id: id, recipe: "repair", participants: ["a"], causes: [], supervisor: "a", status: Offered, started: 0, due: 0 }
+
+pure func state() -> State = match init(config(), actors(), resources()) { Ok(s) => {s | tasks:[task("t")]}, Err(_) => emptyState(config(),actors(),resources()) }
+pure func working() -> State = match accept(config(), policies(), state(), Host, "t") {
+  Ok(step) => step.state,
+  Err(_) => state()
+}
+
+pure func sameState(a: State, b: State) -> bool =
+  a.tick == b.tick && a.revision == b.revision && a.seq == b.seq && a.resources == b.resources && a.tasks == b.tasks && a.conditions == b.conditions
+
+test "reserving and completing conserves inventory" {
+  match accept(config(), policies(), state(), Host, "t") {
+    Err(_) => false,
+    Ok(step) => step.state.resources == [{ id: "material", initial: 9, available: 4, reserved: 5, consumed: 0, transferredIn: 0, transferredOut: 0 }] && (match complete(config(), { step.state | tick: 3 }, "t") {
+      Err(_) => false,
+      Ok(done) => done.state.resources == [{ id: "material", initial: 9, available: 6, reserved: 0, consumed: 3, transferredIn: 0, transferredOut: 0 }] && (match complete(config(), done.state, "t") {
+        Err(_) => true,
+        Ok(_) => false
+      })
+    })
+  }
+}
+
+test "capacity prevents aggregate work allocation" {
+  let s = working() in match accept(config(), policies(), { s | tasks: [task("u")] ++ s.tasks }, Host, "u") {
+    Err(_) => true,
+    Ok(_) => false
+  }
+}
+
+test "advance partition produces identical state and events" {
+  let s = working() in match advance(config(), policies(), s, 10, 20) {
+    Done(big, es) => match advance(config(), policies(), s, 2, 20) {
+      Done(first, e1) => match advance(config(), policies(), first, 10, 20) {
+        Done(last, e2) => sameState(last, big) && e1 ++ e2 == es,
+        _ => false
+      },
+      _ => false
+    },
+    _ => false
+  }
+}
+
+test "rewind and bad budgets preserve state" {
+  let s = working() in match advance(config(), policies(), s, 0 - 1, 2) {
+    Blocked(n, _, _, _, _) => sameState(n, s) && (match advance(config(), policies(), s, 10, 0) {
+      Blocked(x, _, _, _, _) => sameState(x, s),
+      _ => false
+    }),
+    _ => false
+  }
+}
+
+test "completion failure leaves tick and reservation unchanged" {
+ let c = {config() | recipes:[{id:"repair",duration:3,allocation:2,costs:[{resource:"material",reserve:5,consume:3}],effects:[IndicatorDelta("a","stress",100)]}]};
+ match init(c,actors(),resources()) { Err(_)=>false, Ok(start)=>match accept(c,policies(),{start | tasks:[task("t")]},Host,"t") { Err(_)=>false,Ok(accepted)=>match advance(c,policies(),accepted.state,10,20) { Blocked(n,_,id,t,_)=>sameState(n,accepted.state) && id == "t" && t == 3,_=>false } } }
+}
+
+test "simultaneous completion precedes and cancels condition entry" {
+  let c = { config() | recipes: [{ id: "repair", duration: 3, allocation: 2, costs: [{ resource: "material", reserve: 5, consume: 3 }], effects: [IndicatorDelta("a", "stress", 0 - 40)] }], rules: [{ id: "rule", actor: "a", indicator: "stress", above: true, threshold: 50, recovery: 30, duration: 3, cooldown: 2 }] } in
+  match init(c, actors(), resources()) {
+    Err(_) => false,
+    Ok(start) => match accept(c, policies(), { start | tasks: [task("t")] }, Host, "t") {
+      Err(_) => false,
+      Ok(accepted) => match advance(c, policies(), accepted.state, 10, 20) {
+        Done(last, events) => last.seq == 2 && (match events {
+          e :: [] => e.kind == TaskCompleted("t"),
+          _ => false
+        }),
+        _ => false
+      }
+    }
+  }
+}
+
+test "task boundaries at same tick sort by stable id" {
+  let s = { working() | actors: [{ id: "a", capacity: 10, attributes: [], values: [], indicators: [{ id: "stress", value: 60 }] }], resources: [{ id: "material", initial: 20, available: 15, reserved: 5, consumed: 0, transferredIn: 0, transferredOut: 0 }] } in
+  match accept(config(), policies(), { s | tasks: [task("a")] ++ s.tasks }, Host, "a") {
+    Err(_) => false,
+    Ok(next) => match advance(config(), policies(), next.state, 10, 20) {
+      Done(_, events) => match events {
+        first :: second :: [] => first.kind == TaskCompleted("a") && second.kind == TaskCompleted("t") && second.seq == first.seq + 1,
+        _ => false
+      },
+      _ => false
+    }
+  }
+}
+
+test "same config id cannot hide a changed frozen config" { let s=state() in match advance({config() | timeUnit:"changed"},policies(),s,10,20) { Blocked(n,_,id,_,_)=>sameState(n,s) && id == "input",_=>false } }
+
+test "progress overflow blocks completion without consuming reservation" { let c={config() | recipes:[{id:"repair",duration:50000,allocation:50000,costs:[{resource:"material",reserve:5,consume:3}],effects:[]}]} in let a=[{id:"a",capacity:50000,attributes:[],values:[],indicators:[{id:"stress",value:60}]}] in match init(c,a,resources()) { Err(_)=>false,Ok(start)=>match accept(c,policies(),{start | tasks:[task("t")]},Host,"t") { Err(_)=>false,Ok(accepted)=>match advance(c,policies(),accepted.state,50000,20) { Blocked(n,_,id,t,_)=>sameState(n,accepted.state) && id == "t" && t == 50000,_=>false } } } }
+
+test "completion evidence can be explicitly delivered later" { let c=config() in let s=working() in match advance(c,policies(),s,3,20) { Done(n,events)=>n.knowledge == s.knowledge && match events { e :: []=>match e.evidence { None=>false,Some(id)=>match deliver(c,policies(),n,Host,{id:"delivery",observer:"a",evidence:id,causes:[],notBefore:3,source:"host"}) { Err(_)=>false,Ok(received)=>received.state.knowledge == [{observer:"a",evidence:id}] } },_=>false },_=>false } }
+test "completion evidence capacity failure leaves whole boundary unchanged" { let c={config() | limits:{config().limits | evidence:1},evidence:[{id:"initial",author:"host",kind:"fact",text:"initial",causes:[]}]} in match init(c,actors(),resources()) { Err(_)=>false,Ok(start)=>match accept(c,policies(),{start | tasks:[task("t")]},Host,"t") { Err(_)=>false,Ok(accepted)=>match advance(c,policies(),accepted.state,3,20) { Blocked(n,events,id,t,_)=>sameState(n,accepted.state) && n.evidence == accepted.state.evidence && events == [] && id == "t" && t == 3,_=>false } } } }
+test "completion evidence id collision blocks atomically" { let s=working() in let forged={s | evidence:[{id:"event-2",author:"host",kind:"fact",text:"collision",causes:[]}]} in match advance(config(),policies(),forged,3,20) { Blocked(n,_,_,_,_)=>sameState(n,forged) && n.evidence == forged.evidence,_=>false } }

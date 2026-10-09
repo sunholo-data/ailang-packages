@@ -1,0 +1,62 @@
+module sunholo/social_dynamics/model
+import std/list (length, dedup, sortBy)
+import std/string (length as stringLength)
+import std/result (Result, Ok, Err)
+import std/option (Option, None)
+
+export type Error = InvalidConfig(string) | InvalidSchema(string) | UnsupportedVersion(string) | UnknownId(string) | Unauthorized(string) | UnseenEvidence(string) | StaleRevision(string) | Expired(string) | AlteredDuplicate(string) | InsufficientResource(string) | CapacityExceeded(string) | InvalidPolicyEffect(string) | InvalidTransition(string) | ClockRewind(string) | InvalidBudget(string) | NumericOverflow(string) | PendingAdvance(string) | InvalidContinuation(string) deriving (Eq)
+export type Principal = Host | ActorPrincipal(string) deriving (Eq)
+export type Source = AI | Authored | ActorInput deriving (Eq)
+export type Disposition = Applied | Duplicate deriving (Eq)
+export type Value = {id: string, value: int} deriving (Eq)
+export type Actor = {id: string, capacity: int, attributes: [Value], values: [Value], indicators: [Value]} deriving (Eq)
+export type Indicator = {id: string, minimum: int, maximum: int} deriving (Eq)
+export type Relationship = {from: string, to: string, dimension: string, value: int} deriving (Eq)
+export type Resource = {id: string, initial: int, available: int, reserved: int, consumed: int, transferredIn: int, transferredOut: int} deriving (Eq)
+export type Cost = {resource: string, reserve: int, consume: int} deriving (Eq)
+export type Effect = IndicatorDelta(string, string, int) | RelationshipDelta(string, string, string, int) deriving (Eq)
+export type Recipe = {id: string, duration: int, allocation: int, costs: [Cost], effects: [Effect]} deriving (Eq)
+export type Requirement = {actor: string, indicator: string, minimum: int} deriving (Eq)
+export type Authority = Allowed | Conditional([Requirement]) | Refused(string) deriving (Eq)
+export type TaskStatus = Offered | Working | Completed | Stopped deriving (Eq)
+export type Task = {id: string, recipe: string, participants: [string], causes: [string], supervisor: string, status: TaskStatus, started: int, due: int} deriving (Eq)
+export type Relief = {id: string, task: string, author: string, resolved: bool} deriving (Eq)
+export type Commitment = {id: string, parties: [string], accepted: [string], terms: string, due: int, causes: [string], active: bool} deriving (Eq)
+export type Evidence = {id: string, author: string, kind: string, text: string, causes: [string]} deriving (Eq)
+export type Knowledge = {observer: string, evidence: string} deriving (Eq)
+export type Appraisal = {observer: Actor, evidence: Evidence, relationships: [Relationship], visible: [Evidence]} deriving (Eq)
+export type Rule = {id: string, actor: string, indicator: string, above: bool, threshold: int, recovery: int, duration: int, cooldown: int} deriving (Eq)
+export type Condition = {id: string, since: int, active: bool, cooldownUntil: int} deriving (Eq)
+export type Limits = {actors: int, tasks: int, commitments: int, reliefs: int, evidence: int, knowledge: int, accepted: int, operations: int, effects: int, text: int, wire: int} deriving (Eq)
+export type Config = {id: string, version: int, session: string, timeUnit: string, authorityId: string, appraisalId: string, limits: Limits, indicators: [Indicator], recipes: [Recipe], rules: [Rule], evidence: [Evidence], knowledge: [Knowledge], relationships: [Relationship]} deriving (Eq)
+export type Policies = {authorityId: string, appraisalId: string, authority: (State, Principal, Task) -> Authority, appraisal: Appraisal -> [Effect]}
+export type Accepted = {id: string, body: string} deriving (Eq)
+export type Token = {config: string, revision: int, target: int, cursor: int} deriving (Eq)
+export type State = {config: string, configBody: string, session: string, tick: int, revision: int, seq: int, actors: [Actor], resources: [Resource], relationships: [Relationship], tasks: [Task], reliefs: [Relief], commitments: [Commitment], evidence: [Evidence], knowledge: [Knowledge], conditions: [Condition], accepted: [Accepted], continuation: Option[Token]} deriving (Eq)
+export type Operation = OfferTask(string, string, [string], [string]) | RaiseConcern(string, [string], [string], string) | RequestRelief(string, string, [string]) | OfferCommitment(string, [string], string, int, [string]) | AcceptTask(string) | ResolveRelief(string, bool) | AcceptCommitment(string) deriving (Eq)
+export type Proposal = {id: string, config: string, baseRevision: int, principal: string, origin: Source, expires: int, causes: [string], operations: [Operation]} deriving (Eq)
+export type Delivery = {id: string, observer: string, evidence: string, causes: [string], notBefore: int, source: string} deriving (Eq)
+export type EventKind = TaskOffered(string) | TaskAccepted(string) | ConcernRaised(string) | ReliefRequested(string) | ReliefResolved(string, bool) | CommitmentOffered(string) | CommitmentAccepted(string, string, bool) | TaskCompleted(string) | ConditionEntered(string) | ConditionRecovered(string) | ObservationDelivered(string, string) | ReactionApplied(string, string, [Effect]) deriving (Eq)
+export type Event = {schema: string, seq: int, revision: int, tick: int, kind: EventKind, causes: [string], evidence: Option[string]} deriving (Eq)
+export type Step = {state: State, disposition: Disposition, events: [Event]} deriving (Eq)
+export type AdvanceResult = Done(State, [Event]) | Pending(State, [Event], Token) | Blocked(State, [Event], string, int, Error) deriving (Eq)
+
+-- All stored numbers are bounded to +/- 10^9; intermediate products checked first.
+export pure func numericLimit() -> int ensures { result == 1000000000 } = 1000000000
+export pure func bounded(n: int) -> bool ensures { result == (n >= 0 - 1000000000 && n <= 1000000000) } = n >= 0 - 1000000000 && n <= 1000000000
+export pure func validId(id: string) -> bool ensures { result == (stringLength(id) > 0 && stringLength(id) <= 96) } = stringLength(id) > 0 && stringLength(id) <= 96
+export pure func unique(ids: [string]) -> bool ensures { result == (length(ids) == length(dedup(ids))) } = length(ids) == length(dedup(ids))
+export pure func sorted(ids: [string]) -> [string] ensures { length(result) == length(ids) } = sortBy(\a b. if a < b then 0 - 1 else if a == b then 0 else 1, ids)
+export pure func principalId(p: Principal) -> string ensures { result != "" } = match p { Host => "host", ActorPrincipal(id) => if id == "" then "invalid" else id }
+export pure func add(a: int, b: int) -> Result[int, Error] ensures { match result { Ok(n) => bounded(n), Err(_) => true } } =
+  if not bounded(a) || not bounded(b) || (b > 0 && a > numericLimit() - b) || (b < 0 && a < (0 - numericLimit()) - b) then Err(NumericOverflow("addition")) else Ok(a + b)
+export pure func multiply(a: int, b: int) -> Result[int, Error] ensures { match result { Ok(n) => bounded(n), Err(_) => true } } =
+  if a < 0 || b < 0 || not bounded(a) || not bounded(b) then Err(NumericOverflow("multiplication"))
+  else if b != 0 && a > numericLimit() / b then Err(NumericOverflow("multiplication")) else Ok(a * b)
+export pure func event(s: State, kind: EventKind, causes: [string]) -> Event ensures { result.tick == s.tick } =
+  {schema: "social_event/1", seq: s.seq + 1, revision: s.revision + 1, tick: s.tick, kind: kind, causes: sorted(causes), evidence: None}
+export pure func emptyState(c: Config, actors: [Actor], resources: [Resource]) -> State ensures { result.tick == 0 && result.revision == 0 && result.seq == 0 } =
+  {config: c.id, configBody: "", session: c.session, tick: 0, revision: 0, seq: 0, actors: actors, resources: resources, relationships: c.relationships, tasks: [], reliefs: [], commitments: [], evidence: c.evidence, knowledge: c.knowledge, conditions: [], accepted: [], continuation: None}
+
+test "bounded arithmetic rejects overflow" { add(1000000000, 1) == Err(NumericOverflow("addition")) && multiply(50000, 50000) == Err(NumericOverflow("multiplication")) }
+test "ids and duplicate sets" { validId("crew1") && not validId("") && not unique(["a", "a"]) && sorted(["b", "a"]) == ["a", "b"] }

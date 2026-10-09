@@ -1,0 +1,157 @@
+module sunholo/social_dynamics/tasks
+import ./model (Config, Policies, State, Principal, Host, ActorPrincipal, Task, Recipe, Cost, Resource, Requirement, Authority, Allowed, Conditional, Refused, TaskStatus, Offered, Working, Completed, Stopped, Step, Applied, Error, UnknownId, Unauthorized, InvalidTransition, InsufficientResource, CapacityExceeded, NumericOverflow, TaskAccepted, TaskCompleted, ReliefResolved, add, event, principalId, multiply, InvalidConfig, PendingAdvance)
+import ./wire (encodeConfig)
+import ./indicators (applyEffects, findActor)
+import std/result (Result, Ok, Err)
+import std/option (Option, Some, None)
+import std/string (length as stringLength)
+import std/list (filter, map, foldl, contains, any, length)
+
+pure func context(c:Config,s:State)->Result[State,Error] =
+ if c.id != s.config || c.session != s.session || encodeConfig(c) != s.configBody then Err(InvalidConfig("identity")) else match s.continuation { Some(_)=>Err(PendingAdvance("task")),None=>Ok(s) }
+pure func validPrincipal(s:State,p:Principal)->bool = match p { Host=>true,ActorPrincipal(id)=>id != "host" && match findActor(s,id) { None=>false,Some(_)=>true } }
+pure func boundaryEvidence(c:Config,s:State,kind:string,text:string,causes:[string])->Result[State,Error]
+ensures { match result { Ok(n)=>length(n.evidence) == length(s.evidence)+1 && n.knowledge == s.knowledge,Err(_)=>true } } = match context(c,s) { Err(e)=>Err(e),Ok(_)=>evidenceReady(c,s,kind,text,causes) }
+pure func evidenceReady(c:Config,s:State,kind:string,text:string,causes:[string])->Result[State,Error] =
+ if s.seq >= 1000000000 then Err(NumericOverflow("event")) else let id="event-${s.seq+1}" in
+ if stringLength(text) > c.limits.text || length(causes) > c.limits.operations then Err(CapacityExceeded("evidence_body")) else if length(s.evidence) >= c.limits.evidence then Err(CapacityExceeded("evidence")) else if any(\e. e.id == id,s.evidence) then Err(InvalidTransition(id)) else Ok({s | evidence:s.evidence ++ [{id:id,author:"host",kind:kind,text:text,causes:causes}]})
+
+export pure func findTask(s: State, id: string) -> Option[Task]
+ensures { match result {
+  Some(t) => t.id == id,
+  None => true
+} } = match filter(\t. t.id == id, s.tasks) {
+  [] => None,
+  t :: _ => Some(t)
+}
+
+pure func recipe(c: Config, id: string) -> Option[Recipe] = match filter(\r. r.id == id, c.recipes) {
+  [] => None,
+  r :: _ => Some(r)
+}
+
+pure func requirements(s: State, rs: [Requirement]) -> bool = match rs {
+  [] => true,
+  r :: tail => match findActor(s, r.actor) {
+    None => false,
+    Some(a) => any(\v. v.id == r.indicator && v.value >= r.minimum, a.indicators) && requirements(s, tail)
+  }
+}
+
+pure func authorized(p: Principal, t: Task) -> bool = match p {
+  Host => true,
+  ActorPrincipal(id) => id == t.supervisor
+}
+
+pure func allocated(c: Config, s: State, actor: string) -> int =
+  foldl(\n t. if t.status == Working && contains(t.participants, actor) then match recipe(c, t.recipe) {
+    Some(r) => n + r.allocation,
+    None => n
+  } else n, 0, s.tasks)
+
+pure func capacity(c: Config, s: State, t: Task, r: Recipe) -> bool = not any(\id. match findActor(s, id) {
+  None => true,
+  Some(a) => allocated(c, s, id) > a.capacity - r.allocation
+}, t.participants)
+
+-- Duplicate cost resource IDs are validated by Config, so each reservation applies once.
+pure func reserve(rs: [Resource], costs: [Cost]) -> Result[[Resource], Error] = match costs {
+  [] => Ok(rs),
+  cost :: tail => match filter(\r. r.id == cost.resource, rs) {
+    [] => Err(UnknownId(cost.resource)),
+    r :: _ => if r.available < cost.reserve then Err(InsufficientResource(r.id)) else match add(r.reserved, cost.reserve) {
+      Err(e) => Err(e),
+      Ok(n) => reserve(map(\x. if x.id == r.id then { x | available: x.available - cost.reserve, reserved: n } else x, rs), tail)
+    }
+  }
+}
+
+export pure func accept(c: Config, policies: Policies, s: State, p: Principal, offerId: string) -> Result[Step, Error]
+ensures { match result {
+  Ok(step) => step.state.tick == s.tick,
+  Err(_) => true
+} } = match context(c,s) { Err(e)=>Err(e),Ok(_)=>acceptReady(c,policies,s,p,offerId) }
+pure func acceptReady(c:Config,policies:Policies,s:State,p:Principal,offerId:string)->Result[Step,Error] = if not validPrincipal(s,p) then Err(Unauthorized("principal")) else if c.authorityId != policies.authorityId || c.appraisalId != policies.appraisalId then Err(InvalidConfig("policies")) else match findTask(s, offerId) {
+  None => Err(UnknownId(offerId)),
+  Some(t) => if t.status != Offered then Err(InvalidTransition(offerId)) else match policies.authority(s, p, t) {
+    Refused(reason) => Err(Unauthorized(reason)),
+    Conditional(rs) => if not requirements(s, rs) then Err(Unauthorized(offerId)) else start(c, s, { t | supervisor: principalId(p) }),
+    Allowed => start(c, s, { t | supervisor: principalId(p) })
+  }
+}
+
+pure func start(c: Config, s: State, t: Task) -> Result[Step, Error] = match recipe(c, t.recipe) {
+  None => Err(UnknownId(t.recipe)),
+  Some(r) => if not capacity(c, s, t, r) then Err(CapacityExceeded(t.id)) else match add(s.tick, r.duration) {
+    Err(e) => Err(e),
+    Ok(due) => match reserve(s.resources, r.costs) {
+      Err(e) => Err(e),
+      Ok(resources) => if s.seq >= 1000000000 || s.revision >= 1000000000 then Err(NumericOverflow("event")) else let e = event(s, TaskAccepted(t.id), t.causes) in
+      Ok({ state: { s | resources: resources, tasks: map(\x. if x.id == t.id then { x | status: Working, started: s.tick, due: due, supervisor: t.supervisor } else x, s.tasks), seq: e.seq, revision: e.revision }, disposition: Applied, events: [e] })
+    }
+  }
+}
+
+pure func release(rs: [Resource], costs: [Cost], consume: bool) -> Result[[Resource], Error] = match costs {
+  [] => Ok(rs),
+  cost :: tail => match filter(\r. r.id == cost.resource, rs) {
+    [] => Err(UnknownId(cost.resource)),
+    r :: _ => if r.reserved < cost.reserve then Err(InvalidTransition(r.id)) else let used = if consume then cost.consume else 0 in
+    match add(r.consumed, used) {
+      Err(e) => Err(e),
+      Ok(consumed) => match add(r.available, cost.reserve - used) {
+        Err(e) => Err(e),
+        Ok(available) => release(map(\x. if x.id == r.id then { x | reserved: x.reserved - cost.reserve, available: available, consumed: consumed } else x, rs), tail, consume)
+      }
+    }
+  }
+}
+
+export pure func progress(c:Config,s:State,taskId:string)->Result[int,Error]
+ensures { match result { Ok(n)=>n >= 0 && n <= 1000000000,Err(_)=>true } } = match context(c,s) { Err(e)=>Err(e),Ok(_)=>progressReady(c,s,taskId) }
+pure func progressReady(c:Config,s:State,taskId:string)->Result[int,Error] = match findTask(s,taskId) {
+ None=>Err(UnknownId(taskId)),Some(t)=>if t.status == Offered then Ok(0) else match recipe(c,t.recipe) { None=>Err(UnknownId(t.recipe)),Some(r)=>
+ let end = if s.tick < t.due then s.tick else t.due in if end < t.started then Err(InvalidTransition(taskId)) else multiply(r.allocation,end-t.started)
+ }
+}
+export pure func complete(c: Config, s: State, taskId: string) -> Result[Step, Error]
+ensures { match result {
+  Ok(step) => step.state.tick == s.tick,
+  Err(_) => true
+} } = match context(c,s) { Err(e)=>Err(e),Ok(_)=>completeReady(c,s,taskId) }
+pure func completeReady(c:Config,s:State,taskId:string)->Result[Step,Error] = match findTask(s, taskId) {
+  None => Err(UnknownId(taskId)),
+  Some(t) => if t.status != Working || t.due > s.tick then Err(InvalidTransition(taskId)) else match progress(c,s,taskId) { Err(e)=>Err(e),Ok(_)=>finish(c,s,t) }
+}
+pure func finish(c:Config,s:State,t:Task)->Result[Step,Error] = match recipe(c, t.recipe) {
+    None => Err(UnknownId(t.recipe)),
+    Some(r) => match release(s.resources, r.costs, true) {
+      Err(e) => Err(e),
+      Ok(resources) => match applyEffects(c, { s | resources: resources, tasks: map(\x. if x.id == t.id then { x | status: Completed } else x, s.tasks) }, r.effects) {
+        Err(e) => Err(e),
+        Ok(next) => if s.seq >= 1000000000 || s.revision >= 1000000000 then Err(NumericOverflow("event")) else match boundaryEvidence(c,next,"task_completed",t.id,t.causes) { Err(e)=>Err(e),Ok(observed)=>
+        let e = {event(s, TaskCompleted(t.id), t.causes) | evidence:Some("event-${s.seq+1}")} in
+        Ok({ state: { observed | seq: e.seq, revision: e.revision }, disposition: Applied, events: [e] }) }
+      }
+    }
+  }
+
+export pure func resolveRelief(c: Config, s: State, p: Principal, requestId: string, releaseRemaining: bool) -> Result[Step, Error]
+ensures { match result {
+  Ok(step) => step.state.tick == s.tick,
+  Err(_) => true
+} } = match context(c,s) { Err(e)=>Err(e),Ok(_)=>if not validPrincipal(s,p) then Err(Unauthorized("principal")) else resolveReady(c,s,p,requestId,releaseRemaining) }
+pure func resolveReady(c:Config,s:State,p:Principal,requestId:string,releaseRemaining:bool)->Result[Step,Error] = match filter(\r. r.id == requestId, s.reliefs) {
+  [] => Err(UnknownId(requestId)),
+  request :: _ => if request.resolved then Err(InvalidTransition(requestId)) else match findTask(s, request.task) {
+    None => Err(UnknownId(request.task)),
+    Some(t) => if not authorized(p, t) then Err(Unauthorized(requestId)) else if t.status != Working then Err(InvalidTransition(t.id)) else match recipe(c, t.recipe) {
+      None => Err(UnknownId(t.recipe)),
+      Some(r) => match if releaseRemaining then release(s.resources, r.costs, false) else Ok(s.resources) {
+        Err(e) => Err(e),
+        Ok(resources) => if s.seq >= 1000000000 || s.revision >= 1000000000 then Err(NumericOverflow("event")) else let e = event(s, ReliefResolved(requestId, releaseRemaining), []) in
+        Ok({ state: { s | resources: resources, tasks: map(\x. if x.id == t.id && releaseRemaining then { x | status: Stopped, due: s.tick } else x, s.tasks), reliefs: map(\x. if x.id == requestId then { x | resolved: true } else x, s.reliefs), seq: e.seq, revision: e.revision }, disposition: Applied, events: [e] })
+      }
+    }
+  }
+}

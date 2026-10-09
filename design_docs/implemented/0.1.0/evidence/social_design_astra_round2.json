@@ -1,0 +1,70 @@
+{
+  "review_schema": "independent_design_review/1",
+  "reviewer": "gpt-6-astra",
+  "author": "gpt-6.1-sol",
+  "date": "2026-10-09",
+  "round": 2,
+  "document": "design_docs/planned/social-dynamics-0.1.0.md",
+  "document_sha256": "b9bfafbe9017042c76b7f6c4be50fa2409cb02d558fd05fc0a10f6fe3f951b93",
+  "sprint": "design_docs/planned/social-dynamics-0.1.0-sprint.md",
+  "sprint_sha256": "538c50096bb363c25be2a95e79303cd66411acd6e5e03949e146992fdcf2d61f",
+  "verdict": "PASS",
+  "summary": "The revised design resolves the substantive scheduling, aggregate atomicity, bounded-failure and policy-effect restrictions from round 1. The author corrected the remaining authored-versus-received knowledge contradiction during this review, and the corrected document was reread. No blocking design contradiction remains. This approves the design for sprint approval, not implementation correctness or publication.",
+  "strongest_objection": "Resolved during round 2: authored concern/offer/commitment evidence now grants knowledge only to the principal without appraisal, while host delivery grants received knowledge. Known observer/evidence pairs remain deduplicated under the existing general rule.",
+  "prior_findings": [
+    {
+      "id": "ASTRA-1",
+      "status": "resolved",
+      "evidence": "One scheduler clock per session; deterministic phase/object ordering; positive durations and deferred condition consequences; partition promise limited to identical ordered inputs; continuation pins target/config and excludes other inputs."
+    },
+    {
+      "id": "ASTRA-2",
+      "status": "resolved",
+      "evidence": "Seven operations distinguish intent from acceptance; Conditional requirements must pass; private staged validation accounts for cumulative reservations; accepted-ID lookup precedes stale/expiry rejection."
+    },
+    {
+      "id": "ASTRA-3",
+      "status": "resolved",
+      "evidence": "Host-bound principal, not-before delivery gate, trusted deterministic policy boundary and observer-owned reaction effects are now explicit. The corrected authorship rule resolves ASTRA-R2-1."
+    },
+    {
+      "id": "ASTRA-4",
+      "status": "resolved",
+      "evidence": "Finite retained accepted IDs, no eviction, explicit experiment exhaustion, staged scheduled transactions, terminal Blocked and finite nonrecursive appraisal batches define bounded behavior."
+    }
+  ],
+  "findings": [
+    {
+      "id": "ASTRA-R2-1",
+      "severity": "resolved",
+      "area": "knowledge transition contract",
+      "lines": "129-131, 337-348 in corrected document",
+      "objection": "RaiseConcern records a concern known to its author. Delivery is then declared the only grant of new observation knowledge after init. No separate authored-knowledge category exists in State, and no implicit self-delivery is specified. A consumer cannot determine whether appraisalContext(author, concernEvidenceId) succeeds immediately after RaiseConcern, whether a reaction fires, or whether an explicit self-delivery is required.",
+      "required_fix": "Adopt one rule throughout the document. Recommended minimal rule: authored concern creation atomically adds the new concern evidence to its author's knowledge without appraisal; external observation knowledge is granted only by deliver. An explicit later self-delivery is Duplicate with no reaction because observer/evidence is already known. State whether the new evidence ID is concernId or a separately defined ID, count the author grant against the existing evidence/knowledge caps, and roll back the entire proposal if those caps are exceeded. Alternatively keep delivery as the sole grant and remove 'known to its author', explicitly requiring self-delivery. Do not leave both rules in force.",
+      "acceptance": "Corrected document satisfies the semantic requirement: authored content grants principal-only knowledge without appraisal; cited causes must already be known; other actors learn through host delivery. Authorship capacity failures explicitly roll back the whole proposal. Self/already-known delivery explicitly has no appraisal, revision, events or ledger entry after host authority/reference/receipt checks. Author and other-observer fixtures are required."
+    }
+  ],
+  "nonblocking_observations": [
+    {
+      "area": "trusted operation-class binding",
+      "assessment": "Resolved during review: apply now takes trusted Source separately from Proposal, and the recorded origin must match. Permitted operation classes are determined from this host-bound value."
+    },
+    {
+      "area": "condition reevaluation",
+      "assessment": "Explicitly include init and successful apply/deliver transactions that change relevant indicators in condition reevaluation, not only scheduled boundaries. Preserve the next-tick minimum and duration clock. This prevents an implementation from waiting for an unrelated scheduled item to notice a newly satisfied threshold."
+    },
+    {
+      "area": "sprint alignment",
+      "assessment": "The revised 2,500-LOC/eight-day plan, separate consumer package, adversarial fixtures, strict boundary probes and independent evaluation align with the design. S2's plural 'monotone clocks' should say one session clock. No implementation or publication should start before the recorded sprint approval."
+    }
+  ],
+  "no_ideal_playstyle": "Acceptable for this scope: domain policies and indicators remain configurable, no universal score is introduced, and example care/collaboration/renegotiation tradeoffs are explicit and do not claim balance or empirical psychology.",
+  "extensibility_and_scope": "Acceptable: the bounded grammar, trusted policy seams and two unrelated domains provide a concrete reuse test. Single-clock scheduling and finite experiment histories are explicit limitations rather than hidden promises.",
+  "required_next_step": "Present the concrete sprint for the required approval. During execution, preserve the contracts and prove them with the specified consumer, transaction, knowledge, scheduler, codec and parity fixtures. Nonblocking clarifications below do not require architecture expansion or another design round.",
+  "execution": {
+    "source_modified": false,
+    "tests_run": false,
+    "network_used": false,
+    "paid_provider_calls": false
+  }
+}
