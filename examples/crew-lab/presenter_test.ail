@@ -67,9 +67,13 @@ test "contextual help states depleted supplies and produces no host transition" 
 }
 
 test "stock narrator is distinct from exact cached and newly generated AI dialogue" {
-  contains(dialogue("scientist", "accept", "[authored starter] Response: accept.", "authored"), "Crew reaction (narrator): scientist agrees") && not contains(dialogue("scientist", "accept", "placeholder", "authored"), "scientist:") && contains(dialogue("scientist", "accept", "A precise cached line.", "cache"), "scientist: A precise cached line.") && contains(dialogue("scientist", "accept", "A new line.", "generated"), "New AI wording")
+  contains(dialogue("scientist", "accept", "[authored starter] Response: accept.", "authored", "authored"), "Crew reaction (narrator): scientist agrees") && not contains(dialogue("scientist", "accept", "placeholder", "authored", "authored"), "scientist:") && contains(dialogue("scientist", "accept", "A precise cached line.", "cache", "ai"), "scientist: A precise cached line.") && contains(dialogue("scientist", "accept", "A new line.", "generated", "ai"), "New AI wording")
 }
 
 test "rejection guidance never promises missing blocked continuation or replenishment" {
   contains(rejection("{\"error\":{\"code\":\"insufficient_resource\",\"detail\":\"materials\"}}"), "will not return by waiting") && contains(rejection("{\"blocked\":true}"), "target was not reached") && not contains(rejection("{\"blocked\":true}"), "continue or abort")
+}
+
+test "cached authored stock and cached generated words retain distinct provenance" {
+  contains(dialogue("scientist", "accept", "placeholder", "cache", "authored"), "Crew reaction (narrator): scientist agrees") && contains(dialogue("scientist", "accept", "placeholder", "cache", "authored"), "Saved stock wording; no AI call") && not contains(dialogue("scientist", "accept", "placeholder", "cache", "authored"), "Saved AI wording") && not contains(dialogue("scientist", "accept", "placeholder", "cache", "authored"), "scientist:") && contains(dialogue("scientist", "accept", "The exact cached sentence.", "cache", "ai"), "scientist: The exact cached sentence.") && contains(dialogue("scientist", "accept", "The exact cached sentence.", "cache", "ai"), "Saved AI wording; no new AI call") && contains(dialogue("scientist", "accept", "The exact new sentence.", "generated", "ai"), "scientist: The exact new sentence.") && contains(dialogue("scientist", "accept", "The exact new sentence.", "generated", "ai"), "New AI wording")
 }

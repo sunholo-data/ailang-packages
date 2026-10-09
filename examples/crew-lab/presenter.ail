@@ -99,19 +99,19 @@ ensures { stringLength(result) > 0 } = {
   panel("CAPTAIN'S GUIDE", "At the bridge: 1/2 offer science/maintenance; 3/4 offer rest.\n5 advances one tick.\n6 checks in on working crew; 7 reviews existing offers; 8 handles relief.\n9 shows status; 0 quits from the bridge or goes back from a submenu.\n\nAn offer invites a reply; it does not start work. You choose Start next.\nScience reserves/consumes 4 of the initial 6 materials over 4 ticks.\nMaintenance needs 3 to start, consumes 2 over 3 ticks. Rest needs none.\nScience completion leaves 2: waiting will not make maintenance affordable.\nCrew can do one project each. Waiting can free a busy worker; relief can\nstop work. Completion applies fatigue/readiness changes all at once.\nDirected trust belongs to the named observer and changes on receipt.\nCrew reaction chances use personality, values, fatigue and received trust;\nthese are experimental rules. AI only supplies possible dialogue wording.\n${modeLine}\n\n${contextLine}")
 }
 
-pure func sourceLabel(source: string) -> string =
-  if source == "cache" then "Saved AI wording; no new AI call" else if source == "authored" || source == "explicit-authored" then "Stock wording; no AI call" else if source == "generated" then "New AI wording" else "Dialogue source: ${source}"
+pure func sourceLabel(source: string, origin: string) -> string =
+  if source == "cache" then if origin == "authored" then "Saved stock wording; no AI call" else "Saved AI wording; no new AI call" else if source == "authored" || source == "explicit-authored" then "Stock wording; no AI call" else if source == "generated" then "New AI wording" else "Dialogue source: ${source}"
 
 pure func stockSummary(actor: string, label: string) -> string =
   if label == "accept" then "${actor} agrees to the assignment." else if label == "decline" then "${actor} refuses the assignment." else if label == "concern" then "${actor} raises a concern about the assignment." else if label == "defer" then "${actor} has no definite answer yet." else if label == "continue" then "${actor} is willing to keep working." else if label == "request_relief" then "${actor} asks to be relieved from this work." else "${actor} has no clear reply."
 
 -- A stock fallback is a narrator summary of the selected legal reaction, not
 -- rewritten AI dialogue. The exact selected bundle/text remains in the journal.
-export pure func dialogue(actor: string, label: string, text: string, source: string) -> string
+export pure func dialogue(actor: string, label: string, text: string, source: string, origin: string) -> string
 ensures { stringLength(result) > 0 } = {
-  let line = if source == "authored" || source == "explicit-authored" then "Crew reaction (narrator): ${stockSummary(actor, label)}" else "${actor}: ${text}"
+  let line = if origin == "authored" then "Crew reaction (narrator): ${stockSummary(actor, label)}" else "${actor}: ${text}"
   let consequence = if label == "accept" then "Agreement received. You still decide whether to start." else if label == "request_relief" then "A relief request is now waiting in menu 8." else if label == "decline" then "Refusal received. Under consent, work cannot start. Orders may cost trust." else "Reply received; no project starts automatically."
-  "${line}\n[${sourceLabel(source)}]\n${consequence}"
+  "${line}\n[${sourceLabel(source, origin)}]\n${consequence}"
 }
 
 export pure func rejection(trace: string) -> string

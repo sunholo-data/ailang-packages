@@ -54,3 +54,7 @@ bounded host tick progress, recorded consequence deltas and a factual quit recap
 Directed relationship trust is shown instead of the inert actor indicator.
 Stock reactions are labelled narrator summaries; selected AI quotations and full
 journal provenance remain exact. Help/navigation uses no AI or host transition.
+
+Cached authored bundles now remain labelled saved stock narrator reactions.
+Cached/generated AI dialogue remains quoted exactly; Fetch and journal source
+metadata are unchanged. Native and installed cached-origin controls cover both.

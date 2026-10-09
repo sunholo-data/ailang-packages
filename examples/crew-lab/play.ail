@@ -92,7 +92,7 @@ func respond(r: Run, explicitAuthored: bool) -> Result[Applied, string] ! {FS, A
             let offered = anyOffered(r.ui, request.task)
             match commit(r, reply.command, reply.seed, if offered then "start" else "main", if offered then request.task else "", r.ui.nextId, jo([kv("selection", reply.metadata), kv("usage", usage(fetch))]), fetch.calls) {
               Err(e) => Err(e),
-              Ok(applied) => Ok({ applied | message: if applied.failed then applied.message else dialogue(request.actor, reply.label, reply.text, fetch.source) })
+              Ok(applied) => Ok({ applied | message: if applied.failed then applied.message else dialogue(request.actor, reply.label, reply.text, fetch.source, bundle.origin) })
             }
           }
         }

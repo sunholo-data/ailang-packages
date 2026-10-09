@@ -47,6 +47,21 @@ rg -q "CAPTAIN'S GUIDE" "$TMP/newcomer.out"
 # Help must remain below the latest dashboard until its current numbered menu.
 awk '/^\[ CAPTAIN.S GUIDE \]/{guide=1} guide && /^\[ BRIDGE/{bad=1} /^1\. (Offer|Start)/{guide=0} END{exit bad}' "$TMP/newcomer.out"
 rg -q 'Elapsed: 4 ticks. Completed projects: 1' "$TMP/newcomer.out"
+# A cached authored bundle stays stock narration; transport provenance remains cache.
+mkdir -p "$TMP/cached-stock/cache"
+original=("$TMP/science"/runs/*/journal.jsonl)
+key=$(jq -r 'select(.payload.metadata.selection.bundle!=null)|.payload.metadata.selection.bundle.key' "${original[0]}")
+jq 'select(.payload.metadata.selection.bundle!=null)|.payload.metadata.selection.bundle' "${original[0]}" > "$TMP/cached-stock/cache/$key.json"
+cp "$TMP/science/response-policy.json" "$TMP/cached-stock/response-policy.json"
+"$TMP/bin/crew-play-offline" --home "$TMP/cached-stock" < "$EX/recordings/play-science.menu" > "$TMP/cached-stock.out"
+rg -q 'Saved stock wording; no AI call' "$TMP/cached-stock.out"
+rg -q 'Crew reaction \(narrator\): scientist agrees' "$TMP/cached-stock.out"
+if rg -q 'Saved AI wording' "$TMP/cached-stock.out"; then exit 1; fi
+journals=("$TMP/cached-stock"/runs/*/journal.jsonl)
+jq -s -e 'any(.[]; .payload.metadata.usage.source=="cache" and .payload.metadata.usage.calls==0 and .payload.metadata.selection.bundle.origin=="authored")' "${journals[0]}" > /dev/null
+jq 'select(.payload.metadata.selection.bundle!=null)|.payload.metadata.selection' "${original[0]}" > "$TMP/stock-before.json"
+jq 'select(.payload.metadata.selection.bundle!=null)|.payload.metadata.selection' "${journals[0]}" > "$TMP/stock-after.json"
+cmp "$TMP/stock-before.json" "$TMP/stock-after.json"
 # Ordinary published resource rejection must leave the captain playing.
 mkdir -p "$TMP/shortage"
 cp "$TMP/projects/response-policy.json" "$TMP/shortage/response-policy.json"
