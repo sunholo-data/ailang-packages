@@ -14,6 +14,12 @@ resource contention/completion, cache isolation and both-engine replay controls.
 Legacy recordings, crew-play and strict effects remain compatible; --legacy --debug
 retains the earlier journey comparison. No registry publication or game integration.
 
+The pending proposal now distinguishes an agreed offer from started work, explains
+the assigned worker, purpose, duration and resource consequences, and labels the
+choices Start now / Decide later. The old0 shortcut is explicitly the same as
+deciding later; b returns to the current decision. These hints remain visible on
+the minimum-size screen and rest does not claim to reserve supplies.
+
 ## 0.1.0
 
 Adds an independent captain-and-crew CLI experiment using saved synthetic typed

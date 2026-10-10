@@ -123,6 +123,13 @@ Native presentation controls use initialized trusted fixtures; installed control
 exercise complete host-start/publication flows. The current evaluator has an imported
 native-test std/json getString callback resolver issue in minimal imported controls; do not skip native controls, use pure fixture boundaries and real CLI tests.
 
+Modern proposal preview derives its worker, agreement, purpose, duration and costs
+from trusted host state. Start now assigns/reserves without advancing time; Decide
+later and0 return to main with the offer/answer intact. Label b Decision during
+submenus: it returns from reading views to that active decision, not to main.
+Keep Start/Decide later meanings in the persistent minimum-size footer; rest has
+no resource reservations. These are presentation changes, not new host transitions.
+
 Runtime validation limits on v0.52.0: fmt reports a nil-expression node for the
 existing journey_presenter_test module, and bounded15-second format attempts for
 play, narrative and watch_presenter time out. Record these gaps; never describe
