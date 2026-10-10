@@ -1,0 +1,87 @@
+{
+  "sprint_id": "S-CREW-NATIVE-UI",
+  "evaluation_round": 2,
+  "timestamp": "2026-10-10T18:47:18Z",
+  "evaluator": "watch_design_review_a",
+  "executor": "root",
+  "source_head": "1cd02d9e12e53dee78c2d2c245d6c80634d85158",
+  "merge_commit": "c5ae7eb3e7fb698da055d8c03d9600f246eab41c",
+  "pull_request": "https://github.com/sunholo-data/ailang-packages/pull/122",
+  "design_doc": "design_docs/implemented/crew-lab/crew-native-ui.md",
+  "sprint_plan": "design_docs/implemented/crew-lab/crew-native-ui-sprint.md",
+  "result": "pass",
+  "scope": "Final acceptance of merged and durably installed UI correction. Public registry release is separately blocked awaiting explicit authorization; no publication or new registry consumer success claimed.",
+  "total_score": 94,
+  "pass_threshold": 70,
+  "score_breakdown": {"tests_pass":20,"lint_clean":5,"acceptance_criteria":30,"code_quality":15,"documentation":15,"design_fidelity":9},
+  "score_notes": [
+    "Exact-head CI passed all crew, mutation and social stages; full local validate exit0. Tests points confirmed.",
+    "All eight UI acceptance groups are supported; corrected durable installation closes NU8. Separate public publication is not a local UI-playability criterion.",
+    "Completed corrective sprint/landing artifacts remove provisional five-point deduction. Formatter/proof limits retain the five-point lint deduction; previous minor semantic-colour fidelity deduction remains."
+  ],
+  "hard_fails": [],
+  "historical_correction": "Round1 visual acceptance was insufficient. Its ANSI stripping and LF splitting checked text dimensions but did not prove raw terminal cursor positions. The user's reported staircase/scrolling defect invalidates that part of the historical verdict. This round explicitly requires visible-cell and scroll evidence; round1 is retained as an audit record.",
+  "root_cause": "Native raw mode disables driver LF-to-CRLF translation. Printing LF-separated frames leaves the cursor in its previous column, causing staircase text and unwanted wrapping/scrolling.",
+  "change_review": {
+    "native_projection": "frameText normalizes existing CRLF to LF then LF to CRLF. This is idempotent, adds explicit carriage return before every native line feed, and preserves lone CR semantics, ANSI sequences and Unicode text.",
+    "compatibility": "Only Native writeFrame output changes. Line and Plain retain exact bytes, pure Screen values remain unchanged, writeFrame's effect budget is unchanged. New exported pure helper is additive; terminal_ui patch0.2.1 and crew_lab0.3.1 are documented.",
+    "scope": "No host/domain/worker/cache/model/consent or Godot changes. Python change is PTY test harness only."
+  },
+  "oracle_review": {
+    "independence": "Oracle interprets captured output cursor semantics rather than calling frameText or assuming each LF starts a new row. Raw-LF, CRLF and full-width CRLF controls establish distinct expected behavior.",
+    "semantics": "Inspected clear/home/SGR handling, independent CR and LF, deferred right-edge wrapping, wide-cell placement and scroll accounting. For emitted standalone fixture characters and known CSI subset these model the relevant native rendering behavior.",
+    "red": "Unchanged old adapter fails new actual PTY oracle with eight unintended scroll rows at80x24.",
+    "green": "Every captured fixture frame must equal expected visible cell grid with zero scroll, at80x24,20x8,40x16,100x30 and220x70 physical size with160x60 logical clamp.",
+    "visual_inspection": "Evaluator opened corrected visible40x16 and80x24 proposal grids: aligned full-width rules, current agreement, safe Decide later selection, contextual return option and persistent navigation hints.",
+    "limits": "This is a deliberately restricted VT oracle, not a complete terminal emulator. Unknown escape/control sequences and combining fixture characters fail explicitly. It does not establish behavior for every Unicode grapheme or terminal implementation."
+  },
+  "automated_checks": {
+    "gate_source": "ci",
+    "ci_status": "success",
+    "ci_run": "https://github.com/sunholo-data/ailang-packages/actions/runs/38075427310",
+    "full_local_validate": "PASS exit0; durable final log inspected",
+    "focused_terminal": "42/42 each interpreter and strict VM, as executor evidence",
+    "adapter_inline": "8 passed,7 skipped",
+    "installed_pty": "PASS visible grid/no-scroll, immediate keys, resize, four-turn completion and normal/SIGINT/injected-publication-failure restoration",
+    "quality_and_dry_run": "PASS, executor evidence; no claim of complete SMT proof",
+    "proof_inventory": {"total":35,"verified":12,"skipped":22,"errors":1,"counterexample":0,"uncontracted":0},
+    "proof_limits": "One unchanged encoder error; new frameText contract skipped because std/string.replace is unsupported by SMT encoder. Runtime tests carry the claim.",
+    "duplicate_full_suite": false
+  },
+  "acceptance_criteria": [
+    {"feature_id":"NU1","met":true,"evidence":"Existing introductory content and all five choices unchanged; corrective projection preserves text."},
+    {"feature_id":"NU2","met":true,"evidence":"No domain or UI transition changes; installed resize/navigation invariance controls retained and pass."},
+    {"feature_id":"NU3","met":true,"evidence":"Actual visible grids now align and do not scroll; resource/timeline/qualitative text unchanged."},
+    {"feature_id":"NU4","met":true,"evidence":"Actual PTY cursor oracle passes all five physical sizes and completion/restoration tests."},
+    {"feature_id":"NU5","met":true,"evidence":"No gameplay source change; actual four-turn completion repeated by corrected native PTY test."},
+    {"feature_id":"NU6","met":true,"evidence":"Native CRLF idempotence and ANSI/Unicode preservation controls; exact Line/Plain byte-equality controls; Screen representation unchanged."},
+    {"feature_id":"NU7","met":true,"evidence":"Exact-head CI crew/mutations/social stages passed. Durable preservation-after.txt verifies five prior launcher hashes and four sampled policy/cache hashes unchanged."},
+    {"feature_id":"NU8","met":true,"evidence":"PR122 merged as c5ae7eb; evaluator git comparison confirms application and terminal dependency identity with tested1cd02d9. install.json records refreshed generated user watch launchers0.3.1. Actual user-command smoke verifies12 native visible grids, zero drift/scroll, scientist four-turn completion and compute release, normal restored quit, live plain EOF exit0 and no providers. Evaluator inspected installed-visible-80x24.txt and completed corrective artifacts. Public terminal_ui0.2.1 release remains separately blocked and unclaimed."}
+  ],
+  "required_landing_conditions": [],
+  "separate_public_release": {
+    "status": "blocked_awaiting_explicit_approval",
+    "package": "sunholo/terminal_ui@0.2.1",
+    "reason": "Automatic approval review rejected the attempted public registry publication because external durable release/code disclosure requires explicit user authorization beyond approved local UI repair.",
+    "attempt_executed": false,
+    "published": false,
+    "new_registry_consumer_verified": false,
+    "local_installation": "Uses merged local path dependency; does not require public release. No bypass attempted."
+  },
+  "evidence": [
+    "examples/crew-lab/evidence/native-ui/newline-correction.md",
+    "/private/tmp/crew-native-newline-red.txt",
+    "/private/tmp/crew-native-newline-green-wide.txt",
+    "/private/tmp/crew-native-newline-green-wide/visible-40x16.txt",
+    "/private/tmp/crew-native-newline-green-wide/visible-80x24.txt",
+    "/private/tmp/crew-native-newline-verify.json",
+    "/private/tmp/crew-native-newline-validate.txt",
+    "/Users/voightkampff/dev/sunholo-data/stapledons-godot/.ailang/cache/reviews/crew-native-newline-20261010/ci-result.json",
+    "/Users/voightkampff/dev/sunholo-data/stapledons-godot/.ailang/cache/reviews/crew-native-newline-20261010/install.json",
+    "/Users/voightkampff/dev/sunholo-data/stapledons-godot/.ailang/cache/reviews/crew-native-newline-20261010/installed-native.txt",
+    "/Users/voightkampff/dev/sunholo-data/stapledons-godot/.ailang/cache/reviews/crew-native-newline-20261010/installed-visible-80x24.txt",
+    "/Users/voightkampff/dev/sunholo-data/stapledons-godot/.ailang/cache/reviews/crew-native-newline-20261010/preservation-after.txt"
+  ],
+  "feedback": [],
+  "notes": "Different executor and judge. Evaluator modified this report only, ran no duplicate full suite and invoked no live providers. Prior source review, approved design and evaluator skill remain applicable; this narrow repair addresses the user's concrete rendering defect."
+}

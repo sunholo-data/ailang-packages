@@ -10,10 +10,10 @@
 | We Are Not Built For This | +1 | Qualitative crew observations preserve human ambiguity. |
 | **Net** | **+6** | **Aligned; implemented and accepted.** |
 
-**Status:** Implemented and accepted, 2026-10-10. **Release:** crew-lab 0.3.0.
-**Correction reopened:** A real terminal screenshot invalidated row-alignment
-acceptance. See the companion sprint's corrective acceptance record; repair and
-fresh release validation are in progress under the approved UI scope.
+**Status:** Implemented and accepted after row-alignment correction, 2026-10-10.
+**Release:** local crew-lab 0.3.1; terminal_ui0.2.1 merged, registry release pending
+explicit approval. A real terminal screenshot invalidated the earlier visual check;
+the companion sprint records the corrective acceptance and round2 evaluation.
 **Milestone:** S-CREW-NATIVE-UI. **Priority:** P0, human usability.
 **Estimate:** 1,800 changed lines, including meaningful controls and documentation;
 three development days plus asynchronous CI/review, not a delivery promise.
@@ -211,4 +211,23 @@ experimental app is not a new registry release. Pure controls run interpreter an
 strict VM; the effectful scoped adapter runs interpreter. Exact verification inventory:
 127 total, 26 proved, 97 skipped, four unchanged encoder/solver errors, zero
 counterexamples. AI is still synchronous. No full voyage or Godot runtime change.
-The final report is `.ailang/state/evaluations/eval_S-CREW-NATIVE-UI_round_1.json`.
+The original report is `.ailang/state/evaluations/eval_S-CREW-NATIVE-UI_round_1.json`.
+
+### Corrected actual terminal acceptance
+
+The original LF-split captures missed raw LF retaining its cursor column. Mark's
+screenshot reopened acceptance. Native-only CRLF projection and an independent
+visible-cell cursor oracle now cover actual80×24,20×8,40×16,100×30 and220×70 PTYs,
+including full-width rules, scrolling, selection and restoration. Old source failed
+with eight unintended scroll rows; corrected source passes with zero scrolling.
+Full local validate and exact-head CI38075427310 passed at1cd02d9; PR122 merged as
+c5ae7eb. Updated installed commands passed12actual native grids, scientist4turn
+completion/slot return and clean quit, plus live plain EOF startup; no providercalls.
+Five older launchers/four sampled policy/cache checksums remain unchanged. Terminal
+controls42eachengine; proof35=12proved22skipped1unchangederror; no whole-proof claim.
+Final corrective report: `.ailang/state/evaluations/eval_S-CREW-NATIVE-UI_round_2.json`.
+
+Automatic approval review rejected public registry publication of terminal_ui0.2.1
+because a durable public release needs explicit approval. The package is merged and
+used locally; publication and a new registry-consumer smoke remain pending. No
+registry release is claimed and no approval bypass was attempted.

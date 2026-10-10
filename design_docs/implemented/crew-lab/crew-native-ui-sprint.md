@@ -150,7 +150,18 @@ Root executes the narrow shared adapter correction; a different judge re-evaluat
 - Check actual80×24,20×8,40×16,100×30 and220×70 screens, selection, completion
   and terminal restoration; run terminal package controls in both engines.
 - Require local validation, exact-head CI and independent correction acceptance
-  before updating installed source. Publish terminal_ui0.2.1 after quality gates.
+  before updating installed source. Public terminal_ui0.2.1 release needs its own
+  explicit approval after quality gates; this does not prevent the local repair.
 
-Correction validation and landing are in progress; original evaluation remains
-historical evidence, not proof of the failed user screen.
+Correction validation and local landing completed2026-10-10T18:47:18Z. Full local
+validate and CI38075427310 passed at1cd02d9; PR122 merged as c5ae7eb. Two generated
+watch shims use byte-identical durable main source. Actual installed12visible
+native frames/four-turn science/slot return/quit restoration and live plain EOF
+startup passed, zero providers. Five older launchers/four sampled policy/cache
+hashes are unchanged. Round2 records independent corrective acceptance; original
+round1 remains historical evidence, not proof of the failed user screen.
+
+Automatic approval review rejected public registry publication as an external
+durable release needing explicit authorization. terminal_ui0.2.1 is merged and
+used by the local path consumer; publication/new registry smoke are pending that
+approval. The local UI correction is complete; no publication bypass occurred.
