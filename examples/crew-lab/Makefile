@@ -78,3 +78,10 @@ validate: terminal-tests journey-test
 watch-test:
 	@AILANG="$(AILANG)" "$(EX)/test-watch.sh"
 validate: watch-test
+
+.PHONY: native-ui-test
+native-ui-test:
+	@cd "$(EX)" && "$(AILANG)" test native_watch_ui_test.ail native_watch_presenter_test.ail
+	@cd "$(EX)" && "$(AILANG)" test native_watch_ui_test.ail native_watch_presenter_test.ail --bytecode --strict-bytecode
+	@cd "$(EX)" && "$(AILANG)" test --allow-skips native_watch_ui.ail native_watch_presenter.ail
+validate: native-ui-test

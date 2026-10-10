@@ -1,0 +1,97 @@
+module sunholo/crew_lab/native_watch_ui
+import std/option (Option,Some,None)
+import std/list (length,map,filter,nth,take)
+import pkg/sunholo/terminal_ui/ui (Dimensions)
+import pkg/sunholo/terminal_ui/widgets (viewport,cursor)
+import pkg/sunholo/terminal_ui/events (Event,Input,Sized,Finished,Cancelled,NoInput,Character,Next,Previous,Accept,Cancel,First,Last,PriorPage,FollowingPage)
+import pkg/sunholo/social_dynamics/model (Working,Offered)
+import ./play_flow (PlayState)
+import ./watch_scenario (workers,projectName)
+
+-- Presentation state owns no Session, RNG, journal or AI allowance.
+export type View = Briefing | Decision | Crew | Work | Log | Guide | Ship | Quit deriving(Eq)
+export type UI = {view:View,previous:View,cursor:int,page:int,dimensions:Dimensions,ascii:bool,previousCursor:int,previousPage:int} deriving(Eq)
+export type Choice = {key:string,label:string,preview:string} deriving(Eq)
+export type Transition = {ui:UI,command:Option[string],quit:bool} deriving(Eq)
+
+export pure func initial(columns:int,rows:int,ascii:bool) -> UI ! {}
+ensures { result.view == Briefing && result.cursor == 0 && result.page == 0 && result.dimensions.columns >= 1 && result.dimensions.rows >= 1 } =
+ {view:Briefing,previous:Briefing,cursor:0,page:0,dimensions:viewport(columns,rows),ascii:ascii,previousCursor:0,previousPage:0}
+
+export pure func decision(s:PlayState,columns:int,rows:int,ascii:bool) -> UI ! {}
+ensures { result.view == Decision && result.page == 0 && result.cursor == (if s.phase == "start" then 1 else 0) } =
+ {initial(columns,rows,ascii) | view:Decision,previous:Decision,cursor:if s.phase == "start" then 1 else 0}
+
+pure func item(key:string,label:string,preview:string) -> Choice = {key:key,label:label,preview:preview}
+pure func numbered(labels:[string],n:int,preview:string) -> [Choice] = match labels { []=>[], a::rest=>item("${n}",a,preview)::numbered(rest,n+1,preview) }
+pure func sessionChoices(s:PlayState) -> [Choice] =
+ if s.phase == "start" then [item("1","Start now","Assign this worker and hold the named resources. No time passes."),item("2","Decide later","Keep this proposal and agreement in Offers. Use no time or resources.")]
+ else if s.phase == "assignments" || s.phase == "rests" then numbered(map(\w. "${w}: ${projectName("${if s.phase == "rests" then "rest" else "work"}_${w}")}",workers()),1,"Offer this assignment, hear its worker, then decide whether to start.")
+ else if s.phase == "working" then numbered(map(\t. projectName(t.recipe),filter(\t. t.status == Working,s.session.state.tasks)),1,"Ask the worker how it is going; a reply may include a relief request.")
+ else if s.phase == "offered" then numbered(map(\t. projectName(t.recipe),filter(\t. t.status == Offered,s.session.state.tasks)),1,"Return to this proposal. Reading and selecting it use no time or resources.")
+ else if s.phase == "reliefs" then numbered(map(\r. "Relief requested for ${r.task}",filter(\r. not r.resolved,s.session.state.reliefs)),1,"Review the relief request before granting or denying it.")
+ else if s.phase == "relief" then [item("1","Grant relief","Stop this job and release its held resources; completed work stays done."),item("2","Deny relief","The worker remains assigned. Cooperation can suffer.")]
+ else if s.phase == "response" then [item("1","Retry personal reply","Use a saved reply or a permitted AI attempt. No time passes."),item("2","Use authored continuation","Continue with a contextual narrator summary; uses no AI call."),item("3","Cancel this request","Leave the pending conversation without starting work.")]
+ else match s.session.state.continuation {
+  Some(_) => [item("1","Continue processing this turn","Finish the already requested advance; do not request a new turn."),item("2","Abort remaining processing","Keep effects already recorded and stop this continuation.")],
+  None => [item("1","Choose work","Offer a project, hear its worker, then decide whether to start."),item("2","Arrange rest","Offer a two-turn rest assignment. Recovery happens when it completes."),item("5","Advance one turn","Move every working assignment one turn. Effects apply on completion."),item("6","Check in with working crew","Hear a worker's reply; they may request relief."),item("7","Review open offers","Return to a proposal you left for later; reading uses no time."),item("8","Resolve a relief request","Review a request before granting or denying it.")]
+ }
+
+export pure func choices(s:Option[PlayState]) -> [Choice] ! {}
+ensures { length(result) >= 0 && length(result) <= 4096 } = match s {
+ None => [item("1","Ask for agreement","Start requires the worker's agreement."),item("2","Captain's authority","Start despite refusal; trust can fall.")],
+ Some(p) => take(4096,sessionChoices(p))
+}
+
+test "intro UI starts on agreement and idle preserves every field" {
+ let u=initial(40,16,true);
+ u.view==Briefing && u.cursor==0 && update(None,u,NoInput)=={ui:u,command:None,quit:false}
+}
+test "native interruption exits while q opens a safe confirmation" {
+ let u=initial(80,24,false);
+ update(None,u,Cancelled).quit && update(None,u,Input(Character("q"))).ui.cursor==0 && not update(None,u,Input(Character("q"))).quit
+}
+
+export pure func selected(s:Option[PlayState],u:UI) -> Option[Choice] ! {}
+ensures { match result {None=>true,Some(c)=>c.label!=""} } =
+ if u.view == Quit then Some(if u.cursor == 1 then item("q","End this watch","Keep the journal and response library. A fresh launch starts a new crew.") else item("b","Keep playing","Return to your pending decision.")) else nth(choices(s),cursor(u.cursor,length(choices(s))))
+
+pure func rootView(s:Option[PlayState]) -> View = match s {None=>Briefing,Some(_)=>Decision}
+pure func openQuit(u:UI) -> UI = {u | previous:u.view,previousCursor:u.cursor,previousPage:u.page,view:Quit,cursor:0,page:0}
+pure func restore(u:UI)->UI = {u|view:u.previous,cursor:u.previousCursor,page:u.previousPage}
+pure func reading(v:View) -> bool = v == Crew || v == Work || v == Log || v == Guide || v == Ship
+pure func page(n:int) -> int = if n < 0 then 0 else if n > 1000000 then 1000000 else n
+pure func unchanged(u:UI) -> Transition = {ui:u,command:None,quit:false}
+pure func chooseNumber(s:Option[PlayState],u:UI,key:string) -> Transition =
+ if reading(u.view) then unchanged(u) else if key == "0" then {ui:if u.view == Quit then {u|view:u.previous,cursor:0,page:0} else u,command:if u.view != Quit then Some("0") else None,quit:false}
+ else if length(filter(\c. c.key == key,choices(s))) > 0 then {ui:u,command:Some(key),quit:false} else unchanged(u)
+
+export pure func update(s:Option[PlayState],u:UI,e:Event) -> Transition ! {}
+requires { u.dimensions.columns>=1 && u.dimensions.rows>=1 && u.page>=0 }
+ensures { result.ui.dimensions.columns >= 1 && result.ui.dimensions.rows >= 1 && result.ui.page >= 0 && (e != NoInput || result.ui == u && result.command == None && not result.quit) } = match e {
+ NoInput => unchanged(u),
+ Finished => {ui:u,command:None,quit:true},
+ Sized(w,h) => unchanged({u|dimensions:viewport(w,h)}),
+ Cancelled => {ui:u,command:None,quit:true},
+ Input(k) => {
+  let count = if u.view == Quit then 2 else length(choices(s));
+  if u.dimensions.columns<40 || u.dimensions.rows<16 then {ui:u,command:None,quit:k==Character("q") || k==Cancel}
+  else if u.view==Quit then if k==Cancel || k==Character("b") || k==Character("q") then unchanged(restore(u)) else if k==Next || k==Previous || k==First || k==Last then unchanged({u|cursor:cursor(if k==First then 0 else if k==Last then 1 else u.cursor+(if k==Previous then 0-1 else 1),2)}) else if k==Accept then if u.cursor==1 then {ui:u,command:None,quit:true} else unchanged(restore(u)) else unchanged(u)
+  else
+  if k == Character("q") then unchanged(openQuit(u))
+  else if k == Cancel then if u.view == Quit then unchanged({u|view:u.previous,cursor:0,page:0}) else if reading(u.view) then unchanged({u|view:rootView(s),page:0}) else match s {
+   Some(p) => if p.phase != "main" then {ui:u,command:Some("0"),quit:false} else unchanged(openQuit(u)),
+   None => unchanged(openQuit(u))
+  }
+  else if k == Character("b") then unchanged({u|view:rootView(s),page:0})
+  else if k == Character("h") then unchanged({u|view:Guide,page:0})
+  else if k == Character("c") then unchanged({u|view:Crew,page:0})
+  else if k == Character("w") then unchanged({u|view:Work,page:0})
+  else if k == Character("j") then unchanged({u|view:Log,page:0})
+  else if k == Character("s") then unchanged({u|view:Ship,page:0})
+  else if k == PriorPage || k == FollowingPage || (reading(u.view) && (k == Next || k == Previous)) then unchanged({u|page:page(u.page + (if k == PriorPage || k == Previous then 0-1 else 1))})
+  else if k == Next || k == Previous || k == First || k == Last then unchanged({u|cursor:cursor(if k == First then 0 else if k == Last then count-1 else u.cursor + (if k == Previous then 0-1 else 1),count)})
+  else if k == Accept then if reading(u.view) then unchanged(u) else if u.view == Quit then if u.cursor == 1 then {ui:u,command:None,quit:true} else unchanged({u|view:u.previous,cursor:0,page:0}) else match selected(s,u) {None=>unchanged(u),Some(c)=>{ui:u,command:Some(c.key),quit:false}}
+  else match k {Character(key)=>chooseNumber(s,u,key),_=>unchanged(u)}
+ }
+}

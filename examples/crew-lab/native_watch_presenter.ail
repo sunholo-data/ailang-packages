@@ -1,0 +1,135 @@
+module sunholo/crew_lab/native_watch_presenter
+import std/list (map,filter,head,nth,length,take,drop,flatMap,any)
+import std/string (chars,concat,join,repeat,split)
+import std/option (Option,Some,None)
+import pkg/sunholo/terminal_ui/ui (Screen,cells,pad,wrap,safeText,clampPage)
+import pkg/sunholo/terminal_ui/widgets (frame as smallFrame,cursor)
+import pkg/sunholo/social_dynamics/model (Actor,Task,Working,Completed,Stopped)
+import ./play_flow (PlayState)
+import ./native_watch_ui (UI,View,Choice,choices,selected,Briefing,Decision,Crew,Work,Log,Guide,Ship,Quit)
+import ./watch_scenario (projectName,resourceName,purpose)
+import ./narrative (crew,supplies,costs,spendsSupplies,fatigue,stress,morale,observation)
+
+pure func clamp(n:int,lo:int,hi:int)->int = if n<lo then lo else if n>hi then hi else n
+pure func clipped(xs:[string],width:int,used:int)->[string] = match xs {[]=>[],c::rest=>if used+cells(c)>width then [] else c::clipped(rest,width,used+cells(c))}
+-- Trusted renderer clips structural rows only. Dialogue is wrapped and paged.
+export pure func fit(text:string,width:int)->string ! {}
+requires { width>=0 && width<=160 }
+ensures { cells(result)<=width } = concat(clipped(chars(join(" ",split(safeText(text),"\n"))),width,0))
+
+export pure func elapsed(done:int,total:int,ascii:bool)->string ! {}
+requires { done>=0 && done<=1000000000 && total>=0 && total<=1000000000 }
+ensures { result!="" } = {
+ let n=if total==0 then 0 else if done>=total then 4 else done*4/total;
+ "[${repeat(if ascii then "#" else "█",n)}${repeat(if ascii then "." else "░",4-n)}] ${done}/${total} turns"
+}
+
+pure func value(a:Actor,id:string)->int = match head(filter(\v. v.id==id,a.indicators)){None=>50,Some(v)=>v.value}
+pure func tired(a:Actor)->string = if value(a,"fatigue")<25 then "rested" else if value(a,"fatigue")<60 then "a little tired" else if value(a,"fatigue")<80 then "tired" else "exhausted"
+pure func tense(a:Actor)->string = if value(a,"stress")<35 then "at ease" else if value(a,"stress")<60 then "watchful" else if value(a,"stress")<80 then "on edge" else "fraught"
+pure func spirit(a:Actor)->string = if value(a,"morale")<30 then "discouraged" else if value(a,"morale")<70 then "steady" else "in good spirits"
+pure func assigned(s:PlayState,id:string)->string = match head(filter(\t. t.status==Working && any(\p. p==id,t.participants),s.session.state.tasks)) {
+ None=>"Available",Some(t)=>if t.recipe=="rest_${id}" then "Resting" else projectName(t.recipe)
+}
+pure func roster(s:PlayState,width:int)->[string] = map(\a. fit("${pad(a.id,10)} ${assigned(s,a.id)} | ${tired(a)}, ${tense(a)}, ${spirit(a)}",width),filter(\a. a.id!="captain",s.session.state.actors))
+pure func resourceRows(s:PlayState)->[string] = map(\r. "${resourceName(r.id)}: ${r.available} free / ${r.reserved} held${if r.id=="archive_compute" then " (reusable)" else " / ${r.consumed} spent"}",s.session.state.resources)
+pure func timeline(s:PlayState,t:Task,ascii:bool)->string = "${projectName(t.recipe)} ${if t.status==Working then elapsed(clamp(s.session.state.tick-t.started,0,1000000000),clamp(t.due-t.started,0,1000000000),ascii) else if t.status==Completed then "Completed" else if t.status==Stopped then "Stopped" else "Offered; not started"}"
+pure func schematic(ascii:bool)->[string] = if ascii then ["     +----------+","     |  BRIDGE  |","     +-----+----+","           |","  +--------+---------+","  |     COMMONS      |","  | terraces / lift  |","  +------------------+"] else ["     ╭──────────╮","     │  BRIDGE  │","     ╰─────┬────╯","           │","  ╭────────┴─────────╮","  │     COMMONS      │","  │ terraces / lift  │","  ╰──────────────────╯"]
+pure func twoPanels(left:[string],right:[string],n:int,width:int)->[string] = if n>=length(left) && n>=length(right) then [] else {
+ let l=match nth(left,n){None=>"",Some(v)=>v};
+ let r=match nth(right,n){None=>"",Some(v)=>v};
+ "${pad(fit(l,25),25)} ${fit(r,width-26)}"::twoPanels(left,right,n+1,width)
+}
+pure func status(s:PlayState)->string = if s.session.state.tick>=8 then "Preparation review available; continue freely" else "Preparation review in ${8-s.session.state.tick} turns"
+pure func proposal(s:PlayState,message:string)->string = match head(filter(\t. t.id==s.target,s.session.state.tasks)) {
+ None=>"This proposal is unavailable. Return to Offers.",Some(t)=>{
+ let who=match head(t.participants){None=>"worker",Some(w)=>w};
+ let agreed=any(\b. b.task==t.id && any(\c. c.id==b.agreement && c.parties==["captain",who] && c.active && c.accepted==c.parties && c.due>s.session.state.tick,s.session.state.commitments),s.session.bindings);
+ "PROPOSAL / ${projectName(t.recipe)}\n${if agreed then "${who} agreed. Work has not started." else if s.session.policy=="consent" then "No current agreement. Start requires consent." else "No current agreement. Authority permits Start; trust can suffer."}\n${purpose(t.recipe)}\n${costs(s.session,t.recipe)}${if spendsSupplies(s.session,t.recipe) then "\nSupplies spend at completion even when benefits are capped." else ""}\nStart commits this worker; no time passes. Advance moves work forward.\nDecide later keeps this offer and agreement under Offers.\n${if message=="" then "" else "\nCREW REPLY / CONSEQUENCE\n${message}"}\n\nAVAILABLE\n${supplies(s.session)}"
+ }
+}
+pure func help(mode:string,remaining:int)->string =
+ "YOUR PREPARATION WATCH\nYou are captain of a bubble ship. Five specialists prepare for possible first contact. There is no required route or best score.\n\nChoose work or rest to offer an assignment. Read its purpose and costs, hear its worker, then Start or Decide later. Starting assigns a worker and holds resources without moving time. Advance moves everyone one turn; benefits and costs apply at completion.\n\nAgreement means the worker must consent before Start. Authority permits starting despite refusal; trust can suffer. Neither style bypasses capacity or supplies.\n\nArchive compute is reusable capacity for Spire analysis. Slots return when a job ends. Replacement modules and diagnostic cartridges are finite and spent on completion, even when a benefit is already capped. Relief stops a job and releases its remaining reservations.\n\nCheck-in hears a working crew member; they may request relief. Offers returns to proposals left open. Read Crew, Work, Ship and Log without spending time.\n\nArrows choose; Enter selects. Numbers keep their displayed meaning. PgUp/PgDn scroll details. h Help; b or Escape returns to your pending decision. q asks before ending. In line/plain modes enter one command per line; blank input waits, EOF ends.\n\n${if mode=="offline" then "Offline: saved replies or authored narrator continuations; no provider calls." else "A new personal reply may require a synchronous AI call: controls wait until it finishes. Saved replies need no call. ${remaining} attempts remain; the watch response policy sets a maximum of8. Authored continuation remains available when attempts are exhausted."}\n\nEight turns mark a preparation review, not arrival or a deadline. Continue as long as useful. Alien negotiations and a completed journey are not simulated here. A fresh launch starts a new crew; the response library persists."
+pure func body(s:Option[PlayState],u:UI,message:string,history:[string],mode:string,remaining:int,path:string,debug:bool)->[string] = {
+ let width=u.dimensions.columns;
+ if u.view==Quit then wrap("End this watch? Your journal and response library remain. A fresh launch starts a new crew.",width)
+ else if u.view==Guide then wrap(help(mode,remaining),width)
+ else match s {
+ None=>wrap("You are captain of a bubble ship.\nFive specialists prepare for possible contact.\nOffer work to hear its worker.\nStart holds people and resources.\nAdvance moves everyone one turn.",width),
+ Some(p)=> if u.view==Crew then wrap(crew(p.session,debug),width)
+ else if u.view==Log then wrap(if length(history)==0 then "No decisions yet. Offer work to begin." else join("\n\n",history),width)
+ else if u.view==Work then wrap("WORK AND SUPPLIES\n${join("\n",resourceRows(p))}\n\n${if length(p.session.state.tasks)==0 then "No projects yet. Choose work or rest to begin." else join("\n\n",map(\t. "${timeline(p,t,u.ascii)}\n${purpose(t.recipe)}\n${costs(p.session,t.recipe)}",p.session.state.tasks))}",width)
+ else if u.view==Ship then schematic(u.ascii)++wrap("Schematic: Bridge / Commons, terraces and open arcades near the Spire approach. Badges show assignments, not crew locations.\n\n${join("\n",roster(p,width))}",width)
+ else if p.phase=="start" then wrap(proposal(p,message),width)
+ else if p.phase=="assignments" || p.phase=="rests" then match selected(s,u) {
+  None=>wrap("No assignments available.",width),Some(c)=>{
+   let idx=cursor(u.cursor,5);
+   let who=match nth(["scientist","engineer","medic","pilot","diplomat"],idx){None=>"scientist",Some(w)=>w};
+   let recipe="${if p.phase=="rests" then "rest" else "work"}_${who}";
+   wrap("${c.label}\n${purpose(recipe)}\n${costs(p.session,recipe)}${if spendsSupplies(p.session,recipe) then "\nSupplies spend even if benefits are capped." else ""}\nOffer first. The worker replies before you commit anything.\n\n${supplies(p.session)}",width)
+  }
+ }
+ else {
+  let rows=roster(p,if width>=100 then width-26 else width);
+  let crewRows=if width>=100 then twoPanels(schematic(u.ascii),["YOUR CREW / assignments + observations"]++rows,0,width) else (if width>=80 then (if u.ascii then ["+-- BRIDGE --+","+-----+------+    +-- COMMONS / terraces --+","      +-----------+-----------------------+"] else ["╭── BRIDGE ──╮","╰─────┬──────╯    ╭── COMMONS / terraces ──╮","      ╰───────────┴───────────────────────╯"]) else ["BRIDGE / COMMONS | YOUR FIVE SPECIALISTS"])++rows;
+  crewRows++[fit(status(p),width)]++map(\l. fit(l,width),resourceRows(p))++map(\t. fit(timeline(p,t,u.ascii),width),filter(\t. t.status==Working,p.session.state.tasks))++(if message=="" then [] else wrap("\nLATEST REPLY / CONSEQUENCE\n${message}",width))
+ }
+ }
+}
+pure func shownMenu(s:Option[PlayState],u:UI,width:int)->[string] = {
+ let cs=if u.view==Quit then [{key:"",label:"Keep playing",preview:""},{key:"",label:"End this watch",preview:""}] else choices(s);
+ let c=cursor(u.cursor,length(cs));
+ let offset=if c<=1 then 0 else c-1;
+ let window=take(3,drop(offset,cs));
+ let lines=menuRows(window,c-offset,0,width);
+ if length(lines)==0 then ["No choices here; b returns to bridge."] else lines
+}
+pure func menuRows(cs:[Choice],selectedIndex:int,n:int,width:int)->[string] = match cs {[]=>[],c::rest=>fit("${if n==selectedIndex then ">" else " "} ${c.key}${if c.key=="" then "" else " "}${c.label}",width)::menuRows(rest,selectedIndex,n+1,width)}
+pure func blank(n:int)->[string] = if n<=0 then [] else ""::blank(n-1)
+pure func title(v:View)->string = match v {Briefing=>"FIRST HELLO",Decision=>"BRIDGE",Crew=>"CREW",Work=>"WORK",Log=>"LOG",Guide=>"HELP",Ship=>"SHIP",Quit=>"END WATCH?"}
+export pure func consequence(s:Option[PlayState],u:UI)->string ! {}
+ensures { result!="" } = match (s,selected(s,u)) {
+ (_,None)=>"Read details; b returns to your decision.",
+ (Some(p),Some(c))=>if p.phase!="start" || c.key!="1" || u.view==Quit then c.preview else match head(filter(\t. t.id==p.target,p.session.state.tasks)) {
+  None=>"Proposal unavailable; Start cannot proceed.",
+  Some(t)=>match head(filter(\r. r.id==t.recipe,p.session.config.recipes)) {
+   None=>"Recipe unavailable; Start cannot proceed.",Some(r)=>{
+    let shortages=flatMap(\cost. match head(filter(\stock. stock.id==cost.resource,p.session.state.resources)) {
+     None=>["Missing ${resourceName(cost.resource)}."],Some(stock)=>if cost.reserve>stock.available then ["${resourceName(cost.resource)}: need ${cost.reserve}, ${stock.available} free."] else []
+    },r.costs);
+    if length(shortages)>0 then "Cannot Start: ${join(" ",shortages)} Decide later keeps the offer."
+    else "Assign ${join(", ",t.participants)}; no time passes. ${costs(p.session,t.recipe)}"
+   }
+  }
+ },
+ (_,Some(c))=>c.preview
+}
+pure func colored(lines:[string])->string = join("\n",map(\l. match chars(l){">"::_=>"\u{1B}[96m${l}\u{1B}[0m",_=>l},lines))
+pure func assemble(lines:[string],page:int,pages:int,ansi:bool)->Screen = {lines:lines,text:if ansi then "\u{1B}[2J\u{1B}[H${colored(lines)}\u{1B}[0m" else join("\n",lines),page:page,pages:pages}
+
+export pure func frame(s:Option[PlayState],u:UI,message:string,history:[string],mode:string,remaining:int,path:string,debug:bool,ansi:bool)->Screen ! {}
+requires { u.dimensions.columns>=1 && u.dimensions.columns<=160 && u.dimensions.rows>=1 && u.dimensions.rows<=60 }
+ensures { result.pages>=1 && result.page>=0 && result.page<result.pages && length(result.lines)<=u.dimensions.rows && not any(\l. cells(l)>u.dimensions.columns,result.lines) } = {
+ let d=u.dimensions;
+ if d.columns<40 || d.rows<16 then smallFrame(d,ansi,[],"",[],0)
+ else {
+  let rule=repeat(if u.ascii then "-" else "─",d.columns);
+  let root=match s {None=>true,Some(_)=>false};
+  let header=[fit("VOYAGE / ${title(u.view)}${match s {None=>"",Some(p)=>" / turn ${p.session.state.tick}"}}",d.columns)]++(match s {None=>[],Some(p)=>[if p.session.policy=="consent" then "Agreement: Start needs crew consent" else "Authority: Start despite refusal"]});
+  let readView=u.view==Crew || u.view==Work || u.view==Log || u.view==Guide || u.view==Ship;
+  let keys=map(\l. fit(l,d.columns),if readView then ["Arrows/PgUp/PgDn read; q Quit","b/Esc return to pending decision"] else if root then ["Up/Down choose; Enter; 1/2; h Help","PgUp/PgDn details; Esc/q Quit"] else ["Arrows / Enter; c Crew w Work s Ship","PgUp/PgDn j Log h Help b Back q Quit"]);
+  let policy=root && u.view==Briefing;
+  let menu=if policy then flatMap(\c. [fit("${if c.key=="${u.cursor+1}" then ">" else " "} ${c.key} ${c.label}",d.columns),fit("  ${c.preview}",d.columns)],choices(None)) else if readView then ["READING / no time or resources used"] else shownMenu(s,u,d.columns);
+  let preview=if policy || readView then [] else take(3,wrap(consequence(s,u),d.columns));
+  let room=d.rows-length(header)-2-length(menu)-length(preview)-length(keys)-1;
+  let contents=body(s,u,message,history,mode,remaining,path,debug);
+  let pages=if length(contents)==0 then 1 else (length(contents)+room-1)/room;
+  let page=clampPage(u.page,pages);
+  let shown=take(room,drop(page*room,contents));
+  let lines=header++[rule]++shown++blank(room-length(shown))++[rule]++menu++preview++keys++[fit("${if readView then "" else "Choice ${cursor(u.cursor,if u.view==Quit then 2 else length(choices(s)))+1}/${if u.view==Quit then 2 else length(choices(s))} | "}Details ${page+1}/${pages}",d.columns)];
+  assemble(lines,page,pages,ansi)
+ }
+}
+
+test "fit keeps structural spacing and clips conservative cells" {fit(" a  b ",6)==" a  b " && fit("abcdef",3)=="abc"}
+test "elapsed uses turns rather than psychology" {elapsed(2,4,true)=="[##..] 2/4 turns" && elapsed(4,4,false)=="[████] 4/4 turns"}

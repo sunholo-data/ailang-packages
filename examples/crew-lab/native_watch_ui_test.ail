@@ -1,0 +1,63 @@
+module sunholo/crew_lab/native_watch_ui_test
+import std/option (Some, None)
+import std/result (Ok, Err)
+import pkg/sunholo/terminal_ui/events (Input, Sized, NoInput, Finished, Cancelled, Next, Accept, Cancel, Character)
+import ./play_flow (beginWatch)
+import ./native_watch_ui (initial, decision, update, choices, Decision, Guide, Quit)
+
+test "intro choices explain consent and authority before selecting" {
+ let cs = choices(None);
+ match cs { a::b::[] => a.key == "1" && b.key == "2" && a.preview == "Start requires the worker's agreement." && b.preview == "Start despite refusal; trust can fall.", _ => false }
+}
+test "tiny view cannot dispatch invisible Start or policy choices" {
+ let u=initial(20,8,false);
+ update(None,u,Input(Accept)).command==None && update(None,u,Input(Character("1"))).command==None && update(None,u,Input(Character("q"))).quit
+}
+test "quit modal cannot dispatch domain numbers and preserves safe proposal default" {
+ match beginWatch("2",73) {Err(_)=>false,Ok(s)=>{
+ let p={s|phase:"start",target:"proposal"};
+ let u={decision(p,80,24,false)|page:3};
+ let q=update(Some(p),u,Input(Character("q")));
+ let bad=update(Some(p),q.ui,Input(Character("1")));
+ let back=update(Some(p),bad.ui,Input(Cancel));
+ let chosen=update(Some(p),back.ui,Input(Accept));
+ bad.command==None && bad.ui.view==Quit && back.ui.cursor==1 && back.ui.page==3 && chosen.command==Some("2")
+ }}
+}
+test "idle is exact UI identity and emits no action" {
+ let u = initial(80,24,false);
+ let r = update(None,u,NoInput);
+ r.ui == u && r.command == None && not r.quit
+}
+test "resize keeps current decision and cursor even below minimum" {
+ let u = { initial(80,24,false) | cursor:1, page:4 };
+ let r = update(None,u,Sized(20,8));
+ r.ui.dimensions.columns == 20 && r.ui.dimensions.rows == 8 && r.ui.cursor == 1 && r.ui.page == 4 && r.command == None
+}
+test "arrows select and enter emits stable policy number" {
+ let a = update(None,initial(80,24,false),Input(Next));
+ let b = update(None,a.ui,Input(Accept));
+ b.command == Some("2") && not b.quit
+}
+test "escape opens quit confirmation with keep playing selected" {
+ let a = update(None,initial(80,24,false),Input(Cancel));
+ let b = update(None,a.ui,Input(Accept));
+ a.ui.view == Quit && b.ui.view != Quit && not b.quit && b.command == None
+}
+test "EOF and interruption end immediately while q asks before quitting" {
+ let u = initial(40,16,true);
+ update(None,u,Finished).quit && update(None,u,Cancelled).quit && not update(None,u,Input(Character("q"))).quit && update(None,u,Input(Character("q"))).ui.view == Quit
+}
+test "pending proposal defaults decide later and navigation emits no domain command" {
+ match beginWatch("2",73) {
+  Err(_) => false,
+  Ok(s) => {
+   let p = {s | phase:"start",target:"proposal"};
+   let u = decision(p,80,24,false);
+   let help = update(Some(p),u,Input(Character("h")));
+   let back = update(Some(p),help.ui,Input(Cancel));
+   let chosen = update(Some(p),back.ui,Input(Accept));
+   u.cursor == 1 && help.ui.view == Guide && back.ui.view == Decision && chosen.command == Some("2")
+  }
+ }
+}
