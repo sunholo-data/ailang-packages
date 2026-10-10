@@ -13,6 +13,11 @@ test "tiny view cannot dispatch invisible Start or policy choices" {
  let u=initial(20,8,false);
  update(None,u,Input(Accept)).command==None && update(None,u,Input(Character("1"))).command==None && update(None,u,Input(Character("q"))).quit
 }
+test "invalid external dimensions normalize positive before calling viewport" {
+ let u=initial(398,0-911,false);
+ let r=update(None,u,Sized(0,0));
+ u.dimensions.columns==160 && u.dimensions.rows==1 && r.ui.dimensions.columns==1 && r.ui.dimensions.rows==1
+}
 test "quit modal cannot dispatch domain numbers and preserves safe proposal default" {
  match beginWatch("2",73) {Err(_)=>false,Ok(s)=>{
  let p={s|phase:"start",target:"proposal"};

@@ -16,7 +16,7 @@ export type Transition = {ui:UI,command:Option[string],quit:bool} deriving(Eq)
 
 export pure func initial(columns:int,rows:int,ascii:bool) -> UI ! {}
 ensures { result.view == Briefing && result.cursor == 0 && result.page == 0 && result.dimensions.columns >= 1 && result.dimensions.rows >= 1 } =
- {view:Briefing,previous:Briefing,cursor:0,page:0,dimensions:viewport(columns,rows),ascii:ascii,previousCursor:0,previousPage:0}
+ {view:Briefing,previous:Briefing,cursor:0,page:0,dimensions:viewport(if columns<1 then 1 else columns,if rows<1 then 1 else rows),ascii:ascii,previousCursor:0,previousPage:0}
 
 export pure func decision(s:PlayState,columns:int,rows:int,ascii:bool) -> UI ! {}
 ensures { result.view == Decision && result.page == 0 && result.cursor == (if s.phase == "start" then 1 else 0) } =
@@ -71,7 +71,7 @@ requires { u.dimensions.columns>=1 && u.dimensions.rows>=1 && u.page>=0 }
 ensures { result.ui.dimensions.columns >= 1 && result.ui.dimensions.rows >= 1 && result.ui.page >= 0 && (e != NoInput || result.ui == u && result.command == None && not result.quit) } = match e {
  NoInput => unchanged(u),
  Finished => {ui:u,command:None,quit:true},
- Sized(w,h) => unchanged({u|dimensions:viewport(w,h)}),
+ Sized(w,h) => unchanged({u|dimensions:viewport(if w<1 then 1 else w,if h<1 then 1 else h)}),
  Cancelled => {ui:u,command:None,quit:true},
  Input(k) => {
   let count = if u.view == Quit then 2 else length(choices(s));
