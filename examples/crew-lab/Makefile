@@ -19,6 +19,9 @@ tests:
 	@cd "$(EX)" && "$(AILANG)" test --package .
 	@cd "$(EX)" && "$(AILANG)" test --package . --bytecode --strict-bytecode
 	@cd "$(EX)" && "$(AILANG)" test scenario.ail
+	@cd "$(EX)" && "$(AILANG)" test --allow-skips watch_scenario.ail
+	@cd "$(EX)" && "$(AILANG)" test --allow-skips narrative.ail
+	@cd "$(EX)" && "$(AILANG)" test --allow-skips watch_presenter.ail
 	@cd "$(EX)" && "$(AILANG)" test --allow-skips session.ail
 	@cd "$(EX)" && "$(AILANG)" test --allow-skips reactions.ail
 	@cd "$(EX)" && "$(AILANG)" test --allow-skips play_flow.ail
@@ -70,3 +73,8 @@ terminal-tests:
 journey-test:
 	@AILANG="$(AILANG)" "$(EX)/test-journey.sh"
 validate: terminal-tests journey-test
+
+.PHONY: watch-test
+watch-test:
+	@AILANG="$(AILANG)" "$(EX)/test-watch.sh"
+validate: watch-test

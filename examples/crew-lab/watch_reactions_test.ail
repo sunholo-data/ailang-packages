@@ -1,0 +1,89 @@
+module sunholo/crew_lab/watch_reactions_test
+import ./session (Request, start, offer, ask)
+import ./reactions (decodePolicy, watchPolicyBody, weights, watchSignature, signature, prompt, narrativeText, narrativeBundle)
+import std/result (Ok, Err)
+import std/list (head, filter, map, foldl)
+import std/option (Some, None)
+import std/string (replace, contains)
+import pkg/sunholo/content_library/library (starterBundle)
+
+pure func request() -> Result[Request, string] =
+  match start("{\"command\":\"start\",\"policy\":\"consent\",\"scenario\":\"watch-v2\"}") {
+    Err(_) => Err("start"),
+    Ok(s) => match offer(s.session, "scientist", "work_scientist", "job") {
+      Err(_) => Err("offer"),
+      Ok(o) => match ask(o.session, "scientist", "job", "q") {
+        Err(_) => Err("ask"),
+        Ok(a) => match head(a.session.pending) {
+          None => Err("pending"),
+          Some(r) => Ok(r)
+        }
+      }
+    }
+  }
+
+pure func score(r: Request, label: string) -> int = match decodePolicy(watchPolicyBody()) {
+  Err(_) => -1,
+  Ok(p) => match weights(p, r) {
+    Err(_) => -1,
+    Ok(xs) => foldl(\acc x. if x.label == label then x.weight else acc, -1, xs)
+  }
+}
+
+pure func modify(r: Request, id: string, old: int, n: int) -> Request =
+  { r | context: replace(r.context, "\"id\":\"${id}\",\"value\":${old}", "\"id\":\"${id}\",\"value\":${n}") }
+
+test "stress and morale causally affect modern willingness" {
+  match request() {
+    Err(_) => false,
+    Ok(r) => score(modify(r, "stress", 65, 75), "accept") < score(r, "accept") && score(modify(r, "stress", 65, 75), "concern") > score(r, "concern") && score(modify(r, "morale", 55, 65), "accept") > score(r, "accept")
+  }
+}
+
+test "every modern OCEAN axis changes a relevant weight" {
+  match request() {
+    Err(_) => false,
+    Ok(r) => score(modify(r, "openness", 80, 90), "accept") > score(r, "accept") && score(modify(r, "conscientiousness", 80, 90), "accept") > score(r, "accept") && score(modify(r, "agreeableness", 50, 60), "accept") > score(r, "accept") && score(modify(r, "neuroticism", 50, 60), "accept") < score(r, "accept") && score(modify(r, "extraversion", 20, 30), "concern") > score(r, "concern")
+  }
+}
+
+test "signature versions identity policy model remain isolated" {
+  match request() {
+    Err(_) => false,
+    Ok(r) => watchSignature(r, "policy", "model") != signature(r, "policy", "model") && watchSignature(r, "policy", "model") != watchSignature({ r | configBody: "different" }, "policy", "model") && watchSignature(r, "policy", "model") != watchSignature(r, "changed", "model") && watchSignature(r, "policy", "model") != watchSignature(r, "policy", "other")
+  }
+}
+
+test "modern prompt exposes only local perception and purpose" {
+  match request() {
+    Err(_) => false,
+    Ok(r) => {
+      let p = prompt(watchSignature(r, "SECRET_POLICY_ONLY_FOR_CACHE", "model"), r.legal)
+      contains(p, "Spire readings") && not contains(p, "SECRET_POLICY_ONLY_FOR_CACHE") && not contains(p, "bounded_indicator_delta") && not contains(p, "replacement_modules")
+    }
+  }
+}
+
+test "text guard rejects score and trait disclosures but allows supplies" {
+  not narrativeText("My fatigue is 45.") && not narrativeText("Stress: 85") && not narrativeText("fatigue is real; my fatigue: 45") && narrativeText("I feel stress; I need 2 cartridges.") && not narrativeText("My OCEAN openness is high") && not narrativeText("Your hidden variables changed") && narrativeText("I am tired, but I can do it.") && narrativeText("This needs 2 Archive compute slots.")
+}
+
+test "modern cache guard checks every variant without altering text" {
+  match request() {
+    Err(_) => false,
+    Ok(r) => {
+      let sig = watchSignature(r, "policy", "model")
+      match starterBundle(sig, r.legal) {
+        Err(_) => false,
+        Ok(b) => narrativeBundle(sig, b) && not narrativeBundle(sig, { b | variants: map(\v. { v | text: "fatigue: 45" }, b.variants) })
+      }
+    }
+  }
+}
+
+test "modern default has six bounded calls and leaves legacy untouched" {
+  match decodePolicy(watchPolicyBody()) {
+    Ok(p) => p.callLimit == 6,
+    _ => false
+  }
+}

@@ -1,0 +1,224 @@
+module sunholo/crew_lab/watch_test
+import std/result (Result, Ok, Err)
+import std/list (length, filter, head, any, map)
+import std/option (Some, None)
+import ./session (Session, start, offer, startTask, input, ask, complete, resolve)
+import ./watch_scenario (workers, workerRecipe, config, actors, resources, projectName, resourceName)
+import pkg/sunholo/social_dynamics/model (Working, Completed, Stopped)
+import pkg/sunholo/social_dynamics/conditions (reevaluate)
+
+pure func all[a](f: a -> bool, xs: [a]) -> bool = not any(\x. not f(x), xs)
+
+pure func base() = start("{\"command\":\"start\",\"policy\":\"orders\",\"scenario\":\"watch-v2\"}")
+
+pure func job(s: Session, worker: string, id: string) = match offer(s, worker, "work_${worker}", id) {
+  Err(e) => Err(e),
+  Ok(o) => startTask(o.session, id)
+}
+
+pure func advance(s: Session, tick: int) = input(s, "{\"command\":\"advance\",\"tick\":${tick},\"budget\":64}")
+
+test "watch includes captain five specialists owned recipes and stocks" {
+  length(actors()) == 6 && length(workers()) == 5 && length(resources()) == 3 && all(\w. workerRecipe(w, "work_${w}") && workerRecipe(w, "rest_${w}") && not workerRecipe("captain", "work_${w}"), workers()) && projectName("") == "Unknown project" && resourceName("") == "Unknown supply"
+}
+
+test "unknown modern profile and extra fields reject" {
+  match (start("{\"command\":\"start\",\"policy\":\"consent\",\"scenario\":\"watch-v3\"}"), start("{\"command\":\"start\",\"policy\":\"consent\",\"scenario\":\"watch-v2\",\"extra\":1}")) {
+    (Err(_), Err(_)) => true,
+    _ => false
+  }
+}
+
+test "modern consent still requires personal agreement" {
+  match start("{\"command\":\"start\",\"policy\":\"consent\",\"scenario\":\"watch-v2\"}") {
+    Err(_) => false,
+    Ok(o) => match offer(o.session, "medic", "work_medic", "job") {
+      Err(_) => false,
+      Ok(p) => match startTask(p.session, "job") {
+        Err(_) => true,
+        _ => false
+      }
+    }
+  }
+}
+
+test "modern config mutation refuses and wrong worker cannot own recipe" {
+  match base() {
+    Err(_) => false,
+    Ok(o) => match (offer({ o.session | config: { o.session.config | id: "crew-watch-v2-orders", recipes: [] } }, "scientist", "work_scientist", "bad"), offer(o.session, "engineer", "work_scientist", "bad")) {
+      (Err(_), Err(_)) => true,
+      _ => false
+    }
+  }
+}
+
+test "concurrent archive slots reject excess and completion releases" {
+  match base() {
+    Err(_) => false,
+    Ok(o) => match job(o.session, "scientist", "science") {
+      Err(_) => false,
+      Ok(a) => match job(a.session, "engineer", "engineering") {
+        Err(_) => false,
+        Ok(b) => match job(b.session, "pilot", "pilot") {
+          Ok(_) => false,
+          Err(_) => match advance(b.session, 4) {
+            Err(_) => false,
+            Ok(done) => match head(filter(\r. r.id == "archive_compute", done.session.state.resources)) {
+              Some(r) => r.available == 3 && r.reserved == 0 && r.consumed == 0 && all(\t. t.status == Completed, done.session.state.tasks),
+              _ => false
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
+test "finite module consumes once while waiting restores no stock" {
+  match base() {
+    Err(_) => false,
+    Ok(o) => match job(o.session, "engineer", "engineering") {
+      Err(_) => false,
+      Ok(a) => match advance(a.session, 3) {
+        Err(_) => false,
+        Ok(b) => match advance(b.session, 7) {
+          Err(_) => false,
+          Ok(done) => match head(filter(\r. r.id == "replacement_modules", done.session.state.resources)) {
+            Some(r) => r.available == 2 && r.reserved == 0 && r.consumed == 1,
+            _ => false
+          }
+        }
+      }
+    }
+  }
+}
+
+test "repeated rest at lower limits completes instead of stranding worker" {
+  match base() {
+    Err(_) => false,
+    Ok(o) => {
+      let initial = { o.session | state: { o.session.state | actors: map(\a. if a.id == "scientist" then { a | indicators: map(\v. if v.id == "fatigue" || v.id == "stress" then { v | value: 0 } else if v.id == "morale" then { v | value: 100 } else v, a.indicators) } else a, o.session.state.actors) } }
+      match offer(initial, "scientist", "rest_scientist", "rest1") {
+        Err(_) => false,
+        Ok(a) => match startTask(a.session, "rest1") {
+          Err(_) => false,
+          Ok(b) => match advance(b.session, 2) {
+            Err(_) => false,
+            Ok(c) => match offer(c.session, "scientist", "rest_scientist", "rest2") {
+              Err(_) => false,
+              Ok(d) => match startTask(d.session, "rest2") {
+                Err(_) => false,
+                Ok(e) => match advance(e.session, 4) {
+                  Err(_) => false,
+                  Ok(done) => all(\t. t.status == Completed, done.session.state.tasks)
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
+test "useful work at upper limit releases compute and spends finite cartridges" {
+  match base() {
+    Err(_) => false,
+    Ok(o) => {
+      let initial = { o.session | state: { o.session.state | actors: map(\a. if a.id == "pilot" || a.id == "medic" then { a | indicators: map(\v. { v | value: 100 }, a.indicators) } else a, o.session.state.actors) } }
+      match job(initial, "pilot", "limit") {
+        Err(_) => false,
+        Ok(a) => match job(a.session, "medic", "care-limit") {
+          Err(_) => false,
+          Ok(care) => match advance(care.session, 2) {
+            Err(_) => false,
+            Ok(done) => all(\t. t.status == Completed, done.session.state.tasks) && (match head(filter(\r. r.id == "archive_compute", done.session.state.resources)) {
+              Some(r) => r.available == 3 && r.reserved == 0 && (match head(filter(\stock. stock.id == "diagnostic_cartridges", done.session.state.resources)) {
+                Some(stock) => stock.available == 3 && stock.consumed == 1 && stock.reserved == 0,
+                None => false
+              }),
+              _ => false
+            })
+          }
+        }
+      }
+    }
+  }
+}
+
+test "all specialist conditions require sustained stress" {
+  match base() {
+    Err(_) => false,
+    Ok(o) => {
+      let changed = { o.session | state: { o.session.state | actors: map(\a. if a.id == "captain" then a else { a | indicators: map(\v. if v.id == "stress" then { v | value: 75 } else v, a.indicators) }, o.session.state.actors) } }
+      match reevaluate(changed.config, changed.state) {
+        Err(_) => false,
+        Ok(state) => match advance({ changed | state: state }, 1) {
+          Err(_) => false,
+          Ok(a) => length(filter(\c. c.active, a.session.state.conditions)) == 0 && (match advance(a.session, 3) {
+            Err(_) => false,
+            Ok(b) => length(filter(\c. c.active, b.session.state.conditions)) == 5
+          })
+        }
+      }
+    }
+  }
+}
+
+pure func setStress(s: Session, n: int) =
+  { s | state: { s.state | actors: map(\a. if a.id == "captain" then a else { a | indicators: map(\v. if v.id == "stress" then { v | value: n } else v, a.indicators) }, s.state.actors) } }
+
+pure func refresh(s: Session) = match reevaluate(s.config, s.state) {
+  Err(e) => Err(e),
+  Ok(state) => Ok({ s | state: state })
+}
+
+test "watch sustained recovery waits a tick and cooldown prevents immediate reentry" {
+  match base() {
+    Err(_) => false,
+    Ok(o) => match refresh(setStress(o.session, 75)) {
+      Err(_) => false,
+      Ok(s) => match advance(s, 2) {
+        Err(_) => false,
+        Ok(active) => length(filter(\c. c.active, active.session.state.conditions)) == 5 && (match refresh(setStress(active.session, 45)) {
+          Err(_) => false,
+          Ok(low) => length(filter(\c. c.active, low.state.conditions)) == 5 && (match advance(low, 3) {
+            Err(_) => false,
+            Ok(recovered) => length(filter(\c. c.active, recovered.session.state.conditions)) == 0 && all(\c. c.cooldownUntil == 6, recovered.session.state.conditions) && (match refresh(setStress(recovered.session, 75)) {
+              Err(_) => false,
+              Ok(high) => match advance(high, 5) {
+                Err(_) => false,
+                Ok(wait) => length(filter(\c. c.active, wait.session.state.conditions)) == 0 && (match advance(wait.session, 8) {
+                  Err(_) => false,
+                  Ok(reentered) => length(filter(\c. c.active, reentered.session.state.conditions)) == 5
+                })
+              }
+            })
+          })
+        })
+      }
+    }
+  }
+}
+
+test "modern granted relief refunds reusable compute and untouched finite modules" {
+  match base() {
+    Err(_) => false,
+    Ok(o) => match job(o.session, "engineer", "repair") {
+      Err(_) => false,
+      Ok(work) => match ask(work.session, "engineer", "repair", "r") {
+        Err(_) => false,
+        Ok(asked) => match complete(asked.session, "r", "{\"model\":\"fixture\",\"id\":\"fixture\",\"usage\":{\"input_tokens\":0,\"output_tokens\":0,\"cost\":0},\"answers\":{\"response\":{\"type\":\"choice\",\"choice\":\"request_relief\",\"confidence\":1,\"probabilities\":{\"continue\":0,\"request_relief\":1,\"defer\":0}}}}", 0.0) {
+          Err(_) => false,
+          Ok(reply) => match resolve(reply.session, "relief-r", true) {
+            Err(_) => false,
+            Ok(stopped) => all(\t. t.status == Stopped, stopped.session.state.tasks) && all(\r. r.reserved == 0 && r.consumed == 0, stopped.session.state.resources) && (match head(filter(\r. r.id == "archive_compute", stopped.session.state.resources)) {
+              Some(r) => r.available == 3,
+              None => false
+            })
+          }
+        }
+      }
+    }
+  }
+}

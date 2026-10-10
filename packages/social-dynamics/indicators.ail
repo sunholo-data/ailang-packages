@@ -1,5 +1,5 @@
 module sunholo/social_dynamics/indicators
-import ./model (Actor, Indicator, Value, Resource, Evidence, Effect, IndicatorDelta, RelationshipDelta, Config, State, Error, PendingAdvance, InvalidConfig, InvalidPolicyEffect, CapacityExceeded, UnknownId, bounded, validId, unique, add, emptyState)
+import ./model (Actor, Indicator, Value, Resource, Evidence, Effect, BoundedIndicatorDelta, IndicatorDelta, RelationshipDelta, Config, State, Error, PendingAdvance, InvalidConfig, InvalidPolicyEffect, CapacityExceeded, UnknownId, bounded, validId, unique, add, emptyState)
 import ./wire (encodeConfig)
 import std/list (length, map, dedup, contains, any, filter, head)
 import std/option (Option, Some, None)
@@ -7,88 +7,142 @@ import std/result (Result, Ok, Err)
 import std/string (length as stringLength, startsWith)
 
 export pure func findActor(s: State, id: string) -> Option[Actor]
-ensures { match result { Some(a) => a.id == id, None => true } } = head(filter(\a. a.id == id, s.actors))
+ensures { match result {
+  Some(a) => a.id == id,
+  None => true
+} } = head(filter(\a. a.id == id, s.actors))
+
 export pure func findIndicator(c: Config, id: string) -> Option[Indicator]
-ensures { match result { Some(i) => i.id == id, None => true } } = head(filter(\i. i.id == id, c.indicators))
+ensures { match result {
+  Some(i) => i.id == id,
+  None => true
+} } = head(filter(\i. i.id == id, c.indicators))
+
 export pure func knows(s: State, observer: string, evidence: string) -> bool
-ensures { result == any(\k. k.observer == observer && k.evidence == evidence, s.knowledge) } = any(\k. k.observer == observer && k.evidence == evidence, s.knowledge)
+ensures { result == any(\k. k.observer == observer && k.evidence == evidence, s.knowledge) } =
+  any(\k. k.observer == observer && k.evidence == evidence, s.knowledge)
 
 pure func all[a](f: a -> bool, xs: [a]) -> bool = not any(\x. not f(x), xs)
 
 pure func valueValid(v: Value) -> bool = validId(v.id) && bounded(v.value)
-pure func valuesValid(vs: [Value], cap: int) -> bool = length(vs) <= cap && unique(map(\v. v.id, vs)) && all(valueValid, vs)
-pure func inRange(c: Config, id: string, n: int) -> bool = match findIndicator(c, id) { None => false, Some(i) => bounded(n) && n >= i.minimum && n <= i.maximum }
+
+pure func valuesValid(vs: [Value], cap: int) -> bool =
+  length(vs) <= cap && unique(map(\v. v.id, vs)) && all(valueValid, vs)
+
+pure func inRange(c: Config, id: string, n: int) -> bool = match findIndicator(c, id) {
+  None => false,
+  Some(i) => bounded(n) && n >= i.minimum && n <= i.maximum
+}
+
 pure func actorPresent(actors: [Actor], id: string) -> bool = any(\a. a.id == id, actors)
+
 pure func limitValid(n: int) -> bool = n > 0 && n <= 1000000
+
 pure func limitsValid(c: Config) -> bool = {
- let l = c.limits;
- all(limitValid, [l.actors, l.tasks, l.commitments, l.reliefs, l.evidence, l.knowledge, l.accepted, l.operations, l.effects, l.text, l.wire])
+  let l = c.limits
+  all(limitValid, [l.actors, l.tasks, l.commitments, l.reliefs, l.evidence, l.knowledge, l.accepted, l.operations, l.effects, l.text, l.wire])
 }
+
 pure func resourceValid(r: Resource) -> bool = {
- let nonnegative = all(\n. n >= 0 && bounded(n), [r.initial, r.available, r.reserved, r.consumed, r.transferredIn, r.transferredOut]);
- -- At most five bounded summands; these intermediate sums remain below 64-bit overflow.
- validId(r.id) && r.reserved == 0 && nonnegative && r.available + r.reserved + r.consumed == r.initial + r.transferredIn - r.transferredOut
+  let nonnegative = all(\n. n >= 0 && bounded(n), [r.initial, r.available, r.reserved, r.consumed, r.transferredIn, r.transferredOut])
+  -- At most five bounded summands; these intermediate sums remain below 64-bit overflow.
+  validId(r.id) && r.reserved == 0 && nonnegative && r.available + r.reserved + r.consumed == r.initial + r.transferredIn - r.transferredOut
 }
-pure func acyclic(pending: [Evidence], resolved: [string]) -> bool =
- if length(pending) == 0 then true else {
-  let ready = filter(\e. all(\id. contains(resolved, id), e.causes), pending);
-  let ids = map(\e. e.id, ready);
+
+pure func acyclic(pending: [Evidence], resolved: [string]) -> bool = if length(pending) == 0 then true else {
+  let ready = filter(\e. all(\id. contains(resolved, id), e.causes), pending)
+  let ids = map(\e. e.id, ready)
   if length(ready) == 0 then false else acyclic(filter(\e. not contains(ids, e.id), pending), resolved ++ ids)
- }
+}
+
 pure func effectShape(e: Effect) -> bool = match e {
- IndicatorDelta(a, i, d) => validId(a) && validId(i) && bounded(d),
- RelationshipDelta(a, b, i, d) => validId(a) && validId(b) && validId(i) && bounded(d)
+  BoundedIndicatorDelta(a, i, d) => validId(a) && validId(i) && bounded(d),
+  IndicatorDelta(a, i, d) => validId(a) && validId(i) && bounded(d),
+  RelationshipDelta(a, b, i, d) => validId(a) && validId(b) && validId(i) && bounded(d)
 }
 
 pure func effectReference(c: Config, actors: [Actor], e: Effect) -> bool = match e {
- IndicatorDelta(a, i, d) => actorPresent(actors, a) && bounded(d) && any(\actor. actor.id == a && any(\v. v.id == i, actor.indicators), actors) && any(\def. def.id == i, c.indicators),
- RelationshipDelta(a, b, i, d) => actorPresent(actors, a) && actorPresent(actors, b) && bounded(d) && any(\def. def.id == i, c.indicators) && any(\r. r.from == a && r.to == b && r.dimension == i, c.relationships)
+  BoundedIndicatorDelta(a, i, d) => actorPresent(actors, a) && bounded(d) && any(\actor. actor.id == a && any(\v. v.id == i, actor.indicators), actors) && any(\def. def.id == i, c.indicators),
+  IndicatorDelta(a, i, d) => actorPresent(actors, a) && bounded(d) && any(\actor. actor.id == a && any(\v. v.id == i, actor.indicators), actors) && any(\def. def.id == i, c.indicators),
+  RelationshipDelta(a, b, i, d) => actorPresent(actors, a) && actorPresent(actors, b) && bounded(d) && any(\def. def.id == i, c.indicators) && any(\r. r.from == a && r.to == b && r.dimension == i, c.relationships)
 }
 
 export pure func validateConfig(c: Config, actors: [Actor], resources: [Resource]) -> Result[State, Error]
-ensures { match result { Ok(s) => s.config == c.id && s.tick == 0 && s.revision == 0, Err(_) => true } } = {
- let aid = \id. id == "host" || actorPresent(actors, id);
- let eid = \id. any(\e. e.id == id, c.evidence);
- if not validId(c.id) || c.version != 1 || not validId(c.session) || not validId(c.timeUnit) || not validId(c.authorityId) || not validId(c.appraisalId) || not limitsValid(c) then Err(InvalidConfig("identity_or_limits"))
- else if length(actors) == 0 || length(actors) > c.limits.actors || not unique(map(\a. a.id, actors)) || any(\a. a.id == "host", actors) then Err(InvalidConfig("actors"))
- else if length(c.indicators) > c.limits.effects || not unique(map(\i. i.id, c.indicators)) || not all(\i. validId(i.id) && bounded(i.minimum) && bounded(i.maximum) && i.minimum <= i.maximum, c.indicators) then Err(InvalidConfig("indicator_definitions"))
- else if not all(\a. validId(a.id) && a.capacity >= 0 && bounded(a.capacity) && valuesValid(a.attributes, c.limits.effects) && valuesValid(a.values, c.limits.effects) && valuesValid(a.indicators, c.limits.effects) && all(\v. inRange(c, v.id, v.value), a.indicators), actors) then Err(InvalidConfig("actor_values"))
- else if length(resources) > c.limits.effects || not unique(map(\r. r.id, resources)) || not all(resourceValid, resources) then Err(InvalidConfig("resources"))
- else if length(c.relationships) > c.limits.knowledge || length(dedup(map(\r. (r.from, r.to, r.dimension), c.relationships))) != length(c.relationships) || not all(\r. actorPresent(actors, r.from) && actorPresent(actors, r.to) && inRange(c, r.dimension, r.value), c.relationships) then Err(InvalidConfig("relationships"))
- else if length(c.evidence) > c.limits.evidence || not unique(map(\e. e.id, c.evidence)) || not all(\e. validId(e.id) && not startsWith(e.id, "event-") && aid(e.author) && validId(e.kind) && stringLength(e.text) <= c.limits.text && length(e.causes) <= c.limits.operations && unique(e.causes) && all(\id. validId(id) && eid(id) && id != e.id, e.causes), c.evidence) then Err(InvalidConfig("evidence"))
- else if not acyclic(c.evidence, []) then Err(InvalidConfig("evidence_cycle"))
- else if length(c.knowledge) > c.limits.knowledge || length(dedup(map(\k. (k.observer, k.evidence), c.knowledge))) != length(c.knowledge) || not all(\k. aid(k.observer) && eid(k.evidence), c.knowledge) then Err(InvalidConfig("knowledge"))
- else if length(c.recipes) > c.limits.tasks || not unique(map(\r. r.id, c.recipes)) || not all(\r. validId(r.id) && r.duration >= 1 && bounded(r.duration) && r.allocation >= 1 && bounded(r.allocation) && length(r.costs) <= c.limits.effects && unique(map(\cost. cost.resource, r.costs)) && all(\cost. any(\resource. resource.id == cost.resource, resources) && bounded(cost.reserve) && bounded(cost.consume) && cost.reserve >= 0 && cost.consume >= 0 && cost.consume <= cost.reserve, r.costs) && length(r.effects) <= c.limits.effects && all(\e. effectReference(c, actors, e), r.effects), c.recipes) then Err(InvalidConfig("recipes"))
- else if length(c.rules) > c.limits.effects || not unique(map(\r. r.id, c.rules)) || not all(\r. validId(r.id) && actorPresent(actors, r.actor) && inRange(c, r.indicator, r.threshold) && any(\a. a.id == r.actor && any(\v. v.id == r.indicator, a.indicators), actors) && r.duration >= 1 && bounded(r.duration) && inRange(c, r.indicator, r.recovery) && (if r.above then r.recovery < r.threshold else r.recovery > r.threshold) && r.cooldown >= 0 && bounded(r.cooldown), c.rules) then Err(InvalidConfig("rules"))
- else Ok({emptyState(c, actors, resources) | configBody: encodeConfig(c)})
+ensures { match result {
+  Ok(s) => s.config == c.id && s.tick == 0 && s.revision == 0,
+  Err(_) => true
+} } = {
+  let aid = \id. id == "host" || actorPresent(actors, id)
+  let eid = \id. any(\e. e.id == id, c.evidence)
+  if not validId(c.id) || c.version != 1 || not validId(c.session) || not validId(c.timeUnit) || not validId(c.authorityId) || not validId(c.appraisalId) || not limitsValid(c) then Err(InvalidConfig("identity_or_limits")) else if length(actors) == 0 || length(actors) > c.limits.actors || not unique(map(\a. a.id, actors)) || any(\a. a.id == "host", actors) then Err(InvalidConfig("actors")) else if length(c.indicators) > c.limits.effects || not unique(map(\i. i.id, c.indicators)) || not all(\i. validId(i.id) && bounded(i.minimum) && bounded(i.maximum) && i.minimum <= i.maximum, c.indicators) then Err(InvalidConfig("indicator_definitions")) else if not all(\a. validId(a.id) && a.capacity >= 0 && bounded(a.capacity) && valuesValid(a.attributes, c.limits.effects) && valuesValid(a.values, c.limits.effects) && valuesValid(a.indicators, c.limits.effects) && all(\v. inRange(c, v.id, v.value), a.indicators), actors) then Err(InvalidConfig("actor_values")) else if length(resources) > c.limits.effects || not unique(map(\r. r.id, resources)) || not all(resourceValid, resources) then Err(InvalidConfig("resources")) else if length(c.relationships) > c.limits.knowledge || length(dedup(map(\r. (r.from, r.to, r.dimension), c.relationships))) != length(c.relationships) || not all(\r. actorPresent(actors, r.from) && actorPresent(actors, r.to) && inRange(c, r.dimension, r.value), c.relationships) then Err(InvalidConfig("relationships")) else if length(c.evidence) > c.limits.evidence || not unique(map(\e. e.id, c.evidence)) || not all(\e. validId(e.id) && not startsWith(e.id, "event-") && aid(e.author) && validId(e.kind) && stringLength(e.text) <= c.limits.text && length(e.causes) <= c.limits.operations && unique(e.causes) && all(\id. validId(id) && eid(id) && id != e.id, e.causes), c.evidence) then Err(InvalidConfig("evidence")) else if not acyclic(c.evidence, []) then Err(InvalidConfig("evidence_cycle")) else if length(c.knowledge) > c.limits.knowledge || length(dedup(map(\k. (k.observer, k.evidence), c.knowledge))) != length(c.knowledge) || not all(\k. aid(k.observer) && eid(k.evidence), c.knowledge) then Err(InvalidConfig("knowledge")) else if length(c.recipes) > c.limits.tasks || not unique(map(\r. r.id, c.recipes)) || not all(\r. validId(r.id) && r.duration >= 1 && bounded(r.duration) && r.allocation >= 1 && bounded(r.allocation) && length(r.costs) <= c.limits.effects && unique(map(\cost. cost.resource, r.costs)) && all(\cost. any(\resource. resource.id == cost.resource, resources) && bounded(cost.reserve) && bounded(cost.consume) && cost.reserve >= 0 && cost.consume >= 0 && cost.consume <= cost.reserve, r.costs) && length(r.effects) <= c.limits.effects && all(\e. effectReference(c, actors, e), r.effects), c.recipes) then Err(InvalidConfig("recipes")) else if length(c.rules) > c.limits.effects || not unique(map(\r. r.id, c.rules)) || not all(\r. validId(r.id) && actorPresent(actors, r.actor) && inRange(c, r.indicator, r.threshold) && any(\a. a.id == r.actor && any(\v. v.id == r.indicator, a.indicators), actors) && r.duration >= 1 && bounded(r.duration) && inRange(c, r.indicator, r.recovery) && (if r.above then r.recovery < r.threshold else r.recovery > r.threshold) && r.cooldown >= 0 && bounded(r.cooldown), c.rules) then Err(InvalidConfig("rules")) else Ok({ emptyState(c, actors, resources) | configBody: encodeConfig(c) })
 }
 
-pure func applyOne(c: Config, s: State, e: Effect) -> Result[State, Error] = match e {
- IndicatorDelta(actor, indicator, delta) => match findActor(s, actor) {
-  None => Err(UnknownId(actor)),
-  Some(a) => match head(filter(\v. v.id == indicator, a.indicators)) {
-   None => Err(UnknownId(indicator)),
-   Some(v) => match add(v.value, delta) {
-    Err(err) => Err(err),
-    Ok(n) => if not inRange(c, indicator, n) then Err(InvalidPolicyEffect(indicator)) else {
-     let changed = {a | indicators: map(\old. if old.id == indicator then {old | value: n} else old, a.indicators)};
-     Ok({s | actors: map(\old. if old.id == actor then changed else old, s.actors)})
+export pure func clampIndicator(n: int, minimum: int, maximum: int) -> int ! {}
+requires { minimum <= maximum }
+ensures { result >= minimum && result <= maximum && (if n >= minimum && n <= maximum then result == n else true) }
+  tests [
+    ((120, 0, 100), 100),
+    ((-30, -20, 70), -20),
+    ((50, 0, 100), 50)
+  ] {
+  if n < minimum then minimum else if n > maximum then maximum else n
+}
+
+pure func boundedOne(c: Config, s: State, actor: string, indicator: string, delta: int) -> Result[State, Error] =
+  if not unique(map(\i. i.id, c.indicators)) || not all(\i. validId(i.id) && bounded(i.minimum) && bounded(i.maximum) && i.minimum <= i.maximum, c.indicators) || not unique(map(\a. a.id, s.actors)) || not all(\a. valuesValid(a.indicators, c.limits.effects) && all(\v. inRange(c, v.id, v.value), a.indicators), s.actors) then Err(InvalidPolicyEffect("current_state")) else match (findActor(s, actor), findIndicator(c, indicator)) {
+    (None, _) => Err(UnknownId(actor)),
+    (_, None) => Err(UnknownId(indicator)),
+    (Some(a), Some(i)) => match head(filter(\v. v.id == indicator, a.indicators)) {
+      None => Err(UnknownId(indicator)),
+      Some(v) => match add(v.value, delta) {
+        Err(e) => Err(e),
+        Ok(n) => {
+          let actual = clampIndicator(n, i.minimum, i.maximum)
+          let changed = { a | indicators: map(\old. if old.id == indicator then { old | value: actual } else old, a.indicators) }
+          Ok({ s | actors: map(\old. if old.id == actor then changed else old, s.actors) })
+        }
+      }
     }
-   }
   }
- },
- RelationshipDelta(from, to, dimension, delta) => match head(filter(\r. r.from == from && r.to == to && r.dimension == dimension, s.relationships)) {
-  None => Err(UnknownId(dimension)),
-  Some(r) => match add(r.value, delta) {
-   Err(err) => Err(err),
-   Ok(n) => if not inRange(c, dimension, n) then Err(InvalidPolicyEffect(dimension)) else Ok({s | relationships: map(\old. if old.from == from && old.to == to && old.dimension == dimension then {old | value: n} else old, s.relationships)})
+
+pure func applyOne(c: Config, s: State, e: Effect) -> Result[State, Error] = match e {
+  BoundedIndicatorDelta(actor, indicator, delta) => boundedOne(c, s, actor, indicator, delta),
+  IndicatorDelta(actor, indicator, delta) => match findActor(s, actor) {
+    None => Err(UnknownId(actor)),
+    Some(a) => match head(filter(\v. v.id == indicator, a.indicators)) {
+      None => Err(UnknownId(indicator)),
+      Some(v) => match add(v.value, delta) {
+        Err(err) => Err(err),
+        Ok(n) => if not inRange(c, indicator, n) then Err(InvalidPolicyEffect(indicator)) else {
+          let changed = { a | indicators: map(\old. if old.id == indicator then { old | value: n } else old, a.indicators) }
+          Ok({ s | actors: map(\old. if old.id == actor then changed else old, s.actors) })
+        }
+      }
+    }
+  },
+  RelationshipDelta(from, to, dimension, delta) => match head(filter(\r. r.from == from && r.to == to && r.dimension == dimension, s.relationships)) {
+    None => Err(UnknownId(dimension)),
+    Some(r) => match add(r.value, delta) {
+      Err(err) => Err(err),
+      Ok(n) => if not inRange(c, dimension, n) then Err(InvalidPolicyEffect(dimension)) else Ok({ s | relationships: map(\old. if old.from == from && old.to == to && old.dimension == dimension then { old | value: n } else old, s.relationships) })
+    }
   }
- }
 }
+
 pure func applyMany(c: Config, s: State, effects: [Effect]) -> Result[State, Error] = match effects {
- [] => Ok(s),
- e :: rest => match applyOne(c, s, e) { Err(err) => Err(err), Ok(next) => applyMany(c, next, rest) }
+  [] => Ok(s),
+  e :: rest => match applyOne(c, s, e) {
+    Err(err) => Err(err),
+    Ok(next) => applyMany(c, next, rest)
+  }
 }
+
 export pure func applyEffects(c: Config, s: State, effects: [Effect]) -> Result[State, Error]
-ensures { match result { Ok(next) => next.tick == s.tick && next.revision == s.revision && next.seq == s.seq, Err(_) => true } } =
- if s.config != c.id || s.session != c.session || s.configBody != encodeConfig(c) then Err(InvalidConfig("session_config")) else if (match s.continuation { Some(_) => true, None => false }) then Err(PendingAdvance("effects")) else if length(effects) > c.limits.effects then Err(CapacityExceeded("effects")) else if any(\e. not effectShape(e), effects) then Err(InvalidPolicyEffect("shape")) else applyMany(c, s, effects)
+ensures { match result {
+  Ok(next) => next.tick == s.tick && next.revision == s.revision && next.seq == s.seq,
+  Err(_) => true
+} } =
+  if s.config != c.id || s.session != c.session || s.configBody != encodeConfig(c) then Err(InvalidConfig("session_config")) else if match s.continuation {
+    Some(_) => true,
+    None => false
+  } then Err(PendingAdvance("effects")) else if length(effects) > c.limits.effects then Err(CapacityExceeded("effects")) else if any(\e. not effectShape(e), effects) then Err(InvalidPolicyEffect("shape")) else applyMany(c, s, effects)

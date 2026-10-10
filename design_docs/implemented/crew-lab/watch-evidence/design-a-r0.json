@@ -1,0 +1,51 @@
+{
+  "reviewer": "in-session independent reviewer A",
+  "review_type": "reject-by-default design review; no external provider calls",
+  "document": "/private/tmp/crew-watch-v2-20261010/design_docs/planned/crew-lab/crew-watch-v2.md",
+  "verdict": "REJECT",
+  "strongest_objection": "The design assumes existing indicator validation provides usable bounded completion, but it rejects rather than saturates fixed effects. Repeatable rest and reusable-capacity work inevitably reach bounds and can strand accepted work, its actor capacity, and reservations at completion.",
+  "required_changes": [
+    {
+      "id": "R1",
+      "severity": "high",
+      "finding": "Define modern task indicator-boundary behavior before execution. Current fixed rest effects include fatigue -20 and stress -15 and fixed science effects include observations +25. For any initial values in 0..100, sufficiently repeated rest underflows and repeated science overflows. Existing validation does not clamp.",
+      "evidence": [
+        "packages/social-dynamics/indicators.ail:67-76: IndicatorDelta adds delta then returns InvalidPolicyEffect if outside configured range.",
+        "packages/social-dynamics/tasks.ail:127-139: finish first tentatively releases resources and changes status, then calls applyEffects; an error returns Err without committing completion/release.",
+        "packages/social-dynamics/engine.ail:50-51: failed completion returns Blocked with prior state.",
+        "Design: all indicators bounded 0..100 by existing host validation; all work/rest effects occur at completion; generic kernel reused without overrides. No modern preflight or saturation rule is specified."
+      ],
+      "required_resolution": "Specify an explicit bounded-effect design or deterministic start preflight that refuses a task whose full completion deltas cannot fit. Preserve legacy config/replay and kernel semantics. If preflight is selected, give qualitative player feedback and retain the offer/decision without reserving resources or reporting a successful start. Do not silently mutate recipe/config identity at completion. Add controls for every positive and negative indicator boundary, repeated rest, repeated reusable work, and concurrent actors completing safely, asserting no stranded reservation or worker and continued ability to advance time.",
+      "axioms": ["A5", "A9", "A11"]
+    }
+  ],
+  "axioms": [
+    {"id":"A1","judgment":"PASS","reason":"Seeded selection and recorded publication retained; new profile explicit."},
+    {"id":"A2","judgment":"PASS","reason":"Legacy exact encoding/signature and modern replay isolation specified."},
+    {"id":"A3","judgment":"PASS","reason":"Pure host and bounded FS/AI adapter retained."},
+    {"id":"A4","judgment":"PASS","reason":"Exact consent policy strings, config recomputation, recipe ownership, actor-local context required."},
+    {"id":"A5","judgment":"REJECT","reason":"Bounds premise conflicts with actual indicator implementation; missing accepted-task completion boundary controls."},
+    {"id":"A6","judgment":"PASS","reason":"Cache locks retained and modern policy file separated."},
+    {"id":"A7","judgment":"PASS","reason":"Raw structured journal remains authoritative; qualitative UI is projection."},
+    {"id":"A8","judgment":"PASS","reason":"No syntax/compiler change."},
+    {"id":"A9","judgment":"REJECT","reason":"Compute and consumable arithmetic is correct on successful completion, but unhandled indicator failures can keep advertised temporary holds indefinitely."},
+    {"id":"A10","judgment":"PASS","reason":"Existing social kernel, terminal UI, content library and decisions reused."},
+    {"id":"A11","judgment":"REJECT","reason":"Kernel failure is structured, but the design has no ordinary player continuation for its predictably failing completion deltas."},
+    {"id":"A12","judgment":"PASS","reason":"AI text cannot author effects; modern signature identity explicitly excluded from omniscient narrative prompt."}
+  ],
+  "hard_gates": {
+    "legacy_config_consent_isolation": "PASS design: full known variant+policy recomputation and exact consent string required; verify adversarial controls during execution.",
+    "cache_policy_isolation": "PASS design: separate modern policy file, new prompt version and scenario/config signature, exact legacy preservation.",
+    "resource_completion_relief": "REJECT due R1. Base reserve/release/consume premises otherwise match tasks.ail, including full refund on granted stop and no passive replenishment.",
+    "npc_perception_confidentiality": "PASS design: local frozen perception and trusted recipe context only, no full config dump. Existing prompt currently embeds signature, so modern prompt must actually split narrative context from cache signature as specified.",
+    "rookie_minimum_ui": "PASS design requirement, pending implementation evidence: first frame explicitly must explain role/context/action/policy at 40x16, help before input, no read-only state changes.",
+    "deterministic_replay_authority": "PASS design, pending prescribed interpreter/strict-VM and journal checks.",
+    "external_vendor_quorum": "NOT CLAIMED: this in-session review is not an off-vendor CLI quorum. No external AI API was invoked."
+  },
+  "suggestions": [
+    "Include an exact 40x16 opening frame in the sprint evidence. terminal-ui screen requires wrapped header+footer <= rows-5, so explanatory chrome must leave usable body height; a string-presence test anywhere in output is insufficient.",
+    "In modern prompt tests assert an unrelated actor's unique private sentinel never appears while a received evidence sentinel does. Assert config identity affects the signature but full config/effects never enter the model prompt.",
+    "Keep cache-text guard failures observable as pending requests without repeating a permanently invalid cache entry on every retry; explicit authored continuation must remain available. The current resolve prioritizes an existing cache file."
+  ],
+  "limitations": "Design review against source, not implementation acceptance. Existing source still implements legacy scenario. No live provider calls, source edits, or product tests performed."
+}

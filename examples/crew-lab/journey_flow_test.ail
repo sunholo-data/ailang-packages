@@ -57,3 +57,10 @@ test "TERM and NO_COLOR honor explicit visual default" {
 test "onboarding bound is inclusive size exclusive action count" {
   onboardingAllowed(9999, 65536) && not onboardingAllowed(10000, 1) && not onboardingAllowed(0, 65537) && not onboardingAllowed(-1, 1)
 }
+
+test "modern default and explicit debug legacy flags remain separate" {
+  match (options([], 80, 24, false), options(["--debug", "--legacy"], 80, 24, false), options(["--debug", "--debug"], 80, 24, false)) {
+    (Ok(a), Ok(b), Err(_)) => not a.debug && not a.legacy && b.debug && b.legacy && b.args == ["--seed", "42"],
+    _ => false
+  }
+}

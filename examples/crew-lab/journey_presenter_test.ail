@@ -2,7 +2,7 @@ module sunholo/crew_lab/journey_presenter_test
 import std/result (Ok, Err)
 import std/string (contains, repeat)
 import ./session (start)
-import ./journey_presenter (chapter, opening, frame, indicatorChanges, journeyRecap)
+import ./journey_presenter (chapter, opening, onboarding, frame, indicatorChanges, journeyRecap)
 import ./journey_flow (initial)
 import pkg/sunholo/terminal_ui/ui (dimensions, cells)
 
@@ -83,4 +83,15 @@ test "quit recap sanitizes only display path controls" {
       not contains(journeyRecap(s, "path\u{1B}[31m\u{202E}journal"), "\u{1B}") && not contains(journeyRecap(s, "path\u{1B}[31m\u{202E}journal"), "\u{202E}") && contains(journeyRecap(s, "path\u{1B}[31m\u{202E}journal"), "path[31mjournal")
     }
   }
+}
+
+
+test "newcomer meaning visible on smallest initial frame" {
+  let f = onboarding("offline", 42, dimensions(40, 16), false, 0, false)
+  contains(f.text, "You are captain") && contains(f.text, "first contact") && contains(f.text, "Offer > hear > Start > advance") && contains(f.text, "1 Ask for agreement") && contains(f.text, "Work waits for agreement") && contains(f.text, "2 Use captain's authority") && contains(f.text, "Start despite refusal; trust can fall") && contains(f.text, "this run") && contains(f.text, "h Help")
+}
+
+test "prestart help has concrete example and return" {
+  let f = onboarding("offline", 42, dimensions(80, 24), false, 0, true)
+  contains(f.text, "Example") && contains(f.text, "Offering never starts work") && contains(f.text, "b Back") && contains(f.text, "No turns")
 }
