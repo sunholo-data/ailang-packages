@@ -11,6 +11,7 @@ import pkg/sunholo/social_dynamics/tasks (findTask)
 import pkg/sunholo/social_dynamics/relationships (appraisalContext, deliver)
 import pkg/sunholo/social_dynamics/wire (encodeState, encodeEvents, encodeError, encodeConfig)
 import ./scenario (config, actors, resources, workerRecipe, policies)
+import ./watch_scenario (config as watchConfig, actors as watchActors, resources as watchResources, workerRecipe as watchWorkerRecipe)
 import ./codec (object, fields, text, integer, number, CrewOutcome, AgreedStart, RefusedOrder, GrantedRelief, DeniedRelief, encodeOutcome)
 import ./actor_policy (evaluate, requestBody, encodeChoice)
 
@@ -52,7 +53,9 @@ pure func output(s: Session, events: [Event]) -> Output =
 
 pure func checkedId(id: string) -> bool = validId(id) && stringLength(id) <= 64
 
-pure func identity(s: Session) -> bool = match config(s.policy) {
+pure func modern(s: Session) -> bool = s.config.id == "crew-watch-v2-${s.policy}"
+pure func owned(s: Session, worker: string, recipe: string) -> bool = if modern(s) then watchWorkerRecipe(worker, recipe) else workerRecipe(worker, recipe)
+pure func identity(s: Session) -> bool = match (if modern(s) then watchConfig(s.policy) else config(s.policy)) {
   Err(_) => false,
   Ok(c) => encodeConfig(c) == encodeConfig(s.config) && encodeConfig(c) == s.state.configBody && s.state.config == c.id && s.state.session == c.session
 }
@@ -81,7 +84,7 @@ pure func binding(s: Session, task: string) -> Result[TaskAgreement, HostError] 
       None => Err(HostFailure("unknown project")),
       Some(t) => match head(filter(\c. c.id == b.agreement, s.state.commitments)) {
         None => Err(HostFailure("unknown agreement")),
-        Some(c) => if b.captain != "captain" || t.recipe != b.recipe || t.participants != [b.worker] || t.supervisor != "captain" || c.parties != sorted([b.captain, b.worker]) || not workerRecipe(b.worker, b.recipe) then Err(HostFailure("project binding mismatch")) else Ok(b)
+        Some(c) => if b.captain != "captain" || t.recipe != b.recipe || t.participants != [b.worker] || t.supervisor != "captain" || c.parties != sorted([b.captain, b.worker]) || not owned(s, b.worker, b.recipe) then Err(HostFailure("project binding mismatch")) else Ok(b)
       }
     }
   }
@@ -94,7 +97,7 @@ ensures { match result {
   Ok(o) => length(o.session.bindings) == length(s.bindings) + 1,
   Err(_) => true
 } } =
-  if not idle(s) || not identity(s) then Err(HostFailure("offer context")) else if not checkedId(id) || not workerRecipe(worker, recipe) || s.state.tick > numericLimit() - 20 then Err(HostFailure("offer fields")) else {
+  if not idle(s) || not identity(s) then Err(HostFailure("offer context")) else if not checkedId(id) || not owned(s, worker, recipe) || s.state.tick > numericLimit() - 20 then Err(HostFailure("offer fields")) else {
     let agreement = "agreement-${id}"
     let b: TaskAgreement = { task: id, agreement: agreement, captain: "captain", worker: worker, recipe: recipe }
     match domain(s, "offer-${id}", "captain", Authored, [OfferTask(id, recipe, [worker], []), OfferCommitment(agreement, ["captain", worker], "Project agreement ${id}", s.state.tick + 20, []), AcceptCommitment(agreement)]) {
@@ -265,10 +268,10 @@ ensures { match result {
   Err(_) => true
 } } = match object(line) {
   Err(e) => Err(HostFailure(e)),
-  Ok(j) => if not fields(j, ["command", "policy"]) then Err(HostFailure("start fields")) else match (getString(j, "command"), getString(j, "policy")) {
-    (Some("start"), Some(policy)) => match config(policy) {
+  Ok(j) => if not fields(j, ["command", "policy"]) && not (fields(j, ["command", "policy", "scenario"]) && getString(j, "scenario") == Some("watch-v2")) then Err(HostFailure("start fields")) else match (getString(j, "command"), getString(j, "policy")) {
+    (Some("start"), Some(policy)) => match (if getString(j, "scenario") == Some("watch-v2") then watchConfig(policy) else config(policy)) {
       Err(e) => Err(HostFailure(e)),
-      Ok(c) => match init(c, actors(), resources()) {
+      Ok(c) => match init(c, if getString(j, "scenario") == Some("watch-v2") then watchActors() else actors(), if getString(j, "scenario") == Some("watch-v2") then watchResources() else resources()) {
         Err(e) => Err(DomainFailure(e)),
         Ok(state) => Ok(output({ policy: policy, config: c, state: state, bindings: [], pending: [], bank: [], reports: [] }, []))
       }

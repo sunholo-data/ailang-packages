@@ -1,5 +1,5 @@
 module sunholo/social_dynamics/indicators
-import ./model (Actor, Indicator, Value, Resource, Evidence, Effect, IndicatorDelta, RelationshipDelta, Config, State, Error, PendingAdvance, InvalidConfig, InvalidPolicyEffect, CapacityExceeded, UnknownId, bounded, validId, unique, add, emptyState)
+import ./model (Actor, Indicator, Value, Resource, Evidence, Effect, BoundedIndicatorDelta, IndicatorDelta, RelationshipDelta, Config, State, Error, PendingAdvance, InvalidConfig, InvalidPolicyEffect, CapacityExceeded, UnknownId, bounded, validId, unique, add, emptyState)
 import ./wire (encodeConfig)
 import std/list (length, map, dedup, contains, any, filter, head)
 import std/option (Option, Some, None)
@@ -36,11 +36,13 @@ pure func acyclic(pending: [Evidence], resolved: [string]) -> bool =
   if length(ready) == 0 then false else acyclic(filter(\e. not contains(ids, e.id), pending), resolved ++ ids)
  }
 pure func effectShape(e: Effect) -> bool = match e {
+ BoundedIndicatorDelta(a, i, d) => validId(a) && validId(i) && bounded(d),
  IndicatorDelta(a, i, d) => validId(a) && validId(i) && bounded(d),
  RelationshipDelta(a, b, i, d) => validId(a) && validId(b) && validId(i) && bounded(d)
 }
 
 pure func effectReference(c: Config, actors: [Actor], e: Effect) -> bool = match e {
+ BoundedIndicatorDelta(a, i, d) => actorPresent(actors, a) && bounded(d) && any(\actor. actor.id == a && any(\v. v.id == i, actor.indicators), actors) && any(\def. def.id == i, c.indicators),
  IndicatorDelta(a, i, d) => actorPresent(actors, a) && bounded(d) && any(\actor. actor.id == a && any(\v. v.id == i, actor.indicators), actors) && any(\def. def.id == i, c.indicators),
  RelationshipDelta(a, b, i, d) => actorPresent(actors, a) && actorPresent(actors, b) && bounded(d) && any(\def. def.id == i, c.indicators) && any(\r. r.from == a && r.to == b && r.dimension == i, c.relationships)
 }
@@ -63,7 +65,30 @@ ensures { match result { Ok(s) => s.config == c.id && s.tick == 0 && s.revision 
  else Ok({emptyState(c, actors, resources) | configBody: encodeConfig(c)})
 }
 
+export pure func clampIndicator(n: int, minimum: int, maximum: int) -> int ! {}
+requires { minimum <= maximum }
+ensures { result >= minimum && result <= maximum && (if n >= minimum && n <= maximum then result == n else true) } =
+ if n < minimum then minimum else if n > maximum then maximum else n
+
+pure func boundedOne(c: Config, s: State, actor: string, indicator: string, delta: int) -> Result[State, Error] =
+ if not unique(map(\i. i.id, c.indicators)) || not all(\i. validId(i.id) && bounded(i.minimum) && bounded(i.maximum) && i.minimum <= i.maximum, c.indicators) || not unique(map(\a. a.id, s.actors)) || not all(\a. valuesValid(a.indicators, c.limits.effects) && all(\v. inRange(c, v.id, v.value), a.indicators), s.actors) then Err(InvalidPolicyEffect("current_state")) else match (findActor(s, actor), findIndicator(c, indicator)) {
+  (None, _) => Err(UnknownId(actor)),
+  (_, None) => Err(UnknownId(indicator)),
+  (Some(a), Some(i)) => match head(filter(\v. v.id == indicator, a.indicators)) {
+   None => Err(UnknownId(indicator)),
+   Some(v) => match add(v.value, delta) {
+    Err(e) => Err(e),
+    Ok(n) => {
+     let actual = clampIndicator(n, i.minimum, i.maximum);
+     let changed = {a | indicators: map(\old. if old.id == indicator then {old | value: actual} else old, a.indicators)};
+     Ok({s | actors: map(\old. if old.id == actor then changed else old, s.actors)})
+    }
+   }
+  }
+ }
+
 pure func applyOne(c: Config, s: State, e: Effect) -> Result[State, Error] = match e {
+ BoundedIndicatorDelta(actor, indicator, delta) => boundedOne(c, s, actor, indicator, delta),
  IndicatorDelta(actor, indicator, delta) => match findActor(s, actor) {
   None => Err(UnknownId(actor)),
   Some(a) => match head(filter(\v. v.id == indicator, a.indicators)) {

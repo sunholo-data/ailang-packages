@@ -1,5 +1,5 @@
 module sunholo/social_dynamics/relationships
-import ./model (Appraisal, Config, State, Policies, Principal, Host, ActorPrincipal, Delivery, Step, Error, Effect, IndicatorDelta, RelationshipDelta, InvalidConfig, UnknownId, UnseenEvidence, Unauthorized, InvalidTransition, InvalidSchema, InvalidPolicyEffect, CapacityExceeded, PendingAdvance, AlteredDuplicate, Applied, Duplicate, ObservationDelivered, ReactionApplied, validId, bounded, unique, sorted, add, event)
+import ./model (Appraisal, Config, State, Policies, Principal, Host, ActorPrincipal, Delivery, Step, Error, Effect, BoundedIndicatorDelta, IndicatorDelta, RelationshipDelta, InvalidConfig, UnknownId, UnseenEvidence, Unauthorized, InvalidTransition, InvalidSchema, InvalidPolicyEffect, CapacityExceeded, PendingAdvance, AlteredDuplicate, Applied, Duplicate, ObservationDelivered, ReactionApplied, validId, bounded, unique, sorted, add, event)
 import ./indicators (findActor, knows, applyEffects)
 import ./wire (encodeConfig)
 import ./conditions (reevaluate)
@@ -20,7 +20,7 @@ ensures { match result { Ok(c) => c.observer.id == observer && c.evidence.id == 
   }
  }
 
-pure func ownEffect(observer: string, e: Effect) -> bool = match e { IndicatorDelta(actor, _, _) => actor == observer, RelationshipDelta(from, _, _, _) => from == observer }
+pure func ownEffect(observer: string, e: Effect) -> bool = match e { BoundedIndicatorDelta(actor, _, _) => actor == observer, IndicatorDelta(actor, _, _) => actor == observer, RelationshipDelta(from, _, _, _) => from == observer }
 pure func deliveryBody(d: Delivery) -> string = encode(jo([kv("schema", js("social_delivery/1")), kv("id", js(d.id)), kv("observer", js(d.observer)), kv("evidence", js(d.evidence)), kv("causes", ja(map(js, sorted(d.causes)))), kv("not_before", jint(d.notBefore)), kv("source", js(d.source))]))
 pure func received(c: Config, p: Policies, s: State, d: Delivery, body: string) -> Result[Step, Error] = {
  let staged = {s | knowledge: s.knowledge ++ [{observer: d.observer, evidence: d.evidence}]};

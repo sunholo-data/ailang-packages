@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.0
+
+Breaking: Effect adds opt-in BoundedIndicatorDelta. Checked arithmetic and reference/observer ownership gates remain; only a valid configured indicator result saturates at its bounds. Existing IndicatorDelta and wire tags are unchanged.
+
 ## 0.1.0
 
 Experimental pure social dynamics kernel: bounded domain indicators, directed
