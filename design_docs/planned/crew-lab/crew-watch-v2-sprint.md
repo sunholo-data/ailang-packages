@@ -1,6 +1,7 @@
 # S-CREW-WATCH-V2 — five specialists and understandable command choices
 
-**Status:** Ready: both independent reviewers PASS revision1, controller PASS;
+**Status:** In progress: M1–M3 committed; M4 final checks, evaluation and landing underway.
+Both independent reviewers PASS revision1, controller PASS;
 implementation already requested by
 Mark, resource semantics approved in attended reply2026-10-10. Main landing and local
 CLI installation authorization persist. AILANG prompt version loaded: v0.16.6 (whole
@@ -32,9 +33,11 @@ frames are directly testable. Keep explanations in visible chrome; add h/help be
 start, an example and clear return. Display captain, preparation context, first action
 flow, exact meanings and scope of both command styles. No initial seed questionnaire.
 
-- [ ] Actual first frame at80x24 and40x16 conveys captain/context/actions/style semantics.
-- [ ] h/help/n/v do not create host state, journal, RNG change or AI use.
-- [ ] Existing plain/ANSI/input-bound behavior retained; key+Enter instructions concise.
+- [x] Actual first frame at80x24 and40x16 conveys captain/context/actions/style semantics.
+- [x] h/help/n/v do not create host state, journal, RNG change or AI use.
+- [x] Existing plain/ANSI/input-bound behavior retained; key+Enter instructions concise.
+
+M1 committed b694236 (2026-10-10); integrated installed evidence is captured again in M4.
 
 ## M2 — isolated five-specialist scenario (~650 lines)
 
@@ -48,13 +51,15 @@ Keep old scenario funcs/start/policy/recording byte-identical. Add explicit know
 recompute authoritative config and recipe ownership for exact variant. Main work/rest
 menus route five actors through shared offer/response/start/scheduler/relief.
 
-- [ ] Six actors (captain plusfive), actual five work/rest recipes, three named stocks.
-- [ ] Strict profile/config identity tests and consent cannot be bypassed.
-- [ ] Completion returns compute, spends physical stock once; stops refund reservations.
-- [ ] Per-specialist condition rules have real sustained/recovery behavior, not just text.
-- [ ] Bounded modern effects complete repeated work/rest at limits, release reservations,
+- [x] Six actors (captain plusfive), actual five work/rest recipes, three named stocks.
+- [x] Strict profile/config identity tests and consent cannot be bypassed.
+- [x] Completion returns compute, spends physical stock once; stops refund reservations.
+- [x] Per-specialist condition rules have real sustained/recovery behavior, not just text.
+- [x] Bounded modern effects complete repeated work/rest at limits, release reservations,
 retain numeric overflow/invalid state/ownership guards; legacy strict deltas unchanged.
-- [ ] All legacy scenario/play/recording controls still pass without updating expected rules.
+- [x] All legacy scenario/play/recording controls still pass without updating expected rules.
+
+M2 committed 4cae2e3 (2026-10-10); M4 reruns the full integrated regression gate.
 
 ## M3 — descriptive state and context-aware response library (~800 lines)
 
@@ -67,13 +72,15 @@ config/prompt/context/model/policy details; v1 unchanged. Generate from actor-lo
 state, legal labels and project description. Check disclosure patterns before cache
 publication and again on cache reads. No AI authority/effects or new peer knowledge.
 
-- [ ] Normal five-person narrative views reveal no trait names or numeric psychology.
-- [ ] Debug displays real OCEAN/state/trust and selection evidence when requested.
-- [ ] Authored reactions demonstrably respond to stress/morale and all OCEAN axes.
-- [ ] New signature/policy cannot consume or alter old caches/files.
-- [ ] Known score/hidden-mechanics disclosure patterns rejected; physical quantities allowed.
-- [ ] Invalid output stays pending, budgets count actual calls, zero providers in offline tests.
-- [ ] Cache words are exact selected/journalled words; stock is context-aware narrator text.
+- [x] Normal five-person narrative views reveal no trait names or numeric psychology.
+- [x] Debug displays real OCEAN/state/trust and selection evidence when requested.
+- [x] Authored reactions demonstrably respond to stress/morale and all OCEAN axes.
+- [x] New signature/policy cannot consume or alter old caches/files.
+- [x] Known score/hidden-mechanics disclosure patterns rejected; physical quantities allowed.
+- [x] Invalid output stays pending, budgets count actual calls, zero providers in offline tests.
+- [x] Cache words are exact selected/journalled words; stock is context-aware narrator text.
+
+M3 committed c3e90ca (2026-10-10); final M4 controls regenerate actual player evidence.
 
 ## M4 — real gameplay evidence, docs and independent acceptance (~300 lines)
 
