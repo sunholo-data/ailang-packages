@@ -9,11 +9,32 @@
 | Grounded Strangeness | +1 | Archive analyses Spire readings; no cargo crosses the bubble. |
 | We Are Not Built For This | +2 | Stress, morale and fatigue affect reactions; rest and refusal matter. |
 
-**Status:** Reviewed: two independent PASS verdicts on revision1 plus controller PASS.
+**Status:** Implemented 2026-10-10. PR116 merged to packages main; CI green and durable CLI installed.
 **Target:** experimental crew-lab successor. **Priority:** P0.
 **Estimate:** four focused milestones, about 2,000 changed lines including controls,
 2–3 development days with review buffer; not a delivery promise.
 **Planner-Lane:** codex-ok.
+
+## Landed evidence
+
+Code [PR116](https://github.com/sunholo-data/ailang-packages/pull/116), main
+`a7bf0234dbb07b37fe103deab3e4a4d8c85fda29`, passed
+[CI](https://github.com/sunholo-data/ailang-packages/actions/runs/38036524133).
+The independent evaluator reviews the completed implementation and landing in
+`.ailang/state/evaluations/eval_S-CREW-WATCH-V2_round_1.json`.
+App149 and social117 native controls pass in both engines without fallback;
+installed watch/legacy/replay and all eight behavioral mutation controls pass.
+Root also exhausted both finite stocks through installed commands: the next start
+rejects with a named resource, retaining its offer and clearing reservations.
+Actual-user-home science completes at turn4 and returns all compute. The existing
+policy and three cached responses retain their checksums. Seven launchers point at
+the isolated durable merged-main checkout; other active checkouts are untouched.
+
+Formal proof is partial: app26 verified,83 skipped,4 encoder/solver errors,
+zero counterexamples (113 total). The new clamp helper is verified; five other
+indicator exports skip. Formatting is partial due to recorded runtime failures.
+No registry publication or live provider validation is claimed. The 8MiB journal
+bound suits preparation watches; whole journeys need checkpoint/compaction work.
 
 ## Authorization and problem
 

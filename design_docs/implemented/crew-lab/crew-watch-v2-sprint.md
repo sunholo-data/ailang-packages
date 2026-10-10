@@ -1,6 +1,7 @@
 # S-CREW-WATCH-V2 — five specialists and understandable command choices
 
-**Status:** In progress: M1–M3 committed; M4 final checks, evaluation and landing underway.
+**Status:** ✅ Completed 2026-10-10: M1–M4 implemented, independently reviewed,
+CI passed, PR116 merged to packages main and durable CLI installed.
 Both independent reviewers PASS revision1, controller PASS;
 implementation already requested by
 Mark, resource semantics approved in attended reply2026-10-10. Main landing and local
@@ -25,7 +26,7 @@ Prior attended UI sprint changed803 AILANG lines with125 app native controls per
 and took one attended day. This slice adds resource/identity/cache semantics, so estimate
 2,000 changed lines across3 development days with buffer (not a user delivery promise).
 
-## M1 — context before the first policy choice (~250 lines)
+## ✅ M1 — context before the first policy choice (~250 lines)
 
 Files: examples/crew-lab/play.ail, journey_presenter.ail, journey_flow.ail and their
 native *_test.ail modules. Create a pure initial-screen helper so real minimum-size
@@ -39,7 +40,7 @@ flow, exact meanings and scope of both command styles. No initial seed questionn
 
 M1 committed b694236 (2026-10-10); integrated installed evidence is captured again in M4.
 
-## M2 — isolated five-specialist scenario (~650 lines)
+## ✅ M2 — isolated five-specialist scenario (~650 lines)
 
 Files: packages/social-dynamics/model.ail, indicators.ail, relationships.ail,
 wire.ail and native controls for an explicit BoundedIndicatorDelta effect (existing
@@ -61,7 +62,7 @@ retain numeric overflow/invalid state/ownership guards; legacy strict deltas unc
 
 M2 committed 4cae2e3 (2026-10-10); M4 reruns the full integrated regression gate.
 
-## M3 — descriptive state and context-aware response library (~800 lines)
+## ✅ M3 — descriptive state and context-aware response library (~800 lines)
 
 Files: journey_presenter.ail, journey_flow.ail, play.ail, reactions.ail, store.ail,
 new narrative.ail/helper if useful, native controls and saved AI fixtures. All actual
@@ -82,21 +83,31 @@ publication and again on cache reads. No AI authority/effects or new peer knowle
 
 M3 committed c3e90ca (2026-10-10); final M4 controls regenerate actual player evidence.
 
-## M4 — real gameplay evidence, docs and independent acceptance (~300 lines)
+## ✅ M4 — real gameplay evidence, docs and independent acceptance (~300 lines)
 
 Files: new test-watch.sh, README.md, AGENT.md, CHANGELOG.md, Makefile; extend existing
 test-journey.sh with explicit legacy-profile path to preserve comparable controls while
 new default coversmodernwatch; scoped CI pathworkflow asneeded.
 
-- [ ] make -f examples/crew-lab/Makefile watch-test runs installed onboarding/gameplay,
+- [x] make -f examples/crew-lab/Makefile watch-test runs installed onboarding/gameplay,
 all views/debug/refusal/shortage/completion/help, temporary homes and no provider calls.
-- [ ] Journal extraction/recovery replay matches bothengines; legacy controls unchanged.
-- [ ] Scoped validate plus110social kernel native controls both engines; strict quality
+- [x] Journal extraction/recovery replay matches bothengines; legacy controls unchanged.
+- [x] Scoped validate plus117 social kernel native controls both engines; strict quality
 inventory recorded with solver skips/errors separately from native tests.
-- [ ] README has start command and two complete input flows with expected consequences.
-- [ ] Independent evaluator reads actual first frames/gameplay, no unresolved blockers.
-- [ ] Main merge only after CI passes; durable local CLI shims updated from mergedsource,
+- [x] README has start command and two complete input flows with expected consequences.
+- [x] Independent evaluator reads actual first frames/gameplay, no unresolved blockers.
+- [x] Main merge only after CI passes; durable local CLI shims updated from mergedsource,
 existing user policy/cache unchanged and active checkouts preserved.
+
+M4 source01c2a44; PR116 head e87598c passed CI38036524133 and merged at08:23 UTC
+to main a7bf023. Actual installed user-home science completes at turn4; existing
+four policy/cache files pass checksum checks. Local artifacts capture installed
+finite exhaustion, bounds, relief and navigation/replay invariance. App native149,
+social117, library14 and terminal12 pass in both engines; eight mutants killed.
+Strict quality has no failing gates, while proof app26/113 verified,83 skipped,
+4 encoder/solver errors and partial formatter failures remain explicit limitations.
+Actual implementation delta 2,047 lines changed (1,861 added/186 removed) across
+one attended development day, measured923a47b..e87598c; not a throughput promise.
 
 ## Syntax/contract/effect/source-test checklist
 
