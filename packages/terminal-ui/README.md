@@ -8,6 +8,9 @@ The native adapter uses AILANG's scoped `std/terminal` API; the host restores th
 terminal when the application returns, fails or exits. Native support targets
 macOS and Linux. The pure renderer and replay layer require no capabilities.
 
+Native frames return to column zero on every row using explicit CRLF: raw-mode
+terminals do not translate LF automatically. Line/plain output remains byte-exact.
+
 ```sh
 # Development checkout with a supporting AILANG binary:
 ailang install --path packages/terminal-ui

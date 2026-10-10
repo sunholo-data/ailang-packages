@@ -96,6 +96,10 @@ IO operations. run/interactive demo duration is intentionally user-driven and ha
 no fixed total operation ceiling; consumers can supply an outer IO budget. Decoder,
 transcript and viewport sizes are explicitly bounded.
 
+Native output uses `frameText(Native, text)` to convert LF/CRLF to CRLF exactly
+once: raw mode disables driver newline translation. Line/Plain projections keep
+their input bytes unchanged. Screen.lines and cached application text stay untouched.
+
 ## Validation
 
 Run lock, check --package, test --package (evaluator and strict VM), each implementation

@@ -2,7 +2,7 @@ module sunholo/terminal_ui/adapter
 import std/result (Result, Ok, Err)
 import std/option (Option, Some, None)
 import std/io (print, flush, readLineOpt)
-import std/string (contains)
+import std/string (contains, replace)
 import std/terminal (TerminalInfo, TerminalEvent, TerminalKey, TerminalSession, TerminalError, info, withTerminal, readEvent, Key, Resize, EndOfInput, Interrupted, Idle, Text, Up, Down, Left, Right, Enter, Escape, Backspace, Tab, Home, End, PageUp, PageDown, Delete)
 import ./ui (Dimensions, Screen)
 import ./events (Event, KeyCode, Input, Sized, Finished, Cancelled, NoInput, Character, Previous, Next, MoveLeft, MoveRight, Accept, Cancel, Erase, FocusNext, First, Last, PriorPage, FollowingPage, Remove, lineEvent)
@@ -116,9 +116,23 @@ requires { resolved.mode != Auto && validSize(resolved.dimensions.columns, resol
   } else Ok(body(None))
 }
 
+-- Native raw mode disables the terminal driver's LF -> CRLF translation.
+-- Normalize only the output projection, preserving source frames and plain logs.
+export pure func frameText(mode: Mode, text: string) -> string ! {}
+requires { mode != Auto }
+ensures { if mode == Native then not contains(replace(result, "\r\n", ""), "\n") else result == text }
+tests [
+  ((Native, "left\nnext"), "left\r\nnext"),
+  ((Native, "left\r\nnext\n"), "left\r\nnext\r\n"),
+  ((Plain, "left\nnext"), "left\nnext"),
+  ((Line, "left\nnext"), "left\nnext")
+] {
+  if mode == Native then replace(replace(text, "\r\n", "\n"), "\n", "\r\n") else text
+}
+
 export func writeFrame(resolved: Resolved, screen: Screen) -> () ! {IO @limit=3}
 requires { resolved.mode != Auto && (resolved.mode != Plain || not contains(screen.text, "\u{1B}")) } {
-  print(screen.text)
+  print(frameText(resolved.mode, screen.text))
   if resolved.mode == Native then () else print("Choose > ")
   flush()
 }

@@ -135,3 +135,22 @@ hours were not measured. See design completion evidence for proof/VM limitations
 registry consumer scope and truthful synchronous AI. Final metadata is a separate
 docs-only landing; it does not replace the tested source revision. Normative roadmap
 publication remains subject to outstanding destination/content approval.
+
+## Corrective acceptance: raw terminal row alignment
+
+Mark's real terminal screenshot on2026-10-10 invalidated the earlier visual
+acceptance: byte-line inspection missed raw LF preserving the cursor column.
+This is a repair of approved NU3/NU4/NU6, with no new gameplay or sprint scope.
+Root executes the narrow shared adapter correction; a different judge re-evaluates.
+
+- Reproduce with an independent cursor/cell oracle on actual native PTY bytes.
+  Old source fails: eight unintended scroll rows at80×24.
+- Normalize native output only to idempotent CRLF. Keep pure Screen.lines,
+  Line/Plain bytes, simulation, cached dialogue and journal data unchanged.
+- Check actual80×24,20×8,40×16,100×30 and220×70 screens, selection, completion
+  and terminal restoration; run terminal package controls in both engines.
+- Require local validation, exact-head CI and independent correction acceptance
+  before updating installed source. Publish terminal_ui0.2.1 after quality gates.
+
+Correction validation and landing are in progress; original evaluation remains
+historical evidence, not proof of the failed user screen.

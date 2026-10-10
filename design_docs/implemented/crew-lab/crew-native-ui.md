@@ -11,6 +11,9 @@
 | **Net** | **+6** | **Aligned; implemented and accepted.** |
 
 **Status:** Implemented and accepted, 2026-10-10. **Release:** crew-lab 0.3.0.
+**Correction reopened:** A real terminal screenshot invalidated row-alignment
+acceptance. See the companion sprint's corrective acceptance record; repair and
+fresh release validation are in progress under the approved UI scope.
 **Milestone:** S-CREW-NATIVE-UI. **Priority:** P0, human usability.
 **Estimate:** 1,800 changed lines, including meaningful controls and documentation;
 three development days plus asynchronous CI/review, not a delivery promise.

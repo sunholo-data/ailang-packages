@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.2.1
+
+Fix staircase text and unintended scrolling in native raw terminal frames.
+The IO adapter writes explicit CRLF between rows; an idempotent pure frameText
+projection preserves ANSI/Unicode and leaves Line/Plain bytes unchanged.
+The crew PTY harness now interprets visible cursor cells instead of relying only
+on newline-split captures, catching the defect at actual terminal sizes.
+
 ## 0.2.0
 
 Add reusable pure selection, confirmation and paging widgets with normalized events.

@@ -15,6 +15,7 @@ import tempfile
 import sys
 import termios
 import time
+import unicodedata
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 AILANG = os.environ.get("AILANG", "ailang")
@@ -32,6 +33,68 @@ print('CREW_FIXTURE_EXIT='+str(rc),flush=True)
 os.read(control,1)
 sys.exit(rc if rc>=0 else 128-rc)
 """
+
+def visible_cells(frame, columns, rows):
+    """Test oracle for this renderer's VT subset, with raw LF retaining column.
+
+    Interpret cursor movement and deferred right-edge wrapping; splitting a byte
+    capture into lines cannot establish what a human terminal actually displays.
+    Unsupported controls fail instead of silently treating them as printable.
+    """
+    grid = [[" "] * columns for _ in range(rows)]
+    x = y = 0
+    pending_wrap = False
+    scrolls = 0
+    text = frame.decode("utf-8")
+    tokens = re.findall(r"\x1b\[[0-9;?]*[A-Za-z]|[^\x1b]", text)
+    assert "".join(tokens) == text, "unknown escape in rendered frame"
+    for token in tokens:
+        if token.startswith("\x1b["):
+            if token == "\x1b[2J":
+                grid = [[" "] * columns for _ in range(rows)]
+            elif token == "\x1b[H":
+                x = y = 0
+                pending_wrap = False
+            else:
+                assert token.endswith("m"), f"unsupported renderer control {token!r}"
+            continue
+        if token == "\r":
+            x = 0
+            pending_wrap = False
+        elif token == "\n":
+            y += 1
+            pending_wrap = False
+        else:
+            assert ord(token) >= 32, f"unexpected control {token!r}"
+            width = 0 if unicodedata.combining(token) else 2 if unicodedata.east_asian_width(token) in "WF" else 1
+            assert width > 0, "fixtures must use standalone display characters"
+            if pending_wrap or x + width > columns:
+                x = 0
+                y += 1
+            if y >= rows:
+                grid.pop(0)
+                grid.append([" "] * columns)
+                y = rows - 1
+                scrolls += 1
+            grid[y][x] = token
+            if width == 2:
+                grid[y][x + 1] = ""
+            x += width
+            pending_wrap = x >= columns
+            if pending_wrap:
+                x = columns - 1
+        if y >= rows:
+            grid.pop(0)
+            grid.append([" "] * columns)
+            y = rows - 1
+            scrolls += 1
+    return ["".join(row) for row in grid], scrolls
+
+# Independent oracle controls: a raw LF really does drift; CRLF and a full-width
+# rule followed by CRLF begin the next row at column zero without scrolling.
+assert visible_cells(b"ab\ncd", 8, 3)[0][:2] == ["ab      ", "  cd    "]
+assert visible_cells(b"ab\r\ncd", 8, 3)[0][:2] == ["ab      ", "cd      "]
+assert visible_cells(b"12345678\r\ncd", 8, 3) == (["12345678", "cd      ", "        "], 0)
 
 class Watch:
     def __init__(self, shim, home, columns=80, rows=24):
@@ -160,6 +223,8 @@ with tempfile.TemporaryDirectory(prefix="crew-native-pty-") as temporary:
         w.expect("> 2 Decide later")
         w.resize(100,30)
         w.expect("Decide later")
+        w.resize(220,70)
+        w.expect("Decide later")
         assert w.journal().read_bytes()==before, "navigation/resize/quit-cancel changed journal"
         w.send(b"\x1b[A\r")
         w.expect("VOYAGE / BRIDGE / turn 0")
@@ -186,19 +251,27 @@ with tempfile.TemporaryDirectory(prefix="crew-native-pty-") as temporary:
             lines=text.split("\n")
             if "Terminal too small" in text:
                 assert len(lines)<=8 and all(len(line)<=20 for line in lines)
+                visible, scrolls = visible_cells(b"\x1b[2J\x1b[H" + chunk, 20, 8)
+                assert scrolls == 0 and visible == [line.ljust(20) for line in lines] + [" " * 20] * (8 - len(lines))
                 inspected.append((20,8))
                 continue
             rule=next(line for line in lines if line and set(line)<=set("─-"))
             columns=len(rule)
-            rows={80:24,40:16,100:30}[columns]
+            rows={80:24,40:16,100:30,160:60}[columns]
             assert len(lines)==rows, (columns,len(lines),lines)
             assert all(len(line)<=columns for line in lines), (columns,lines)
+            physical_columns, physical_rows = (220, 70) if columns == 160 else (columns, rows)
+            visible, scrolls = visible_cells(b"\x1b[2J\x1b[H" + chunk, physical_columns, physical_rows)
+            assert scrolls == 0, f"frame scrolled {scrolls} rows at {columns}x{rows}"
+            assert visible == [line.ljust(physical_columns) for line in lines] + [" " * physical_columns] * (physical_rows - rows), f"native cursor drift at {physical_columns}x{physical_rows}: {visible!r}"
+            if EVIDENCE:
+                (pathlib.Path(EVIDENCE)/f"visible-{physical_columns}x{physical_rows}.txt").write_text("\n".join(visible) + "\n")
             inspected.append((columns,rows))
-        assert {(80,24),(20,8),(40,16),(100,30)}<=set(inspected)
+        assert {(80,24),(20,8),(40,16),(100,30),(160,60)}<=set(inspected)
         if EVIDENCE:
             pathlib.Path(EVIDENCE).mkdir(parents=True,exist_ok=True)
             (pathlib.Path(EVIDENCE)/"native-journey.ansi").write_bytes(w.output.replace(str(base).encode(),b"<temporary-home>"))
-        print("PASS native arrows/Enter, proposal-safe quit, resize80/20/40/100, real four-turn completion and restoration")
+        print("PASS native visible cursor cells/no scrolling, arrows/Enter, proposal-safe quit, resize80/20/40/100/220, real four-turn completion and restoration")
     finally:
         w.close()
 

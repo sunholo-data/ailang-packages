@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.3.1
+
+Fix native staircase rendering using terminal_ui0.2.1's explicit raw-mode row
+separators. Strengthen the actual PTY harness with a visible-cell cursor oracle,
+no-scroll assertions and a 220×70 terminal beyond the capped 160×60 layout.
+Simulation, library, journal and line/plain behavior remain unchanged.
+
 ## 0.3.0
 
 Adds pure AILANG `crew-watch` and `crew-watch-offline` with native arrows/Enter,
