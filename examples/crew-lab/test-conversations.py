@@ -286,7 +286,7 @@ with tempfile.TemporaryDirectory(prefix="crew-conversation-acceptance-") as temp
     major_home = base / "plain-major"
     major = subprocess.run([str(shim), "--mode", "plain", "--debug", "--home", str(major_home),
                             "--seed", str(SEED), "--columns", "100", "--rows", "40"],
-                           input="1\n4\n1\nc\nb\n5\nc\n", text=True,
+                           input="1\n4\n1\nc\npgdn\npgdn\nb\n5\nc\npgdn\npgdn\n", text=True,
                            capture_output=True, timeout=60)
     assert major.returncode == 0, major.stdout[-2000:] + major.stderr[-2000:]
     major_states = states(major_home)
