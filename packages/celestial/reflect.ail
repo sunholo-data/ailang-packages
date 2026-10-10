@@ -22,8 +22,10 @@ import std/math (sin, cos, pow, intToFloat)
 import ./kepler (pi)
 
 -- E = e1AU / r^2: a point source's illuminance at r AU.
+-- Domain: e1AU >= 0 (an illuminance is nonnegative) and rAU > 0; the
+-- generated contract failed on e1AU < 0 before 0.4.1.
 export pure func starIlluminanceAt(e1AU: float, rAU: float) -> float
-  requires { rAU > 0.0 }
+  requires { e1AU >= 0.0 && rAU > 0.0 }
   ensures { result >= 0.0 }
 {
   e1AU / (rAU * rAU)
@@ -120,8 +122,13 @@ export pure func phaseFunction(alpha: float, k: float) -> float =
 -- p geometric albedo, R the body's radius and d the observer distance in
 -- the same unit (km), r the body's distance from the star in AU, alpha the
 -- phase angle (radians), k the Minnaert exponent of Phi.
+-- Domain (completed in 0.4.1; the generated contract failed without it):
+-- e1AU >= 0, p >= 0 (geometric albedo can exceed 1, e.g. Enceladus 1.38),
+-- radius > 0, rAU > 0, d > 0, alpha in [0, pi] (the phase-function domain of
+-- lambertPhase/minnaertPhase) and k > 0 — the same bounds phaseFunction's
+-- callees require. Every factor is then nonnegative, so the illuminance is.
 export pure func discIlluminance(e1AU: float, p: float, radius: float, rAU: float, d: float, alpha: float, k: float) -> float
-  requires { rAU > 0.0 && d > 0.0 }
+  requires { e1AU >= 0.0 && p >= 0.0 && radius > 0.0 && rAU > 0.0 && d > 0.0 && alpha >= 0.0 && alpha <= 3.141592653589794 && k > 0.0 }
   ensures { result >= 0.0 }
 {
   e1AU * p * (radius / d) * (radius / d) * phaseFunction(alpha, k) / (rAU * rAU)
