@@ -14,7 +14,7 @@ import ./hyper (sinh, cosh, tanh, atanh, sinhc)
 
 -- Rapidity, proper (ship) time, coordinate (galaxy) time, distance along the
 -- line of motion. Negative phi means moving backward along the line.
-export type Motion = { phi: float, tau: float, t: float, x: float }
+export type Motion = { phi: float, tau: float, t: float, x: float } deriving (Eq)
 
 -- Standard gravity 9.80665 m/s^2 in c per Julian year.
 export pure func standardGravity() -> float = 1.032295275553596
@@ -60,8 +60,16 @@ export pure func oneMinusBeta(phi: float) -> float
 -- (signed; negative decelerates). Exact:
 --   dt = cosh(mid) * dtau * sinhc(h/2),  dx = sinh(mid) * dtau * sinhc(h/2)
 -- where h = a * dtau and mid is the mean rapidity over the step.
+-- Domain (0.13.0): dtau >= 0 as before, and BOTH the incoming and the
+-- outgoing rapidity (m.phi and m.phi + a dtau) within +-700.0, where cosh
+-- and sinh are finite in float64 (exp saturates at 709.78) and, since mid
+-- is their midpoint and |h| <= 1400, sinhc(h/2) is finite too. The old
+-- unbounded contract let |a dtau| ~ 6.6e4 steps through, where sinhc
+-- returned NaN and t was NaN. For rapidities near the 700 bound with very
+-- long steps, t and x can still saturate to +Inf (float64 exhaustion); the
+-- monotone-time ensures holds throughout.
 export pure func accelerate(m: Motion, a: float, dtau: float) -> Motion
-  requires { dtau >= 0.0 }
+  requires { dtau >= 0.0 && m.phi >= -700.0 && m.phi <= 700.0 && m.phi + a * dtau >= -700.0 && m.phi + a * dtau <= 700.0 }
   ensures { result.tau >= m.tau && result.t >= m.t }
 {
   let h = a * dtau;
@@ -71,9 +79,10 @@ export pure func accelerate(m: Motion, a: float, dtau: float) -> Motion
   { phi: phi1, tau: m.tau + dtau, t: m.t + cosh(mid) * k, x: m.x + sinh(mid) * k }
 }
 
--- Coast at constant rapidity for dtau of proper time.
+-- Coast at constant rapidity for dtau of proper time. Same rapidity bound
+-- as accelerate (0.13.0), whose contract it forwards to.
 export pure func coast(m: Motion, dtau: float) -> Motion
-  requires { dtau >= 0.0 }
+  requires { dtau >= 0.0 && m.phi >= -700.0 && m.phi <= 700.0 }
   ensures { result.tau >= m.tau && result.t >= m.t }
 {
   accelerate(m, 0.0, dtau)

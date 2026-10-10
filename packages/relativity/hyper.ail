@@ -19,7 +19,14 @@ export pure func absf(u: float) -> float
 }
 
 -- e^u - 1, accurate to a few ulps for tiny |u| (Kahan).
+-- Domain (0.13.0): u <= 700.0. exp(u) itself saturates to +Inf past
+-- u = 709.78 (the float64 max, e^709.782...), and before that the Kahan
+-- ratio's numerator (e^u - 1) u overflows past u ~ 703.3, so 700.0 is the
+-- largest round bound that keeps the result finite with headroom. Far below
+-- zero exp underflows to 0 and expm1 returns exactly -1.0, the correctly
+-- rounded value.
 export pure func expm1(u: float) -> float
+  requires { u <= 700.0 }
   ensures { result > -1.0 || result == -1.0 }
 {
   let y = exp(u);
@@ -38,8 +45,15 @@ export pure func log1p(x: float) -> float
 
 export pure func sinh(u: float) -> float {
   let a = absf(u);
-  let e = expm1(a);
-  let s = e * (e + 2.0) / (2.0 * (e + 1.0));
+  -- The e (e + 2) / (2 (e + 1)) form overflows once e^a passes about 6e153
+  -- (|a| > 355): it returned +Inf where the true sinh is finite up to
+  -- |a| = 709.09, and NaN past exp's own 709.78. Above 350, sinh = e^a / 2
+  -- to the last bit (the e^-a half is far below one ulp of e^a), and it
+  -- saturates to +Inf exactly when e^a does (0.13.0).
+  let s = if a > 350.0 then exp(a) / 2.0 else {
+    let e = expm1(a);
+    e * (e + 2.0) / (2.0 * (e + 1.0))
+  };
   if u < 0.0 then 0.0 - s else s
 }
 
@@ -80,7 +94,10 @@ export pure func acosh(x: float) -> float
 }
 
 -- sinh(u)/u with the removable singularity filled in (1 at u = 0).
+-- Domain (0.13.0): |u| <= 700.0, where sinh is finite (it saturates to
+-- +Inf like cosh, at |u| ~ 709.1); sinh(u)/u >= 1 throughout.
 export pure func sinhc(u: float) -> float
+  requires { u >= -700.0 && u <= 700.0 }
   ensures { result >= 1.0 }
 {
   if absf(u) < 0.0001 then 1.0 + u * u / 6.0 else sinh(u) / u
