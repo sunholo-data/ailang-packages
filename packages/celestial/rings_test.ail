@@ -265,3 +265,29 @@ pure func sweepMu(i: int, j: int) -> bool =
 pure func sweepAll(i: int) -> bool = if i > 9 then true else sweepMu(i, 0) && sweepAll(i + 1)
 
 test "both faces finite and >= 0 for mu0 1e-4..1, mu 0.01..1, tau 0..10; unlit decays past its peak" { sweepAll(0) }
+
+-- ---------- input domain of the unlit face (0.4.1) ----------
+-- ringUnlitIF requires w0 in [0, 1], phaseP >= 0, tau >= 0 and mu0, mu the
+-- |sin| elevations in [0, 1] with mu > 0 (the generated contract failed on
+-- w0 < 0 before 0.4.1; the seeded generator cannot reach the narrow
+-- mu0/mu window, so the domain's edges are pinned by hand — the sweep above
+-- covers the interior).
+
+pure func checkUnlitDomainEdges() -> bool {
+  -- a dark ring (w0 = 0), a zero phase-function value, the Sun in the ring
+  -- plane (mu0 = 0) and tau = 0 all give 0:
+  ringUnlitIF(0.0, 1.3, 0.7, 0.45, 0.5) == 0.0
+  && ringUnlitIF(0.5, 0.0, 0.7, 0.45, 0.5) == 0.0
+  && ringUnlitIF(0.5, 1.3, 0.7, 0.0, 0.5) == 0.0
+  && ringUnlitIF(0.5, 1.3, 0.0, 0.45, 0.5) == 0.0
+  -- the w0 = 1 edge matches the textbook form:
+  && rel(ringUnlitIF(1.0, 1.0, 0.7, 0.45, 0.5), 1.0 * 0.45 / (4.0 * 0.05) * (exp(0.0 - 1.4) - exp(0.0 - 0.7 / 0.45)), 0.00000000000001)
+  -- the mu0 = 1 edge (Sun 90 deg over the plane) matches the textbook form:
+  && rel(ringUnlitIF(0.5, 1.3, 0.7, 1.0, 0.2), 0.5 * 1.3 * 1.0 / (4.0 * (0.2 - 1.0)) * (exp(0.0 - 3.5) - exp(0.0 - 0.7)), 0.00000000000001)
+  -- the corner mu0 = mu = 1 is the finite limit w0 P tau e^(-tau) / 4:
+  && rel(ringUnlitIF(0.5, 1.3, 0.7, 1.0, 1.0), unlitLimit(0.5, 1.3, 0.7, 1.0), 0.000000000000001)
+  -- and on the mu = 1 edge the textbook form holds:
+  && rel(ringUnlitIF(0.5, 1.3, 0.7, 0.3, 1.0), 0.5 * 1.3 * 0.3 / (4.0 * 0.7) * (exp(0.0 - 0.7) - exp(0.0 - 0.7 / 0.3)), 0.00000000000001)
+}
+
+test "unlit face domain edges: w0 0 and 1, phaseP 0, mu0 0 and 1, mu 1, mu0 = mu = 1 — all finite, matching the textbook form or 0" { checkUnlitDomainEdges() }

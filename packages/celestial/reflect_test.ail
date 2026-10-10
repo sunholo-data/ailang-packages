@@ -178,3 +178,41 @@ pure func checkDiscScaling() -> bool {
 }
 
 test "disc illuminance e1AU p (R/d)^2 Phi(alpha) / r^2" { checkDiscScaling() }
+
+-- ---------- input domains (0.4.1) ----------
+-- The seeded generated contracts sample uniform floats and filter on
+-- requires, so they cannot reach a narrow domain like alpha in [0, pi]
+-- (they report "accepted 0 of 1000 generated inputs" and skip). The valid
+-- domains' edges are therefore pinned here by hand:
+--   starIlluminanceAt: e1AU >= 0, rAU > 0
+--   discIlluminance: e1AU >= 0, p >= 0, radius > 0, rAU > 0, d > 0,
+--     alpha in [0, pi] (the phase-function domain), k > 0
+
+pure func checkStarIlluminanceDomain() -> bool =
+  starIlluminanceAt(0.0, 5.2) == 0.0
+  && starIlluminanceAt(0.0, 0.3) == 0.0
+  && rel(starIlluminanceAt(sunE1au(), 0.000001), sunE1au() * 1.0e12, 0.000000000000001)
+  && starIlluminanceAt(sunE1au(), 1000000.0) > 0.0
+  && starIlluminanceAt(sunE1au(), 5.2) >= 0.0
+
+test "starIlluminanceAt domain edges: e1AU = 0 is 0 at any rAU; rAU -> 0 blows up nonnegative, rAU -> inf stays positive" { checkStarIlluminanceDomain() }
+
+pure func checkDiscDomain() -> bool {
+  let d = 4.2 * 149597870.7;
+  let e0 = sunE1au() * 0.538 * (71492.0 / d) * (71492.0 / d) / 27.04;
+  -- opposition (alpha = 0) is Phi = 1 for both Lambert and Minnaert k
+  rel(discIlluminance(sunE1au(), 0.538, 71492.0, 5.2, d, 0.0, 1.0), e0, 0.000000000000001)
+  && rel(discIlluminance(sunE1au(), 0.538, 71492.0, 5.2, d, 0.0, 0.9), e0, 0.000000000000001)
+  -- alpha = pi (the domain's upper edge) is full phase: Minnaert is exactly 0;
+  -- Lambert's closed form leaves only sin(pi)/pi ~ 4e-17 of e0
+  && discIlluminance(sunE1au(), 0.538, 71492.0, 5.2, d, pi(), 0.9) == 0.0
+  && absf(discIlluminance(sunE1au(), 0.538, 71492.0, 5.2, d, pi(), 1.0)) < 0.000000000000001
+  -- a dark star or a perfectly dark body give 0
+  && discIlluminance(0.0, 0.538, 71492.0, 5.2, d, 0.7, 1.0) == 0.0
+  && discIlluminance(sunE1au(), 0.0, 71492.0, 5.2, d, 0.7, 1.0) == 0.0
+  -- between, the result is the closed form times the phase function, so >= 0
+  && rel(discIlluminance(sunE1au(), 0.538, 71492.0, 5.2, d, 1.0, 1.2), e0 * minnaertPhase(1.0, 1.2), 0.000000000000001)
+  && rel(discIlluminance(sunE1au(), 0.538, 71492.0, 5.2, d, 2.5, 0.5), e0 * minnaertPhase(2.5, 0.5), 0.000000000000001)
+}
+
+test "discIlluminance domain edges: alpha 0 and pi, a dark star and a dark body; interior stays e1AU p (R/d)^2 Phi / r^2 >= 0" { checkDiscDomain() }

@@ -300,6 +300,15 @@ Inner planets (Mercury-Mars) have b = c = s = f = 0.
 - **No relativity import.** The star's illuminance at 1 AU is a parameter:
   for the Sun in V, `sunholo/relativity` `illuminanceFromV(-26.74)` =
   127,057.4 lux.
+- **Input domains (0.4.1).** `starIlluminanceAt` takes `e1AU >= 0` and
+  `rAU > 0`. `discIlluminance` additionally takes `p >= 0` (geometric albedo
+  can exceed 1, e.g. Enceladus 1.38), `radius > 0`, `alpha in [0, pi]` (the
+  phase-function domain) and `k > 0`; on that domain every factor is
+  nonnegative, so the illuminance is. `ringUnlitIF` takes `w0 in [0, 1]`,
+  `phaseP >= 0`, `tau >= 0` and `mu0, mu in [0, 1]` with `mu > 0`. Out-of-domain
+  inputs are contract violations (`requires`), not undefined behaviour: the
+  generated contracts sample only inside them, and the boundary tests in
+  `reflect_test.ail` / `rings_test.ail` pin the edges by hand.
 
 ## Rings (`rings`)
 
