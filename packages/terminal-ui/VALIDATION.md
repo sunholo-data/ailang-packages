@@ -5,7 +5,9 @@ based on v0.53.1 and finally integrated with core dev commit acc227e55 (v0.53.3
 metadata and imported callback contract repair). Integrated strict quality again
 reports 0 gates and the same test/proof totals. These results do not claim the
 >=0.54.0 runtime floor has been released. Publication waits for
-a supporting core release and registry validator. No registry upload was performed.
+a supporting core release and registry validator. An authorized publication request
+was rejected by validator v0.53.2 because std/terminal is absent: eight pure files
+compiled, four adapter/demo files failed. No version was accepted or published.
 
 - `ailang lock`, `lock --check`, `check --package .`: all 12 source/test files compile.
 - `test --package .`: 39 passed, 0 failed, 0 skipped. This is 37 named controls and
