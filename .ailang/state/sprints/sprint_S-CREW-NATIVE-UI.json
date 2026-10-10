@@ -1,0 +1,98 @@
+{
+  "sprint_id": "S-CREW-NATIVE-UI",
+  "status": "in_progress",
+  "created": "2026-10-10",
+  "design_doc": "design_docs/planned/crew-lab/crew-native-ui.md",
+  "sprint_plan": "design_docs/planned/crew-lab/crew-native-ui-sprint.md",
+  "authorization": "Mark explicitly approved S-CREW-NATIVE-UI in the attended session on 2026-10-10 after reviewing the graphical mockup and bounded sprint plan. Execute this sprint in isolation; worker cleanup remains separately owned and reply-inbox downstream milestones remain gated.",
+  "prompt_version": "v0.16.7",
+  "github_issues": [],
+  "velocity": {
+    "target_loc_per_day": 600,
+    "estimated_total_loc": 1800,
+    "estimated_days": 3
+  },
+  "features": [
+    {
+      "id": "M1",
+      "description": "Pure native UI state, understandable choices and adaptive terminal graphics",
+      "estimated_loc": 700,
+      "dependencies": [],
+      "acceptance_criteria": [
+        "NU1 intro/command styles before input at80x24 and40x16",
+        "NU2 safe defaults and cursor/navigation/resize/Idle domain invariance in both engines",
+        "NU3/NU6 fivecrew, actual resource/timeline facts and bounded plain/ASCII frames"
+      ],
+      "passes": true,
+      "started": "2026-10-10",
+      "completed": "2026-10-10",
+      "notes": "37 files check;168 package controls pass interpreter and strictVM;16 new named controls include frame matrix, read-only chrome, modal restoration and tiny-input blocking. Source-inline skips reported separately. Actual40x16/80x24 frames in examples/crew-lab/evidence/native-ui/m1-frames.txt. Domain/journal equivalence reserved for installed M2/M3 controls."
+    },
+    {
+      "id": "M2",
+      "description": "Scoped native input adapter and additive playable crew-watch commands",
+      "estimated_loc": 600,
+      "dependencies": [
+        "M1"
+      ],
+      "acceptance_criteria": [
+        "NU4 singleinputowner and native key/resize/signal restoration",
+        "NU5 actual offline offer/start/advance/completion/shortage/relief flows",
+        "NU6 lineblank idle versusEOF and preservedexactquotes",
+        "Truthful synchronousAI status; no workers or cleanupchanges"
+      ],
+      "passes": true,
+      "started": "2026-10-10",
+      "completed": "2026-10-10",
+      "notes": "Additive pure AILANG crew-watch/live+offline scoped adapter and shared existing commit/store boundaries implemented. Installed science/contention/recovery/grant/deny relief and actual refused-order trust consequences PASS; navigation and legacy payload parity, both-engine replay, exact valid cache / invalid-control rejection, blank/EOF and zero providers PASS. Actual native PTY arrows/Enter, four sizes, SIGINT and publication-failure restoration PASS. Evidence examples/crew-lab/evidence/native-ui/M2-M3.md."
+    },
+    {
+      "id": "M3",
+      "description": "Installed PTY/gameplay evidence, documentation, independent acceptance and main landing",
+      "estimated_loc": 500,
+      "dependencies": [
+        "M2"
+      ],
+      "acceptance_criteria": [
+        "NU1-NU6 inspected actualframes andinstalledPTY/gameflows",
+        "NU7 existing validate, cache/policy/oldcommands andCIgreen",
+        "NU8 differentagent evaluation withoutblockers; mergedmain anddurablenewcommands",
+        "Two runnablewalkthroughs and explicit proof/VM limitations"
+      ],
+      "passes": null,
+      "started": "2026-10-10",
+      "completed": null,
+      "notes": "Local implementation, focused tests, installed harnesses, walkthroughs and release docs ready. Full local validate is starting after immutable handoff. Independent judge, CI, main merge and durable additive installation are pending root-owned landing gates; passes remains null."
+    }
+  ],
+  "registry_reuse": [
+    {
+      "milestone": "M1",
+      "package": "sunholo/terminal_ui",
+      "version": "0.2.0",
+      "action": "depend",
+      "search_terms": [
+        "terminal"
+      ],
+      "inspection": [
+        "pkg info sunholo/terminal_ui",
+        "pkg docs sunholo/terminal_ui"
+      ],
+      "reason": "Published pure events/widgets and safe layout already cover selection and graphics composition; app projections reuse existing domain."
+    },
+    {
+      "milestone": "M2",
+      "package": "sunholo/terminal_ui",
+      "version": "0.2.0",
+      "action": "depend",
+      "reason": "Reuse scoped native/line/plain/auto adapter and normalized events; no second input or generic terminal host."
+    },
+    {
+      "milestone": "M3",
+      "package": "sunholo/terminal_ui",
+      "version": "0.2.0",
+      "action": "depend",
+      "reason": "Installed tests and examples validate published terminal APIs alongside existing crew regressions."
+    }
+  ]
+}

@@ -1,0 +1,50 @@
+module sunholo/crew_lab/native_watch_presenter_test
+import std/result (Ok,Err)
+import std/option (Some,None)
+import std/list (any,length)
+import std/string (contains,join)
+import pkg/sunholo/terminal_ui/ui (cells)
+import ./play_flow (beginWatch)
+import ./native_watch_ui (initial,decision,Ship,Guide)
+import ./native_watch_presenter (frame,elapsed)
+
+pure func all[a](f:a->bool,xs:[a])->bool = not any(\x. not f(x),xs)
+
+test "new captain sees teaching and both command style meanings at40x16" {
+ let f = frame(None,initial(40,16,false),"",[],"offline",0,"journal",false,false);
+ let text = join("\n",f.lines);
+ length(f.lines) == 16 && all(\l. cells(l) <= 40,f.lines) && contains(text,"You are captain") && contains(text,"Five specialists") && contains(text,"requires") && contains(text,"despite refusal") && contains(text,"Enter") && not contains(f.text,"\u{1B}")
+}
+test "reading guide hides inactive Start and uses reading controls" {
+ match beginWatch("2",61) {Err(_)=>false,Ok(s)=>{
+ let p={s|phase:"start",target:"proposal"};
+ let text=frame(Some(p),{decision(p,40,16,false)|view:Guide},"",[],"offline",0,"journal",false,false).text;
+ contains(text,"return to pending decision") && not contains(text,"> 1 Start now") && not contains(text,"Enter acts")
+ }}
+}
+test "elapsed quarters correctly represent three of four and six of eight" {elapsed(3,4,true)=="[###.] 3/4 turns" && elapsed(6,8,true)=="[###.] 6/8 turns"}
+test "representative frame matrix fits every actual viewport" {
+ all(\width. all(\height. {
+ let f=frame(None,initial(width,height,false),"",[],"offline",0,"journal",false,false);
+ length(f.lines)<=height && all(\l. cells(l)<=width,f.lines) && not contains(f.text,"\u{1B}")
+ },[8,16,24,60]),[20,40,80,100,160])
+}
+test "all five specialists and named supplies fit bridge80x24" {
+ match beginWatch("1",61) { Err(_)=>false,Ok(s)=>{
+ let f = frame(Some(s),decision(s,80,24,false),"",[],"offline",0,"journal",false,false);
+ let text = join("\n",f.lines);
+ length(f.lines) == 24 && all(\l. cells(l)<=80,f.lines) && contains(text,"scientist") && contains(text,"engineer") && contains(text,"medic") && contains(text,"pilot") && contains(text,"diplomat") && contains(text,"Archive compute") && contains(text,"Replacement modules") && contains(text,"Diagnostic cartridges") && not contains(text,"fatigue") && not contains(text,"OCEAN")
+ }}
+}
+test "tiny frame fits actual viewport and retains underlying UI" {
+ let u=initial(20,8,true);
+ let f=frame(None,u,"",[],"offline",0,"journal",false,false);
+ length(f.lines)<=8 && all(\l. cells(l)<=20,f.lines) && contains(join("\n",f.lines),"Need 40 x 16")
+}
+test "ASCII ship diagram and elapsed bar are physical facts" {
+ match beginWatch("2",61) {Err(_)=>false,Ok(s)=>{
+ let f=frame(Some(s),{decision(s,80,24,true)|view:Ship},"",[],"offline",0,"journal",false,false);
+ let text=join("\n",f.lines);
+ contains(text,"BRIDGE") && contains(text,"COMMONS") && not contains(text,"─") && not contains(text,"█") && elapsed(2,4,true)=="[##..] 2/4 turns" && elapsed(0,0,true)=="[....] 0/0 turns"
+ }}
+}
