@@ -8,9 +8,9 @@
 | The Ship Is Home | +2 | Bridge and existing Commons provide a human setting for five specialists. |
 | Grounded Strangeness | 0 | Schematics introduce no astronomy or alien-generation claims. |
 | We Are Not Built For This | +1 | Qualitative crew observations preserve human ambiguity. |
-| **Net** | **+6** | **Aligned; ready for sprint approval.** |
+| **Net** | **+6** | **Aligned; implemented and accepted.** |
 
-**Status:** Approved by Mark, 2026-10-10; implementation starting. **Release:** crew-lab successor.
+**Status:** Implemented and accepted, 2026-10-10. **Release:** crew-lab 0.3.0.
 **Milestone:** S-CREW-NATIVE-UI. **Priority:** P0, human usability.
 **Estimate:** 1,800 changed lines, including meaningful controls and documentation;
 three development days plus asynchronous CI/review, not a delivery promise.
@@ -150,7 +150,7 @@ events after cleanup is verified; this sprint starts no workers or parallel call
 
 ## Acceptance criteria
 
-Commands below are planned interfaces, not present/passing claims. AILANG is the
+Commands below are implemented and passed. AILANG is the
 dedicated v0.54.0 binary; make commands use AILANG=/absolute/path/to/that/binary.
 
 | ID | Required evidence | Command |
@@ -181,10 +181,31 @@ fake crew locations (work badges only); UTF8 width mismatch (conservative existi
 cells and ASCII mode); accidental Enter commits (explicit screen state/default);
 wrong runtime breaks old commands (isolated installation); waiting screen promises
 background freedom (truthful synchronous state). No unanswered gameplay decision
-blocks planning; approval of this bounded new sprint is the remaining project gate.
+blocks this implemented sprint. Mark approved this bounded sprint before execution.
 
 Deliver design/mockup, pure UI and presenter, effectful adapter, additive commands,
 meaningful tests and actual terminal evidence, two playable walkthroughs, updated
 README/AGENT/changelog and independent acceptance report. Move implemented docs
-only after acceptance. Normative roadmap publication uses its existing separate
+after acceptance. Normative roadmap publication uses its existing separate
 approval boundary; do not alter the pending public design payload.
+
+## Completion evidence
+
+Reviewed implementation `667491a` passed full local validate and exact-head
+[CI 38073025460](https://github.com/sunholo-data/ailang-packages/actions/runs/38073025460),
+including behavioural mutations and social regressions. There are 170 named crew
+controls in each engine, plus installed shell flows and three native PTY lifecycle
+controls. A different agent accepted the actual frames, gameplay and terminal restoration.
+[PR120](https://github.com/sunholo-data/ailang-packages/pull/120) merged as `02c8042`.
+Only additive `~/.ailang/bin/crew-watch` and `crew-watch-offline` were installed,
+using durable owned source and the dedicated official v0.54.0 runtime. Installed
+native intro/bridge/quit and live plain EOF startup passed with no provider calls.
+All five prior launcher checksums and four sampled policy/cache checksums are unchanged.
+
+Published terminal_ui0.2.0 passed a clean consumer smoke; social/content retain
+existing local dependencies because content_library0.1.0 is not published. This
+experimental app is not a new registry release. Pure controls run interpreter and
+strict VM; the effectful scoped adapter runs interpreter. Exact verification inventory:
+127 total, 26 proved, 97 skipped, four unchanged encoder/solver errors, zero
+counterexamples. AI is still synchronous. No full voyage or Godot runtime change.
+The final report is `.ailang/state/evaluations/eval_S-CREW-NATIVE-UI_round_1.json`.

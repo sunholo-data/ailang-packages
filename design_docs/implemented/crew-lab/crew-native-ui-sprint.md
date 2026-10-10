@@ -1,6 +1,6 @@
 # Sprint S-CREW-NATIVE-UI
 
-**Status:** Approved by Mark in this attended session, 2026-10-10; implementation starting.
+**Status:** Completed and accepted, 2026-10-10; approved by Mark before execution.
 **Design:** [crew-native-ui.md](crew-native-ui.md).
 **Visual:** [crew-native-ui-mockup.txt](crew-native-ui-mockup.txt).
 **Goal:** Make the five-person preparation watch readable and enjoyable with pure
@@ -55,7 +55,7 @@ Pure named controls must run interpreter and strictVM without fallback. Effectfu
 adapter/demo uses interpreter because @limit frames are not VM-supported; preserve
 budgets. Report actual native/inline counts, skips and Z3 errors separately.
 
-## M1 — Pure UI and graphical information (700 lines)
+## M1 — Pure UI and graphical information (700 lines) — completed
 
 Estimated450implementation +250controls; day1. Depend on published widgets and
 current watch domain, not worker lifecycle. Files: examples/crew-lab/native_watch_ui.ail,
@@ -73,7 +73,7 @@ no numeric psychology in normalmode. Commands: new native-ui-test target and
 existing native/strictVM package tests. Verify pure helpers; report proof boundaries.
 Risk: dense chrome; reduce schematic before reducing action readability.
 
-## M2 — Native play adapter and additive commands (600 lines)
+## M2 — Native play adapter and additive commands (600 lines) — completed
 
 Estimated400implementation +200controls; day2, afterM1. Files: native_watch.ail,
 ailang.toml/lock, Makefile, test-native-watch.sh, focused PTY harness.
@@ -92,7 +92,7 @@ science completes, returnsslots, shortage preservesoffer and explanation. Comman
 native-watch-test and native-watch-pty-test. Current app and library scoped regressions
 pass. Risk: input-owner conflicts; no secondstdinreader/no selectEvents host.
 
-## M3 — Actual play evidence, documentation and landing (500 lines)
+## M3 — Actual play evidence, documentation and landing (500 lines) — completed
 
 Estimated100implementation/docs +400harness/fixtures; day3, afterM2. Files:
 test-native-watch-pty.py (test harness only), Makefile, README, AGENT, CHANGELOG,
@@ -124,8 +124,14 @@ durablelanding. Before execution fetchmain and reconcile only this ownedcheckout
 do not reset other ongoing work. No cloud messages or public normative doc push is
 needed to approve the UI. Prior reply-inbox approval is separate and remains gated.
 
-Progress: .ailang/state/sprints/sprint_S-CREW-NATIVE-UI.json, all passes initially null.
-After specific sprint approval, hand off immediately to sprint-executor with these
-three milestones and registry decisions. Run sprint-evaluator on a different agent.
-Then archive implementation docs/report and changelog; normative roadmap update
-remains subject to its outstanding destination/content approval.
+Progress: `.ailang/state/sprints/sprint_S-CREW-NATIVE-UI.json`, all milestones passed.
+Executor watch_executor and independent judge watch_design_review_a completed their
+separate roles. Full local validation and exact-head CI38073025460 passed at667491a;
+PR120 merged as02c8042. Two additive durable launchers passed actual installed smoke;
+five old commands and four sampled policy/cache files retain original checksums.
+Frozen implementation changed1,714 lines (1,704 insertions/10 deletions) in one
+calendar day against1,800 over three estimated development days; elapsed working
+hours were not measured. See design completion evidence for proof/VM limitations,
+registry consumer scope and truthful synchronous AI. Final metadata is a separate
+docs-only landing; it does not replace the tested source revision. Normative roadmap
+publication remains subject to outstanding destination/content approval.
