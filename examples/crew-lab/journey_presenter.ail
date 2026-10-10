@@ -26,6 +26,13 @@ ensures { slength(result) > 0 } = {
   "[ BEFORE THE FIRST HELLO ]\n\nYou are captain of a bubble ship. The bridge and Commons are home between destinations. Possible first contact lies ahead: prepare people as well as equipment.\n\nScientist: fatigue 45; values curiosity and autonomy. Engineer: fatigue 30; values reliability and fairness. They can agree, refuse, raise concerns or ask for relief.\n\nSix internal materials: science needs 4, maintenance 3 to start. Both cannot start together. Rest needs none. There is no correct route or winning score.\n\nOffer -> hear crew -> choose Start/Leave -> advance turns -> observe consequences. Agreement never starts work. One turn is a step of this lab, not physical travel. Reading is free.\n\nEight turns mark a preparation review, not a deadline or alien contact simulation. Seed ${show(seed)} repeats variation with the same choices/library. ${source}"
 }
 
+-- Persistent choice meanings fit the minimum screen before input is accepted.
+export pure func onboarding(mode: string, seed: int, d: Dimensions, ansi: bool, page: int, explain: bool) -> Screen ! {}
+ensures { result.pages >= 1 && result.page >= 0 && result.page < result.pages } = {
+  let body = if explain then "Example: offer the scientist an analysis project, hear their response, then choose Start or leave it open. Offering never starts work. Advance a turn to move started work. Read Crew or Work to understand competing needs.\n\nAsk for agreement waits for the worker to agree. Captain's authority can start despite an objection, but cooperation, capacity and supplies still matter. Your style lasts for this run. Neither style guarantees success.\n\nNo turns, random draws or AI calls happen while reading this introduction." else "Choose how you assign work this run. People and equipment both need preparation; no single route is correct."
+  screen(d, ansi, ["You are captain of a bubble ship.", "Prepare your crew for first contact.", "Offer > hear > Start > advance"], body, ["1 Ask for agreement", "  Work waits for agreement", "2 Use captain's authority", "  May override refusal; trust can suffer", "Style lasts this run; h Help /b Back", "0 Quit /n Next /v Previous; Enter"], page)
+}
+
 pure func supplies(s: PlayState) -> string =
   join("\n", map(\r. "${r.id}: ${show(r.available)} available / ${show(r.reserved)} reserved / ${show(r.consumed)} consumed", s.session.state.resources))
 

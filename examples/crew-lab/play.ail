@@ -10,7 +10,7 @@ import pkg/sunholo/content_library/library (Bundle, encodeBundle, starterBundle,
 import pkg/sunholo/social_dynamics/model (Offered)
 import pkg/sunholo/terminal_ui/ui (Dimensions, dimensions, screen, safeText)
 import ./journey_flow (Navigation, initial, options as journeyOptions, styleDefault, onboardingAllowed, navigation, remember)
-import ./journey_presenter (frame, opening, indicatorChanges, journeyRecap)
+import ./journey_presenter (frame, opening, onboarding, indicatorChanges, journeyRecap)
 import ./session (Request, start)
 import ./reactions (Policy, weights, signature, fixtureBody)
 import ./store (Fetch, loadPolicy, resolve, openRun, appendRun)
@@ -218,8 +218,8 @@ func envNumber(name: string, fallback: int) -> int ! {Env} = match stringToInt(g
   None => fallback
 }
 
-func choosePolicy(mode: string, seed: int, d: Dimensions, ansi: bool, page: int, inputs: int) -> string ! {IO} = {
-  let f = screen(d, ansi, ["Stapledon's Voyage / Bridge", "Before first hello / preparation 0/8", "Seed ${show(seed)}; reading costs no turns"], opening(mode, seed), ["1 Consent: crew must agree", "2 Orders: refusal may cost trust", "0 Quit /n Next /v Previous", "Key + Enter; blank line ends this run."], page)
+func choosePolicy(mode: string, seed: int, d: Dimensions, ansi: bool, page: int, inputs: int, explain: bool) -> string ! {IO} = {
+  let f = onboarding(mode, seed, d, ansi, page, explain)
   print(f.text)
   print("Choose > ")
   flush()
@@ -233,9 +233,9 @@ func choosePolicy(mode: string, seed: int, d: Dimensions, ansi: bool, page: int,
     println("Preparation not started. No game commands recorded.")
     exit(0);
     ""
-  } else if key == "n" then choosePolicy(mode, seed, d, ansi, f.page + 1, inputs + 1) else if key == "v" then choosePolicy(mode, seed, d, ansi, if f.page <= 0 then 0 else f.page - 1, inputs + 1) else if key == "1" || key == "2" then key else {
-    println("Choose 1 Consent or 2 Orders, or read n/v.")
-    choosePolicy(mode, seed, d, ansi, f.page, inputs + 1)
+  } else if key == "n" then choosePolicy(mode, seed, d, ansi, f.page + 1, inputs + 1, explain) else if key == "v" then choosePolicy(mode, seed, d, ansi, if f.page <= 0 then 0 else f.page - 1, inputs + 1, explain) else if key == "h" || key == "help" then choosePolicy(mode, seed, d, ansi, 0, inputs + 1, true) else if key == "b" then choosePolicy(mode, seed, d, ansi, 0, inputs + 1, false) else if key == "1" || key == "2" then key else {
+    println("Choose 1 agreement or 2 authority; h explains with an example.")
+    choosePolicy(mode, seed, d, ansi, f.page, inputs + 1, explain)
   }
 }
 
@@ -260,7 +260,7 @@ func launch(mode: string, modern: bool) -> () ! {IO, Env, FS, AI} = {
           if o.hasSeed then println("Seed ${show(o.seed)}: the same seed, policy, library and choices repeat the variation.") else ()
           println(policyBrief())
         }
-        let policyChoice = if modern then choosePolicy(mode, o.seed, d, f.ansi, 0, 0) else readLine()
+        let policyChoice = if modern then choosePolicy(mode, o.seed, d, f.ansi, 0, 0, false) else readLine()
         let seed = if o.hasSeed then Ok(o.seed) else {
           println(seedBrief())
           seedNumber(readLine())
