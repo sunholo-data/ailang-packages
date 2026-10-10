@@ -17,6 +17,11 @@ independent `[bin]` command; it does not alter the Go CLI or message store.
   frame emits an ASCII compact message below 40×16, fitting even 1×1.
 - `transcript` (pure): Config, Transcript, TranscriptError, Replay;
   encodeTranscript/decodeTranscript, replaySelection, selectionFrame/selectionBody.
+- `text_field` (pure): create/update a 1..4096-codepoint Field. Exact text is
+  kept through Unicode insertion, left/right/home/end, backward/forward deletion,
+  submission and cancellation. Reject control-containing/overlength insertions
+  atomically. Accept submits nonblank exact text; cancelled/completed fields stay
+  stable. No application hotkeys are interpreted: Character("q") is text.
 - `adapter` (IO only): choose/resolve explicit Native/Line/Plain/Auto; run scopes
   a host session; readInput and writeFrame adapt normalized inputs/frames.
 

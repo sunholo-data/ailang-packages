@@ -38,3 +38,13 @@ The package is experimental and unpublished. Game integration, live generation,
 visibility of captain KPIs and final refusal/authority rules remain subsequent work.
 
 Opt-in `BoundedIndicatorDelta(actor, indicator, delta)` performs checked addition and saturates to configured indicator bounds. Strict `IndicatorDelta` retains rejection outside bounds. Unknown references, invalid current indicator state and numeric overflow remain errors, and appraisals can affect only their observer. The new effect encodes as `bounded_indicator_delta`; existing tags remain unchanged.
+
+### Gradual personality experiment
+
+Import `personality` alongside `model`. `initialize(actor, fiveOCEANValues, tick)`
+returns baseline/current response state. `beginMajor(p, {receipt, kind:FirstContact})`
+sets an individual target without changing traits. `advance(p, tick+1)` moves each
+trait by at most one point; `receiveInteraction` can modify a currently active
+response but ordinary dialogue never starts drift. Use validated received evidence,
+not generated prose, to construct receipts. The independent crew-watch lab provides
+a complete example with explicit scenario reports and development inspection.

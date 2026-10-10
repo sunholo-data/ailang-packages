@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.3.0
+
+Add a pure bounded Unicode codepoint text field: exact insertion, navigation,
+backward/forward deletion, explicit submission and cancellation. Input limits
+and control rejection preserve whole drafts; idle and resize never submit.
+
 ## 0.2.1
 
 Fix staircase text and unintended scrolling in native raw terminal frames.

@@ -1,0 +1,23 @@
+module sunholo/crew_lab/conversation_tradeoff_test
+import std/option (Some,None)
+import std/list (head,filter,any,map)
+import pkg/sunholo/social_dynamics/model (Appraisal,RelationshipDelta,BoundedIndicatorDelta)
+import ./watch_scenario (actors)
+import ./conversations (reaction)
+
+pure func context(actor:string,stress:int)->Appraisal = {
+ let original=match head(filter(\a. a.id==actor,actors())) {None=>{id:"fixture",capacity:1,attributes:[],values:[],indicators:[]},Some(a)=>a};
+ {observer:{original|indicators:map(\v. if v.id=="stress" then {v|value:stress} else v,original.indicators)},evidence:{id:"speech",author:"captain",kind:"concern",text:"Discussion only",causes:[]},relationships:[{from:actor,to:"captain",dimension:"trust",value:50}],visible:[]}
+}
+test "clear boundaries frustrate curious autonomous scientist while asking advice can help" {
+ let a=context("scientist",40);
+ any(\e. e==RelationshipDelta("scientist","captain","trust",-1),reaction(a,"clear_scope",false)) && any(\e. e==BoundedIndicatorDelta("scientist","stress",1),reaction(a,"clear_scope",false)) && any(\e. e==RelationshipDelta("scientist","captain","trust",1),reaction(a,"ask_advice",false))
+}
+test "reliability focused engineer responds better to clear scope than open advice" {
+ let a=context("engineer",50);
+ any(\e. e==RelationshipDelta("engineer","captain","trust",1),reaction(a,"clear_scope",false)) && any(\e. e==RelationshipDelta("engineer","captain","trust",0),reaction(a,"ask_advice",false))
+}
+test "same advice can strain an overloaded scientist and repeated reassurance stops rewarding" {
+ let a=context("scientist",80);
+ any(\e. e==RelationshipDelta("scientist","captain","trust",-1),reaction(a,"ask_advice",false)) && any(\e. e==RelationshipDelta("engineer","captain","trust",0),reaction(context("engineer",50),"clear_scope",true)) && any(\e. e==BoundedIndicatorDelta("engineer","stress",0),reaction(context("engineer",50),"clear_scope",true))
+}

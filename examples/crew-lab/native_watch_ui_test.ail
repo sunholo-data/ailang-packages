@@ -1,9 +1,12 @@
 module sunholo/crew_lab/native_watch_ui_test
 import std/option (Some, None)
+import std/list (head,length)
+import ./session (offer,ask,complete)
+import ./reactions (fixtureBody)
 import std/result (Ok, Err)
 import pkg/sunholo/terminal_ui/events (Input, Sized, NoInput, Finished, Cancelled, Next, Accept, Cancel, Character)
-import ./play_flow (beginWatch)
-import ./native_watch_ui (initial, decision, update, choices, Decision, Guide, Quit)
+import ./play_flow (beginWatch,beginConversationWatch)
+import ./native_watch_ui (initial, decision, update, choices,selected, Decision, Guide, Quit)
 
 test "intro choices explain consent and authority before selecting" {
  let cs = choices(None);
@@ -74,4 +77,12 @@ test "pending proposal defaults decide later and navigation emits no domain comm
    u.cursor == 1 && help.ui.view == Guide && back.ui.view == Decision && chosen.command == Some("2")
   }
  }
+}
+
+test "reopening a concerned authority offer defaults to Decide later not Start" {
+ match beginConversationWatch("2",34500) {Err(_)=>false,Ok(p)=>match offer(p.session,"medic","work_medic","diagnostics") {Err(_)=>false,Ok(o)=>match ask(o.session,"medic","diagnostics","medic-first") {Err(_)=>false,Ok(a)=>match head(a.session.pending) {None=>false,Some(r)=>match complete(a.session,r.id,fixtureBody(r,"concern"),0.0) {Err(_)=>false,Ok(c)=>{
+ let reopened={p|session:c.session,phase:"start",target:"diagnostics"};
+ let u=decision(reopened,40,16,false);
+ (match selected(Some(reopened),u) {None=>false,Some(c)=>c.key=="2" && c.label=="Decide later"}) && update(Some(reopened),u,Input(Accept)).command==Some("2") && length(choices(Some(reopened)))==4
+ }}}}}}
 }

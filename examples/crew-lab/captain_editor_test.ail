@@ -1,0 +1,54 @@
+module sunholo/crew_lab/captain_editor_test
+import std/option (Some,None)
+import std/string (contains)
+import pkg/sunholo/terminal_ui/events (Input,Character,Accept,Cancel,Next,FocusNext,Sized,NoInput,FollowingPage)
+import ./native_watch_ui (initial,editor,update,Editor,ReplyReview,Guide,Decision)
+
+test "typed q b h zero remain exact speech rather than global commands" {
+ let u=editor(initial(80,30,false),"issue-test","","ask_advice",0,0);
+ let t=update(None,u,Input(Character("qbh0")));
+ t.ui.view==Editor && not t.quit && t.command==None && match t.ui.draft {None=>false,Some(d)=>d.field.text=="qbh0"}
+}
+test "enter reviews editable suggestion with keep editing default and no social command" {
+ let u=editor(initial(80,30,false),"issue-test","Our crew comes first.","clear_scope",2,7);
+ let review=update(None,u,Input(Accept));
+ let back=update(None,review.ui,Input(Accept));
+ review.command==None && review.ui.view==ReplyReview && review.ui.cursor==1 && back.command==None && back.ui.view==Editor
+}
+test "only explicit Send emits exact escaped speech and captured issue time revision" {
+ let u=editor(initial(80,30,false),"issue-test","qbh0: Zoë says \"hello\".","ask_advice",2,7);
+ let review=update(None,u,Input(Accept));
+ let submitted=update(None,review.ui,Input(Character("1")));
+ match submitted.command {None=>false,Some(s)=>not contains(s,"captain_reply") && contains(s,":reply ") && contains(s,"issue-test") && contains(s,"Zoë") && contains(s,"\"revision\":7")}
+}
+test "cancel draft submits nothing and retains exact words for later editing" {
+ let u=editor(initial(80,30,false),"issue-test","I need your judgement.","ask_advice",0,0);
+ let r=update(None,u,Input(Cancel));
+ r.command==None && r.ui.view==Decision && r.ui.draft==u.draft
+}
+test "context inspection keeps draft and returns to editor; idle and resize never send" {
+ let u=editor(initial(80,30,false),"issue-test","Uncertainty remains.","clear_scope",0,0);
+ let guide=update(None,u,Input(FocusNext));
+ let back=update(None,guide.ui,Input(Cancel));
+ guide.ui.view==Guide && back.ui.view==Editor && back.ui.draft==u.draft && update(None,u,NoInput).ui==u && update(None,u,Sized(40,16)).command==None
+}
+test "blank editor cannot review or send and changing stance preserves words" {
+ let blank=editor(initial(80,30,false),"issue-test","  ","ask_advice",0,0);
+ let u=editor(blank,"issue-test","Tell me your recommendation.","ask_advice",0,0);
+ let review=update(None,u,Input(Accept));
+ let change=update(None,review.ui,Input(Character("3")));
+ update(None,blank,Input(Accept)).ui.view==Editor && change.command==None && match change.ui.draft {None=>false,Some(d)=>d.field.text=="Tell me your recommendation." && d.approach=="stage_plan"}
+}
+
+test "small terminal never treats a typed quit letter as navigation inside draft" {
+ let u=editor(initial(40,16,false),"issue-test","","ask_advice",0,0);
+ let small=update(None,u,Sized(20,8));
+ let typed=update(None,small.ui,Input(Character("q")));
+ typed.command==None && not typed.quit && match typed.ui.draft {None=>false,Some(d)=>d.field.text=="q"}
+}
+test "review scrolling changes only page and preserves exact draft" {
+ let u=editor(initial(40,16,false),"issue-test","Review this in context.","ask_advice",0,0);
+ let reviewed=update(None,u,Input(Accept));
+ let paged=update(None,reviewed.ui,Input(FollowingPage));
+ paged.command==None && paged.ui.page==1 && paged.ui.draft==reviewed.ui.draft
+}

@@ -103,7 +103,7 @@ class Watch:
         self.original = termios.tcgetattr(self.slave)
         self.resize(columns, rows, notify=False)
         control,self.control= os.pipe()
-        self.proc = subprocess.Popen([sys.executable,"-u","-c",GUARDIAN,str(control),str(shim), "--mode", "native", "--home", str(home), "--seed", "42"], pass_fds=(control,), stdin=self.slave, stdout=self.slave, stderr=self.slave, start_new_session=True, env={**os.environ, "TERM": "xterm-256color"})
+        self.proc = subprocess.Popen([sys.executable,"-u","-c",GUARDIAN,str(control),str(shim), "--mode", "native", "--legacy", "--home", str(home), "--seed", "42"], pass_fds=(control,), stdin=self.slave, stdout=self.slave, stderr=self.slave, start_new_session=True, env={**os.environ, "TERM": "xterm-256color"})
         os.close(control)
         print(f"fixture pid={self.proc.pid} home={self.home.name}", flush=True)
         self.output = b""

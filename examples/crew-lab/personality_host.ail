@@ -1,0 +1,60 @@
+module sunholo/crew_lab/personality_host
+import std/result (Result,Ok,Err)
+import std/option (Option,Some,None)
+import std/list (map,filter,head,any,length)
+import std/json (Json,jo,kv,js,jint,ja,encode)
+import std/string (length as size,join)
+import pkg/sunholo/social_dynamics/model (Actor,State,Value,Host)
+import pkg/sunholo/social_dynamics/personality (Personality,Receipt,MajorEvent,FirstContact,Loss,DeepTime,Betrayal,Interaction,Support,Conflict,Neutral,ReceiptEntry,MajorReceived,InteractionReceived,initialize,beginMajor,receiveInteraction,advance)
+
+@allow_empty_ok("Empty actor tail is successful bounded recursion, not a missing actor")
+pure func initActors(xs:[Actor],tick:int)->Result[[Personality],string] = match xs {
+ []=>Ok([]),a::rest=>match (initialize(a.id,a.attributes,tick),initActors(rest,tick)) { (Ok(p),Ok(ps))=>Ok(p::ps),(Err(e),_)=>Err(e),(_,Err(e))=>Err(e) }
+}
+export pure func initializeShip(s:State)->Result[[Personality],string] ! {}
+ensures {match result {Err(_)=>true,Ok(ps)=>length(ps)==length(filter(\a. a.id!="captain",s.actors))}} = initActors(filter(\a. a.id!="captain",s.actors),s.tick)
+@allow_empty_ok("Empty personality tail is successful bounded recursion")
+export pure func advanceShip(ps:[Personality],tick:int)->Result[[Personality],string] ! {}
+ensures {match result {Err(_)=>true,Ok(qs)=>length(qs)==length(ps)}} = match ps {
+ []=>Ok([]),p::rest=>match (advance(p,tick),advanceShip(rest,tick)) {(Ok(q),Ok(qs))=>Ok(q::qs),(Err(e),_)=>Err(e),(_,Err(e))=>Err(e)}
+}
+export pure func project(ps:[Personality],s:State)->State ! {}
+ensures {result.tick==s.tick && result.revision==s.revision && result.resources==s.resources && result.tasks==s.tasks} =
+ {s|actors:map(\a. match head(filter(\p. p.actor==a.id,ps)){None=>a,Some(p)=>{a|attributes:p.current}},s.actors)}
+
+export pure func majorKind(kind:string)->Option[MajorEvent] ! {}
+ensures {kind=="first_contact" || kind=="loss" || kind=="deep_time" || kind=="betrayal" || result==None} =
+ if kind=="first_contact" then Some(FirstContact) else if kind=="loss" then Some(Loss) else if kind=="deep_time" then Some(DeepTime) else if kind=="betrayal" then Some(Betrayal) else None
+
+-- Only a committed delivery counts. The host freezes its explicit source at
+-- receipt creation; a claimant's string or an AI line does not prove knowledge.
+@allow_empty_ok("Empty personality tail is successful bounded recursion")
+export pure func receiveMajor(ps:[Personality],s:State,evidence:string,kind:MajorEvent,source:string)->Result[[Personality],string] ! {}
+ensures {match result {Err(_)=>true,Ok(qs)=>length(qs)==length(ps)}} = match ps {
+ []=>Ok([]),p::rest=>if not any(\k. k.observer==p.actor && k.evidence==evidence,s.knowledge) || not any(\e. e.id==evidence,s.evidence) then Err("major_event_not_received") else {
+ let r:Receipt={id:"major-${evidence}-${p.actor}",observer:p.actor,evidence:evidence,receivedAt:s.tick,principal:Host,perceivedSource:source};
+ match (beginMajor(p,{receipt:r,kind:kind}),receiveMajor(rest,s,evidence,kind,source)) {(Ok(q),Ok(qs))=>Ok(q::qs),(Err(e),_)=>Err(e),(_,Err(e))=>Err(e)}
+ }
+}
+pure func trust(s:State,actor:string)->int = match head(filter(\r. r.from==actor && r.to=="captain" && r.dimension=="trust",s.relationships)){None=>50,Some(r)=>r.value}
+@allow_empty_ok("Empty personality tail is successful bounded recursion")
+export pure func receiveSpeech(ps:[Personality],before:State,after:State,worker:string,evidence:string)->Result[[Personality],string] ! {}
+ensures {match result {Err(_)=>true,Ok(qs)=>length(qs)==length(ps)}} = match ps {
+ []=>Ok([]),p::rest=>if p.actor!=worker then match receiveSpeech(rest,before,after,worker,evidence){Err(e)=>Err(e),Ok(qs)=>Ok(p::qs)} else if not any(\k. k.observer==worker && k.evidence==evidence,after.knowledge) || not any(\e. e.id==evidence && e.author=="captain",after.evidence) then Err("speech_not_received") else {
+ let delta=trust(after,worker)-trust(before,worker);
+ let r:Receipt={id:"interaction-${evidence}-${worker}",observer:worker,evidence:evidence,receivedAt:after.tick,principal:Host,perceivedSource:"captain-conversation-v1"};
+ match (receiveInteraction(p,{receipt:r,kind:if delta>0 then Support else if delta<0 then Conflict else Neutral}),receiveSpeech(rest,before,after,worker,evidence)) {(Ok(q),Ok(qs))=>Ok(q::qs),(Err(e),_)=>Err(e),(_,Err(e))=>Err(e)}
+ }
+}
+pure func values(vs:[Value])->Json = ja(map(\v. jo([kv("id",js(v.id)),kv("value",jint(v.value))]),vs))
+pure func receipt(r:Receipt)->Json = jo([kv("id",js(r.id)),kv("observer",js(r.observer)),kv("evidence",js(r.evidence)),kv("received_at",jint(r.receivedAt)),kv("principal",js("Host")),kv("perceived_source",js(r.perceivedSource))])
+pure func majorName(k:MajorEvent)->string = match k {FirstContact=>"first_contact",Loss=>"loss",DeepTime=>"deep_time",Betrayal=>"betrayal"}
+pure func entry(e:ReceiptEntry)->Json = match e {
+ MajorReceived(m)=>jo([kv("receipt",receipt(m.receipt)),kv("major",js(majorName(m.kind)))]),
+ InteractionReceived(i)=>jo([kv("receipt",receipt(i.receipt)),kv("interaction",js(match i.kind{Support=>"support",Conflict=>"conflict",Neutral=>"neutral"}))])
+}
+export pure func json(ps:[Personality])->Json ! {}
+ensures {size(encode(result))>0} = ja(map(\p. jo([kv("actor",js(p.actor)),kv("baseline",values(p.baseline)),kv("current",values(p.current)),kv("last_tick",jint(p.lastTick)),kv("history",ja(map(entry,p.history))),kv("response",match p.active {None=>js("none"),Some(r)=>jo([kv("trigger",js(r.trigger)),kv("until",jint(r.until)),kv("targets",values(r.targets))])})]),ps))
+
+export pure func development(ps:[Personality])->string ! {}
+ensures {size(result)>0} = "PERSONALITY RESPONSE / DEVELOPMENT\n${join("\n\n",map(\p. "${p.actor}: baseline ${join(", ",map(\v. "${v.id} ${v.value}",p.baseline))}\n${match p.active {None=>"No active major-event response.",Some(r)=>"Received ${r.trigger}; settling through turn ${r.until}. Targets ${join(", ",map(\v. "${v.id} ${v.value}",r.targets))}."}}\n${length(p.history)} received major/interaction receipts; last simulation turn ${p.lastTick}.",ps))}"

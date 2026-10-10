@@ -35,3 +35,12 @@ functions explicitly; the effectful demo uses the evaluator. Pure package contro
 run on the strict VM with zero fallback.
 
 Validation and the release prerequisite are recorded in [VALIDATION.md](VALIDATION.md).
+
+### Text entry
+
+`text_field.create(text, limit)` constructs a pure editor; `update(field, event)`
+returns the next field. `Character(text)` inserts exact text; arrows, Home/End,
+Backspace/Delete move or remove Unicode codepoints. Enter sets `submitted` only
+for a nonblank draft, while Escape sets `cancelled` without sending. Input is
+bounded and control-free. Applications choose whether submission opens a review
+step or commits a domain command. This widget performs neither IO nor inference.

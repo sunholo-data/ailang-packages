@@ -1,0 +1,51 @@
+module sunholo/terminal_ui/text_field
+import std/list (length,take,drop,any)
+import std/string (chars,concat,trim)
+import std/option (Option,Some,None)
+import std/result (Result,Ok,Err)
+import ./events (Event,Input,Character,MoveLeft,MoveRight,First,Last,Erase,Remove,Accept,Cancel,Cancelled,Finished)
+
+-- Editing is pure and owns neither terminal input nor application decisions.
+-- Cursor/limit count Unicode codepoints; rendering measures display cells separately.
+export type Field = {text:string,cursor:int,limit:int,submitted:Option[string],cancelled:bool} deriving(Eq)
+
+pure func count(text:string)->int = length(chars(text))
+export pure func validText(text:string)->bool ! {}
+ensures { not result || count(text)<=4096 } =
+ count(text)<=4096 && not any(\c. c<" " || c=="\x7f",chars(text))
+
+export pure func create(text:string,limit:int)->Result[Field,string] ! {}
+ensures { match result {Err(_)=>true,Ok(f)=>f.cursor==count(text) && f.cursor<=f.limit && f.submitted==None && not f.cancelled} } =
+ if limit<1 || limit>4096 || not validText(text) || count(text)>limit then Err("Invalid text-field contents or limit")
+ else Ok({text:text,cursor:count(text),limit:limit,submitted:None,cancelled:false})
+
+pure func before(f:Field)->[string] = take(f.cursor,chars(f.text))
+pure func after(f:Field)->[string] = drop(f.cursor,chars(f.text))
+pure func insert(f:Field,text:string)->Field =
+ if not validText(text) || count(f.text)+count(text)>f.limit then f
+ else {f|text:concat(before(f)++chars(text)++after(f)),cursor:f.cursor+count(text)}
+
+export pure func update(f:Field,event:Event)->Field ! {}
+requires { f.limit>=1 && f.limit<=4096 && f.cursor>=0 && f.cursor<=count(f.text) && count(f.text)<=f.limit && validText(f.text) }
+ensures { result.limit==f.limit && result.cursor>=0 && result.cursor<=count(result.text) && count(result.text)<=result.limit && validText(result.text) } =
+ if f.submitted!=None || f.cancelled then f else match event {
+  Input(Character(text))=>insert(f,text),
+  Input(MoveLeft)=>{f|cursor:if f.cursor>0 then f.cursor-1 else 0},
+  Input(MoveRight)=>{f|cursor:if f.cursor<count(f.text) then f.cursor+1 else count(f.text)},
+  Input(First)=>{f|cursor:0},
+  Input(Last)=>{f|cursor:count(f.text)},
+  Input(Erase)=>if f.cursor==0 then f else {f|text:concat(take(f.cursor-1,chars(f.text))++after(f)),cursor:f.cursor-1},
+  Input(Remove)=>if f.cursor==count(f.text) then f else {f|text:concat(before(f)++drop(f.cursor+1,chars(f.text)))},
+  Input(Accept)=>if trim(f.text)=="" then f else {f|submitted:Some(f.text)},
+  Input(Cancel)=>{f|cancelled:true},
+  Cancelled=>{f|cancelled:true},
+  Finished=>{f|cancelled:true},
+  _=>f
+ }
+
+test "text source retains literal navigation letters and requires explicit send" {
+ match create("",16){Err(_)=>false,Ok(f)=>{
+  let typed=update(f,Input(Character("q0bh")));
+  typed.text=="q0bh" && typed.submitted==None && typed.cursor==4
+ }}
+}
