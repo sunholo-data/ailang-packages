@@ -1,7 +1,8 @@
 module sunholo/terminal_ui/adapter_test
 import std/option (Option, Some, None)
 import std/result (Ok, Err)
-import ./adapter (Native, Line, Plain, Auto, resolve, normalize, MissingSize, NativeUnavailable)
+import ./adapter (Native, Line, Plain, Auto, resolve, normalize, MissingSize, NativeUnavailable, frameText)
+import std/string (repeat)
 import ./events (Input, Next, Sized, Finished, Cancelled, NoInput)
 import std/terminal (Key, Down, Resize, EndOfInput, Interrupted, Idle)
 
@@ -38,4 +39,18 @@ test "unknown line size requires explicit dimensions" {
 
 test "normalize native keys resize EOF interruption idle" {
   normalize(Key(Down)) == Input(Next) && normalize(Resize({ columns: 20, rows: 8 })) == Sized(20, 8) && normalize(EndOfInput) == Finished && normalize(Interrupted) == Cancelled && normalize(Idle) == NoInput
+}
+
+test "raw native rows return to column zero after rules and blank rows" {
+  frameText(Native, "short\n\n${repeat("─", 80)}\n> Start\n") == "short\r\n\r\n${repeat("─", 80)}\r\n> Start\r\n"
+}
+
+test "native newline normalization is idempotent and keeps ANSI and Unicode" {
+  let text = "\u{1B}[Hcafé 界\r\n\u{1B}[96mNext\u{1B}[0m\n";
+  frameText(Native, frameText(Native, text)) == frameText(Native, text) && frameText(Native, text) == "\u{1B}[Hcafé 界\r\n\u{1B}[96mNext\u{1B}[0m\r\n"
+}
+
+test "line and plain output retain exact source bytes including blank rows" {
+  let text = "a\r\nb\n\n";
+  frameText(Line, text) == text && frameText(Plain, text) == text && frameText(Native, "") == ""
 }
