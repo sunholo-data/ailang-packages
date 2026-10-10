@@ -7,6 +7,7 @@ import std/json (encode, jo, kv, js)
 import pkg/sunholo/social_dynamics/model (Offered, Working, Task)
 import ./session (Session, start, input, encodeHostError)
 import ./presenter (dashboard, projectName)
+import ./watch_scenario (workers, projectName as watchName, purpose)
 
 export type PlayState = { session: Session, seed: int, nextId: int, seq: int, phase: string, target: string } deriving (Eq)
 
@@ -39,6 +40,27 @@ ensures { match result {
       Ok(o) => Ok({ session: o.session, seed: seed, nextId: 1, seq: 0, phase: "main", target: "" })
     }
   }
+
+export pure func beginWatch(policyChoice: string, seed: int) -> Result[PlayState, string] ! {}
+ensures { match result { Ok(s) => s.seed == seed && s.seq == 0 && s.nextId == 1, Err(_) => true } } =
+ if seed < 1 || seed > 2147483646 then Err("Invalid seed") else if policyChoice != "1" && policyChoice != "2" then Err("Choose agreement or authority") else {
+  let policy = if policyChoice == "1" then "consent" else "orders";
+  match start("{\"command\":\"start\",\"policy\":\"${policy}\",\"scenario\":\"watch-v2\"}") {
+   Err(e) => Err(encodeHostError(e)),
+   Ok(o) => Ok({session:o.session,seed:seed,nextId:1,seq:0,phase:"main",target:""})
+  }
+ }
+
+export pure func isWatch(s: PlayState) -> bool ! {}
+ensures { result == (s.session.config.id == "crew-watch-v2-${s.session.policy}") } = s.session.config.id == "crew-watch-v2-${s.session.policy}"
+
+pure func assignment(c: string, resting: bool) -> Result[Intent,string] = match stringToInt(c) {
+ None => Err("Choose a listed specialist"),
+ Some(n) => match nth(workers(),n-1) {
+  None => Err("Choose a listed specialist"),
+  Some(worker) => Ok(project(worker,"${if resting then "rest" else "work"}_${worker}"))
+ }
+}
 
 pure func argsLoop(xs: [string], o: Options, seenHome: bool) -> Result[Options, string] = match xs {
   [] => Ok(o),
@@ -88,9 +110,9 @@ ensures { match result {
   Err(_) => true
 } } =
   if stringLength(line) > 65536 then Err("Input exceeds 65536 characters") else let c = trim(line) in
-  if c == "h" || c == "help" then Ok(intent("help", "")) else if c == "0" then Ok(intent(if s.phase == "main" || s.phase == "response" then "quit" else "back", "")) else if s.phase == "start" then if c == "1" then Ok(intent("start", s.target)) else if c == "2" then Ok(intent("back", "")) else Err("Choose 1 Start or 2 Leave offered") else if s.phase == "response" then if c == "1" then Ok(intent("retry", s.target)) else if c == "2" then Ok(intent("authored", s.target)) else if c == "3" then Ok(intent("cancel", s.target)) else Err("Choose Retry, authored continuation, cancel or quit") else if s.phase == "working" then taskChoice(s, c, true) else if s.phase == "offered" then taskChoice(s, c, false) else if s.phase == "reliefs" then reliefChoice(s, c) else if s.phase == "relief" then if c == "1" then Ok(intent("grant", s.target)) else if c == "2" then Ok(intent("deny", s.target)) else Err("Choose 1 Grant or 2 Deny") else if s.phase != "main" then Err("Invalid menu phase") else match s.session.state.continuation {
+  if c == "h" || c == "help" then Ok(intent("help", "")) else if c == "0" then Ok(intent(if s.phase == "main" || s.phase == "response" then "quit" else "back", "")) else if s.phase == "start" then if c == "1" then Ok(intent("start", s.target)) else if c == "2" then Ok(intent("back", "")) else Err("Choose 1 Start or 2 Leave offered") else if s.phase == "response" then if c == "1" then Ok(intent("retry", s.target)) else if c == "2" then Ok(intent("authored", s.target)) else if c == "3" then Ok(intent("cancel", s.target)) else Err("Choose Retry, authored continuation, cancel or quit") else if isWatch(s) && (s.phase == "assignments" || s.phase == "rests") then assignment(c,s.phase == "rests") else if s.phase == "working" then taskChoice(s, c, true) else if s.phase == "offered" then taskChoice(s, c, false) else if s.phase == "reliefs" then reliefChoice(s, c) else if s.phase == "relief" then if c == "1" then Ok(intent("grant", s.target)) else if c == "2" then Ok(intent("deny", s.target)) else Err("Choose 1 Grant or 2 Deny") else if s.phase != "main" then Err("Invalid menu phase") else match s.session.state.continuation {
     Some(token) => if c == "1" then Ok(intent("continue", show(token.target))) else if c == "2" then Ok(intent("abort", "")) else if c == "9" then Ok(intent("status", "")) else Err("Finish or abort the pending advance first"),
-    None => if c == "1" then Ok(project("scientist", "observations")) else if c == "2" then Ok(project("engineer", "maintenance")) else if c == "3" then Ok(project("scientist", "rest_scientist")) else if c == "4" then Ok(project("engineer", "rest_engineer")) else if c == "5" then Ok(intent("advance", "")) else if c == "6" then Ok(intent("working", "")) else if c == "7" then Ok(intent("offered", "")) else if c == "8" then Ok(intent("reliefs", "")) else if c == "9" then Ok(intent("status", "")) else Err("Choose a listed captain action")
+    None => if isWatch(s) && c == "1" then Ok(intent("assignments", "")) else if isWatch(s) && c == "2" then Ok(intent("rests", "")) else if isWatch(s) && (c == "3" || c == "4") then Err("Choose work or rest, then a specialist") else if c == "1" then Ok(project("scientist", "observations")) else if c == "2" then Ok(project("engineer", "maintenance")) else if c == "3" then Ok(project("scientist", "rest_scientist")) else if c == "4" then Ok(project("engineer", "rest_engineer")) else if c == "5" then Ok(intent("advance", "")) else if c == "6" then Ok(intent("working", "")) else if c == "7" then Ok(intent("offered", "")) else if c == "8" then Ok(intent("reliefs", "")) else if c == "9" then Ok(intent("status", "")) else Err("Choose a listed captain action")
   }
 
 pure func numbered(xs: [string], i: int) -> [string] = match xs {
@@ -100,9 +122,12 @@ pure func numbered(xs: [string], i: int) -> [string] = match xs {
 
 export pure func menu(s: PlayState) -> string
 ensures { stringLength(result) > 0 } =
-  if s.phase == "start" then "1. Start ${s.target}\n2. Leave offered" else if s.phase == "response" then "Crew response unavailable.\n1. Retry crew reply\n2. Use stock wording (no AI call)\n3. Cancel this response\n0. Quit" else if s.phase == "relief" then "1. Grant relief ${s.target}\n2. Deny relief\n0. Back" else if s.phase == "working" || s.phase == "offered" then join("\n", numbered(map(\t. "${projectName(t.recipe)} / ${join(", ", t.participants)}", tasks(s, s.phase == "working")), 1) ++ ["0. Back"]) else if s.phase == "reliefs" then join("\n", numbered(map(\r. "${r.author}: ${r.id}", filter(\r. not r.resolved, s.session.state.reliefs)), 1) ++ ["0. Back"]) else match s.session.state.continuation {
+  if isWatch(s) && (s.phase == "assignments" || s.phase == "rests") then join("\n\n", numbered(map(\worker. {
+ let recipe = "${if s.phase == "rests" then "rest" else "work"}_${worker}";
+ "${watchName(recipe)} / ${worker}\n${purpose(recipe)}"
+ }, workers()),1) ++ ["0. Back"]) else if s.phase == "start" then "1. Start ${s.target}\n2. Leave offered" else if s.phase == "response" then "Crew response unavailable.\n1. Retry crew reply\n2. Use stock wording (no AI call)\n3. Cancel this response\n0. Quit" else if s.phase == "relief" then "1. Grant relief ${s.target}\n2. Deny relief\n0. Back" else if s.phase == "working" || s.phase == "offered" then join("\n", numbered(map(\t. "${projectName(t.recipe)} / ${join(", ", t.participants)}", tasks(s, s.phase == "working")), 1) ++ ["0. Back"]) else if s.phase == "reliefs" then join("\n", numbered(map(\r. "${r.author}: ${r.id}", filter(\r. not r.resolved, s.session.state.reliefs)), 1) ++ ["0. Back"]) else match s.session.state.continuation {
     Some(_) => "1. Continue pending advance\n2. Abort pending advance\n9. Status\n0. Quit",
-    None => "1. Offer science (4 ticks; reserve/consume 4 materials)\n2. Offer maintenance (3 ticks; reserve 3, consume 2)\n3. Scientist rest (2 ticks; no materials)\n4. Engineer rest (2 ticks; no materials)\n5. Advance one tick\n6. Check in with working crew\n7. Review offered projects\n8. Resolve relief\n9. Status\n0. Quit\nh. Help"
+    None => if isWatch(s) then "1. Choose work for a specialist\n2. Arrange rest\n5. Advance one turn\n6. Check in with working crew\n7. Review offered projects\n8. Resolve relief\n0. Quit" else "1. Offer science (4 ticks; reserve/consume 4 materials)\n2. Offer maintenance (3 ticks; reserve 3, consume 2)\n3. Scientist rest (2 ticks; no materials)\n4. Engineer rest (2 ticks; no materials)\n5. Advance one tick\n6. Check in with working crew\n7. Review offered projects\n8. Resolve relief\n9. Status\n0. Quit\nh. Help"
   }
 
 export pure func stage(s: PlayState, command: string, nextSeed: int, phase: string, target: string, nextId: int) -> Result[Stage, string]

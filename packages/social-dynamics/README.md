@@ -36,3 +36,5 @@ Read [AGENT.md](AGENT.md) for API contracts and explicit retention limits, and t
 [runner guide](../../examples/social-dynamics/README.md) for commands and input format.
 The package is experimental and unpublished. Game integration, live generation,
 visibility of captain KPIs and final refusal/authority rules remain subsequent work.
+
+Opt-in `BoundedIndicatorDelta(actor, indicator, delta)` performs checked addition and saturates to configured indicator bounds. Strict `IndicatorDelta` retains rejection outside bounds. Unknown references, invalid current indicator state and numeric overflow remain errors, and appraisals can affect only their observer. The new effect encodes as `bounded_indicator_delta`; existing tags remain unchanged.

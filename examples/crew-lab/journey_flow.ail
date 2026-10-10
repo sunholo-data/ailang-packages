@@ -9,7 +9,7 @@ export type Navigation = { view: string, page: int, history: [string] } deriving
 
 export type Routed = { state: PlayState, nav: Navigation, handled: bool } deriving (Eq)
 
-export type JourneyOptions = { args: [string], columns: int, rows: int, ansi: bool } deriving (Eq)
+export type JourneyOptions = { args: [string], columns: int, rows: int, ansi: bool, debug: bool, legacy: bool } deriving (Eq)
 
 export pure func initial() -> Navigation ! {}
 ensures { result.page == 0 && result.view == "bridge" && length(result.history) == 0 } =
@@ -33,6 +33,8 @@ ensures { length(result.history) <= 64 && result.page == 0 && result.view == "br
 pure func argsLoop(xs: [string], o: JourneyOptions, seen: [string], seed: bool) -> Result[JourneyOptions, string] =
   match xs {
     [] => Ok({ o | args: if seed then o.args else o.args ++ ["--seed", "42"] }),
+    "--debug" :: rest => if member(seen, "debug") then Err("Repeated --debug") else argsLoop(rest, { o | debug: true }, "debug" :: seen, seed),
+    "--legacy" :: rest => if member(seen, "legacy") then Err("Repeated --legacy") else argsLoop(rest, { o | legacy: true }, "legacy" :: seen, seed),
     "--plain" :: rest => if member(seen, "style") then Err("Repeated UI style") else argsLoop(rest, { o | ansi: false }, "style" :: seen, seed),
     "--ansi" :: rest => if member(seen, "style") then Err("Repeated UI style") else argsLoop(rest, { o | ansi: true }, "style" :: seen, seed),
     flag :: value :: rest => if flag == "--columns" || flag == "--rows" then if member(seen, flag) then Err("Repeated dimension") else match stringToInt(value) {
@@ -55,7 +57,7 @@ requires { columns >= 40 && columns <= 160 && rows >= 16 && rows <= 60 }
 ensures { match result {
   Ok(o) => o.columns >= 40 && o.columns <= 160 && o.rows >= 16 && o.rows <= 60,
   Err(_) => true
-} } = argsLoop(args, { args: [], columns: columns, rows: rows, ansi: ansi }, [], false)
+} } = argsLoop(args, { args: [], columns: columns, rows: rows, ansi: ansi, debug: false, legacy: false }, [], false)
 
 export pure func onboardingAllowed(lines: int, size: int) -> bool ! {}
 ensures { result == (lines >= 0 && lines < 10000 && size >= 0 && size <= 65536) }

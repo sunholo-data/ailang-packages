@@ -1,5 +1,5 @@
 module sunholo/social_dynamics/relationships_test
-import ./model (Actor, Config, Resource, State, emptyState, Policies, Delivery, Host, ActorPrincipal, Allowed, IndicatorDelta, RelationshipDelta, Error, Unauthorized, UnseenEvidence, InvalidPolicyEffect, PendingAdvance, InvalidTransition, CapacityExceeded, Applied, Duplicate)
+import ./model (Actor, Config, Resource, State, emptyState, Policies, Delivery, Host, ActorPrincipal, Allowed, BoundedIndicatorDelta, IndicatorDelta, RelationshipDelta, Error, Unauthorized, UnseenEvidence, InvalidPolicyEffect, PendingAdvance, InvalidTransition, CapacityExceeded, Applied, Duplicate)
 import ./indicators (validateConfig)
 import ./relationships (appraisalContext, deliver)
 import std/result (Ok, Err)
@@ -41,3 +41,11 @@ test "policy identity mismatch refuses" { let p = policies(); match deliver(fixt
 test "known self delivery still validates receipt gate" { let d = delivery(); match deliver(fixtureConfig(), policies(), fixtureState(), Host, {d | observer: "a", notBefore: 1}) { Err(InvalidTransition(_)) => true, _ => false } }
 test "own indicator policy can replace relationship policy" { let p = policies(); match deliver(fixtureConfig(), {p | appraisal: \a. [IndicatorDelta(a.observer.id, "trust", 2)]}, fixtureState(), Host, delivery()) { Ok(step) => step.state.relationships == fixtureState().relationships && match head(filter(\a. a.id == "b", step.state.actors)) { Some(a) => match head(a.indicators) { Some(v) => v.id == "trust" && v.value == 72, _ => false }, _ => false }, _ => false } }
 test "same ID indicator range mutation refuses delivery before duplicate" { let c = fixtureConfig(); let d = delivery(); match deliver(c, policies(), fixtureState(), Host, d) { Ok(step) => match deliver({c | indicators: [{id: "trust", minimum: 0, maximum: 200}]}, policies(), step.state, Host, d) { Err(_) => true, _ => false }, _ => false } }
+
+test "bounded appraisal remains observer owned and atomic" {
+ let p = policies();
+ match (deliver(fixtureConfig(),{p | appraisal: \a. [BoundedIndicatorDelta("a","trust",999)]},fixtureState(),Host,delivery()), deliver(fixtureConfig(),{p | appraisal: \a. [BoundedIndicatorDelta("b","trust",999),BoundedIndicatorDelta("b","missing",1)]},fixtureState(),Host,delivery())) { (Err(InvalidPolicyEffect(_)),Err(_)) => true, _ => false }
+}
+test "own bounded appraisal saturates valid recipient" {
+ let p = policies(); match deliver(fixtureConfig(),{p | appraisal: \a. [BoundedIndicatorDelta(a.observer.id,"trust",999)]},fixtureState(),Host,delivery()) { Ok(step) => match head(filter(\a. a.id == "b",step.state.actors)) {Some(a) => match head(a.indicators) {Some(v) => v.id == "trust" && v.value == 100,_=>false},_=>false},_=>false }
+}

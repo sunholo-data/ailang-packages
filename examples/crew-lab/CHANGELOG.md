@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.2.0
+
+Adds understandable first-choice context and pre-start help, plus a versioned
+five-specialist watch that is now crew-journey's default. Archive compute capacity
+is reusable; replacement modules and diagnostic cartridges are finite. Fatigue,
+stress, morale, role values and all OCEAN axes influence responses; normal play uses
+qualitative descriptions and exact AI words, while --debug exposes development state.
+The separate watch policy defaults to6 bounded AI attempts and preserves legacy user
+policy/cache files. Modern signatures include exact config identity; score-disclosure
+guards reject generated and cached text before use. Adds installed walkthrough,
+resource contention/completion, cache isolation and both-engine replay controls.
+Legacy recordings, crew-play and strict effects remain compatible; --legacy --debug
+retains the earlier journey comparison. No registry publication or game integration.
+
 ## 0.1.0
 
 Adds an independent captain-and-crew CLI experiment using saved synthetic typed

@@ -1,0 +1,37 @@
+{
+  "reviewer": "watch_design_review_b",
+  "document": "/private/tmp/crew-watch-v2-20261010/design_docs/planned/crew-lab/crew-watch-v2.md",
+  "verdict": "REJECT",
+  "round": 0,
+  "axioms": {"A1":1,"A2":1,"A3":1,"A4":1,"A5":-1,"A6":0,"A7":1,"A8":0,"A9":0,"A10":1,"A11":0,"A12":1},
+  "net": 7,
+  "hard_axiom_violation": false,
+  "hard_gates": {
+    "language_claims": "PASS: no novel compiler/language-support premise",
+    "conflict_surface": "PASS: application start/profile/cache compatibility is explicitly scoped; no compiler changes",
+    "historical_isolation": "PASS: legacy configs, start payload, signatures, editable policy and banked quotes explicitly preserved",
+    "authority": "PASS: exact consent/orders identity and variant ownership checks are explicit",
+    "actor_local_ai_context": "PASS: frozen perception and trusted catalog, no private peer-state injection",
+    "cost_and_indicator_premises": "REJECT: static effect boundary behavior is not addressed",
+    "player_projection": "PASS: all normal surfaces named and debug access explicit",
+    "quorum_vendor_rule": "Controller must document the blocked external quorum and identity/vendor basis of any allowed in-session substitute; this review cannot independently certify provider identity"
+  },
+  "blockers": [{
+    "id": "B1",
+    "title": "Repeated work/rest can block completion at indicator bounds",
+    "evidence": [
+      "packages/social-dynamics/indicators.ail applyOne: IndicatorDelta computes n=value+delta and returns InvalidPolicyEffect when n is outside the configured range; there is no clipping",
+      "packages/social-dynamics/tasks.ail finish: release and completed status are staged before applyEffects, but on error neither is returned/published",
+      "packages/social-dynamics/engine.ail drive: a failed complete returns Blocked with the previous state",
+      "examples/crew-lab/scenario.ail existing values start readiness at 50 and fatigue at 45/30; the new draft does not prescribe a new boundary strategy"
+    ],
+    "causal_example": "For an engineer starting at readiness 50, +20 completions produce 70 and 90, then a third completion attempts 110. The proposed third replacement module remains reserved and the project remains Working. Repeated fatigue/stress-reducing rest similarly eventually attempts a negative value.",
+    "requested_resolution": "Specify a modern-only strategy before execution: e.g. reject unsafe starts with exact bounds and human-readable explanation, or define explicitly versioned bounded completion handling without changing legacy semantics. Include repeated rest at zero, work at readiness/morale 100, stop/refund, and slot/supply conservation controls. Ensure stock-exhaustion acceptance tests are achievable under the chosen strategy.",
+    "why_blocking": "The lab is explicitly intended for continued fast iteration and promises repeat-work stock exhaustion plus resource release. Current source-backed kernel behavior does not guarantee those mechanics under the draft's static deltas."
+  }],
+  "strongest_objection": "The design treats host range validation as sufficient for playable bounded indicators, but the existing host rejects rather than saturates; valid assignments can become uncompletable later.",
+  "suggestions": [
+    "Record initial fatigue, stress, morale and readiness values in the design or implementation data evidence so end-to-end boundary cases are reproducible.",
+    "At 40x16, inspect the actual first frame to ensure persistent policy explanation still leaves space for the captain/context/action flow; unit text-presence checks alone do not establish visible onboarding."
+  ]
+}

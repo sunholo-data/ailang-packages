@@ -8,7 +8,7 @@ import std/fs (mkdirAllResult, mkdirResult, readFileResult, writeFileResult, ren
 import std/ai (step, Message)
 import pkg/sunholo/content_library/library (Bundle, cacheKey, decodeBundle, encodeBundle, decodeGenerated, starterBundle)
 import ./codec (object, fields, integer)
-import ./reactions (Policy, decodePolicy, defaultPolicyBody, prompt)
+import ./reactions (Policy, decodePolicy, defaultPolicyBody, watchPolicyBody, narrativeBundle, prompt)
 
 export type PolicyFile = { policy: Policy, body: string }
 
@@ -68,18 +68,19 @@ func policyRead(path: string) -> Result[PolicyFile, string] ! {FS} = match readF
   }
 }
 
-func policyLocked(home: string, path: string, lock: string) -> Result[PolicyFile, string] ! {FS} = {
-  let result = if fileExists(path) then policyRead(path) else match atomic(path, "${lock}/policy.tmp", defaultPolicyBody()) {
-    Err(e) => Err(e),
-    Ok(_) => policyRead(path)
-  }
-  match removeFileResult("${lock}/policy.tmp") {
-    _ => match removeFileResult(lock) {
-      Err(_) => Err("cannot release policy lock"),
-      Ok(_) => result
+func policyLocked(home: string, path: string, lock: string, defaultBody: string) -> Result[PolicyFile, string] ! {FS} =
+  {
+    let result = if fileExists(path) then policyRead(path) else match atomic(path, "${lock}/policy.tmp", defaultBody) {
+      Err(e) => Err(e),
+      Ok(_) => policyRead(path)
+    }
+    match removeFileResult("${lock}/policy.tmp") {
+      _ => match removeFileResult(lock) {
+        Err(_) => Err("cannot release policy lock"),
+        Ok(_) => result
+      }
     }
   }
-}
 
 export func loadPolicy(home: string) -> Result[PolicyFile, string] ! {FS}
 ensures { match result {
@@ -92,7 +93,23 @@ ensures { match result {
     let lock = "${home}/policy.lock"
     if fileExists(path) then policyRead(path) else match mkdirResult(lock) {
       Err(_) => Err("policy initialisation busy; existing config retained"),
-      Ok(_) => policyLocked(home, path, lock)
+      Ok(_) => policyLocked(home, path, lock, defaultPolicyBody())
+    }
+  }
+}
+
+export func loadWatchPolicy(home: string) -> Result[PolicyFile, string] ! {FS}
+ensures { match result {
+  Ok(p) => stringLength(p.body) > 0,
+  Err(_) => true
+} } = match ensureHome(home) {
+  Err(e) => Err(e),
+  Ok(_) => {
+    let path = "${home}/response-policy-watch-v2.json"
+    let lock = "${home}/policy-watch-v2.lock"
+    if fileExists(path) then policyRead(path) else match mkdirResult(lock) {
+      Err(_) => Err("watch policy initialisation busy"),
+      Ok(_) => policyLocked(home, path, lock, watchPolicyBody())
     }
   }
 }
@@ -102,7 +119,7 @@ func cacheRead(path: string, signature: string, legal: [string], model: string) 
     Err(_) => failed("cannot read cached dialogue", 0, 0, 0, true),
     Ok(body) => match decodeBundle(body, signature, legal) {
       Err(e) => failed("invalid cached dialogue: ${e}", 0, 0, 0, true),
-      Ok(bundle) => if bundle.origin == "ai" && bundle.model != model then failed("cached model metadata mismatch", 0, 0, 0, true) else loaded(bundle, "cache", 0, 0, 0)
+      Ok(bundle) => if not narrativeBundle(signature, bundle) then failed("cached dialogue reveals development metrics; request retained", 0, 0, 0, true) else if bundle.origin == "ai" && bundle.model != model then failed("cached model metadata mismatch", 0, 0, 0, true) else loaded(bundle, "cache", 0, 0, 0)
     }
   }
 
@@ -114,7 +131,7 @@ func generate(path: string, lock: string, signature: string, legal: [string], mo
     Err(e) => failed("AI generation unavailable (${e.code}); request retained", 1, 0, 0, false),
     Ok(reply) => match decodeGenerated(reply.message.content, signature, legal, model, reply.input_tokens, reply.output_tokens) {
       Err(e) => failed("AI output rejected: ${e}", 1, reply.input_tokens, reply.output_tokens, true),
-      Ok(bundle) => {
+      Ok(bundle) => if not narrativeBundle(signature, bundle) then failed("AI output reveals development metrics; request retained", 1, reply.input_tokens, reply.output_tokens, true) else {
         let body = encodeBundle(bundle)
         if stringLength(body) > 65536 then failed("generated bundle exceeds file bound", 1, reply.input_tokens, reply.output_tokens, true) else match atomic(path, "${lock}/bundle.tmp", body) {
           Err(e) => failed(e, 1, reply.input_tokens, reply.output_tokens, true),

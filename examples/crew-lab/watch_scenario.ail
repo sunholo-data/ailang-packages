@@ -1,0 +1,53 @@
+module sunholo/crew_lab/watch_scenario
+import std/result (Result, Ok, Err)
+import std/list (map, length, contains)
+import pkg/sunholo/social_dynamics/model (Config, Actor, Resource, Recipe, Value, BoundedIndicatorDelta)
+import ./scenario (config as legacyConfig)
+
+export pure func workers() -> [string] ! {}
+ensures { length(result) == 5 }
+ =
+ ["scientist", "engineer", "medic", "pilot", "diplomat"]
+
+export pure func workerRecipe(worker: string, recipe: string) -> bool ! {}
+ensures { not result || contains(workers(), worker) }
+ tests [(("medic","work_medic"),true),(("pilot","rest_pilot"),true),(("pilot","work_scientist"),false),(("captain","work_captain"),false)] {
+ contains(workers(), worker) && (recipe == "work_${worker}" || recipe == "rest_${worker}")
+ }
+
+export pure func projectName(recipe: string) -> string ! {}
+ensures { result != "" } =
+ if recipe == "work_scientist" then "Analyse Spire readings" else if recipe == "work_engineer" then "Service signal equipment" else if recipe == "work_medic" then "Prepare diagnostic supplies" else if recipe == "work_pilot" then "Plan approach observations" else if recipe == "work_diplomat" then "Rehearse first-contact signals" else if recipe == "rest_scientist" then "Scientist rest" else if recipe == "rest_engineer" then "Engineer rest" else if recipe == "rest_medic" then "Medic rest" else if recipe == "rest_pilot" then "Pilot rest" else if recipe == "rest_diplomat" then "Diplomat rest" else if recipe == "" then "Unknown project" else recipe
+
+export pure func purpose(recipe: string) -> string ! {}
+ensures { result != "" } =
+ if recipe == "work_scientist" then "Interpret the Spire readings before possible contact." else if recipe == "work_engineer" then "Prepare reliable equipment for receiving a signal." else if recipe == "work_medic" then "Organise diagnostic supplies for the coming encounter." else if recipe == "work_pilot" then "Prepare an observation approach without moving the ship yet." else if recipe == "work_diplomat" then "Practise signals that may help us begin a conversation." else "Make room to recover before another assignment."
+
+pure func slots(n: int) = {resource:"archive_compute", reserve:n, consume:0}
+pure func supply(id: string) = {resource:id, reserve:1, consume:1}
+pure func change(actor: string, indicator: string, n: int) = BoundedIndicatorDelta(actor, indicator, n)
+pure func work(worker: string, duration: int, costs: [{resource:string,reserve:int,consume:int}], fatigue: int, stress: int, morale: int, benefit: string, amount: int) -> Recipe =
+ {id:"work_${worker}",duration:duration,allocation:1,costs:costs,effects:[change(worker,benefit,amount),change(worker,"fatigue",fatigue),change(worker,"stress",stress),change(worker,"morale",morale)]}
+pure func rest(worker: string) -> Recipe = {id:"rest_${worker}",duration:2,allocation:1,costs:[],effects:[change(worker,"fatigue",-20),change(worker,"stress",-15),change(worker,"morale",5)]}
+
+export pure func config(policy: string) -> Result[Config,string] ! {}
+ensures { match result {Ok(c) => c.version == 1 && c.limits.actors == 6, Err(_) => true} } =
+ match legacyConfig(policy) {
+  Err(e) => Err(e),
+  Ok(c) => Ok({c | id:"crew-watch-v2-${policy}",session:"crew-watch-v2-${policy}",limits:{c.limits | actors:6},indicators:map(\id. {id:id,minimum:0,maximum:100},["fatigue","stress","morale","readiness","observations","trust"]),recipes:[work("scientist",4,[slots(2)],20,10,5,"observations",25),work("engineer",3,[slots(1),supply("replacement_modules")],15,5,0,"readiness",20),work("medic",2,[supply("diagnostic_cartridges")],10,5,5,"readiness",15),work("pilot",2,[slots(2)],15,10,0,"readiness",15),work("diplomat",3,[slots(1)],10,10,5,"readiness",15)] ++ map(rest,workers()),rules:map(\worker. {id:"overextended_${worker}",actor:worker,indicator:"stress",above:true,threshold:70,recovery:45,duration:2,cooldown:3},workers()),relationships:map(\worker. {from:worker,to:"captain",dimension:"trust",value:50},workers())})
+ }
+
+pure func ocean(o: int,c: int,e: int,a: int,n: int) -> [Value] = [{id:"openness",value:o},{id:"conscientiousness",value:c},{id:"extraversion",value:e},{id:"agreeableness",value:a},{id:"neuroticism",value:n}]
+pure func values(f: int,s: int,m: int) -> [Value] = [{id:"fatigue",value:f},{id:"stress",value:s},{id:"morale",value:m},{id:"readiness",value:50},{id:"observations",value:0}]
+pure func actor(id: string,traits: [Value],priorities: [Value],f: int,s: int,m: int) -> Actor = {id:id,capacity:1,attributes:traits,values:priorities,indicators:values(f,s,m)}
+
+export pure func actors() -> [Actor] ! {}
+ensures { length(result) == 6 } =
+ [actor("captain",[],[{id:"mission",value:80}],10,35,60),actor("scientist",ocean(80,80,20,50,50),[{id:"curiosity",value:80},{id:"autonomy",value:75}],45,65,55),actor("engineer",ocean(20,80,20,50,20),[{id:"reliability",value:85},{id:"fairness",value:70}],30,50,55),actor("medic",ocean(50,50,50,80,50),[{id:"care",value:85},{id:"fairness",value:70}],40,60,65),actor("pilot",ocean(20,20,80,50,20),[{id:"safety",value:80},{id:"autonomy",value:75}],25,55,60),actor("diplomat",ocean(50,50,80,80,20),[{id:"cooperation",value:85},{id:"curiosity",value:70}],35,65,70)]
+
+pure func resource(id: string,n: int) -> Resource = {id:id,initial:n,available:n,reserved:0,consumed:0,transferredIn:0,transferredOut:0}
+export pure func resources() -> [Resource] ! {}
+ensures { length(result) == 3 } = [resource("archive_compute",3),resource("replacement_modules",3),resource("diagnostic_cartridges",4)]
+
+export pure func resourceName(id: string) -> string ! {}
+ensures { result != "" } = if id == "archive_compute" then "Archive compute slots" else if id == "replacement_modules" then "Replacement modules" else if id == "diagnostic_cartridges" then "Diagnostic cartridges" else if id == "" then "Unknown supply" else id

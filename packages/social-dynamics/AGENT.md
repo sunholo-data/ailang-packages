@@ -1,6 +1,6 @@
 # sunholo/social_dynamics
 
-Experimental 0.1.0. Public exports are pure. Package IO ceiling is solely for
+Experimental 0.2.0. Public exports are pure. Package IO ceiling is solely for
 private `_smoke.ail`; no provider, wall clock, disk, game or hidden RNG access.
 
 Start with `engine.init(config, actors, resources)`. Supply trusted deterministic
@@ -26,7 +26,7 @@ trusted host seam, not a callback sandbox. Exported low-level helpers (effects,
 task/condition transitions) are for the trusted engine, not generated input.
 
 All numbers are bounded +/-1,000,000,000; times/costs/capacities are nonnegative.
-No clamping. Material available+reserved+consumed equals initial+inbound-outbound.
+Strict IndicatorDelta never clamps. BoundedIndicatorDelta explicitly saturates a checked result at configured bounds; it refuses invalid current indicator state, unknown references and numeric overflow. Adding this ADT arm requires exhaustive consumers to update. Material available+reserved+consumed equals initial+inbound-outbound.
 Accept reserves once; discrete project completion consumes configured amount and
 returns the rest; stop returns unused reservation. Work allocations are concurrent
 rate limits. `tasks.progress` derives checked allocation*elapsed ticks. This is

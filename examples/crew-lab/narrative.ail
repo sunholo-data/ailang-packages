@@ -1,0 +1,68 @@
+module sunholo/crew_lab/narrative
+import std/list (head,filter,map,length)
+import std/option (Some,None)
+import std/string (join,length as size)
+import std/json (decode,getString,getArray,getInt)
+import std/result (Ok,Err)
+import pkg/sunholo/social_dynamics/model (Actor,Relationship,Value,Working,Completed)
+import ./session (Session,Request)
+import ./watch_scenario (projectName,resourceName,purpose)
+
+export pure func fatigue(n: int) -> string ! {}
+ensures { size(result) > 0 }
+ tests [(0,"looks well rested"),(45,"looks a little tired"),(90,"looks exhausted")] {
+ if n < 25 then "looks well rested" else if n < 60 then "looks a little tired" else if n < 80 then "looks tired" else "looks exhausted"
+}
+export pure func stress(n: int) -> string ! {}
+ensures { size(result) > 0 }
+ tests [(0,"seems at ease"),(60,"seems on edge"),(90,"looks fraught")] {
+ if n < 35 then "seems at ease" else if n < 60 then "seems watchful" else if n < 80 then "seems on edge" else "looks fraught"
+}
+export pure func morale(n: int) -> string ! {}
+ensures { size(result) > 0 }
+ tests [(0,"seems discouraged"),(50,"seems steady"),(90,"seems in good spirits")] {
+ if n < 30 then "seems discouraged" else if n < 70 then "seems steady" else "seems in good spirits"
+}
+pure func value(a: Actor,id: string) -> int = lookupValue(a.indicators,id)
+pure func lookupValue(xs: [Value],id: string) -> int = match xs {[]=>50,v::rest=>if v.id == id then v.value else lookupValue(rest,id)}
+pure func trust(rs: [Relationship],id: string) -> string = match rs {
+ []=>"",
+ r::rest=>if r.from != id || r.to != "captain" || r.dimension != "trust" then trust(rest,id) else if r.value < 30 then "is guarded with you" else if r.value < 65 then "is willing to hear you out" else "seems confident in your leadership"
+}
+export pure func observation(a: Actor,rs: [Relationship]) -> string ! {}
+ensures { size(result) > 0 } = "${a.id} ${fatigue(value(a,"fatigue"))}, ${stress(value(a,"stress"))} and ${morale(value(a,"morale"))}; ${trust(rs,a.id)}."
+export pure func crew(s: Session,debug: bool) -> string ! {}
+ensures { size(result) > 0 } = join("\n\n",map(\a. {
+ let busy = filter(\t. t.status == Working && head(t.participants) == Some(a.id),s.state.tasks);
+ let work = if length(busy) == 0 then "Available for an assignment." else join(", ",map(\t. "Working: ${projectName(t.recipe)}",busy));
+ let preferences = join(", ",map(\v. v.id,a.values));
+ let raw = if debug then "\nDEVELOPMENT: ${join(", ",map(\v. "${v.id} ${v.value}",a.indicators))}\nOCEAN: ${join(", ",map(\v. "${v.id} ${v.value}",a.attributes))}\n${join(", ",map(\r. "${r.from} -> ${r.to} ${r.dimension} ${r.value}",filter(\r. r.from == a.id,s.state.relationships)))}" else "";
+ "[ ${a.id} ]\n${observation(a,s.state.relationships)}\nCares about ${preferences}. ${work}${raw}"
+},filter(\a. debug || a.id != "captain",s.state.actors)))
+export pure func supplies(s: Session) -> string ! {}
+ensures { size(result) > 0 } = join("\n",map(\r. "${resourceName(r.id)}: ${r.available} free / ${r.reserved} held / ${r.consumed} spent",s.state.resources))
+export pure func costs(s: Session,recipe: string) -> string ! {}
+ensures { size(result) > 0 } = match head(filter(\r. r.id == recipe,s.config.recipes)) {
+ None=>"Project unavailable",Some(r)=>"${r.duration} turns; ${if length(r.costs) == 0 then "no supplies" else join(", ",map(\c. "holds ${c.reserve} ${resourceName(c.resource)}${if c.consume == 0 then "; returns when work ends" else "; spends ${c.consume} on completion"}",r.costs))}"
+}
+pure func receivedValue(r: Request,id: string) -> int = match decode(r.context) {
+ Err(_)=>50,Ok(j)=>match getArray(j,"indicators") {None=>50,Some(xs)=>match head(filter(\v. getString(v,"id") == Some(id),xs)) {None=>50,Some(v)=>match getInt(v,"value") {Some(n)=>n,None=>50}}}
+}
+export pure func stock(r: Request,label: string) -> string ! {}
+ensures { size(result) > 0 } = {
+ let recipe = match decode(r.context) {Err(_)=>"",Ok(j)=>match getString(j,"recipe") {Some(x)=>x,None=>""}};
+ let response = if label == "accept" then "agrees to take it on" else if label == "decline" then "declines the assignment" else if label == "concern" then "raises concerns before starting" else if label == "request_relief" then "asks to be relieved" else if label == "continue" then "is willing to continue" else "asks for more time to decide";
+ "Crew reaction (narrator): For ${projectName(recipe)}, the ${r.actor} ${response}. The ${r.actor} ${fatigue(receivedValue(r,"fatigue"))}, ${stress(receivedValue(r,"stress"))} and ${morale(receivedValue(r,"morale"))}."
+}
+export pure func consequences(before: Session,after: Session,c: string) -> string ! {}
+ensures { size(result) > 0 } = {
+ let cmd = match decode(c) {Err(_)=>"",Ok(j)=>match getString(j,"command") {Some(x)=>x,None=>""}};
+ let summary = if cmd == "advance" then "Turn ${after.state.tick}: started work has moved forward." else if cmd == "start_task" then "Work has started. Its worker and resources are occupied until it ends." else if cmd == "offer" then "Assignment offered; hear the crew before choosing whether to start." else if cmd == "resolve_relief" then "Relief decision recorded; review Work for the resulting assignment." else "Your decision is recorded.";
+ let complete = filter(\t. t.status == Completed && not (match head(filter(\old. old.id == t.id,before.state.tasks)) {Some(old)=>old.status == Completed,None=>false}),after.state.tasks);
+ let effects = join("\n",map(\a. match head(filter(\old. old.id == a.id,before.state.actors)) {None=>"",Some(old)=>if old.indicators == a.indicators then "" else observation(a,after.state.relationships)},after.state.actors));
+ let relationships = join("\n",map(\r. match head(filter(\old. old.from == r.from && old.to == r.to && old.dimension == r.dimension,before.state.relationships)) {None=>"",Some(old)=>if old.value == r.value then "" else "${r.from} seems ${if r.value < old.value then "less comfortable" else "more comfortable"} with your leadership."},after.state.relationships));
+ "${summary}${if length(complete) == 0 then "" else "\nCompleted: ${join(", ",map(\t. projectName(t.recipe),complete))}. Reserved compute is available again; completed work spends its physical supplies."}\n${effects}\n${relationships}"
+}
+
+export pure func spendsSupplies(s: Session,recipe: string) -> bool ! {}
+ensures { not result || length(filter(\r. r.id == recipe,s.config.recipes)) > 0 } = match head(filter(\r. r.id == recipe,s.config.recipes)) {None=>false,Some(r)=>length(filter(\c. c.consume > 0,r.costs)) > 0}
