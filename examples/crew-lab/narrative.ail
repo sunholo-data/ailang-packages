@@ -64,4 +64,5 @@ ensures { size(result) > 0 } = {
  "${summary}${if length(complete) == 0 then "" else "\nCompleted: ${join(", ",map(\t. projectName(t.recipe),complete))}. Reserved compute is available again; completed work spends its physical supplies."}\n${effects}\n${relationships}"
 }
 
-export pure func spendsSupplies(s: Session,recipe: string) -> bool ! {} = match head(filter(\r. r.id == recipe,s.config.recipes)) {None=>false,Some(r)=>length(filter(\c. c.consume > 0,r.costs)) > 0}
+export pure func spendsSupplies(s: Session,recipe: string) -> bool ! {}
+ensures { not result || length(filter(\r. r.id == recipe,s.config.recipes)) > 0 } = match head(filter(\r. r.id == recipe,s.config.recipes)) {None=>false,Some(r)=>length(filter(\c. c.consume > 0,r.costs)) > 0}

@@ -121,19 +121,25 @@ test "repeated rest at lower limits completes instead of stranding worker" {
   }
 }
 
-test "useful work at upper limit completes and releases compute" {
+test "useful work at upper limit releases compute and spends finite cartridges" {
   match base() {
     Err(_) => false,
     Ok(o) => {
-      let initial = { o.session | state: { o.session.state | actors: map(\a. if a.id == "pilot" then { a | indicators: map(\v. { v | value: 100 }, a.indicators) } else a, o.session.state.actors) } }
+      let initial = { o.session | state: { o.session.state | actors: map(\a. if a.id == "pilot" || a.id == "medic" then { a | indicators: map(\v. { v | value: 100 }, a.indicators) } else a, o.session.state.actors) } }
       match job(initial, "pilot", "limit") {
         Err(_) => false,
-        Ok(a) => match advance(a.session, 2) {
+        Ok(a) => match job(a.session, "medic", "care-limit") {
           Err(_) => false,
-          Ok(done) => all(\t. t.status == Completed, done.session.state.tasks) && (match head(filter(\r. r.id == "archive_compute", done.session.state.resources)) {
-            Some(r) => r.available == 3 && r.reserved == 0,
-            _ => false
-          })
+          Ok(care) => match advance(care.session, 2) {
+            Err(_) => false,
+            Ok(done) => all(\t. t.status == Completed, done.session.state.tasks) && (match head(filter(\r. r.id == "archive_compute", done.session.state.resources)) {
+              Some(r) => r.available == 3 && r.reserved == 0 && (match head(filter(\stock. stock.id == "diagnostic_cartridges", done.session.state.resources)) {
+                Some(stock) => stock.available == 3 && stock.consumed == 1 && stock.reserved == 0,
+                None => false
+              }),
+              _ => false
+            })
+          }
         }
       }
     }

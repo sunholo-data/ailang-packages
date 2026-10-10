@@ -12,33 +12,65 @@ crew-journey-offline
 crew-journey --ansi --columns 80 --rows 24
 ```
 
-The briefing explains your role and supplies. Choose **1 consent** or **2 orders**
-explicitly. The new entry uses disclosed seed 42; `--seed N` changes the experiment
-without a seed questionnaire. Offer an assignment, hear the crew, then choose
-Start or Leave. Only advancing time progresses work. Reading never moves time.
+The opening tells you what you are doing before asking for your command style.
+**1 Ask for agreement** waits for a worker to agree before work can start.
+**2 Use captain's authority** permits starting despite refusal; trust can suffer,
+and cooperation, resources and capacity still apply. This choice lasts this run.
+Press `h` before choosing if you want a concrete example. Seed42 is the default;
+`--seed N` changes repeatable variation without another startup question.
 
-Use keys followed by **Enter**: `c` Crew, `w` Work, `j` Log, `h` Guide, `b` the active
-Bridge decision; `n`/`v` page text. Numeric action keys stay visible on every page. A blank line ends the run because
-the pinned runtime returns the same value for empty input and EOF.
-The main view keeps crew/supply context and the latest published conversation or
-consequence; full OCEAN, values and directed trust live in Crew. Work shows actual
-costs, duration/progress and completion effects. Log keeps 64 session-local notices.
+Your five specialists are scientist, engineer, medic, pilot and diplomat. Their
+fatigue, stress, morale, values and OCEAN archetypes influence authored reactions;
+normal play shows observations and speech, such as “looks tired” or “on edge”.
+`--debug` exposes actual metrics, OCEAN traits and recorded selection evidence for
+development. It is off by default. These are experimental characterization rules.
 
-Try two different experiments. **Equipment first:** offer maintenance (2), hear
-the engineer and choose Start if agreement/authority permits. Advance three turns
-(5), then offer science (1). Maintenance consumes 2 and releases 1 of its 3 reserved
-materials, so 4 remain for science. **Observations then care:** offer science (1)
-and choose Start if permitted. Check in (6) with the working scientist; if they
-request relief, review requests (8) and decide Grant or Deny. Grant stops science
-and refunds its reservation. You can then offer scientist rest (3), choose Start,
-and advance two turns. Replies vary; leave refused offers open, retry a pending
-reply or use explicitly selected stock wording. These paths are experiments,
-not prescribed outcomes.
+Three resources compete: **3 Archive compute slots**, **3 replacement modules**
+and **4 diagnostic cartridges**. Compute is concurrent capacity for analysing
+Spire readings; it returns when work ends. Physical supplies are finite: completion
+spends them, even if a benefit has reached its limit. Granted relief stops work
+and refunds its reservation. Waiting never restores spent physical stock.
 
-If science completes instead, it consumes 4 of the original 6 materials, leaving 2.
-Maintenance needs 3 to start: waiting never replenishes consumed supplies. The UI
-explains ordinary rejection and retains the accepted state. Journal publication
-failure stops the run before exposing an uncommitted state or reply.
+Use a key followed by **Enter**: `c` Crew, `w` Work, `j` Log, `h` Guide and `b`
+returns to your current decision. `n`/`v` page text. Numbers select the visible
+actions on any page. Reading costs no turn, AI attempt, random draw or journal entry.
+Blank input ends the run because the runtime uses the same value for empty input
+and EOF. The log keeps the last64 notices from this run.
+
+Try these two complete flows. Replies vary: under agreement, a refusal means
+leave the offer open or choose another assignment. These examples describe the
+acceptance path, rather than promising an agreement.
+
+1. **Equipment and science together:** choose agreement (`1`), choose work (`1`),
+   scientist (`1`), then Start (`1`) if agreed. Choose work (`1`), engineer (`2`),
+   Start (`1`). These reserve all3 compute slots and1 module. Try pilot work
+   (`1`, `4`, Start `1`): its2 slots are unavailable, so its offer stays open.
+   The rejected start returns to the bridge. Advance4 turns (`5` four times). Science and equipment complete, all3 slots
+   return, and only1 module is spent. Review offers (`7`) to return to the pilot.
+   Read Work (`w`), return to the bridge (`b`), then quit (`0`).
+2. **Care before contact:** choose agreement (`1`), arrange rest (`2`), scientist
+   (`1`), then Start (`1`) if agreed. Advance twice (`5`, `5`): they recover and
+   the worker becomes available. Choose work (`1`), medic (`3`), Start (`1`), then
+   advance twice: diagnostic preparation completes and spends1 cartridge.
+   Choose work (`1`), diplomat (`5`), Start (`1`), then check in (`6`, choose their
+   working project). If they request relief, use `8` to select it and grant or
+   deny. Grant returns their compute slot; denial keeps the assignment working.
+   Read Crew (`c`) and the log (`j`), return (`b`), then quit (`0`).
+
+Live mode uses the existing OpenRouter setup and pinned `z-ai/glm-5.3-flash` model.
+A cache miss may create dialogue once; the same exact situation can reuse it later.
+The modern policy file is `response-policy-watch-v2.json` under the library home,
+with6 attempts per run by default (editable0..8). Existing user policy files are
+preserved. AI supplies speech, authored rules select reactions, and the host owns
+consequences. If generation fails or the budget ends, retry, explicitly choose an
+authored narrator continuation, or cancel. No unselected AI response changes state.
+
+The modern scenario is versioned `watch-v2`. Old `crew-play` and saved recordings
+remain unchanged. `crew-journey --legacy --debug` runs the older two-specialist
+scenario for regression/development. Its old response-policy.json and cache keys
+remain byte-compatible; modern cache signatures include exact configuration identity.
+The known-pattern dialogue guard rejects trait names and metric-score disclosure
+before publication and on cache read; it is not a semantic proof of prose accuracy.
 
 ANSI redraw uses bright blue/gold chrome and safe clear/home/reset only. TERM set
 and not `dumb`, with NO_COLOR absent, selects ANSI; `--plain`/`--ansi` override.
@@ -63,7 +95,7 @@ terminal-ui-demo
 Its core is pure AILANG; the demo uses IO only. Cell sizing supports ASCII, European
 punctuation/box drawing and wide CJK conservatively; no full grapheme/emoji claim.
 Run `test-journey.sh` for installed navigation/baseline equality and both-engine
-recovery replay; `make -f examples/crew-lab/Makefile validate` includes the old gates.
+recovery replay; `make -f examples/crew-lab/Makefile validate` includes the legacy and modern watch gates. Run `watch-test` for the five-specialist installed controls.
 
 The original `crew-play`, `crew-view` and recording commands remain available.
 The following technical guide documents those compatible interfaces and host limits.
@@ -308,3 +340,9 @@ pure controls plus the installed FS/provider-fixture integration harness instead
 SMT proof skips/encoder limitations do not count as runtime test passes. Generated
 text is structurally bounded; factual and response-label consistency remain narrative
 quality concerns for subsequent play testing.
+
+Runs are bounded experiments. Each atomic journal stops safely at8MiB, with a1MiB
+record limit; the last published state is retained when a write cannot fit. The
+number of turns before that happens depends on how many projects, responses and
+events accumulate. Longer whole-journey simulations will need compact checkpoints;
+this release is a watch-sized story lab.

@@ -1,6 +1,6 @@
 # sunholo/crew_lab
 
-Experimental host example, version0.1.0. Saved `main` and `viewer` use IO only.
+Experimental host example, version0.2.0. Saved `main` and `viewer` use IO only.
 The guided `play` adapter uses IO,Env,FS,AI; `store` uses FS,AI. `actor_policy`,
 `scenario`, `session`, `codec`, `reactions`, `play_flow` and `presenter` remain pure.
 No Net, RNG or clock effect is requested.
@@ -97,3 +97,39 @@ Recipe costs/host configuration, authority, response schema, model and library u
 Native controls must test evaluator AND strict VM; installed test-journey compares
 all journal payloads against legacy paths and replays recovery recordings both ways.
 Core raw-key/size request: inbox_1791568104057_d08245d1; not implemented here.
+
+
+Modern default crew-journey uses explicit watch-v2 start, captain plus five specialists,
+three approved named resources and bounded recipe effects. Preserve strict legacy
+start/config/recordings; --legacy --debug remains the comparison UI. Config.version
+stays1. Resource compute is reserved concurrent capacity/consume0; modules/cartridges
+reserve1/consume1. Completion-only effects and full stop refunds remain explicit.
+Normal modern surfaces show descriptive psychology and exact AI quotations; --debug
+is the only development score switch. Authored stock is an app-owned narrator
+projection of frozen local state, while original selected bundle/text remains exact
+in the journal. Normal Guide never announces concealed variables.
+Use separate response-policy-watch-v2.json, callLimit6 default/cap8; never overwrite
+legacy response-policy.json or existing user edits. Modern signatures hash exact
+configuration identity and include local frozen perception, project/purpose, model,
+policy and prompt version. Prompt omits full config/effects and policy text. Reject
+known score/trait disclosures on every cached variant and generated variant before
+cache publication. The guard scans all metric occurrences and permits qualitative
+state alongside physical quantities; this is a bounded pattern check, not a semantic
+proof. Invalid generated/cached text leaves the host request pending. Offline controls
+have0 provider calls; deterministic fixture attempts are reported separately.
+Validate installed walkthrough and both-engine journal recovery with watch-test.
+Pure modules narrative, watch_presenter and watch_scenario contain modern projections.
+Native presentation controls use initialized trusted fixtures; installed controls
+exercise complete host-start/publication flows. The current evaluator has an imported
+native-test std/json getString callback resolver issue in minimal imported controls; do not skip native controls, use pure fixture boundaries and real CLI tests.
+
+Runtime validation limits on v0.52.0: fmt reports a nil-expression node for the
+existing journey_presenter_test module, and bounded15-second format attempts for
+play, narrative and watch_presenter time out. Record these gaps; never describe
+those files as formatter-clean. Package check, native tests and actual installed
+screen controls remain required. Journals retain the existing8MiB total/1MiB record
+limits and stop before publication when full; they do not yet support long journey
+checkpoint compaction. The explicit clampIndicator pure contract is Z3 verified;
+complex actor/state effects are established by native controls, not a whole-kernel
+formal proof. Source-inline contracts lacking complex generators are recorded as
+skipped separately from zero-skip native suites.

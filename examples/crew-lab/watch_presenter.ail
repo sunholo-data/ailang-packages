@@ -26,8 +26,8 @@ pure func footer(s: PlayState) -> [string] = {
  choices ++ ["c Crew w Work j Log h Guide b Bridge","n Next /v Previous; key + Enter"]
 }
 pure func indicator(a: Actor,id: string) -> int = match a.indicators {[]=>50,v::rest=>if v.id == id then v.value else indicator({a | indicators:rest},id)}
-pure func shortFatigue(a: Actor) -> string = if indicator(a,"fatigue") < 25 then "rested" else if indicator(a,"fatigue") < 60 then "tired" else "exhausted"
-pure func shortStress(a: Actor) -> string = if indicator(a,"stress") < 60 then "watchful" else "on edge"
+pure func shortFatigue(a: Actor) -> string = if indicator(a,"fatigue") < 25 then "rested" else if indicator(a,"fatigue") < 60 then "a little tired" else if indicator(a,"fatigue") < 80 then "tired" else "exhausted"
+pure func shortStress(a: Actor) -> string = if indicator(a,"stress") < 35 then "at ease" else if indicator(a,"stress") < 60 then "watchful" else if indicator(a,"stress") < 80 then "on edge" else "fraught"
 pure func shortMorale(a: Actor) -> string = if indicator(a,"morale") < 30 then "discouraged" else if indicator(a,"morale") < 70 then "steady" else "in good spirits"
 pure func bridge(s: PlayState,message: string) -> string = {
  let crewLines = join("\n",map(\a. "${a.id}: ${shortFatigue(a)}, ${shortStress(a)}, ${shortMorale(a)}",filter(\a. a.id != "captain",s.session.state.actors)));

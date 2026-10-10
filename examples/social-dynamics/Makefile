@@ -35,6 +35,7 @@ validate: deps
 	@"$(AILANG)" check --package "$(PKG)"
 	@cd "$(PKG)" && "$(AILANG)" test --package .
 	@cd "$(PKG)" && "$(AILANG)" test --allow-skips model.ail
+	@cd "$(PKG)" && "$(AILANG)" test --allow-skips indicators.ail
 	@cd "$(PKG)" && "$(AILANG)" test _smoke.ail
 	@"$(AILANG)" run --package-dir "$(PKG)" --caps IO --entry main "$(PKG)/_smoke.ail"
 	@"$(AILANG)" check --package "$(EX)"
