@@ -184,3 +184,8 @@ strict VM lacks bounded @limit execution. Do not broaden any IO budget to mask i
 Named pure controls run strict VM with zero fallback; distinguish skipped generator
 and Z3 encodings from established controls/proofs. Journal8MiB retention and bounded
 runtime formatters still limit long-watch scaling; no unbounded journey guarantee.
+
+Native action menus expand with measured height (3..12 rows); compact80x24 keeps
+detail space, from27rows the six bridge actions remain visible at every focus.
+The footer shows visible choice range. Up/Down chooses; PgUp/PgDn pages details.
+Resource-aware offer/withdrawal gameplay is separately planned, not implemented.

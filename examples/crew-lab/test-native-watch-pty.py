@@ -200,7 +200,17 @@ with tempfile.TemporaryDirectory(prefix="crew-native-pty-") as temporary:
         attrs=termios.tcgetattr(w.slave)
         assert not attrs[3]&termios.ICANON and not attrs[3]&termios.ECHO
         w.send(b"1")
-        w.expect("Choice 1/6")
+        w.expect("Choices 1-3/6")
+        navigation_before=w.journal().read_bytes()
+        w.resize(220,70)
+        w.expect("Choices 1-6/6")
+        w.send(b"\x1b[B"*5)
+        w.expect("> 8 Resolve a relief request")
+        assert b"1 Choose work" in w.output.rsplit(b"\x1b[2J\x1b[H",1)[-1], "last focus hid earlier choices on tall terminal"
+        assert w.journal().read_bytes()==navigation_before, "expanded-menu navigation changed journal"
+        w.send(b"\x1b[A"*5)
+        w.resize(80,24)
+        w.expect("Choices 1-3/6")
         w.send(b"1")
         w.expect("1 scientist:")
         w.send(b"1")
@@ -290,7 +300,7 @@ with tempfile.TemporaryDirectory(prefix="crew-native-pty-") as temporary:
     try:
         w.expect("Start despite refusal; trust can fall.")
         w.send(b"1")
-        w.expect("Choice 1/6")
+        w.expect("Choices 1-3/6")
         journal=w.journal()
         before=journal.read_bytes()
         pathlib.Path(str(journal)+".tmp").mkdir()
