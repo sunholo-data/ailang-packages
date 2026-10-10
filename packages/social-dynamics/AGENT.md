@@ -1,6 +1,6 @@
 # sunholo/social_dynamics
 
-Experimental 0.2.0. Public exports are pure. Package IO ceiling is solely for
+Experimental 0.3.0. Public exports are pure. Package IO ceiling is solely for
 private `_smoke.ail`; no provider, wall clock, disk, game or hidden RNG access.
 
 Start with `engine.init(config, actors, resources)`. Supply trusted deterministic

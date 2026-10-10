@@ -97,7 +97,7 @@ Recipe costs/host configuration, authority, response schema, model and library u
 Native controls must test evaluator AND strict VM; installed test-journey compares
 all journal payloads against legacy paths and replays recovery recordings both ways.
 Core raw-key/size request: inbox_1791568104057_d08245d1; the native watch now
-uses the published terminal_ui0.2.0 adapter on standalone AILANG0.54. Old journey
+uses terminal_ui's native adapter on standalone AILANG0.54. Old journey
 commands retain their original line-input behavior.
 
 
