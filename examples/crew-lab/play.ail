@@ -5,19 +5,23 @@ import std/result (Result, Ok, Err)
 import std/option (Some, None)
 import std/list (head, filter, map)
 import std/string (length as stringLength, stringToInt)
-import std/json (Json, encode, decode, jo, ja, kv, js, jint, jnum, jb)
+import std/json (Json, encode, decode, get, getString, jo, ja, kv, js, jint, jnum, jb)
 import pkg/sunholo/content_library/library (Bundle, encodeBundle, starterBundle, nextRoll, pickLabel, pickVariant)
 import pkg/sunholo/social_dynamics/model (Offered)
 import pkg/sunholo/terminal_ui/ui (Dimensions, dimensions, screen, safeText)
 import ./journey_flow (Navigation, initial, options as journeyOptions, styleDefault, onboardingAllowed, navigation, remember)
 import ./journey_presenter (frame, opening, onboarding, indicatorChanges, journeyRecap)
 import ./session (Request, start)
-import ./reactions (Policy, weights, signature, fixtureBody)
-import ./store (Fetch, loadPolicy, resolve, openRun, appendRun)
+import ./watch_presenter (frame as watchFrame, recap as watchRecap)
+import ./narrative (stock as watchStock, consequences as watchConsequences)
+import ./watch_scenario (resourceName)
+import ./codec (object)
+import ./reactions (Policy, weights, signature, watchSignature, fixtureBody)
+import ./store (Fetch, loadPolicy, loadWatchPolicy, resolve, openRun, appendRun)
 import ./presenter (briefing, policyBrief, seedBrief, dashboard, guidance, help, dialogue, rejection, consequences, recap)
-import ./play_flow (PlayState, Stage, Intent, begin, seedNumber, parseArgs, menu, route, stage, publish, renderStatus, recover)
+import ./play_flow (PlayState, Stage, Intent, begin, beginWatch, isWatch, seedNumber, parseArgs, menu, route, stage, publish, renderStatus, recover)
 
-type Run = { ui: PlayState, home: string, path: string, policy: Policy, policyBody: string, mode: string, remaining: int, lines: int, lastMessage: string, modern: bool, nav: Navigation, dimensions: Dimensions, ansi: bool }
+type Run = { ui: PlayState, home: string, path: string, policy: Policy, policyBody: string, mode: string, remaining: int, lines: int, lastMessage: string, modern: bool, nav: Navigation, dimensions: Dimensions, ansi: bool, debug: bool }
 
 type Applied = { run: Run, failed: bool, message: string }
 
@@ -54,6 +58,18 @@ ensures { match result {
 pure func usage(fetch: Fetch) -> Json =
   jo([kv("source", js(fetch.source)), kv("calls", jint(fetch.calls)), kv("input_tokens", jint(fetch.inputTokens)), kv("output_tokens", jint(fetch.outputTokens)), kv("usage_known", jb(fetch.usageKnown))])
 
+pure func watchRejection(trace: string) -> string = match decode(trace) {
+ Err(_)=>"This action could not be completed. You can choose again.",
+ Ok(j)=>match get(j,"error") {
+  None=>"The advance stopped; earlier completed work is retained. Review Work before continuing.",
+  Some(e)=>{
+   let code=match getString(e,"code") {Some(x)=>x,None=>""};
+   let detail=match getString(e,"detail") {Some(x)=>x,None=>""};
+   if code == "insufficient_resource" then "Not enough available ${resourceName(detail)}. Other work may be holding capacity. Review Work, advance existing jobs, or leave this offer open. Spent physical supplies do not return by waiting." else if code == "capacity_exceeded" then "That worker is occupied. Advance their current assignment or handle requested relief; this offer stays open." else "This action needs agreement, cooperation and available resources. Review the offer and your command style; you can choose again."
+  }
+ }
+}
+
 func commit(r: Run, c: string, seed: int, phase: string, target: string, nextId: int, metadata: Json, calls: int) -> Result[Applied, string] ! {FS} =
   match stage(r.ui, c, seed, phase, target, nextId) {
     Err(e) => Err(e),
@@ -63,7 +79,7 @@ func commit(r: Run, c: string, seed: int, phase: string, target: string, nextId:
         Err(e) => Err("Journal failed; prior Session and seed retained: ${e}"),
         Ok(_) => {
           let publication = publish(r.ui, candidate, true)
-          Ok({ run: { r | ui: publication.state, remaining: r.remaining - calls }, failed: candidate.failed, message: if candidate.failed then rejection(candidate.trace) else consequences(r.ui.session, publication.state.session, c) })
+          Ok({ run: { r | ui: publication.state, remaining: r.remaining - calls }, failed: candidate.failed, message: if candidate.failed then if isWatch(r.ui) then watchRejection(candidate.trace) else rejection(candidate.trace) else if isWatch(r.ui) && not r.debug then watchConsequences(r.ui.session, publication.state.session, c) else consequences(r.ui.session, publication.state.session, c) })
         }
       }
     }
@@ -79,24 +95,24 @@ func respond(r: Run, explicitAuthored: bool) -> Result[Applied, string] ! {IO, F
   match head(filter(\q. q.id == r.ui.target, r.ui.session.pending)) {
     None => Err("No pending response"),
     Some(request) => {
-      let sig = signature(request, r.policyBody, model())
-      waiting(r)
+      let sig = if isWatch(r.ui) then watchSignature(request,r.policyBody,model()) else signature(request, r.policyBody, model())
+      waiting(r,request.actor)
       let fetch = if explicitAuthored then { outcome: starterBundle(sig, request.legal), source: "explicit-authored", calls: 0, inputTokens: 0, outputTokens: 0, usageKnown: true } else resolve(r.home, sig, request.legal, model(), r.mode, r.remaining)
       match fetch.outcome {
         Err(e) => match noteFailure(r, fetch, e) {
           Err(j) => Err(j),
-          Ok(n) => Ok({ run: n, failed: false, message: "Library unavailable: ${e}. Request remains pending." })
+          Ok(n) => Ok({ run: n, failed: false, message: if isWatch(r.ui) && not r.debug then "The reply could not be used; retry or use an authored continuation." else "Library unavailable: ${e}. Request remains pending." })
         },
         Ok(bundle) => match selectReply(request, r.policy, bundle, r.ui.seed) {
           Err(e) => match noteFailure(r, fetch, e) {
             Err(j) => Err(j),
-            Ok(n) => Ok({ run: n, failed: false, message: "Response unavailable: ${e}. Request remains pending." })
+            Ok(n) => Ok({ run: n, failed: false, message: if isWatch(r.ui) && not r.debug then "The reply could not be used; retry or use an authored continuation." else "Response unavailable: ${e}. Request remains pending." })
           },
           Ok(reply) => {
             let offered = anyOffered(r.ui, request.task)
             match commit(r, reply.command, reply.seed, if offered then "start" else "main", if offered then request.task else "", r.ui.nextId, jo([kv("selection", reply.metadata), kv("usage", usage(fetch))]), fetch.calls) {
               Err(e) => Err(e),
-              Ok(applied) => Ok({ applied | message: if applied.failed then applied.message else dialogue(request.actor, reply.label, reply.text, fetch.source, bundle.origin) })
+              Ok(applied) => Ok({ applied | message: if applied.failed then applied.message else if isWatch(r.ui) && not r.debug then if bundle.origin == "authored" then watchStock(request,reply.label) else "${request.actor}: ${reply.text}" else "${dialogue(request.actor, reply.label, reply.text, fetch.source, bundle.origin)}${if isWatch(r.ui) && r.debug then "\nDevelopment selection: ${encode(reply.metadata)}" else ""}" })
             }
           }
         }
@@ -130,7 +146,7 @@ func act(r: Run, i: Intent) -> Result[Applied, string] ! {IO, FS, AI} = if i.kin
 } else if i.kind == "review_start" then Ok({ run: { r | ui: { r.ui | phase: "start", target: i.target } }, failed: false, message: "Review the existing offer; the crew agreement is unchanged." }) else if i.kind == "ask" then askProject(r, i.target) else if i.kind == "retry" || i.kind == "authored" then respond(r, i.kind == "authored") else if i.kind == "start" then commit(r, command("start_task", [kv("task", js(i.target))]), r.ui.seed, "main", "", r.ui.nextId, jo([]), 0) else if i.kind == "cancel" then commit(r, command("cancel_request", [kv("id", js(i.target))]), r.ui.seed, "main", "", r.ui.nextId, jo([]), 0) else if i.kind == "grant" || i.kind == "deny" then commit(r, command("resolve_relief", [kv("id", js(i.target)), kv("release", jb(i.kind == "grant"))]), r.ui.seed, "main", "", r.ui.nextId, jo([]), 0) else if i.kind == "advance" then commit(r, command("advance", [kv("tick", jint(r.ui.session.state.tick + 1)), kv("budget", jint(64))]), r.ui.seed, "main", "", r.ui.nextId, jo([]), 0) else if i.kind == "continue" then match r.ui.session.state.continuation {
   Some(t) => commit(r, command("advance", [kv("tick", jint(t.target)), kv("budget", jint(64))]), r.ui.seed, "main", "", r.ui.nextId, jo([]), 0),
   None => Err("No pending advance")
-} else if i.kind == "abort" then commit(r, command("abort", []), r.ui.seed, "main", "", r.ui.nextId, jo([]), 0) else if i.kind == "relief_choice" then Ok({ run: { r | ui: { r.ui | phase: "relief", target: i.target } }, failed: false, message: "" }) else if i.kind == "back" then Ok({ run: { r | ui: { r.ui | phase: "main", target: "" } }, failed: false, message: "" }) else if i.kind == "working" || i.kind == "offered" || i.kind == "reliefs" then Ok({ run: { r | ui: { r.ui | phase: i.kind, target: "" } }, failed: false, message: "" }) else Err("Unknown captain action")
+} else if i.kind == "abort" then commit(r, command("abort", []), r.ui.seed, "main", "", r.ui.nextId, jo([]), 0) else if i.kind == "relief_choice" then Ok({ run: { r | ui: { r.ui | phase: "relief", target: i.target } }, failed: false, message: "" }) else if i.kind == "back" then Ok({ run: { r | ui: { r.ui | phase: "main", target: "" } }, failed: false, message: "" }) else if i.kind == "working" || i.kind == "offered" || i.kind == "reliefs" || i.kind == "assignments" || i.kind == "rests" then Ok({ run: { r | ui: { r.ui | phase: i.kind, target: "" } }, failed: false, message: "" }) else Err("Unknown captain action")
 
 func status(r: Run) -> () ! {IO} {
   println(dashboard(r.ui.session, r.remaining))
@@ -145,7 +161,7 @@ func finish(r: Run) -> () ! {IO, FS} =
     },
     Ok(_) => if r.modern then {
       println("")
-      println(journeyRecap(r.ui, r.path))
+      println(if isWatch(r.ui) then watchRecap(r.ui,r.path,r.debug) else journeyRecap(r.ui, r.path))
     } else println(recap(r.ui.session, r.path))
   }
 
@@ -176,14 +192,14 @@ func loop(r: Run) -> () ! {IO, FS, AI} = if r.modern then journeyLoop(r) else {
   }
 }
 
-func waiting(r: Run) -> () ! {IO} = if not r.modern then () else {
-  let f = screen(r.dimensions, r.ansi, ["Stapledon's Voyage / crew reply", "Request recorded; awaiting crew reply."], "HEARING THE CREW\nLooking for a matching saved response. In live mode, a library miss may call AI within the allowance. No answer or consequence is committed yet.", ["Please wait; next decision follows."], 0)
+func waiting(r: Run,actor: string) -> () ! {IO} = if not r.modern then () else {
+  let f = if isWatch(r.ui) && not r.debug then screen(r.dimensions,r.ansi,["HEARING YOUR CREW"],"The ${actor} is considering the assignment. Their response comes before your decision to start work.",["Please wait; your next choice follows."],0) else screen(r.dimensions, r.ansi, ["Stapledon's Voyage / crew reply", "Request recorded; awaiting crew reply."], "HEARING THE CREW\nLooking for a matching saved response. In live mode, a library miss may call AI within the allowance. No answer or consequence is committed yet.", ["Please wait; next decision follows."], 0)
   if r.ansi then print(f.text) else println(f.text)
   flush()
 }
 
 func journeyLoop(r: Run) -> () ! {IO, FS, AI} = {
-  let f = frame(r.ui, r.nav, r.lastMessage, r.mode, r.remaining, r.path, r.dimensions, r.ansi)
+  let f = if isWatch(r.ui) then watchFrame(r.ui,r.nav,r.lastMessage,r.mode,r.remaining,r.path,r.dimensions,r.ansi,r.debug) else frame(r.ui, r.nav, r.lastMessage, r.mode, r.remaining, r.path, r.dimensions, r.ansi)
   print(f.text)
   print("Choose > ")
   flush()
@@ -202,7 +218,7 @@ func journeyLoop(r: Run) -> () ! {IO, FS, AI} = {
           exit(1)
         },
         Ok(a) => {
-          let detail = if a.run.ui.seq > r.ui.seq then indicatorChanges(r.ui.session, a.run.ui.session) else ""
+          let detail = if a.run.ui.seq > r.ui.seq && (not isWatch(r.ui) || r.debug) then indicatorChanges(r.ui.session, a.run.ui.session) else ""
           let message = if a.message == "" then a.run.lastMessage else "${a.message}${detail}"
           let published = a.run.ui.seq > r.ui.seq && a.message != ""
           let readNav = if published then remember(a.run.nav, message) else { a.run.nav | view: "bridge", page: 0 }
@@ -218,31 +234,32 @@ func envNumber(name: string, fallback: int) -> int ! {Env} = match stringToInt(g
   None => fallback
 }
 
-func choosePolicy(mode: string, seed: int, d: Dimensions, ansi: bool, page: int, inputs: int, explain: bool) -> string ! {IO} = {
-  let f = onboarding(mode, seed, d, ansi, page, explain)
-  print(f.text)
-  print("Choose > ")
-  flush()
-  let key = readLine()
-  if not ansi then println("") else ()
-  if not onboardingAllowed(inputs, stringLength(key)) then {
-    println("Onboarding input limit reached; no game commands recorded.")
-    exit(1)
-  } else ()
-  if key == "" || key == "0" then {
-    println("Preparation not started. No game commands recorded.")
-    exit(0);
-    ""
-  } else if key == "n" then choosePolicy(mode, seed, d, ansi, f.page + 1, inputs + 1, explain) else if key == "v" then choosePolicy(mode, seed, d, ansi, if f.page <= 0 then 0 else f.page - 1, inputs + 1, explain) else if key == "h" || key == "help" then choosePolicy(mode, seed, d, ansi, 0, inputs + 1, true) else if key == "b" then choosePolicy(mode, seed, d, ansi, 0, inputs + 1, false) else if key == "1" || key == "2" then key else {
-    println("Choose 1 agreement or 2 authority; h explains with an example.")
-    choosePolicy(mode, seed, d, ansi, f.page, inputs + 1, explain)
+func choosePolicy(mode: string, seed: int, d: Dimensions, ansi: bool, page: int, inputs: int, explain: bool) -> string ! {IO} =
+  {
+    let f = onboarding(mode, seed, d, ansi, page, explain)
+    print(f.text)
+    print("Choose > ")
+    flush()
+    let key = readLine()
+    if not ansi then println("") else ()
+    if not onboardingAllowed(inputs, stringLength(key)) then {
+      println("Onboarding input limit reached; no game commands recorded.")
+      exit(1)
+    } else ()
+    if key == "" || key == "0" then {
+      println("Preparation not started. No game commands recorded.")
+      exit(0);
+      ""
+    } else if key == "n" then choosePolicy(mode, seed, d, ansi, f.page + 1, inputs + 1, explain) else if key == "v" then choosePolicy(mode, seed, d, ansi, if f.page <= 0 then 0 else f.page - 1, inputs + 1, explain) else if key == "h" || key == "help" then choosePolicy(mode, seed, d, ansi, 0, inputs + 1, true) else if key == "b" then choosePolicy(mode, seed, d, ansi, 0, inputs + 1, false) else if key == "1" || key == "2" then key else {
+      println("Choose 1 agreement or 2 authority; h explains with an example.")
+      choosePolicy(mode, seed, d, ansi, f.page, inputs + 1, explain)
+    }
   }
-}
 
 func launch(mode: string, modern: bool) -> () ! {IO, Env, FS, AI} = {
   let home = getEnvOr("HOME", "")
   let envDims = dimensions(envNumber("COLUMNS", 80), envNumber("LINES", 24))
-  let flags = if modern then journeyOptions(getArgs(), envDims.columns, envDims.rows, styleDefault(getEnvOr("TERM", ""), hasEnv("NO_COLOR"))) else Ok({ args: getArgs(), columns: 80, rows: 28, ansi: false })
+  let flags = if modern then journeyOptions(getArgs(), envDims.columns, envDims.rows, styleDefault(getEnvOr("TERM", ""), hasEnv("NO_COLOR"))) else Ok({ args: getArgs(), columns: 80, rows: 28, ansi: false, debug:false, legacy:true })
   match flags {
     Err(e) => {
       println(if modern then safeText(e) else e)
@@ -270,7 +287,7 @@ func launch(mode: string, modern: bool) -> () ! {IO, Env, FS, AI} = {
             println(if modern then safeText(e) else e)
             exit(1)
           },
-          Ok(seedValue) => match (begin(policyChoice, seedValue), loadPolicy(o.home)) {
+          Ok(seedValue) => match (if modern && not f.legacy then beginWatch(policyChoice, seedValue) else begin(policyChoice, seedValue), if modern && not f.legacy then loadWatchPolicy(o.home) else loadPolicy(o.home)) {
             (Err(e), _) => {
               println(if modern then safeText(e) else e)
               exit(1)
@@ -280,7 +297,7 @@ func launch(mode: string, modern: bool) -> () ! {IO, Env, FS, AI} = {
               exit(1)
             },
             (Ok(ui), Ok(config)) => {
-              let c = command("start", [kv("policy", js(ui.session.policy))])
+              let c = command("start", [kv("policy", js(ui.session.policy))] ++ (if isWatch(ui) then [kv("scenario",js("watch-v2"))] else []))
               match start(c) {
                 Err(_) => {
                   println("Startup failed")
@@ -295,7 +312,7 @@ func launch(mode: string, modern: bool) -> () ! {IO, Env, FS, AI} = {
                     },
                     Ok(path) => {
                       if modern then () else println("Welcome to the bridge. Choose your next captain action.")
-                      loop({ ui: ui, home: o.home, path: path, policy: config.policy, policyBody: config.body, mode: mode, remaining: config.policy.callLimit, lines: if o.hasSeed then 1 else 2, lastMessage: "", modern: modern, nav: initial(), dimensions: d, ansi: f.ansi })
+                      loop({ ui: ui, home: o.home, path: path, policy: config.policy, policyBody: config.body, mode: mode, remaining: config.policy.callLimit, lines: if o.hasSeed then 1 else 2, lastMessage: "", modern: modern, nav: initial(), dimensions: d, ansi: f.ansi, debug:f.debug })
                     }
                   }
                 }

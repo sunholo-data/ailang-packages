@@ -3,7 +3,7 @@ import std/string (repeat, toUpper, join, length as slength)
 import std/list (map, filter, length, head)
 import std/option (Option, Some, None)
 import pkg/sunholo/terminal_ui/ui (Dimensions, Screen, screen, gauge, safeText)
-import pkg/sunholo/social_dynamics/model (Relationship, Actor, Task, Recipe, Value, Effect, IndicatorDelta, RelationshipDelta, Working, Offered, Completed, Stopped)
+import pkg/sunholo/social_dynamics/model (Relationship, Actor, Task, Recipe, Value, Effect, BoundedIndicatorDelta, IndicatorDelta, RelationshipDelta, Working, Offered, Completed, Stopped)
 import ./session (Session)
 import ./play_flow (PlayState, menu)
 import ./journey_flow (Navigation)
@@ -29,8 +29,8 @@ ensures { slength(result) > 0 } = {
 -- Persistent choice meanings fit the minimum screen before input is accepted.
 export pure func onboarding(mode: string, seed: int, d: Dimensions, ansi: bool, page: int, explain: bool) -> Screen ! {}
 ensures { result.pages >= 1 && result.page >= 0 && result.page < result.pages } = {
-  let body = if explain then "Example: offer the scientist an analysis project, hear their response, then choose Start or leave it open. Offering never starts work. Advance a turn to move started work. Read Crew or Work to understand competing needs.\n\nAsk for agreement waits for the worker to agree. Captain's authority can start despite an objection, but cooperation, capacity and supplies still matter. Your style lasts for this run. Neither style guarantees success.\n\nNo turns, random draws or AI calls happen while reading this introduction." else "Choose how you assign work this run. People and equipment both need preparation; no single route is correct."
-  screen(d, ansi, ["You are captain of a bubble ship.", "Prepare your crew for first contact.", "Offer > hear > Start > advance"], body, ["1 Ask for agreement", "  Work waits for agreement", "2 Use captain's authority", "  May override refusal; trust can suffer", "Style lasts this run; h Help /b Back", "0 Quit /n Next /v Previous; Enter"], page)
+  let body = if explain then "Example: offer the scientist an analysis project, hear their response, then choose Start or leave it open. Offering never starts work. Advance a turn to move started work. Read Crew or Work to understand competing needs.\n\nAsk for agreement waits for the worker to agree. Captain's authority can start despite an objection, but cooperation, capacity and supplies still matter. Your style lasts for this run. Neither style guarantees success.\n\nNo turns, random draws or AI calls happen while reading this introduction." else "Choose how you assign work this run. People and equipment share time and Archive capacity."
+  screen(d, ansi, ["You are captain of a bubble ship.", "Prepare your crew for first contact.", "Offer > hear > Start > advance"], body, ["1 Ask for agreement", "  Work waits for agreement", "2 Use captain's authority", "  Start despite refusal; trust can fall", "Style lasts this run; h Help /b Back", "0 Quit /n Next /v Previous; Enter"], page)
 }
 
 pure func supplies(s: PlayState) -> string =
@@ -77,6 +77,7 @@ pure func costs(r: Recipe) -> string =
   if r.costs == [] then "no materials" else join(", ", map(\c. "reserve ${show(c.reserve)} /consume ${show(c.consume)} ${c.resource}", r.costs))
 
 pure func effects(xs: [Effect]) -> string = join("; ", map(\e. match e {
+  BoundedIndicatorDelta(actor, id, n) => "${actor} ${id} ${show(n)} (bounded)",
   IndicatorDelta(actor, id, n) => "${actor} ${id} ${show(n)}",
   RelationshipDelta(from, to, id, n) => "${from} -> ${to} ${id} ${show(n)}"
 }, xs))

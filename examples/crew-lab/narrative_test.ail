@@ -1,0 +1,52 @@
+module sunholo/crew_lab/narrative_test
+import std/result (Ok, Err)
+import std/string (contains)
+import ./session (Session)
+import ./watch_scenario (config, actors, resources)
+import pkg/sunholo/social_dynamics/engine (init)
+import ./narrative (crew, fatigue, stress, morale)
+import ./watch_presenter (frame)
+import ./journey_flow (initial)
+import ./play_flow (beginWatch)
+import pkg/sunholo/terminal_ui/ui (dimensions)
+
+-- Presentation tests construct the trusted initialized fixture directly.
+-- Installed controls separately exercise start, journal and recovery.
+pure func fixture() -> Result[Session, string] = match config("consent") {
+  Err(e) => Err(e),
+  Ok(c) => match init(c, actors(), resources()) {
+    Err(_) => Err("init"),
+    Ok(state) => Ok({ policy: "consent", config: c, state: state, bindings: [], pending: [], bank: [], reports: [] })
+  }
+}
+
+test "normal crew describes five people without scores or traits" {
+  match fixture() {
+    Err(_) => false,
+    Ok(o) => {
+      let text = crew(o, false)
+      contains(text, "scientist looks a little tired") && contains(text, "medic") && contains(text, "pilot") && contains(text, "diplomat") && not contains(text, "fatigue 45") && not contains(text, "openness") && not contains(text, "OCEAN") && not contains(text, "trust 50")
+    }
+  }
+}
+
+test "debug actually shows numeric state and all traits" {
+  match fixture() {
+    Err(_) => false,
+    Ok(o) => {
+      let text = crew(o, true)
+      contains(text, "fatigue 45") && contains(text, "stress 65") && contains(text, "openness 80") && contains(text, "neuroticism 50") && contains(text, "scientist -> captain trust 50")
+    }
+  }
+}
+
+test "normal minimum frame has named resources actionable work rest and help" {
+  match fixture() {
+    Err(_) => false,
+    Ok(session) => {
+      let s = { session: session, seed: 42, nextId: 1, seq: 0, phase: "main", target: "" }
+      let f = frame(s, initial(), "", "offline", 2, "journal", dimensions(40, 16), false, false)
+      contains(f.text, "1 Choose work /2 Arrange rest") && contains(f.text, "5 Advance /6 Check-in") && contains(f.text, "h Guide") && not contains(f.text, "fatigue 45")
+    }
+  }
+}

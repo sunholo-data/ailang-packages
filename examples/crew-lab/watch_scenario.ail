@@ -6,13 +6,14 @@ import ./scenario (config as legacyConfig)
 
 export pure func workers() -> [string] ! {}
 ensures { length(result) == 5 }
- tests [((), ["scientist", "engineer", "medic", "pilot", "diplomat"])] {
+ =
  ["scientist", "engineer", "medic", "pilot", "diplomat"]
- }
 
 export pure func workerRecipe(worker: string, recipe: string) -> bool ! {}
-ensures { not result || contains(workers(), worker) } =
+ensures { not result || contains(workers(), worker) }
+ tests [(("medic","work_medic"),true),(("pilot","rest_pilot"),true),(("pilot","work_scientist"),false),(("captain","work_captain"),false)] {
  contains(workers(), worker) && (recipe == "work_${worker}" || recipe == "rest_${worker}")
+ }
 
 export pure func projectName(recipe: string) -> string ! {}
 ensures { result != "" } =
