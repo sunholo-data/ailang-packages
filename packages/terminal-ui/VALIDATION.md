@@ -1,8 +1,10 @@
 # v0.2.0 validation — 2026-10-10
 
-Validated against the terminal sprint's development binary and stdlib, reported
-v0.53.1 (base version); these results do not claim the >=0.54.0 runtime floor has
-been released. The proposed floor remains in the manifest. Publication waits for
+Validated against the terminal sprint's development binary and stdlib, initially
+based on v0.53.1 and finally integrated with core dev commit acc227e55 (v0.53.3
+metadata and imported callback contract repair). Integrated strict quality again
+reports 0 gates and the same test/proof totals. These results do not claim the
+>=0.54.0 runtime floor has been released. Publication waits for
 a supporting core release and registry validator. No registry upload was performed.
 
 - `ailang lock`, `lock --check`, `check --package .`: all 12 source/test files compile.
