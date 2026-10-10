@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.4.0
+
+Add captain conversations to the native watch: actionable crew concerns, known
+context, three editable starting replies and free text, followed by review of
+exact words and a declared approach. A worker reconsiders the same offered task;
+speaking does not start work, spend supplies or advance time. New watch-v3 hosts
+include conversation and personality sidecars; old journey/play traces retain
+their existing wire format. Public Session gains sidecars (breaking API change).
+
+Add explicit lab voyage reports to experiment with slow, major-event OCEAN
+responses and interaction influence. Numeric traits stay in development views.
+AI remains synchronous; the independent reply-inbox sprint is still gated.
+
 ## 0.3.2
 
 Expand the native action menu with terminal height, retain the complete last

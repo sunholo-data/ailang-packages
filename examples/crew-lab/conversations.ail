@@ -1,0 +1,93 @@
+module sunholo/crew_lab/conversations
+import std/result (Result, Ok, Err)
+import std/option (Option, Some, None)
+import std/list (head, filter, map, length, any, contains)
+import std/string (length as size, trim, chars, charCode, startsWith)
+import std/json (Json, encode, jo, kv, js, jint, ja)
+import pkg/sunholo/social_dynamics/model (Appraisal, Effect, RelationshipDelta, BoundedIndicatorDelta, Value)
+
+export type Issue = {id:string,task:string,worker:string,kind:string,prompt:string,status:string,request:string,turn:int,replyCount:int} deriving (Eq)
+export type Speech = {id:string,issue:string,task:string,worker:string,text:string,approach:string,tick:int,revision:int,request:string} deriving (Eq)
+export type ConversationStore = {version:int,issues:[Issue],speech:[Speech]} deriving (Eq)
+export type Suggestion = {id:string,key:string,text:string,approach:string,preview:string} deriving (Eq)
+export type Conversation = {issue:Issue,briefing:[string],suggestions:[Suggestion]} deriving (Eq)
+
+export pure func empty(version:int) -> ConversationStore ! {}
+requires {version==0 || version==1}
+ensures {result.version==version && result.issues==[] && result.speech==[]} = {version:version,issues:[],speech:[]}
+
+export pure func approaches() -> [string] ! {}
+ensures {length(result)==5} = ["clear_scope","ask_advice","stage_plan","explain_priority","assert_authority"]
+
+export pure func validReply(text:string,approach:string) -> bool ! {}
+ensures {not result || size(text)>0 && size(text)<=1200 && contains(approaches(),approach)} =
+ size(trim(text))>0 && size(text)<=1200 && contains(approaches(),approach) && not any(\c. charCode(c)<32 || charCode(c)==127,chars(text))
+
+export pure func lookup(store:ConversationStore,task:string) -> Option[Issue] ! {}
+ensures {match result {None=>true,Some(i)=>i.task==task && i.status=="open"}} =
+ head(filter(\i. i.task==task && i.status=="open",store.issues))
+
+export pure func subject(worker:string,recipe:string) -> {kind:string,prompt:string} ! {}
+ensures {result.kind!="" && result.prompt!=""} =
+ if startsWith(recipe,"rest_") then {kind:"recovery",prompt:"How does taking this rest fit with what you need from me? We can discuss priorities; the rest period itself remains unchanged."}
+ else if worker=="medic" then {kind:"patient_scope",prompt:"Who are we preparing to treat? Our crew is known; the needs of anyone we meet are unknown. I need us to talk through that uncertainty before I agree."}
+ else if worker=="scientist" then {kind:"analysis_priority",prompt:"Which uncertainty should I prioritise in the Spire readings? We can discuss the emphasis; the analysis assignment and its resources remain unchanged."}
+ else if worker=="engineer" then {kind:"equipment_priority",prompt:"How should I balance signal readiness with reliable equipment for the crew? I want to understand your priority before agreeing."}
+ else if worker=="pilot" then {kind:"approach_risk",prompt:"What risk are we preparing for? This is observation planning, not a manoeuvre; we do not yet know what lies ahead."}
+ else {kind:"contact_stance",prompt:"What attitude should guide our first-contact rehearsal? We can choose how to prepare without claiming anyone has answered us."}
+
+export pure func register(store:ConversationStore,task:string,worker:string,recipe:string,request:string,turn:int,label:string) -> ConversationStore ! {}
+ensures {result.version==store.version && result.speech==store.speech} =
+ if store.version!=1 || not contains(["accept","decline","concern","defer"],label) then store else {
+  let existing=head(filter(\i. i.task==task,store.issues));
+  if label=="accept" then {store|issues:map(\i. if i.task==task then {i|status:"closed",request:request} else i,store.issues)} else {
+   let catalogue=subject(worker,recipe);
+   let issue=match existing {None=>{id:"issue-${request}",task:task,worker:worker,kind:catalogue.kind,prompt:catalogue.prompt,status:"open",request:request,turn:turn,replyCount:0},Some(i)=>{i|status:"open",request:request,turn:turn}};
+   {store|issues:filter(\i. i.task!=task,store.issues) ++ [issue]}
+  }
+ }
+
+export pure func record(store:ConversationStore,speech:Speech) -> ConversationStore ! {}
+requires {length(store.speech)<64}
+ensures {length(result.speech)==length(store.speech)+1} =
+ {store|speech:store.speech ++ [speech],issues:map(\i. if i.id==speech.issue then {i|status:"answered",replyCount:i.replyCount+1} else i,store.issues)}
+
+pure func suggestion(key:string,issue:Issue,text:string,approach:string) -> Suggestion =
+ {id:"${issue.id}-${key}",key:key,text:text,approach:approach,preview:"Discuss ${approach}. The crew may still decline. Sends your exact words; does not start, resize or cancel work, move the ship, or fulfil a promise."}
+
+export pure func suggestions(issue:Issue,seed:int) -> [Suggestion] ! {}
+requires {seed>=1 && seed<=2147483646}
+ensures {length(result)==3} = {
+ let alternate=(seed+issue.replyCount)%2==0;
+ let boundary=if issue.kind=="patient_scope" then (if alternate then "Our crew comes first. Anyone else's needs are still unknown; tell me where our present preparation falls short." else "Let's centre preparation on our own crew, and discuss the unknown needs separately before making further commitments.") else if issue.kind=="recovery" then "Your recovery matters. This is the offered rest period; let us discuss how it fits our priorities." else if issue.worker=="pilot" then "For now we are planning observations only. We have not committed to a manoeuvre or an encounter." else if issue.worker=="diplomat" then "Keep the rehearsal focused on opening a conversation. We cannot assume a welcome or a shared language." else if issue.worker=="scientist" then "Focus our discussion on what the readings can establish, and mark anything uncertain as uncertain." else "Our crew's reliable equipment is the boundary. Tell me what this signal preparation can and cannot establish.";
+ let advice=if alternate then "I do not have all the answers. What approach would you recommend with the time and supplies we actually have?" else "Give me your judgement: what would make this preparation worthwhile, and what remains uncertain?";
+ let staged=if issue.kind=="patient_scope" then "Let's discuss preparation in stages while science investigates. This is a discussion, not a reduced supply allocation or a promise of treatment." else if issue.kind=="recovery" then "I need the crew ready for contact, and I also need you rested. Let's talk through that tension before deciding." else if alternate then "Preparation matters even with uncertainty. I want to hear your objections while we discuss the mission priority." else "I am asking because we need to prepare before first contact. That priority does not remove the uncertainties; let's name them.";
+ [suggestion("1",issue,boundary,"clear_scope"),suggestion("2",issue,advice,"ask_advice"),suggestion("3",issue,staged,if issue.kind=="patient_scope" then "stage_plan" else "explain_priority")]
+}
+
+pure func value(values:[Value],id:string) -> int = match head(filter(\v. v.id==id,values)) {None=>50,Some(v)=>v.value}
+pure func boundDelta(current:int,delta:int) -> int = if current+delta<0 then 0-current else if current+delta>100 then 100-current else delta
+
+-- Host-authored contextual policy; text is never parsed for social effects.
+-- No universal favourable approach: priority can reassure a conscientious person
+-- and strain someone already overloaded; asserting authority can hurt autonomy.
+export pure func reaction(a:Appraisal,approach:string,repeated:bool) -> [Effect] ! {}
+ensures {length(result)<=3} = {
+ let stress=value(a.observer.indicators,"stress");
+ let autonomy=value(a.observer.values,"autonomy");
+ let conscientious=value(a.observer.attributes,"conscientiousness");
+ let open=value(a.observer.attributes,"openness");
+ let trust=match head(filter(\r. r.to=="captain" && r.dimension=="trust",a.relationships)) {None=>50,Some(r)=>r.value};
+ let change=if repeated then 0 else if approach=="assert_authority" then (if autonomy>=70 then -2 else if conscientious>=70 && stress<60 then 1 else -1) else if approach=="ask_advice" then (if stress>=65 then -1 else if open>=60 then 1 else 0) else if approach=="explain_priority" then (if conscientious>=70 && stress<60 then 1 else if stress>=60 then -1 else 0) else if approach=="clear_scope" then (if open>=70 && autonomy>=60 then -1 else if conscientious>=70 || a.observer.id=="medic" then 1 else 0) else 0;
+ let tension=if repeated then 0 else if approach=="assert_authority" then 2 else if approach=="ask_advice" && stress>=65 then 1 else if approach=="clear_scope" then if open>=70 && autonomy>=60 then 1 else if stress>=65 && conscientious<60 then 0 else -1 else 0;
+ [RelationshipDelta(a.observer.id,"captain","trust",boundDelta(trust,change)),BoundedIndicatorDelta(a.observer.id,"stress",tension),BoundedIndicatorDelta(a.observer.id,"morale",if change>0 then 1 else if change<0 then -1 else 0)]
+}
+
+pure func issueJson(i:Issue)->Json = jo([kv("id",js(i.id)),kv("task",js(i.task)),kv("worker",js(i.worker)),kv("kind",js(i.kind)),kv("prompt",js(i.prompt)),kv("status",js(i.status)),kv("request",js(i.request)),kv("turn",jint(i.turn)),kv("replyCount",jint(i.replyCount))])
+pure func speechJson(s:Speech)->Json = jo([kv("id",js(s.id)),kv("issue",js(s.issue)),kv("task",js(s.task)),kv("worker",js(s.worker)),kv("text",js(s.text)),kv("approach",js(s.approach)),kv("tick",jint(s.tick)),kv("revision",jint(s.revision)),kv("request",js(s.request))])
+export pure func json(store:ConversationStore)->Json ! {}
+ensures {size(encode(result))>0} = jo([kv("version",jint(store.version)),kv("issues",ja(map(issueJson,store.issues))),kv("speech",ja(map(speechJson,store.speech)))])
+
+test "reply accepts Unicode and rejects blank controls or unconfirmed stance" {
+ validReply("Let's hear your judgement, Zoë.","ask_advice") && not validReply("  ","ask_advice") && not validReply("a\nb","clear_scope") && not validReply("Give me ten supplies","invent_inventory")
+}

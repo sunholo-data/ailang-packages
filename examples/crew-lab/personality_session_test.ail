@@ -1,0 +1,54 @@
+module sunholo/crew_lab/personality_session_test
+import std/result (Result,Ok,Err)
+import std/list (map,head,filter,length,any,range)
+import std/option (Some,None)
+import std/string (contains)
+import ./session (Session,start,input,snapshot,offer,startTask,ask,complete,captainReply)
+import ./reactions (fixtureBody,watchSignature,watchPolicyBody)
+
+pure func base()->Result[Session,string] = match start("{\"command\":\"start\",\"policy\":\"consent\",\"scenario\":\"watch-v3\"}"){Err(_)=>Err("start"),Ok(o)=>Ok(o.session)}
+pure func report(s:Session,id:string,kind:string)->Result[Session,string] = match input(s,"{\"command\":\"lab_major\",\"id\":\"${id}\",\"kind\":\"${kind}\"}"){Err(_)=>Err("major"),Ok(o)=>Ok(o.session)}
+test "five specialist personality baselines are additive while old snapshots stay unchanged" {
+ match (base(),start("{\"command\":\"start\",\"policy\":\"consent\",\"scenario\":\"watch-v2\"}")){(Ok(s),Ok(old))=>contains(snapshot(s),"personalities") && not contains(snapshot(old.session),"personalities"),_=>false}
+}
+test "explicit lab major report has no instantaneous trait jump then elapsed turn moves gradually" {
+ match base(){Err(_)=>false,Ok(s)=>match report(s,"contact-report","first_contact"){Err(_)=>false,Ok(m)=>map(\a. a.attributes,m.state.actors)==map(\a. a.attributes,s.state.actors) && (match input(m,"{\"command\":\"advance\",\"tick\":1,\"budget\":64}"){Err(_)=>false,Ok(t)=>map(\a. a.attributes,t.session.state.actors)!=map(\a. a.attributes,s.state.actors)})}}
+}
+
+test "ordinary received speech records only its listener and cannot initiate OCEAN drift" {
+ match base(){Err(_)=>false,Ok(s)=>match offer(s,"medic","work_medic","diagnostics"){Err(_)=>false,Ok(o)=>match ask(o.session,"medic","diagnostics","medic-first"){Err(_)=>false,Ok(q)=>match head(q.session.pending){None=>false,Some(r)=>match complete(q.session,r.id,fixtureBody(r,"concern"),0.0){Err(_)=>false,Ok(c)=>match head(c.session.chat.issues){None=>false,Some(i)=>match captainReply(c.session,"captain-a",i.id,"Our crew first.","clear_scope",0,c.session.state.revision){Err(_)=>false,Ok(a)=>not any(\p. p.active!=None,a.session.personalities) && length(filter(\p. p.actor=="medic" && length(p.history)==1,a.session.personalities))==1 && not any(\p. p.actor!="medic" && p.history!=[],a.session.personalities) && map(\p. p.current,a.session.personalities)==map(\p. p.baseline,a.session.personalities)}}}}}}}
+}
+test "elapsed drift is reflected in live actors and their later response context" {
+ match base(){Err(_)=>false,Ok(s)=>match report(s,"report-a","first_contact"){Err(_)=>false,Ok(m)=>match input(m,"{\"command\":\"advance\",\"tick\":1,\"budget\":64}"){Err(_)=>false,Ok(t)=>match offer(t.session,"scientist","work_scientist","science"){Err(_)=>false,Ok(o)=>match ask(o.session,"scientist","science","science-first"){Err(_)=>false,Ok(q)=>match head(q.session.pending){None=>false,Some(r)=>contains(r.context,"\"id\":\"openness\",\"value\":81") && contains(watchSignature(r,watchPolicyBody(),"fixture"),"crew-dialogue-conversation-v1")}}}}}}
+}
+test "same major identity retry after elapsed time is no-op and altered kind cannot retarget" {
+ match base(){Err(_)=>false,Ok(s)=>match report(s,"report-a","first_contact"){Err(_)=>false,Ok(m)=>match input(m,"{\"command\":\"advance\",\"tick\":3,\"budget\":64}"){Err(_)=>false,Ok(t)=>match (report(t.session,"report-a","first_contact"),report(t.session,"report-a","betrayal")){(Ok(retry),Err(_))=>snapshot(retry)==snapshot(t.session),_=>false}}}}
+}
+test "major report catalogue is closed rejects extra effects and cannot interrupt pending speech" {
+ match base(){Err(_)=>false,Ok(s)=>match (report(s,"bad","imagined"),input(s,"{\"command\":\"lab_major\",\"id\":\"bad\",\"kind\":\"loss\",\"effects\":999}"),offer(s,"medic","work_medic","diagnostics")){(Err(_),Err(_),Ok(o))=>match ask(o.session,"medic","diagnostics","pending"){Err(_)=>false,Ok(q)=>match report(q.session,"not-yet","loss"){Err(_)=>true,Ok(_)=>false}},_=>false}}
+}
+test "first contact major reaches only actual five specialist receipts with source retained" {
+ match base(){Err(_)=>false,Ok(s)=>match report(s,"report-a","first_contact"){Err(_)=>false,Ok(m)=>length(m.personalities)==5 && not any(\p. p.actor=="captain",m.personalities) && not any(\p. not any(\k. k.observer==p.actor && k.evidence=="report-a",m.state.knowledge),m.personalities) && contains(snapshot(m),"lab-voyage-report-v1") && contains(snapshot(m),"Explicit fictional laboratory report")}}
+}
+test "blocked scheduler drift uses earlier successful tick instead of requested later time" {
+ match start("{\"command\":\"start\",\"policy\":\"orders\",\"scenario\":\"watch-v3\"}"){Err(_)=>false,Ok(s)=>match report(s.session,"report-a","first_contact"){Err(_)=>false,Ok(m)=>match offer(m,"scientist","rest_scientist","rest"){Err(_)=>false,Ok(r)=>match startTask(r.session,"rest"){Err(_)=>false,Ok(w)=>match offer(w.session,"engineer","work_engineer","repair"){Err(_)=>false,Ok(e)=>match startTask(e.session,"repair"){Err(_)=>false,Ok(t)=>{
+ let padded={t.session|state:{t.session.state|evidence:t.session.state.evidence ++ map(\i. {id:"pad-${i}",author:"captain",kind:"note",text:"",causes:[]},range(1,512-length(t.session.state.evidence)))}};
+ match input(padded,"{\"command\":\"advance\",\"tick\":10,\"budget\":64}"){Err(_)=>false,Ok(o)=>o.failed && o.session.state.tick==2 && not any(\p. p.lastTick!=2,o.session.personalities) && any(\a. a.id=="scientist" && any(\v. v.id=="openness" && v.value==82,a.attributes),o.session.state.actors)}
+ }}}}}}}
+}
+pure func twoJobs(s:Session)->Result[Session,string] = match offer(s,"medic","rest_medic","rest") {
+ Err(_)=>Err("offer rest"),Ok(r)=>match startTask(r.session,"rest") {
+  Err(_)=>Err("start rest"),Ok(w)=>match offer(w.session,"engineer","work_engineer","repair") {
+   Err(_)=>Err("offer repair"),Ok(o)=>match startTask(o.session,"repair"){Err(_)=>Err("start repair"),Ok(j)=>Ok(j.session)}
+  }
+ }
+}
+test "pending advance integrates actual committed time and continuation remains resumable" {
+ match start("{\"command\":\"start\",\"policy\":\"orders\",\"scenario\":\"watch-v3\"}"){Err(_)=>false,Ok(s)=>match report(s.session,"report-a","first_contact"){Err(_)=>false,Ok(m)=>match twoJobs(m){Err(_)=>false,Ok(w)=>match input(w,"{\"command\":\"advance\",\"tick\":10,\"budget\":1}"){Err(_)=>false,Ok(p)=>p.session.state.continuation!=None && not any(\q. q.lastTick!=p.session.state.tick,p.session.personalities) && (match input(p.session,"{\"command\":\"advance\",\"tick\":10,\"budget\":64}"){Err(_)=>false,Ok(done)=>done.session.state.tick==10 && not any(\q. q.lastTick!=10,done.session.personalities)})}}}}
+}
+test "personality clock errors fail explicitly without publishing silent fallback" {
+ match base(){Err(_)=>false,Ok(s)=>{
+ let bad={s|personalities:map(\p. {p|lastTick:2},s.personalities)};
+ match input(bad,"{\"command\":\"advance\",\"tick\":1,\"budget\":64}"){Err(_)=>true,Ok(_)=>false}
+ }}
+}

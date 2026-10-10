@@ -3,7 +3,7 @@ import std/io (readLine, println, exit, print, flush)
 import std/env (getArgs, getEnvOr, getPid, hasEnv)
 import std/result (Result, Ok, Err)
 import std/option (Some, None)
-import std/list (head, filter, map)
+import std/list (head, filter, map, length, contains, take)
 import std/string (length as stringLength, stringToInt)
 import std/json (Json, encode, decode, get, getString, jo, ja, kv, js, jint, jnum, jb)
 import pkg/sunholo/content_library/library (Bundle, encodeBundle, starterBundle, nextRoll, pickLabel, pickVariant)
@@ -11,17 +11,18 @@ import pkg/sunholo/social_dynamics/model (Offered)
 import pkg/sunholo/terminal_ui/ui (Dimensions, dimensions, screen, safeText)
 import ./journey_flow (Navigation, initial, options as journeyOptions, styleDefault, onboardingAllowed, navigation, remember)
 import ./journey_presenter (frame, opening, onboarding, indicatorChanges, journeyRecap)
-import ./session (Request, start)
+import ./session (Request, start, lookupConversation, isConversation)
 import ./watch_presenter (frame as watchFrame, recap as watchRecap)
 import ./narrative (stock as watchStock, consequences as watchConsequences)
 import ./watch_scenario (resourceName)
 import ./codec (object)
-import ./reactions (Policy, weights, signature, watchSignature, fixtureBody)
+import ./reactions (Policy, weights, signature, watchSignature, fixtureBody, conversationStarter)
 import ./store (Fetch, loadPolicy, loadWatchPolicy, resolve, openRun, appendRun)
 import ./presenter (briefing, policyBrief, seedBrief, dashboard, guidance, help, dialogue, rejection, consequences, recap)
-import ./play_flow (PlayState, Stage, Intent, begin, beginWatch, isWatch, seedNumber, parseArgs, menu, route, stage, publish, renderStatus, recover)
+import ./play_flow (PlayState, Stage, Intent, begin, beginWatch, beginConversationWatch, isWatch, seedNumber, parseArgs, menu, route, stage, publish, renderStatus, recover)
 
-export type Run = { ui: PlayState, home: string, path: string, policy: Policy, policyBody: string, mode: string, remaining: int, lines: int, lastMessage: string, modern: bool, nav: Navigation, dimensions: Dimensions, ansi: bool, debug: bool }
+export type HeardReply = {actor:string,text:string} deriving (Eq)
+export type Run = { ui: PlayState, home: string, path: string, policy: Policy, policyBody: string, mode: string, remaining: int, lines: int, lastMessage: string, modern: bool, nav: Navigation, dimensions: Dimensions, ansi: bool, debug: bool, recent:[HeardReply] }
 
 export type Applied = { run: Run, failed: bool, message: string }
 
@@ -54,6 +55,36 @@ ensures { match result {
   (Err(e), _) => Err(e),
   (_, Err(e)) => Err(e)
 }
+
+-- Opinion sampling remains unchanged. Only wording for the selected label may
+-- avoid the same listener's last eight published replies. The stored bundle is
+-- always the original validated bundle, never the filtered selection projection.
+export pure func selectReplyRecent(r:Request,policy:Policy,bundle:Bundle,seed:int,recent:[string])->Result[Reply,string] ! {}
+ensures {match result {Err(_)=>true,Ok(p)=>p.seed>=1 && p.seed<=2147483646 && stringLength(p.command)>0}} =
+ if length(recent)>8 then Err("recent_reply_limit") else match (weights(policy,r),nextRoll(seed)) {
+  (Ok(ws),Ok(responseRoll))=>match (pickLabel(ws,responseRoll.roll),nextRoll(responseRoll.seed)) {
+   (Ok(label),Ok(textRoll))=>match pickVariant(bundle,label,textRoll.roll) {
+    Err(e)=>Err(e),Ok(original)=>{
+     let unseen=filter(\v. v.label==label && not contains(recent,v.text),bundle.variants);
+     let filtered={bundle|variants:filter(\v. v.label!=label || not contains(recent,v.text),bundle.variants)};
+     let exhausted=length(unseen)==0;
+     match (if exhausted then Ok(original) else pickVariant(filtered,label,textRoll.roll)) {
+      Err(e)=>Err(e),Ok(v)=>match decode(encodeBundle(bundle)) {
+       Err(e)=>Err(e),Ok(encoded)=>Ok({command:command("answer",[kv("request",js(r.id)),kv("body",js(fixtureBody(r,label))),kv("roll",jnum(responseRoll.roll))]),seed:textRoll.seed,label:label,text:v.text,metadata:jo([kv("weights",ja(map(\w. jo([kv("label",js(w.label)),kv("weight",jint(w.weight))]),ws))),kv("response_roll",jnum(responseRoll.roll)),kv("text_roll",jnum(textRoll.roll)),kv("selected_label",js(label)),kv("variant_id",js(v.id)),kv("bundle",encoded),kv("dialogue",js(v.text)),kv("recent_wording",jo([kv("policy",js("same-actor-same-label-v1")),kv("recent_text",ja(map(js,recent))),kv("unseen_variants",jint(length(unseen))),kv("exhausted_fallback",jb(exhausted)),kv("original_variant_id",js(original.id))]))])})
+      }
+     }
+    }
+   },(Err(e),_)=>Err(e),(_,Err(e))=>Err(e)
+  },(Err(e),_)=>Err(e),(_,Err(e))=>Err(e)
+ }
+
+export pure func recentFor(recent:[HeardReply],actor:string)->[string] ! {}
+ensures {length(result)<=length(recent)} = map(\p. p.text,filter(\p. p.actor==actor,recent))
+
+export pure func rememberReply(recent:[HeardReply],actor:string,text:string,published:bool)->[HeardReply] ! {}
+requires {length(recent)<=8}
+ensures {length(result)<=8 && (published || result==recent)} =
+ if not published then recent else take(8,[{actor:actor,text:text}] ++ recent)
 
 pure func usage(fetch: Fetch) -> Json =
   jo([kv("source", js(fetch.source)), kv("calls", jint(fetch.calls)), kv("input_tokens", jint(fetch.inputTokens)), kv("output_tokens", jint(fetch.outputTokens)), kv("usage_known", jb(fetch.usageKnown))])
@@ -103,18 +134,22 @@ func respond(r: Run, explicitAuthored: bool) -> Result[Applied, string] ! {IO, F
           Err(j) => Err(j),
           Ok(n) => Ok({ run: n, failed: false, message: if isWatch(r.ui) && not r.debug then "The reply could not be used; retry or use an authored continuation." else "Library unavailable: ${e}. Request remains pending." })
         },
-        Ok(bundle) => match selectReply(request, r.policy, bundle, r.ui.seed) {
+        Ok(rawBundle) => match (if isConversation(r.ui.session) && rawBundle.origin == "authored" then conversationStarter(request,sig) else Ok(rawBundle)) {
+        Err(e)=>Err(e),Ok(bundle) => match (if isConversation(r.ui.session) then selectReplyRecent(request,r.policy,bundle,r.ui.seed,recentFor(r.recent,request.actor)) else selectReply(request, r.policy, bundle, r.ui.seed)) {
           Err(e) => match noteFailure(r, fetch, e) {
             Err(j) => Err(j),
             Ok(n) => Ok({ run: n, failed: false, message: if isWatch(r.ui) && not r.debug then "The reply could not be used; retry or use an authored continuation." else "Response unavailable: ${e}. Request remains pending." })
           },
           Ok(reply) => {
             let offered = anyOffered(r.ui, request.task)
-            match commit(r, reply.command, reply.seed, if offered then "start" else "main", if offered then request.task else "", r.ui.nextId, jo([kv("selection", reply.metadata), kv("usage", usage(fetch))]), fetch.calls) {
+            let hasConcern = isConversation(r.ui.session) && reply.label != "accept" && offered
+            let nextPhase = if hasConcern then "conversation" else if offered then "start" else "main"
+            match commit(r, reply.command, reply.seed, nextPhase, if offered then request.task else "", r.ui.nextId, jo([kv("selection", reply.metadata), kv("usage", usage(fetch))]), fetch.calls) {
               Err(e) => Err(e),
-              Ok(applied) => Ok({ applied | message: if applied.failed then applied.message else if isWatch(r.ui) && not r.debug then if bundle.origin == "authored" then watchStock(request,reply.label) else "${request.actor}: ${reply.text}" else "${dialogue(request.actor, reply.label, reply.text, fetch.source, bundle.origin)}${if isWatch(r.ui) && r.debug then "\nDevelopment selection: ${encode(reply.metadata)}" else ""}" })
+              Ok(applied) => Ok({ applied | run:{applied.run|recent:if isConversation(r.ui.session) then rememberReply(r.recent,request.actor,reply.text,not applied.failed) else r.recent}, message: if applied.failed then applied.message else if isWatch(r.ui) && not r.debug then if bundle.origin == "authored" && not isConversation(r.ui.session) then watchStock(request,reply.label) else "${request.actor}: ${reply.text}" else "${dialogue(request.actor, reply.label, reply.text, fetch.source, bundle.origin)}${if isWatch(r.ui) && r.debug then "\nDevelopment selection: ${encode(reply.metadata)}" else ""}" })
             }
           }
+        }
         }
       }
     }
@@ -137,13 +172,25 @@ func askProject(r: Run, task: string) -> Result[Applied, string] ! {IO, FS, AI} 
     }
   }
 
+func captainSpeech(r:Run,body:string)->Result[Applied,string] ! {IO,FS,AI} = match object(body) {
+ Err(e)=>Err(e),Ok(j)=>match (getString(j,"issue"),getString(j,"text"),getString(j,"approach"),get(j,"tick"),get(j,"revision")) {
+  (Some(issue),Some(words),Some(approach),Some(tick),Some(revision))=>{
+   let id="captain-${r.ui.nextId}";
+   let c=command("captain_reply",[kv("id",js(id)),kv("issue",js(issue)),kv("text",js(words)),kv("approach",js(approach)),kv("tick",tick),kv("revision",revision)]);
+   match commit(r,c,r.ui.seed,"response","reconsider-${id}",r.ui.nextId+1,jo([kv("captain_text",js(words)),kv("confirmed_approach",js(approach)),kv("meaning",js("discussion only"))]),0) {
+    Err(e)=>Err(e),Ok(a)=>if a.failed then Ok(a) else match respond(a.run,false) {Err(e)=>Err(e),Ok(answer)=>Ok({answer|message:"Captain: ${words}\n${answer.message}"})}
+   }
+  },_=>Err("Reply requires exact text and a confirmed approach")
+ }
+}
+
 func act(r: Run, i: Intent) -> Result[Applied, string] ! {IO, FS, AI} = if i.kind == "offer" then {
   let id = "project-${r.ui.nextId}"
   match commit(r, command("offer", [kv("worker", js(i.worker)), kv("recipe", js(i.recipe)), kv("id", js(id))]), r.ui.seed, "main", "", r.ui.nextId + 1, jo([]), 0) {
     Err(e) => Err(e),
     Ok(a) => if a.failed then Ok(a) else askProject(a.run, id)
   }
-} else if i.kind == "review_start" then Ok({ run: { r | ui: { r.ui | phase: "start", target: i.target } }, failed: false, message: "Review the existing offer; the crew agreement is unchanged." }) else if i.kind == "ask" then askProject(r, i.target) else if i.kind == "retry" || i.kind == "authored" then respond(r, i.kind == "authored") else if i.kind == "start" then commit(r, command("start_task", [kv("task", js(i.target))]), r.ui.seed, "main", "", r.ui.nextId, jo([]), 0) else if i.kind == "cancel" then commit(r, command("cancel_request", [kv("id", js(i.target))]), r.ui.seed, "main", "", r.ui.nextId, jo([]), 0) else if i.kind == "grant" || i.kind == "deny" then commit(r, command("resolve_relief", [kv("id", js(i.target)), kv("release", jb(i.kind == "grant"))]), r.ui.seed, "main", "", r.ui.nextId, jo([]), 0) else if i.kind == "advance" then commit(r, command("advance", [kv("tick", jint(r.ui.session.state.tick + 1)), kv("budget", jint(64))]), r.ui.seed, "main", "", r.ui.nextId, jo([]), 0) else if i.kind == "continue" then match r.ui.session.state.continuation {
+} else if i.kind=="events" then Ok({run:{r|ui:{r.ui|phase:"events",target:""}},failed:false,message:"Choose a lab scenario report; receiving it does not advance time."}) else if i.kind=="lab_major" then {let id="report-${r.ui.nextId}";let result=commit(r,command("lab_major",[kv("id",js(id)),kv("kind",js(i.target))]),r.ui.seed,"main","",r.ui.nextId+1,jo([]),0);match result {Err(e)=>Err(e),Ok(a)=>if a.failed then Ok(a) else Ok({a|message:"The crew received the ${i.target} lab report. Temperament responds gradually on future turns; no work or resources changed."})}} else if i.kind == "conversation" then Ok({run:{r|ui:{r.ui|phase:"conversation",target:i.target}},failed:false,message:"Discuss this existing proposal; sending a reply does not start work."}) else if i.kind == "captain_reply" then captainSpeech(r,i.target) else if i.kind == "review_start" then Ok({ run: { r | ui: { r.ui | phase: "start", target: i.target } }, failed: false, message: "Review the existing offer; the crew agreement is unchanged." }) else if i.kind == "ask" then askProject(r, i.target) else if i.kind == "retry" || i.kind == "authored" then respond(r, i.kind == "authored") else if i.kind == "start" then commit(r, command("start_task", [kv("task", js(i.target))]), r.ui.seed, "main", "", r.ui.nextId, jo([]), 0) else if i.kind == "cancel" then commit(r, command("cancel_request", [kv("id", js(i.target))]), r.ui.seed, "main", "", r.ui.nextId, jo([]), 0) else if i.kind == "grant" || i.kind == "deny" then commit(r, command("resolve_relief", [kv("id", js(i.target)), kv("release", jb(i.kind == "grant"))]), r.ui.seed, "main", "", r.ui.nextId, jo([]), 0) else if i.kind == "advance" then commit(r, command("advance", [kv("tick", jint(r.ui.session.state.tick + 1)), kv("budget", jint(64))]), r.ui.seed, "main", "", r.ui.nextId, jo([]), 0) else if i.kind == "continue" then match r.ui.session.state.continuation {
   Some(t) => commit(r, command("advance", [kv("tick", jint(t.target)), kv("budget", jint(64))]), r.ui.seed, "main", "", r.ui.nextId, jo([]), 0),
   None => Err("No pending advance")
 } else if i.kind == "abort" then commit(r, command("abort", []), r.ui.seed, "main", "", r.ui.nextId, jo([]), 0) else if i.kind == "relief_choice" then Ok({ run: { r | ui: { r.ui | phase: "relief", target: i.target } }, failed: false, message: "" }) else if i.kind == "back" then Ok({ run: { r | ui: { r.ui | phase: "main", target: "" } }, failed: false, message: "" }) else if i.kind == "working" || i.kind == "offered" || i.kind == "reliefs" || i.kind == "assignments" || i.kind == "rests" then Ok({ run: { r | ui: { r.ui | phase: i.kind, target: "" } }, failed: false, message: "" }) else Err("Unknown captain action")
@@ -312,7 +359,7 @@ func launch(mode: string, modern: bool) -> () ! {IO, Env, FS, AI} = {
                     },
                     Ok(path) => {
                       if modern then () else println("Welcome to the bridge. Choose your next captain action.")
-                      loop({ ui: ui, home: o.home, path: path, policy: config.policy, policyBody: config.body, mode: mode, remaining: config.policy.callLimit, lines: if o.hasSeed then 1 else 2, lastMessage: "", modern: modern, nav: initial(), dimensions: d, ansi: f.ansi, debug:f.debug })
+                      loop({ ui: ui, home: o.home, path: path, policy: config.policy, policyBody: config.body, mode: mode, remaining: config.policy.callLimit, lines: if o.hasSeed then 1 else 2, lastMessage: "", modern: modern, nav: initial(), dimensions: d, ansi: f.ansi, debug:f.debug, recent:[] })
                     }
                   }
                 }
@@ -340,19 +387,27 @@ requires { mode == "live" || mode == "offline" } = launch(mode, true)
 
 -- Trusted app adapters only: these reuse the same start/commit/respond/store
 -- boundaries. UI-owned navigation never calls them. No second input owner.
-export func openWatch(home:string,seed:int,policyChoice:string,mode:string,debug:bool)->Result[Run,string] ! {FS,Env}
+func openWatchScenario(home:string,seed:int,policyChoice:string,mode:string,debug:bool,conversation:bool)->Result[Run,string] ! {FS,Env}
 requires { stringLength(home)>0 && stringLength(home)<=4096 && seed>=1 && seed<=2147483646 && (mode=="live" || mode=="offline") }
 ensures { match result {Err(_)=>true,Ok(r)=>r.ui.seed==seed && r.ui.seq==0 && isWatch(r.ui) && r.remaining>=0 && r.remaining<=8} } =
- match (beginWatch(policyChoice,seed),loadWatchPolicy(home)) {
+ match (if conversation then beginConversationWatch(policyChoice,seed) else beginWatch(policyChoice,seed),loadWatchPolicy(home)) {
   (Err(e),_)=>Err(e),(_,Err(e))=>Err(e),
   (Ok(ui),Ok(config))=>{
-   let c=command("start",[kv("policy",js(ui.session.policy)),kv("scenario",js("watch-v2"))]);
+   let c=command("start",[kv("policy",js(ui.session.policy)),kv("scenario",js(if conversation then "watch-v3" else "watch-v2"))]);
    match start(c) {Err(_)=>Err("Startup failed"),Ok(host)=>{
     let header=envelope(0,jo([kv("kind",js("start")),kv("host_input",js(c)),kv("host_output",js(host.trace)),kv("seed",jint(seed)),kv("policy_body",js(config.body)),kv("model",js(model())),kv("mode",js(mode))]));
-    match openRun(home,"${getPid()}-${seed}",header) {Err(e)=>Err("Run ownership/journal failed: ${e}"),Ok(path)=>Ok({ui:ui,home:home,path:path,policy:config.policy,policyBody:config.body,mode:mode,remaining:config.policy.callLimit,lines:0,lastMessage:"",modern:true,nav:initial(),dimensions:dimensions(80,24),ansi:false,debug:debug})}
+    match openRun(home,"${getPid()}-${seed}",header) {Err(e)=>Err("Run ownership/journal failed: ${e}"),Ok(path)=>Ok({ui:ui,home:home,path:path,policy:config.policy,policyBody:config.body,mode:mode,remaining:config.policy.callLimit,lines:0,lastMessage:"",modern:true,nav:initial(),dimensions:dimensions(80,24),ansi:false,debug:debug,recent:[]})}
    }}
   }
  }
+
+export func openWatch(home:string,seed:int,policyChoice:string,mode:string,debug:bool)->Result[Run,string] ! {FS,Env}
+requires {stringLength(home)>0 && stringLength(home)<=4096 && seed>=1 && seed<=2147483646 && (mode=="live" || mode=="offline")}
+ensures {match result {Err(_)=>true,Ok(r)=>isWatch(r.ui) && not isConversation(r.ui.session)}} = openWatchScenario(home,seed,policyChoice,mode,debug,false)
+
+export func openConversationWatch(home:string,seed:int,policyChoice:string,mode:string,debug:bool)->Result[Run,string] ! {FS,Env}
+requires {stringLength(home)>0 && stringLength(home)<=4096 && seed>=1 && seed<=2147483646 && (mode=="live" || mode=="offline")}
+ensures {match result {Err(_)=>true,Ok(r)=>isWatch(r.ui) && isConversation(r.ui.session)}} = openWatchScenario(home,seed,policyChoice,mode,debug,true)
 
 export func applyWatch(r:Run,i:Intent)->Result[Applied,string] ! {IO,FS,AI}
 requires { isWatch(r.ui) && r.remaining>=0 && r.remaining<=8 && (r.mode=="live" || r.mode=="offline") }

@@ -1,0 +1,42 @@
+module sunholo/crew_lab/recent_reply_test
+import std/result (Result,Ok,Err)
+import std/option (Some,None)
+import std/list (head,map,length,any)
+import std/json (encode,get,getBool,decode)
+import std/string (contains)
+import ./session (Session,start,offer,ask)
+import ./reactions (decodePolicy,watchPolicyBody,watchSignature,conversationStarter)
+import ./play (selectReply,selectReplyRecent,rememberReply,recentFor)
+import pkg/sunholo/content_library/library (encodeBundle)
+
+pure func pending()->Result[Session,string] = match start("{\"command\":\"start\",\"policy\":\"consent\",\"scenario\":\"watch-v3\"}") {Err(_)=>Err("start"),Ok(s)=>match offer(s.session,"medic","work_medic","diagnostics") {Err(_)=>Err("offer"),Ok(o)=>match ask(o.session,"medic","diagnostics","r1") {Err(_)=>Err("ask"),Ok(a)=>Ok(a.session)}}}
+
+test "recent wording changes only the same label variant without consuming another roll" {
+ match (pending(),decodePolicy(watchPolicyBody())) {(Ok(s),Ok(p))=>match head(s.pending) {None=>false,Some(r)=>match conversationStarter(r,watchSignature(r,watchPolicyBody(),"fixture")) {Err(_)=>false,Ok(b)=>match selectReply(r,p,b,34500) {Err(_)=>false,Ok(first)=>match selectReplyRecent(r,p,b,34500,[first.text]) {Err(_)=>false,Ok(next)=>next.label==first.label && next.seed==first.seed && next.command==first.command && next.text!=first.text}}}},_=>false}
+}
+
+test "exhausted wording keeps original seeded variant rather than changing opinion" {
+ match (pending(),decodePolicy(watchPolicyBody())) {(Ok(s),Ok(p))=>match head(s.pending) {None=>false,Some(r)=>match conversationStarter(r,watchSignature(r,watchPolicyBody(),"fixture")) {Err(_)=>false,Ok(b)=>match (selectReply(r,p,b,34500),selectReplyRecent(r,p,b,34500,map(\v. v.text,b.variants))) {(Ok(old),Ok(next))=>next.command==old.command && next.seed==old.seed && next.label==old.label && next.text==old.text && (match get(next.metadata,"recent_wording"){None=>false,Some(a)=>getBool(a,"exhausted_fallback")==Some(true)}),_=>false}}},_=>false}
+}
+test "another crew member's recent words cannot suppress this actor's wording" {
+ match (pending(),decodePolicy(watchPolicyBody())) {(Ok(s),Ok(p))=>match head(s.pending) {None=>false,Some(r)=>match conversationStarter(r,watchSignature(r,watchPolicyBody(),"fixture")) {Err(_)=>false,Ok(b)=>match selectReply(r,p,b,34500) {Err(_)=>false,Ok(old)=>{
+ let other=rememberReply([],"engineer",old.text,true);
+ let own=rememberReply([],"medic",old.text,true);
+ match (selectReplyRecent(r,p,b,34500,recentFor(other,"medic")),selectReplyRecent(r,p,b,34500,recentFor(own,"medic"))) {(Ok(a),Ok(c))=>a.text==old.text && c.text!=old.text && a.label==c.label && a.seed==c.seed,_=>false}
+ }}}},_=>false}
+}
+test "selected dialogue and variant come from unchanged original cached bundle with audited rolls" {
+ match (pending(),decodePolicy(watchPolicyBody())) {(Ok(s),Ok(p))=>match head(s.pending) {None=>false,Some(r)=>match conversationStarter(r,watchSignature(r,watchPolicyBody(),"fixture")) {Err(_)=>false,Ok(b)=>match selectReply(r,p,b,34500) {Err(_)=>false,Ok(old)=>match selectReplyRecent(r,p,b,34500,[old.text]) {Err(_)=>false,Ok(next)=>any(\v. v.label==next.label && v.text==next.text,b.variants) && (match (get(next.metadata,"bundle"),decode(encodeBundle(b))) {(Some(encoded),Ok(original))=>encoded==original,_=>false}) && get(next.metadata,"weights")==get(old.metadata,"weights") && get(next.metadata,"response_roll")==get(old.metadata,"response_roll") && get(next.metadata,"text_roll")==get(old.metadata,"text_roll")}}}},_=>false}
+}
+test "failed publication never updates recent history while accepted history stays bounded" {
+ let history=[{actor:"medic",text:"most recent"},{actor:"engineer",text:"two"},{actor:"pilot",text:"three"},{actor:"medic",text:"four"},{actor:"scientist",text:"five"},{actor:"diplomat",text:"six"},{actor:"engineer",text:"seven"},{actor:"medic",text:"oldest"}];
+ let rejected=rememberReply(history,"medic","unpublished",false);
+ let accepted=rememberReply(history,"medic","published",true);
+ rejected==history && length(accepted)==8 && head(accepted)==Some({actor:"medic",text:"published"}) && not any(\v. v.text=="oldest",accepted) && not any(\v. v.text=="unpublished",accepted)
+}
+test "recent filtering cannot hide an invalid original bundle" {
+ match (pending(),decodePolicy(watchPolicyBody())) {(Ok(s),Ok(p))=>match head(s.pending) {None=>false,Some(r)=>match conversationStarter(r,watchSignature(r,watchPolicyBody(),"fixture")) {Err(_)=>false,Ok(b)=>{
+ let invalid={b|variants:b.variants ++ [{id:"bad",label:"concern",text:"invalid",weight:0}]};
+ match selectReplyRecent(r,p,invalid,34500,["invalid"]) {Err(_)=>true,Ok(_)=>false}
+ }}},_=>false}
+}

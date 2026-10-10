@@ -74,3 +74,17 @@ import pkg/sunholo/social_dynamics/wire (decodeProposal, encodeState, encodeEven
 ```
 
 Implementation clarification: partition equivalence covers successfully completed advances without intervening inputs. Blocked runs preserve the last committed boundary or idle advance; their retained tick can differ if a prior partition committed an idle time before the failure. They must preserve the same successful effects/event order and failing item, not falsely report the target reached. Generated outcome evidence uses reserved IDs `event-<sequence>`; initial/authored evidence may not use that prefix. Task/condition outcome evidence grants no automatic actor knowledge.
+
+## Personality responses (0.3.0)
+
+`personality` is a pure sidecar: initialize a complete five-trait baseline, accept
+Host receipts for FirstContact/Loss/DeepTime/Betrayal, then advance against the
+simulation clock. Major receipts set targets without an immediate change; at most
+one point per trait per turn moves toward targets within baseline ±20 and 0..100.
+Support/Conflict/Neutral interactions only influence an existing 20-turn response.
+Targets are authored experimental rules, not a scientific claim or moral reward.
+The calling host must verify actual observer knowledge, freeze perceived source,
+and retain the sidecar in journals; supplying a Receipt alone is not authentication.
+History retains at most128 receipts with no eviction; duplicates are exact and
+idempotent, changed bodies or rewind fail. Keep current attributes in later
+appraisal/AI context. No captain inference or personal-value drift is included.

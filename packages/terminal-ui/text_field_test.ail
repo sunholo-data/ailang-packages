@@ -1,0 +1,49 @@
+module sunholo/terminal_ui/text_field_test
+import std/result (Ok,Err)
+import std/option (Some,None)
+import ./events (Input,Character,MoveLeft,MoveRight,First,Last,Erase,Remove,Accept,Cancel,NoInput,Sized)
+import ./text_field (create,update,validText)
+
+test "editor Unicode cursor insertion and backward deletion preserve exact speech" {
+ match create("aé界",20) {
+  Err(_)=>false,
+  Ok(e)=>{
+   let left=update(e,Input(MoveLeft));
+   let added=update(left,Input(Character("🙂")));
+   added.text=="aé🙂界" && added.cursor==3 && (update(added,Input(Erase))).text=="aé界"
+  }
+ }
+}
+test "editor rejects complete overlength and control-containing insertions" {
+ match create("abc",4) {
+  Err(_)=>false,
+  Ok(e)=>update(e,Input(Character("de")))==e && update(e,Input(Character("d\x1b")))==e && not validText("a\nb")
+ }
+}
+test "editor forward delete and edge movement stay bounded" {
+ match create("abc",8) {
+  Err(_)=>false,
+  Ok(e)=>{
+   let first=update(e,Input(First));
+   first.cursor==0 && update(first,Input(MoveLeft))==first && (update(first,Input(Remove))).text=="bc" && update(e,Input(MoveRight))==e
+  }
+ }
+}
+test "editor idle and resize do not change draft or submit" {
+ match create("q0bh",8){Err(_)=>false,Ok(e)=>update(e,NoInput)==e && update(e,Sized(40,16))==e && e.submitted==None}
+}
+test "editor submit is explicit exact and completed field is stable" {
+ match create("  Please explain.  ",40){Err(_)=>false,Ok(e)=>{
+  let sent=update(e,Input(Accept));
+  sent.submitted==Some("  Please explain.  ") && update(sent,Input(Character("x")))==sent && not sent.cancelled
+ }}
+}
+test "editor cancel retains draft without sending and blank cannot submit" {
+ match (create("No promise yet",40),create("   ",8)) {
+  (Ok(e),Ok(blank))=>{let cancelled=update(e,Input(Cancel));cancelled.cancelled && cancelled.text==e.text && cancelled.submitted==None && (update(blank,Input(Accept))).submitted==None},
+  _=>false
+ }
+}
+test "editor invalid initialization does not construct unsafe state" {
+ match (create("a",0),create("abc",2),create("a\t",8),create("",4097)) {(Err(_),Err(_),Err(_),Err(_))=>true,_=>false}
+}

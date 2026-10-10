@@ -455,3 +455,43 @@ record limit; the last published state is retained when a write cannot fit. The
 number of turns before that happens depends on how many projects, responses and
 events accumulate. Longer whole-journey simulations will need compact checkpoints;
 this release is a watch-sized story lab.
+
+## Talk through a crew concern
+
+For a reproducible first example, run:
+
+```sh
+crew-watch-offline --seed 34500
+```
+
+Choose **1 Ask for agreement**, **1 Choose work**, then **3 medic**. The medic
+asks who you intend to prepare for. Their concern leaves the same proposal open.
+Read known facts, their condition, the project costs, and what remains unknown.
+Choose one of three starting replies to edit, or **4 Write my own reply**.
+
+Type your captain's words. Left/Right and Backspace/Delete edit them; Enter opens
+review. Tab opens context help and Escape returns to the draft. Review shows exact
+words and the declared approach. **2 Keep editing** is the default; **3 Change
+approach** cycles the five discussion stances. **1 Send these exact words** commits
+speech and asks the medic to reconsider this same proposal. They may still decline.
+No time passes, supplies are not spent, and work is not started by dialogue.
+
+A suggestion is a discussion, not an implemented resource change or fulfilled
+promise. Free text uses the approach you explicitly confirm; the host does not
+pretend to infer an enforceable command from your words. Your exact words become
+evidence available to the recipient's next AI/cache context and the run journal.
+
+Use **4 Introduce a voyage event (lab)** on the bridge to deliver a major scenario
+report. It is an experiment fixture; the terminal does not simulate an actual
+arrival or alien encounter. Receiving it does not instantly change personality.
+Advance turns, talk to crew, and inspect **c Crew** with `--debug` to see baseline,
+current OCEAN, response targets and received triggers. Ordinary exchanges can
+change mood/trust immediately and influence an active response; they do not start
+OCEAN drift. The normal view stays descriptive.
+
+For redirected input, `--mode plain` uses one complete line of draft text at a
+time, then a blank line to review; `/context` opens help and `/cancel` sends nothing.
+EOF during editing/review sends nothing. `--legacy` runs the previous watch-v2
+for archived parity experiments. Earlier crew-play and crew-journey keep their
+existing behavior. Live dialogue is still synchronous while reply-inbox cleanup
+remains an independent upstream gate.

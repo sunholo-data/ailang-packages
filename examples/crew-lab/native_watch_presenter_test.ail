@@ -4,8 +4,9 @@ import std/option (Some,None)
 import std/list (any,length)
 import std/string (contains,join)
 import pkg/sunholo/terminal_ui/ui (cells)
+import pkg/sunholo/terminal_ui/events (Input,Accept,Character)
 import ./play_flow (beginWatch)
-import ./native_watch_ui (initial,decision,Ship,Guide)
+import ./native_watch_ui (initial,decision,editor,update,Ship,Guide,Editor,ReplyReview)
 import ./native_watch_presenter (frame,elapsed)
 
 pure func all[a](f:a->bool,xs:[a])->bool = not any(\x. not f(x),xs)
@@ -71,4 +72,21 @@ test "compact menu tells captain which choices are outside the window" {
  let f=frame(Some(s),u,"",[],"offline",0,"journal",false,false);
  length(f.lines)==16 && all(\l. cells(l)<=40,f.lines) && contains(f.text,"> 8 Resolve a relief request") && contains(f.text,"Choices 4-6/6")
  }}
+}
+
+test "editor and review frame matrix stays inside screen with long Unicode draft" {
+ let u=editor(initial(80,30,false),"issue-test","qbh0 café 界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界","ask_advice",0,0);
+ all(\width. all(\height. all(\view. {
+ let f=frame(None,{u|dimensions:{columns:width,rows:height},view:view},"",[],"offline",0,"journal",false,false);
+ length(f.lines)==height && all(\line. cells(line)<=width,f.lines)
+ },[Editor,ReplyReview]),[16,30,40]),[40,80,100])
+}
+
+test "long reply review keeps changing declared approach visible at40x16" {
+ let u=editor(initial(40,16,false),"issue-test","Give me your judgement on preparation and the unknown medical needs before we make any further promises, rather than assuming contact will go well.","ask_advice",0,0);
+ let r=update(None,u,Input(Accept));
+ let changed=update(None,r.ui,Input(Character("3")));
+ let before=frame(None,r.ui,"",[],"offline",0,"",false,false).text;
+ let after=frame(None,changed.ui,"",[],"offline",0,"",false,false).text;
+ contains(before,"Approach: Ask for their judgement") && contains(after,"Approach: Discuss a staged approach") && contains(after,"PgUp/PgDn read words")
 }

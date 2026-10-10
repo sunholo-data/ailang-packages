@@ -97,3 +97,13 @@ validate: native-watch-test
 native-watch-pty-test:
 	@AILANG="$(AILANG)" python3 "$(EX)/test-native-watch-pty.py"
 validate: native-watch-pty-test
+
+.PHONY: conversations-test
+conversations-test:
+	@cd "$(EX)" && "$(AILANG)" test --allow-skips conversations.ail
+	@cd "$(EX)" && "$(AILANG)" test --allow-skips personality_host.ail
+	@cd "$(ROOT)/packages/terminal-ui" && "$(AILANG)" test --allow-skips text_field.ail
+	@cd "$(ROOT)/packages/social-dynamics" && "$(AILANG)" test --allow-skips personality.ail
+	@AILANG="$(AILANG)" python3 "$(EX)/test-conversations.py"
+	@AILANG="$(AILANG)" "$(EX)/test-conversation-replay.sh"
+validate: conversations-test

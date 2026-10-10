@@ -1,0 +1,153 @@
+module sunholo/social_dynamics/personality
+import ./model (Value, Principal, Host, validId, unique)
+import std/result (Result, Ok, Err)
+import std/option (Option, Some, None)
+import std/list (length, map, any, filter, head)
+
+-- Trusted host sidecar. Receipt construction is NOT proof of delivery: the host
+-- must validate actual observer knowledge and freeze the perceived source first.
+-- AI wording never selects this catalogue or supplies numeric trait effects.
+export type MajorEvent = FirstContact | Loss | DeepTime | Betrayal deriving (Eq)
+
+export type Interaction = Support | Conflict | Neutral deriving (Eq)
+
+export type Receipt = { id: string, observer: string, evidence: string, receivedAt: int, principal: Principal, perceivedSource: string } deriving (Eq)
+
+export type MajorReceipt = { receipt: Receipt, kind: MajorEvent } deriving (Eq)
+
+export type InteractionReceipt = { receipt: Receipt, kind: Interaction } deriving (Eq)
+
+export type ReceiptEntry = MajorReceived(MajorReceipt) | InteractionReceived(InteractionReceipt) deriving (Eq)
+
+export type Response = { trigger: string, targets: [Value], until: int } deriving (Eq)
+
+export type Personality = { actor: string, baseline: [Value], current: [Value], active: Option[Response], lastTick: int, history: [ReceiptEntry] } deriving (Eq)
+
+pure func every(predicate: Value -> bool, vs: [Value]) -> bool ! {} = not any(\v. not predicate(v), vs)
+
+pure func entriesValid(p: Personality, entries: [ReceiptEntry]) -> bool ! {} =
+  not any(\e. not validReceipt(p, entryReceipt(e)), entries)
+
+pure func ids() -> [string] ! {} = ["openness", "conscientiousness", "extraversion", "agreeableness", "neuroticism"]
+
+pure func amount(vs: [Value], id: string) -> int ! {} = match head(filter(\v. v.id == id, vs)) {
+  Some(v) => v.value,
+  None => 0 - 999
+}
+
+pure func validTraits(vs: [Value]) -> bool ! {} =
+  length(vs) == 5 && unique(map(\v. v.id, vs)) && every(\v. any(\id. id == v.id, ids()) && v.value >= 0 && v.value <= 100, vs)
+
+pure func nearBaseline(baseline: [Value], vs: [Value]) -> bool ! {} =
+  validTraits(vs) && every(\v. v.value >= amount(baseline, v.id) - 20 && v.value <= amount(baseline, v.id) + 20, vs)
+
+pure func time(t: int) -> bool ! {} = t >= 0 && t <= 1000000000
+
+pure func entryReceipt(e: ReceiptEntry) -> Receipt ! {} = match e {
+  MajorReceived(m) => m.receipt,
+  InteractionReceived(i) => i.receipt
+}
+
+pure func validReceipt(p: Personality, r: Receipt) -> bool ! {} =
+  validId(r.id) && validId(r.evidence) && r.observer == p.actor && r.principal == Host && validId(r.perceivedSource) && time(r.receivedAt) && r.receivedAt <= p.lastTick
+
+pure func validState(p: Personality) -> bool ! {} =
+  validId(p.actor) && time(p.lastTick) && validTraits(p.baseline) && nearBaseline(p.baseline, p.current) && length(p.history) <= 128 && unique(map(\e. (entryReceipt(e)).id, p.history)) && entriesValid(p, p.history) && (match p.active {
+    None => true,
+    Some(r) => validId(r.trigger) && time(r.until) && r.until > p.lastTick && nearBaseline(p.baseline, r.targets) && any(\e. match e {
+      MajorReceived(m) => m.receipt.id == r.trigger && m.receipt.receivedAt <= 1000000000 - 20 && r.until == m.receipt.receivedAt + 20,
+      InteractionReceived(_) => false
+    }, p.history)
+  })
+
+export pure func initialize(actor: string, traits: [Value], tick: int) -> Result[Personality, string] ! {}
+ensures { match result {
+  Ok(p) => p.actor == actor && p.current == p.baseline && p.lastTick == tick && p.active == None && validState(p),
+  Err(_) => true
+} } =
+  if not validId(actor) || not validTraits(traits) || not time(tick) then Err("invalid_personality_initialization") else Ok({ actor: actor, baseline: traits, current: traits, active: None, lastTick: tick, history: [] })
+
+pure func boundedTrait(baseline: int, n: int) -> int ! {}
+requires { baseline >= 0 && baseline <= 100 && n >= 0 - 1000 && n <= 1000 }
+ensures { result >= 0 && result <= 100 && result >= baseline - 20 && result <= baseline + 20 } =
+  let low = if baseline < 20 then 0 else baseline - 20 in
+  let high = if baseline > 80 then 100 else baseline + 20 in
+  if n < low then low else if n > high then high else n
+
+-- Demonstration response policy, not a clinical OCEAN claim or moral score.
+-- Temperament and previous drift affect the same experienced event differently.
+pure func eventOffset(kind: MajorEvent, id: string, baseline: int) -> int ! {} = match kind {
+  FirstContact => if id == "openness" then if baseline >= 50 then 8 else 0 - 4 else if id == "neuroticism" then if baseline >= 50 then 8 else 2 else 0,
+  Loss => if id == "extraversion" then if baseline >= 50 then 0 - 6 else 0 - 3 else if id == "neuroticism" then 8 else 0,
+  DeepTime => if id == "openness" then if baseline >= 50 then 6 else 0 - 4 else if id == "conscientiousness" then if baseline >= 50 then 4 else 0 - 2 else 0,
+  Betrayal => if id == "agreeableness" then if baseline >= 50 then 0 - 10 else 0 - 5 else if id == "neuroticism" then 6 else 0
+}
+
+pure func targetTraits(p: Personality, kind: MajorEvent) -> [Value] ! {} =
+  map(\v. { id: v.id, value: boundedTrait(amount(p.baseline, v.id), v.value + eventOffset(kind, v.id, amount(p.baseline, v.id))) }, p.current)
+
+pure func checkEntry(p: Personality, e: ReceiptEntry) -> Result[bool, string] ! {} =
+  if not validState(p) then Err("invalid_personality_state") else match head(filter(\old. (entryReceipt(old)).id == (entryReceipt(e)).id, p.history)) {
+    Some(old) => if old == e then Ok(false) else Err("altered_personality_receipt"),
+    None => if not validReceipt(p, entryReceipt(e)) || (entryReceipt(e)).receivedAt != p.lastTick then Err("invalid_personality_receipt") else if length(p.history) >= 128 then Err("personality_retention_full") else Ok(true)
+  }
+
+export pure func beginMajor(p: Personality, m: MajorReceipt) -> Result[Personality, string] ! {}
+ensures { match result {
+  Ok(q) => q.current == p.current && q.lastTick == p.lastTick && validState(q),
+  Err(_) => true
+} } = match checkEntry(p, MajorReceived(m)) {
+  Err(e) => Err(e),
+  Ok(false) => Ok(p),
+  Ok(true) => if p.lastTick > 1000000000 - 20 then Err("personality_time_overflow") else Ok({ p | active: Some({ trigger: m.receipt.id, targets: targetTraits(p, m.kind), until: p.lastTick + 20 }), history: p.history ++ [MajorReceived(m)] })
+}
+
+pure func toward(n: int, target: int, distance: int) -> int ! {}
+requires { n >= 0 && n <= 100 && target >= 0 && target <= 100 && distance >= 0 && distance <= 1000000000 }
+ensures { result >= 0 && result <= 100 && (if n <= target then result >= n && result <= target else result <= n && result >= target) } =
+  if n < target then if distance >= target - n then target else n + distance else if n > target then if distance >= n - target then target else n - distance else n
+
+-- Support/conflict are the recipient's host-validated perception, not adjectives
+-- inferred from prose. Support reduces the active neuroticism target toward their
+-- baseline; conflict reinforces it modestly. No other trait is assigned a moral
+-- reward. Neutral preserves targets. None can create a response from nothing.
+pure func influence(p: Personality, r: Response, kind: Interaction) -> Response ! {} =
+  { r | targets: map(\v. if v.id != "neuroticism" then v else { v | value: if kind == Support then toward(v.value, amount(p.baseline, v.id), 2) else if kind == Conflict then boundedTrait(amount(p.baseline, v.id), v.value + 2) else v.value }, r.targets) }
+
+export pure func receiveInteraction(p: Personality, i: InteractionReceipt) -> Result[Personality, string] ! {}
+ensures { match result {
+  Ok(q) => q.current == p.current && q.lastTick == p.lastTick && validState(q) && (if p.active == None then q.active == None else true),
+  Err(_) => true
+} } = match checkEntry(p, InteractionReceived(i)) {
+  Err(e) => Err(e),
+  Ok(false) => Ok(p),
+  Ok(true) => Ok({ p | active: match p.active {
+    None => None,
+    Some(r) => Some(influence(p, r, i.kind))
+  }, history: p.history ++ [InteractionReceived(i)] })
+}
+
+export pure func advance(p: Personality, tick: int) -> Result[Personality, string] ! {}
+ensures { match result {
+  Ok(q) => q.lastTick == tick && q.baseline == p.baseline && q.history == p.history && validState(q) && every(\v. v.value <= amount(p.current, v.id) + (tick - p.lastTick) && v.value >= amount(p.current, v.id) - (tick - p.lastTick), q.current),
+  Err(_) => true
+} } =
+  if not validState(p) then Err("invalid_personality_state") else if not time(tick) || tick < p.lastTick then Err("personality_clock_rewind") else if tick == p.lastTick then Ok(p) else match p.active {
+    None => Ok({ p | lastTick: tick }),
+    Some(r) => let until = if tick > r.until then r.until else tick in
+    let elapsed = until - p.lastTick in
+    let current = map(\v. { v | value: toward(v.value, amount(r.targets, v.id), elapsed) }, p.current) in
+    Ok({ p | current: current, lastTick: tick, active: if tick >= r.until then None else Some(r) })
+  }
+
+test "initialization requires exactly all five bounded traits" {
+  initialize("a", [], 0) == Err("invalid_personality_initialization")
+}
+
+test "trait clamp respects world and individual limits" {
+  boundedTrait(50, 90) == 70 && boundedTrait(5, 0 - 10) == 0 && boundedTrait(95, 110) == 100 && boundedTrait(5, 110) == 25 && boundedTrait(95, 0 - 10) == 75
+}
+
+test "slow movement never overshoots" {
+  toward(50, 53, 1) == 51 && toward(50, 53, 100) == 53 && toward(50, 47, 1) == 49
+}

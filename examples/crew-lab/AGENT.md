@@ -189,3 +189,20 @@ Native action menus expand with measured height (3..12 rows); compact80x24 keeps
 detail space, from27rows the six bridge actions remain visible at every focus.
 The footer shows visible choice range. Up/Down chooses; PgUp/PgDn pages details.
 Resource-aware offer/withdrawal gameplay is separately planned, not implemented.
+
+## Conversation watch (0.4.0)
+
+Native watch defaults to `watch-v3` host sidecars; `--legacy`, journey and play
+keep v2/older recordings. Session.chat and .personalities are additive API fields
+but excluded from old wire snapshots. `conversations` owns issue catalogue, exact
+speech and three seeded starting replies; session validates issue/task/clock/revision,
+confirmed stance, delivered evidence and same-proposal reconsideration atomically.
+The native text editor and review are pure UI state and never consume RNG/journal
+IDs/resources. Letters including q/b/h are text while editing. Review defaults to
+Keep editing; only explicit Send publishes speech. Context reads/resize preserve it.
+`personality_host` verifies received evidence before creating kernel receipts,
+projects gradually changed traits into actor attributes on actual committed turns,
+and serializes baselines/targets/history in new host snapshots. A lab_major fixture
+is explicit developer-supplied voyage evidence, not simulated alien contact.
+Scores belong to --debug; ordinary player views use descriptive conditions.
+Python remains restricted to acceptance oracles/harnesses, never product code.

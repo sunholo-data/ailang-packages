@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.3.0
+
+Add a pure personality sidecar with receipt-bound major-event responses. OCEAN
+traits move only over simulation time, at most one point per trait per turn,
+within individual baseline and world bounds. Ordinary perceived interactions
+can influence an active response but cannot initiate one. Exact retries are
+idempotent; altered receipts, rewinds and full retention return typed errors.
+
 ## 0.2.0
 
 Breaking: Effect adds opt-in BoundedIndicatorDelta. Checked arithmetic and reference/observer ownership gates remain; only a valid configured indicator result saturates at its bounds. Existing IndicatorDelta and wire tags are unchanged.

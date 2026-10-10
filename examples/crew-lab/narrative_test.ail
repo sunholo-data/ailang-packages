@@ -2,6 +2,7 @@ module sunholo/crew_lab/narrative_test
 import std/result (Ok, Err)
 import std/string (contains)
 import std/list (map)
+import ./conversations (empty as emptyConversation)
 import ./session (Session, offer)
 import ./watch_scenario (config, actors, resources)
 import pkg/sunholo/social_dynamics/engine (init)
@@ -17,7 +18,7 @@ pure func fixture() -> Result[Session, string] = match config("consent") {
   Err(e) => Err(e),
   Ok(c) => match init(c, actors(), resources()) {
     Err(_) => Err("init"),
-    Ok(state) => Ok({ policy: "consent", config: c, state: state, bindings: [], pending: [], bank: [], reports: [] })
+    Ok(state) => Ok({ policy: "consent", config: c, state: state, bindings: [], pending: [], bank: [], reports: [], chat: emptyConversation(0), personalities: [] })
   }
 }
 

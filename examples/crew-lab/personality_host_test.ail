@@ -1,0 +1,21 @@
+module sunholo/crew_lab/personality_host_test
+import std/result (Ok,Err)
+import pkg/sunholo/social_dynamics/personality (FirstContact)
+import ./session (start,labMajor)
+import ./personality_host (receiveMajor,receiveSpeech)
+
+test "host rejects a major receipt for evidence that no crew actually received" {
+ match start("{\"command\":\"start\",\"policy\":\"consent\",\"scenario\":\"watch-v3\"}") {
+ Err(_)=>false,Ok(s)=>match receiveMajor(s.session.personalities,s.session.state,"invented-report",FirstContact,"lab-voyage-report-v1") {Err(_)=>true,Ok(_)=>false}
+ }
+}
+test "host rejects unreceived speech instead of trusting an invented receipt" {
+ match start("{\"command\":\"start\",\"policy\":\"consent\",\"scenario\":\"watch-v3\"}") {
+ Err(_)=>false,Ok(s)=>match receiveSpeech(s.session.personalities,s.session.state,s.session.state,"medic","invented-speech") {Err(_)=>true,Ok(_)=>false}
+ }
+}
+test "an existing report body without retained major receipts cannot bypass delivery" {
+ match start("{\"command\":\"start\",\"policy\":\"consent\",\"scenario\":\"watch-v3\"}") {
+ Err(_)=>false,Ok(s)=>match labMajor(s.session,"report-a","first_contact") {Err(_)=>false,Ok(m)=>match labMajor({m.session|personalities:s.session.personalities},"report-a","first_contact") {Err(_)=>true,Ok(_)=>false}}
+ }
+}

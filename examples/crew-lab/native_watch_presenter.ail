@@ -5,8 +5,11 @@ import std/option (Option,Some,None)
 import pkg/sunholo/terminal_ui/ui (Screen,cells,pad,wrap,safeText,clampPage)
 import pkg/sunholo/terminal_ui/widgets (frame as smallFrame,cursor)
 import pkg/sunholo/social_dynamics/model (Actor,Task,Working,Completed,Stopped)
+import ./personality_host (development)
+import ./session (describeConversation)
+import std/result (Ok,Err)
 import ./play_flow (PlayState)
-import ./native_watch_ui (UI,View,Choice,choices,selected,Briefing,Decision,Crew,Work,Log,Guide,Ship,Quit)
+import ./native_watch_ui (UI,View,Choice,choices,viewChoices,draftDescription,declaredApproach,selected,Briefing,Decision,Crew,Work,Log,Guide,Ship,Quit,Editor,ReplyReview)
 import ./watch_scenario (projectName,resourceName,purpose)
 import ./narrative (crew,supplies,costs,spendsSupplies,fatigue,stress,morale,observation)
 
@@ -52,18 +55,24 @@ pure func proposal(s:PlayState,message:string)->string = match head(filter(\t. t
  "PROPOSAL / ${projectName(t.recipe)}\n${if agreed then "${who} agreed. Work has not started." else if s.session.policy=="consent" then "No current agreement. Start requires consent." else "No current agreement. Authority permits Start; trust can suffer."}\n${purpose(t.recipe)}\n${costs(s.session,t.recipe)}${if spendsSupplies(s.session,t.recipe) then "\nSupplies spend at completion even when benefits are capped." else ""}\nStart commits this worker; no time passes. Advance moves work forward.\nDecide later keeps this offer and agreement under Offers.\n${if message=="" then "" else "\nCREW REPLY / CONSEQUENCE\n${message}"}\n\nAVAILABLE\n${supplies(s.session)}"
  }
 }
+pure func conversation(s:PlayState)->string = match describeConversation(s.session,s.target,s.seed) {
+ Err(e)=>e,Ok(c)=>"${match head(filter(\a. a.id==c.issue.worker,s.session.state.actors)){None=>"",Some(a)=>observation(a,s.session.state.relationships)}}\n\n${c.issue.worker} ASKS\n${c.issue.prompt}\n\nKNOWN CONTEXT\n${join("\n",c.briefing)}\n\nChoose a reply to edit, or write your own. These are different approaches, not a correct answer. You will review your exact words and declare an approach before sending. The worker reconsiders this same proposal; speaking does not start work."
+}
 pure func help(mode:string,remaining:int)->string =
- "YOUR PREPARATION WATCH\nYou are captain of a bubble ship. Five specialists prepare for possible first contact. There is no required route or best score.\n\nChoose work or rest to offer an assignment. Read its purpose and costs, hear its worker, then Start or Decide later. Starting assigns a worker and holds resources without moving time. Advance moves everyone one turn; benefits and costs apply at completion.\n\nAgreement means the worker must consent before Start. Authority permits starting despite refusal; trust can suffer. Neither style bypasses capacity or supplies.\n\nArchive compute is reusable capacity for Spire analysis. Slots return when a job ends. Replacement modules and diagnostic cartridges are finite and spent on completion, even when a benefit is already capped. Relief stops a job and releases its remaining reservations.\n\nCheck-in hears a working crew member; they may request relief. Offers returns to proposals left open. Read Crew, Work, Ship and Log without spending time.\n\nArrows choose; Enter selects. Numbers keep their displayed meaning. PgUp/PgDn scroll details. h Help; b or Escape returns to your pending decision. q asks before ending. In line/plain modes enter one command per line; blank input waits, EOF ends.\n\n${if mode=="offline" then "Offline: saved replies or authored narrator continuations; no provider calls." else "A new personal reply may require a synchronous AI call: controls wait until it finishes. Saved replies need no call. ${remaining} attempts remain; the watch response policy sets a maximum of8. Authored continuation remains available when attempts are exhausted."}\n\nEight turns mark a preparation review, not arrival or a deadline. Continue as long as useful. Alien negotiations and a completed journey are not simulated here. A fresh launch starts a new crew; the response library persists."
+ "YOUR PREPARATION WATCH\nYou are captain of a bubble ship. Five specialists prepare for possible first contact. There is no required route or best score.\n\nChoose work or rest to offer an assignment. Read its purpose and costs, hear its worker, then Start or Decide later. Starting assigns a worker and holds resources without moving time. Advance moves everyone one turn; benefits and costs apply at completion.\n\nAgreement means the worker must consent before Start. Authority permits starting despite refusal; trust can suffer. Neither style bypasses capacity or supplies.\n\nArchive compute is reusable capacity for Spire analysis. Slots return when a job ends. Replacement modules and diagnostic cartridges are finite and spent on completion, even when a benefit is already capped. Relief stops a job and releases its remaining reservations.\n\nWhen a worker raises a concern, discuss the same proposal: three varied starting replies or your own words. Every reply is editable and reviewed before Send. Choose the intended approach explicitly; your words do not automatically change resources or fulfil promises. In the editor, letters are text, Enter reviews, Tab opens context help, Escape cancels. In line/plain editor modes, enter a complete line, then a blank line to review; /cancel leaves and /context opens help.\n\nCheck-in hears a working crew member; they may request relief. Offers returns to proposals left open. Read Crew, Work, Ship and Log without spending time.\n\nArrows choose; Enter selects. Numbers keep their displayed meaning. PgUp/PgDn scroll details. h Help; b or Escape returns to your pending decision. q asks before ending. In line/plain modes enter one command per line; blank input waits, EOF ends.\n\n${if mode=="offline" then "Offline: saved replies or authored narrator continuations; no provider calls." else "A new personal reply may require a synchronous AI call: controls wait until it finishes. Saved replies need no call. ${remaining} attempts remain; the watch response policy sets a maximum of8. Authored continuation remains available when attempts are exhausted."}\n\nEight turns mark a preparation review, not arrival or a deadline. Continue as long as useful. Alien negotiations and a completed journey are not simulated here. A fresh launch starts a new crew; the response library persists."
 pure func body(s:Option[PlayState],u:UI,message:string,history:[string],mode:string,remaining:int,path:string,debug:bool)->[string] = {
  let width=u.dimensions.columns;
  if u.view==Quit then wrap("End this watch? Your journal and response library remain. A fresh launch starts a new crew.",width)
- else if u.view==Guide then wrap(help(mode,remaining),width)
+ else if u.view==Guide then wrap("${if u.previous==Editor then match s {None=>"",Some(p)=>"CONVERSATION CONTEXT\n${conversation(p)}\n\n"} else ""}${help(mode,remaining)}",width)
  else match s {
  None=>wrap("You are captain of a bubble ship.\nFive specialists prepare for contact.\nOffer work to hear its worker.\nStart holds people and resources.\nAdvance moves everyone one turn.\n\nProjects share3 Archive compute slots. Replacement modules and diagnostic cartridges are finite supplies. Holding resources can prevent another project from starting.",width),
- Some(p)=> if u.view==Crew then wrap(crew(p.session,debug),width)
+ Some(p)=> if u.view==Crew then wrap("${crew(p.session,debug)}${if debug && p.session.chat.version==1 then "\n\n${development(p.session.personalities)}" else ""}",width)
  else if u.view==Log then wrap(if length(history)==0 then "No decisions yet. Offer work to begin." else join("\n\n",history),width)
  else if u.view==Work then wrap("WORK AND SUPPLIES\n${join("\n",resourceRows(p))}\n\n${if length(p.session.state.tasks)==0 then "No projects yet. Choose work or rest to begin." else join("\n\n",map(\t. "${timeline(p,t,u.ascii)}\n${purpose(t.recipe)}\n${costs(p.session,t.recipe)}",p.session.state.tasks))}",width)
  else if u.view==Ship then schematic(u.ascii)++wrap("Schematic: Bridge / Commons, terraces and open arcades along the Spire / Archive approach. Badges show assignments, not crew locations.\n\n${join("\n",roster(p,width))}",width)
+ else if u.view==Editor || u.view==ReplyReview then wrap("${draftDescription(u)}\n\n${conversation(p)}",width)
+ else if p.phase=="conversation" then wrap("${if message=="" then "" else "CREW REPLY / CONSEQUENCE\n${message}\n\n"}${conversation(p)}\n\n${match selected(s,u){None=>"",Some(c)=>"SELECTED STARTING POINT\n${c.label}"}}",width)
+ else if p.phase=="events" then wrap("LAB / VOYAGE REPORTS\nIntroduce a major event as a received scenario fixture, to explore different crew responses. This lab does not simulate an arrival, alien negotiations, an actual loss of supplies, or years of clock time.\n\nReport receipts begin a response; Temperament changes gradually only as you advance turns. Ordinary captain exchanges can influence an active response but do not start one. No event is a reward or a required route.\n\n${match selected(s,u){None=>"",Some(c)=>c.label}}",width)
  else if p.phase=="start" then wrap(proposal(p,message),width)
  else if p.phase=="assignments" || p.phase=="rests" then match selected(s,u) {
   None=>wrap("No assignments available.",width),Some(c)=>{
@@ -83,7 +92,7 @@ pure func body(s:Option[PlayState],u:UI,message:string,history:[string],mode:str
 -- Retain the compact viewport's detail space; extra height reveals more choices.
 pure func menuCapacity(rows:int)->int = clamp(rows-21,3,12)
 pure func menuChoices(s:Option[PlayState],u:UI)->[Choice] =
- if u.view==Quit then [{key:"",label:"Keep playing",preview:""},{key:"",label:"End this watch",preview:""}] else choices(s)
+ if u.view==Quit then [{key:"",label:"Keep playing",preview:""},{key:"",label:"End this watch",preview:""}] else viewChoices(s,u)
 pure func menuOffset(count:int,selectedIndex:int,capacity:int)->int =
  clamp(selectedIndex-capacity+1,0,if count>capacity then count-capacity else 0)
 pure func choiceRange(s:Option[PlayState],u:UI)->string = {
@@ -103,8 +112,8 @@ pure func shownMenu(s:Option[PlayState],u:UI,width:int)->[string] = {
 }
 pure func menuRows(cs:[Choice],selectedIndex:int,n:int,width:int)->[string] = match cs {[]=>[],c::rest=>fit("${if n==selectedIndex then ">" else " "} ${c.key}${if c.key=="" then "" else " "}${c.label}",width)::menuRows(rest,selectedIndex,n+1,width)}
 pure func blank(n:int)->[string] = if n<=0 then [] else ""::blank(n-1)
-pure func title(v:View)->string = match v {Briefing=>"FIRST HELLO",Decision=>"BRIDGE",Crew=>"CREW",Work=>"WORK",Log=>"LOG",Guide=>"HELP",Ship=>"SHIP",Quit=>"END WATCH?"}
-pure func phaseTitle(s:PlayState)->string = if s.phase=="start" then "PROPOSAL" else if s.phase=="assignments" then "CHOOSE WORK" else if s.phase=="rests" then "ARRANGE REST" else if s.phase=="working" then "CHECK-IN" else if s.phase=="offered" then "OFFERS" else if s.phase=="reliefs" || s.phase=="relief" then "RELIEF" else if s.phase=="response" then "REPLY PENDING" else "BRIDGE"
+pure func title(v:View)->string = match v {Briefing=>"FIRST HELLO",Decision=>"BRIDGE",Crew=>"CREW",Work=>"WORK",Log=>"LOG",Guide=>"HELP",Ship=>"SHIP",Quit=>"END WATCH?",Editor=>"WRITE A REPLY",ReplyReview=>"REVIEW YOUR REPLY"}
+pure func phaseTitle(s:PlayState)->string = if s.phase=="events" then "LAB / VOYAGE EVENTS" else if s.phase=="conversation" then "TALK THROUGH THE CONCERN" else if s.phase=="start" then "PROPOSAL" else if s.phase=="assignments" then "CHOOSE WORK" else if s.phase=="rests" then "ARRANGE REST" else if s.phase=="working" then "CHECK-IN" else if s.phase=="offered" then "OFFERS" else if s.phase=="reliefs" || s.phase=="relief" then "RELIEF" else if s.phase=="response" then "REPLY PENDING" else "BRIDGE"
 export pure func consequence(s:Option[PlayState],u:UI)->string ! {}
 ensures { result!="" } = match (s,selected(s,u)) {
  (_,None)=>"Read details; b returns to your decision.",
@@ -135,14 +144,16 @@ ensures { result.pages>=1 && result.page>=0 && result.page<result.pages && lengt
  else {
   let rule=repeat(if u.ascii then "-" else "─",d.columns);
   let root=match s {None=>true,Some(_)=>false};
-  let header=[fit("VOYAGE / ${match s {None=>title(u.view),Some(p)=>if u.view==Decision then phaseTitle(p) else title(u.view)}}${match s {None=>"",Some(p)=>" / turn ${p.session.state.tick}"}}",d.columns)]++(match s {None=>[],Some(p)=>[if p.session.policy=="consent" then "Agreement: Start needs crew consent" else "Authority: Start despite refusal"]});
+  let header=[fit("VOYAGE / ${match s {None=>title(u.view),Some(p)=>if u.view==Decision then phaseTitle(p) else title(u.view)}}${match s {None=>"",Some(p)=>" / turn ${p.session.state.tick}"}}",d.columns)]++(match s {None=>[],Some(p)=>[if p.session.policy=="consent" then "Agreement: Start needs crew consent" else "Authority: Start despite refusal"]})++(if u.view==ReplyReview then [fit("Approach: ${declaredApproach(u)}",d.columns)] else []);
   let readView=u.view==Crew || u.view==Work || u.view==Log || u.view==Guide || u.view==Ship;
-  let keys=map(\l. fit(l,d.columns),if readView then ["Arrows/PgUp/PgDn read; q Quit","b/Esc return to pending decision"] else if root then ["Up/Down choose; Enter; 1/2; h Help","PgUp/PgDn details; Esc/q Quit"] else ["Arrows / Enter; c Crew w Work s Ship","PgUp/PgDn j Log h Help b Back q Quit"]);
+  let editing=u.view==Editor;
+  let reviewing=u.view==ReplyReview;
+  let keys=map(\l. fit(l,d.columns),if editing then ["Type words; Left/Right; Backspace/Delete","Enter review; Tab context; Esc cancel"] else if reviewing then ["Arrows/Enter choose; Esc cancel","PgUp/PgDn read words and context"] else if readView then ["Arrows/PgUp/PgDn read; q Quit","b/Esc return to pending decision"] else if root then ["Up/Down choose; Enter; 1/2; h Help","PgUp/PgDn details; Esc/q Quit"] else ["Arrows / Enter; c Crew w Work s Ship","PgUp/PgDn j Log h Help b Back q Quit"]);
   let policy=root && u.view==Briefing;
-  let menu=if policy then flatMap(\c. [fit("${if c.key=="${u.cursor+1}" then ">" else " "} ${c.key} ${c.label}",d.columns),fit("  ${c.preview}",d.columns)],choices(None)) else if readView then ["READING / no time or resources used"] else shownMenu(s,u,d.columns);
-  let preview=if policy || readView then [] else take(3,wrap(consequence(s,u),d.columns));
+  let menu=if policy then flatMap(\c. [fit("${if c.key=="${u.cursor+1}" then ">" else " "} ${c.key} ${c.label}",d.columns),fit("  ${c.preview}",d.columns)],choices(None)) else if editing then [fit("DRAFT ONLY / nothing sent",d.columns)] else if readView then ["READING / no time or resources used"] else shownMenu(s,u,d.columns);
+  let preview=if policy || readView || editing then [] else take(3,wrap(consequence(s,u),d.columns));
   let room=d.rows-length(header)-2-length(menu)-length(preview)-length(keys)-2;
-  let contents=body(s,u,message,history,mode,remaining,path,debug);
+  let contents=if editing then match u.draft {None=>body(s,u,message,history,mode,remaining,path,debug),Some(draft)=>wrap("WRITE YOUR REPLY / ${draft.field.cursor} characters before cursor\n${if draft.field.cursor>d.columns/2 then "…" else ""}${concat(take(if draft.field.cursor>d.columns/2 then d.columns/2 else draft.field.cursor,drop(if draft.field.cursor>d.columns/2 then draft.field.cursor-d.columns/2 else 0,chars(draft.field.text))))}│${concat(take(d.columns/2,drop(draft.field.cursor,chars(draft.field.text))))}${if length(chars(draft.field.text))-draft.field.cursor>d.columns/2 then "…" else ""}\n\n${match s {None=>"",Some(p)=>conversation(p)}}",d.columns)} else body(s,u,message,history,mode,remaining,path,debug);
   let pages=if length(contents)==0 then 1 else (length(contents)+room-1)/room;
   let page=clampPage(u.page,pages);
   let shown=take(room,drop(page*room,contents));
