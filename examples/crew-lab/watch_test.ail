@@ -23,7 +23,7 @@ test "watch includes captain five specialists owned recipes and stocks" {
 }
 
 test "unknown modern profile and extra fields reject" {
-  match (start("{\"command\":\"start\",\"policy\":\"consent\",\"scenario\":\"watch-v3\"}"), start("{\"command\":\"start\",\"policy\":\"consent\",\"scenario\":\"watch-v2\",\"extra\":1}")) {
+  match (start("{\"command\":\"start\",\"policy\":\"consent\",\"scenario\":\"watch-unknown\"}"), start("{\"command\":\"start\",\"policy\":\"consent\",\"scenario\":\"watch-v2\",\"extra\":1}")) {
     (Err(_), Err(_)) => true,
     _ => false
   }
