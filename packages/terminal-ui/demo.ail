@@ -1,29 +1,229 @@
 module sunholo/terminal_ui/demo
-import std/io (print, flush, readLine, println)
-import std/string (repeat)
-import ./ui (screen, dimensions)
+import std/io (println, eprintln, exit)
+import std/env (getArgs)
+import std/option (Option, Some, None)
+import std/result (Result, Ok, Err)
+import std/terminal (TerminalSession)
+import std/string (repeat, stringToInt)
+import std/bytes as B
+import ./ui (Screen, Dimensions)
+import ./events (Event, Input, Sized, Character, Next, Previous, Accept, Cancel, ending)
+import ./widgets (Menu, Confirmation, Pager, menu, updateMenu, confirm, updateConfirm, page, updatePage, viewport, frame)
+import ./transcript (Config, TranscriptError, LimitExceeded, validConfig, validSize, selectionFrame)
+import ./adapter (Mode, Native, Line, Plain, Auto, Resolved, AdapterError, choose, run, modeName, readInput, writeFrame)
 
-export pure func nextPage(page: int, key: string) -> int ! {}
-requires { page >= 0 && page <= 10000 }
+export type Panel = Choosing | Confirming | Reading | Guide deriving (Eq)
+
+export type Model = { selection: Menu, confirmation: Confirmation, pager: Pager, panel: Panel, done: bool, config: Config } deriving (Eq)
+
+export type Arguments = { mode: Mode, dimensions: Dimensions, help: bool } deriving (Eq)
+
+-- Preserved v0.1 helper behavior for existing demo consumers/tests.
+export pure func nextPage(current: int, key: string) -> int ! {}
+requires { current >= 0 && current <= 10000 }
 ensures { result >= 0 && result <= 10000 }
   tests [
     ((0, "v"), 0),
     ((3, "n"), 4),
     ((2, "h"), 0)
   ] {
-  if key == "n" then if page >= 10000 then 10000 else page + 1 else if key == "v" then if page == 0 then 0 else page - 1 else 0
+  if key == "n" then if current >= 10000 then 10000 else current + 1 else if key == "v" then if current == 0 then 0 else current - 1 else 0
 }
 
-func loop(page: int, guide: bool, ansi: bool) -> () ! {IO} {
-  let body = if guide then "Pure AILANG terminal showcase. Line keys + Enter; EOF quits. Body pages keep the action footer visible. This demo uses plain mode for readable redirected output. The game can choose trusted ANSI redraw. No terminal modes are changed." else "A small terminal can still hold a long conversation.\n${repeat("The ship is home. Reading is not a game action. ", 60)}\nEnd of the conversation."
-  let frame = screen(dimensions(60, 24), ansi, ["Terminal UI / standalone showcase"], body, ["h Guide / b Main / a ANSI toggle / 0 Quit"], page)
-  print(frame.text)
-  print("Choose > ")
-  flush()
-  let key = readLine()
-  if not ansi then println("") else ()
-  if key == "" || key == "0" then println("Demo ended; normal terminal input retained.") else loop(nextPage(frame.page, key), if key == "h" then true else if key == "b" then false else guide, if key == "a" then not ansi else ansi)
+export pure func initial(resolved: Resolved) -> Model ! {}
+requires { resolved.dimensions.columns > 0 && resolved.dimensions.rows > 0 }
+ensures { result.panel == Choosing && not result.done && result.selection.count == 3 && result.pager.current == 0 } {
+  { selection: menu(3), confirmation: confirm(false), pager: page(0, 1), panel: Choosing, done: false, config: { columns: resolved.dimensions.columns, rows: resolved.dimensions.rows, ansi: resolved.ansi, max_events: 4096, max_bytes: 4194304, max_frame_bytes: 65536 } }
 }
 
--- Entry correctness is exercised by the installed shell control, not a unit postcondition.
-export func main() -> () ! {IO} = loop(0, false, false)
+export pure func updateModel(model: Model, event: Event) -> Result[Model, string] ! {}
+requires { validConfig(model.config) }
+ensures { match result {
+  Ok(m) => m.config.columns > 0 && m.config.rows > 0,
+  Err(_) => true
+} } {
+  if model.done then Ok(model) else match event {
+    Sized(columns, rows) => if validSize(columns, rows) then Ok({ model | config: { model.config | columns: columns, rows: rows }, pager: page(model.pager.current, model.pager.pages) }) else Err("invalid resize dimensions"),
+    Input(Character("q")) => Ok({ model | done: true }),
+    Input(Character("0")) => Ok({ model | done: true }),
+    Input(Character("h")) => Ok({ model | panel: Guide, pager: page(0, 1) }),
+    Input(Character("b")) => Ok({ model | panel: Choosing, selection: menu(3), pager: page(0, 1) }),
+    _ => if ending(event) then Ok({ model | done: true }) else match model.panel {
+      Choosing => {
+        let selection = updateMenu(model.selection, event)
+        Ok({ model | selection: selection, panel: if selection.selected == None then Choosing else Confirming, confirmation: confirm(false) })
+      },
+      Confirming => {
+        let confirmation = updateConfirm(model.confirmation, event)
+        match confirmation.answer {
+          None => Ok({ model | confirmation: confirmation }),
+          Some(true) => Ok({ model | confirmation: confirmation, panel: Reading, pager: page(0, 1) }),
+          Some(false) => Ok({ model | confirmation: confirmation, panel: Choosing, selection: menu(3) })
+        }
+      },
+      _ => Ok({ model | pager: updatePage(model.pager, event) })
+    }
+  }
+}
+
+export pure func renderModel(model: Model) -> Result[Screen, TranscriptError] ! {}
+requires { validConfig(model.config) }
+ensures { match result {
+  Ok(s) => B.length(B.fromString(s.text)) <= model.config.max_frame_bytes,
+  Err(_) => true
+} } {
+  if model.panel == Choosing then selectionFrame(model.config, ["Read the ship journal", "Inspect the expedition", "Explore the archive"], model.selection) else {
+    let body = match model.panel {
+      Confirming => "Open selected item ${show(model.selection.cursor + 1)}?\n${if model.confirmation.yes then "  No      > Yes" else "> No        Yes"}",
+      Guide => "Arrow keys select; Enter opens a confirmation; Left/Right choose No/Yes. Reading supports arrows and PageUp/PageDown. h opens this guide, b returns to the menu, q or Escape quits. Native input acts immediately; line mode accepts up/down/enter/left/right/pgup/pgdn followed by Enter. A blank line leaves the model unchanged. EOF ends the demo.",
+      _ => "Journal ${show(model.selection.cursor + 1)}\n${repeat("The ship is home. Reading is not a game action. ", 60)}\nEnd of the conversation."
+    }
+    let actions = if model.panel == Confirming then ["Left/Right choose | Enter confirm | q Quit"] else ["h Guide | b Menu | q Quit"]
+    let rendered = frame(viewport(model.config.columns, model.config.rows), model.config.ansi, ["Terminal UI / standalone showcase"], body, actions, model.pager.current)
+    if B.length(B.fromString(rendered.text)) > model.config.max_frame_bytes then Err(LimitExceeded("demo frame exceeds max_frame_bytes")) else Ok(rendered)
+  }
+}
+
+-- User-driven duration is intentionally unbounded; each read/write is budgeted.
+func loop(resolved: Resolved, session: Option[TerminalSession], model: Model) -> Result[(), string] ! {IO} {
+  if model.done then Ok() else match renderModel(model) {
+    Err(error) => Err(show(error)),
+    Ok(screen) => {
+      let state = { model | pager: page(screen.page, screen.pages) }
+      writeFrame(resolved, screen)
+      match readInput(session) {
+        Err(error) => Err(show(error)),
+        Ok(event) => {
+          if resolved.mode == Native then () else println("")
+          match updateModel(state, event) {
+            Err(error) => Err(error),
+            Ok(updated) => loop(resolved, session, updated)
+          }
+        }
+      }
+    }
+  }
+}
+
+export pure func arguments(args: [string]) -> Result[Arguments, string] ! {}
+ensures { match result {
+  Ok(a) => validSize(a.dimensions.columns, a.dimensions.rows),
+  Err(_) => true
+} } {
+  parseArguments(args, { mode: Auto, dimensions: { columns: 60, rows: 24 }, help: false })
+}
+
+pure func parseArguments(args: [string], current: Arguments) -> Result[Arguments, string] ! {} = match args {
+  [] => Ok(current),
+  "--help" :: rest => parseArguments(rest, { current | help: true }),
+  flag :: value :: rest => match argumentValue(flag, value, current) {
+    Err(error) => Err(error),
+    Ok(updated) => parseArguments(rest, updated)
+  },
+  _ => Err("missing option value; use --help")
+}
+
+pure func argumentValue(flag: string, value: string, current: Arguments) -> Result[Arguments, string] = match flag {
+  "--mode" => match value {
+    "native" => Ok({ current | mode: Native }),
+    "line" => Ok({ current | mode: Line }),
+    "plain" => Ok({ current | mode: Plain }),
+    "auto" => Ok({ current | mode: Auto }),
+    _ => Err("--mode must be native, line, plain or auto")
+  },
+  "--columns" => match stringToInt(value) {
+    Some(n) => if validSize(n, current.dimensions.rows) then Ok({ current | dimensions: { columns: n, rows: current.dimensions.rows } }) else Err("--columns must be 1..65535"),
+    None => Err("--columns requires an integer")
+  },
+  "--rows" => match stringToInt(value) {
+    Some(n) => if validSize(current.dimensions.columns, n) then Ok({ current | dimensions: { columns: current.dimensions.columns, rows: n } }) else Err("--rows must be 1..65535"),
+    None => Err("--rows requires an integer")
+  },
+  _ => Err("unknown option; use --help")
+}
+
+-- Arguments use Env; library adapters and native authority require IO only.
+export func main() -> () ! {IO, Env} {
+  match arguments(getArgs()) {
+    Err(error) => {
+      eprintln(error)
+      exit(2)
+    },
+    Ok(args) => if args.help then println("terminal-ui-demo --mode auto|native|line|plain --columns N --rows N\nNative uses measured terminal dimensions. Line/plain layout defaults to 60x24. Keys: up/down/enter/left/right/pgup/pgdn; h guide, b menu, q quit.") else match choose(args.mode, Some(args.dimensions)) {
+      Err(error) => {
+        eprintln("terminal-ui-demo: ${show(error)}")
+        exit(1)
+      },
+      Ok(resolved) => {
+        eprintln("terminal-ui-demo: selected mode ${modeName(resolved.mode)} (${show(resolved.dimensions.columns)}x${show(resolved.dimensions.rows)})")
+        let result = run(resolved, func(session: Option[TerminalSession]) -> Result[(), string] ! {IO} {
+          loop(resolved, session, initial(resolved))
+        })
+        match result {
+          Err(error) => {
+            eprintln("terminal-ui-demo: ${show(error)}")
+            exit(1)
+          },
+          Ok(Err(error)) => {
+            eprintln("terminal-ui-demo: ${error}")
+            exit(1)
+          },
+          Ok(Ok(_)) => println("Demo ended; terminal input restored.")
+        }
+      }
+    }
+  }
+}
+
+pure func control1() -> bool {
+  let start = initial({ mode: Plain, dimensions: { columns: 60, rows: 24 }, ansi: false })
+  match updateModel(start, Input(Next)) {
+    Ok(moved) => match updateModel(moved, Input(Accept)) {
+      Ok(selected) => selected.panel == Confirming && selected.selection.cursor == 1 && (match updateModel(selected, Input(Next)) {
+        Ok(yes) => match updateModel(yes, Input(Accept)) {
+          Ok(reading) => reading.panel == Reading && reading.confirmation.answer == Some(true),
+          _ => false
+        },
+        _ => false
+      }),
+      _ => false
+    },
+    _ => false
+  }
+}
+
+test "demo selection confirmation and reading are a pure flow" {
+  control1()
+}
+
+pure func control2() -> bool {
+  let start = initial({ mode: Plain, dimensions: { columns: 60, rows: 24 }, ansi: false })
+  match updateModel({ start | selection: { start.selection | cursor: 2 } }, Sized(20, 8)) {
+    Ok(small) => small.selection.cursor == 2 && small.config.columns == 20 && small.config.rows == 8 && (match renderModel(small) {
+      Ok(screen) => screen.lines == ["Terminal too small", "Need 40 x 16", "q quit; resize"],
+      _ => false
+    }),
+    _ => false
+  }
+}
+
+test "resize preserves selection and compact rendering" {
+  control2()
+}
+
+test "bad resize and bad arguments return errors" {
+  (match updateModel(initial({ mode: Plain, dimensions: { columns: 60, rows: 24 }, ansi: false }), Sized(0, 8)) {
+    Err(_) => true,
+    _ => false
+  }) && (match arguments(["--mode", "invalid"]) {
+    Err(_) => true,
+    _ => false
+  }) && (match arguments(["--columns", "0"]) {
+    Err(_) => true,
+    _ => false
+  })
+}
+
+test "line configuration is explicit and valid" {
+  arguments(["--mode", "line", "--columns", "20", "--rows", "8"]) == Ok({ mode: Line, dimensions: { columns: 20, rows: 8 }, help: false })
+}

@@ -1,18 +1,19 @@
 [package]
 name = "sunholo/terminal_ui"
-version = "0.1.0"
+version = "0.2.0"
 edition = "1"
-ailang = ">=0.52.0"
-description = "Pure safe terminal layout and paged screens with an independent IO showcase"
+ailang = ">=0.54.0"
+description = "Safe terminal layout, native widgets and deterministic event replay with a CLI showcase"
 license = "Apache-2.0"
 [exports]
-modules = ["sunholo/terminal_ui/ui"]
+modules = ["sunholo/terminal_ui/ui", "sunholo/terminal_ui/events", "sunholo/terminal_ui/widgets", "sunholo/terminal_ui/transcript", "sunholo/terminal_ui/adapter"]
 [effects]
-max = ["IO"]
+max = ["IO", "Env"]
 [bin]
-terminal-ui-demo = {module = "demo",entry = "main",caps = "IO"}
+terminal-ui-demo = {module = "demo",entry = "main",caps = "IO,Env"}
 [metadata]
-ai_summary = "Experimental pure control sanitizing, conservative cell measurement, wrapping, dimensions, gauges and deterministic ANSI/plain screen paging; line-input IO demo"
+license_url = "https://www.apache.org/licenses/LICENSE-2.0"
+ai_summary = "Pure safe rendering, selection/confirmation/paging, versioned bounded event transcripts and deterministic replay; IO native/line/plain/auto adapters, IO+Env standalone demo"
 repository = "https://github.com/sunholo-data/ailang-packages/tree/main/packages/terminal-ui"
 [release]
 kind = "feature"

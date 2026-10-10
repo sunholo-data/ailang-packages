@@ -1,0 +1,106 @@
+module sunholo/terminal_ui/transcript_test
+import std/option (Some)
+import std/result (Ok, Err)
+import std/string (repeat, contains, chars, join)
+import std/list (length, take)
+import ./events (Input, Character, Next, Previous, MoveLeft, MoveRight, Accept, Cancel, Erase, FocusNext, First, Last, PriorPage, FollowingPage, Remove, Sized, NoInput, Finished, Cancelled)
+import ./transcript (Config, Transcript, encodeTranscript, decodeTranscript, replaySelection, BadFormat, LimitExceeded)
+
+pure func config() -> Config =
+  { columns: 60, rows: 24, ansi: false, max_events: 8, max_bytes: 4096, max_frame_bytes: 4096 }
+
+pure func sample() -> Transcript =
+  { version: 1, config: config(), events: [Input(Next), Sized(20, 8), NoInput, Sized(60, 24), Input(Accept)] }
+
+test "codec preserves config and every event" {
+  match encodeTranscript(sample()) {
+    Ok(text) => decodeTranscript(text, 4096) == Ok(sample()),
+    Err(_) => false
+  }
+}
+
+pure func control1() -> bool {
+  let t = { version: 1, config: config(), events: [Input(Character("界\n\u{1B}quote\"")), Finished, Cancelled] }
+  match encodeTranscript(t) {
+    Ok(text) => decodeTranscript(text, 4096) == Ok(t),
+    Err(_) => false
+  }
+}
+
+test "codec preserves text as data, not display sanitation" {
+  control1()
+}
+
+test "malformed unknown version and fractional sizes are rejected" {
+  (match decodeTranscript("{\"version\":2}", 4096) {
+    Err(BadFormat(_)) => true,
+    _ => false
+  }) && (match decodeTranscript("{\"version\":1,\"config\":{\"columns\":60.5,\"rows\":24,\"ansi\":false,\"max_events\":8,\"max_bytes\":4096,\"max_frame_bytes\":4096},\"events\":[]}", 4096) {
+    Err(BadFormat(_)) => true,
+    _ => false
+  })
+}
+
+test "bounds fail without event truncation" {
+  (match encodeTranscript({ version: 1, config: { config() | max_events: 1 }, events: [NoInput, NoInput] }) {
+    Err(LimitExceeded(_)) => true,
+    _ => false
+  }) && (match decodeTranscript(repeat("x", 101), 100) {
+    Err(LimitExceeded(_)) => true,
+    _ => false
+  })
+}
+
+test "replay final selection and ordered compact frames" {
+  match replaySelection(sample(), ["One", "Two", "Three"]) {
+    Ok(r) => r.model.selected == Some(1) && length(r.frames) == 6 && contains((_list_nth(r.frames, 2)).text, "small"),
+    Err(_) => false
+  }
+}
+
+pure func control2() -> bool {
+  let changed = { sample() | events: [Input(Accept)] }
+  replaySelection(sample(), ["One", "Two", "Three"]) != replaySelection(changed, ["One", "Two", "Three"])
+}
+
+test "key mutation changes replay outcome" {
+  control2()
+}
+
+test "frame limit fails rather than clipping frames" {
+  match replaySelection({ sample() | config: { config() | max_frame_bytes: 10 } }, ["One", "Two", "Three"]) {
+    Err(LimitExceeded(_)) => true,
+    _ => false
+  }
+}
+
+pure func control3() -> bool {
+  let t = { version: 1, config: { config() | max_events: 32 }, events: [Input(Character("x")), Input(Previous), Input(Next), Input(MoveLeft), Input(MoveRight), Input(Accept), Input(Cancel), Input(Erase), Input(FocusNext), Input(First), Input(Last), Input(PriorPage), Input(FollowingPage), Input(Remove), Sized(20, 8), Finished, Cancelled, NoInput] }
+  match encodeTranscript(t) {
+    Ok(text) => decodeTranscript(text, 4096) == Ok(t),
+    _ => false
+  }
+}
+
+test "all normalized keys and events roundtrip in order" {
+  control3()
+}
+
+test "UTF8 byte limit and invalid resize are enforced" {
+  (match encodeTranscript({ sample() | events: [Input(Character(repeat("界", 1366)))] }) {
+    Err(LimitExceeded(_)) => true,
+    _ => false
+  }) && (match encodeTranscript({ sample() | events: [Sized(0, 8)] }) {
+    Err(BadFormat(_)) => true,
+    _ => false
+  })
+}
+
+pure func boundedText(text: string) -> string = "x${join("", take(100, chars(text)))}"
+
+property "generated text survives the versioned codec exactly" {
+  forall(text: string) => match encodeTranscript({ version: 1, config: config(), events: [Input(Character(boundedText(text)))] }) {
+    Ok(encoded) => decodeTranscript(encoded, 4096) == Ok({ version: 1, config: config(), events: [Input(Character(boundedText(text)))] }),
+    _ => false
+  }
+}

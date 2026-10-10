@@ -1,0 +1,44 @@
+module sunholo/terminal_ui/widgets_test
+import std/option (Some, None)
+import std/list (length)
+import std/string (contains)
+import ./events (Input, Next, Previous, Accept, Cancel, First, Last, NoInput, Sized)
+import ./widgets (menu, cursor, updateMenu, confirm, updateConfirm, page, updatePage, viewport, frame)
+
+test "selection clamps first and last" {
+  (updateMenu(menu(3), Input(Previous))).cursor == 0 && (updateMenu(menu(3), Input(Last))).cursor == 2 && (updateMenu(menu(3), Input(First))).cursor == 0
+}
+
+test "selection changes on key and confirms" {
+  (updateMenu(updateMenu(menu(3), Input(Next)), Input(Accept))).selected == Some(1)
+}
+
+test "cancel and empty list never select" {
+  (updateMenu(menu(0), Input(Accept))).selected == None && (updateMenu(menu(3), Input(Cancel))).done
+}
+
+test "confirmation is explicit and cancel has no answer" {
+  (updateConfirm(confirm(false), Input(Accept))).answer == Some(false) && (updateConfirm(updateConfirm(confirm(false), Input(Next)), Input(Accept))).answer == Some(true) && (updateConfirm(confirm(true), Input(Cancel))).answer == None
+}
+
+test "completed widgets are stable" {
+  updateMenu(updateMenu(menu(3), Input(Accept)), Input(Next)) == updateMenu(menu(3), Input(Accept))
+}
+
+test "paging saturates" {
+  (updatePage(page(0, 3), Input(Previous))).current == 0 && (updatePage(page(2, 3), Input(Next))).current == 2
+}
+
+test "resize never invents minimum viewport" {
+  (viewport(20, 8)).columns == 20 && (viewport(20, 8)).rows == 8 && length((frame(viewport(20, 8), false, ["header"], "body", ["q Quit"], 0)).lines) <= 8 && contains((frame(viewport(20, 8), false, ["header"], "body", ["q Quit"], 0)).text, "small")
+}
+
+test "one cell terminal fits and plain has no escape" {
+  (frame(viewport(1, 1), false, ["header"], "body", ["q Quit"], 0)).lines == ["T"] && not contains((frame(viewport(60, 24), false, ["header"], "body", ["q Quit"], 0)).text, "\u{1B}")
+}
+
+pure func countDomain(n: int) -> int = 1 + (if n % 4096 < 0 then -(n % 4096) else n % 4096)
+
+property "cursor stays in every valid generated menu" {
+  forall(index: int, rawCount: int) => cursor(index, countDomain(rawCount)) >= 0 && cursor(index, countDomain(rawCount)) < countDomain(rawCount)
+}
