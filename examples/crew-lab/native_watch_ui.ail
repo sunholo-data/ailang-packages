@@ -25,7 +25,7 @@ ensures { result.view == Decision && result.page == 0 && result.cursor == (if s.
 pure func item(key:string,label:string,preview:string) -> Choice = {key:key,label:label,preview:preview}
 pure func numbered(labels:[string],n:int,preview:string) -> [Choice] = match labels { []=>[], a::rest=>item("${n}",a,preview)::numbered(rest,n+1,preview) }
 pure func sessionChoices(s:PlayState) -> [Choice] =
- if s.phase == "start" then [item("1","Start now","Assign this worker and hold the named resources. No time passes."),item("2","Decide later","Keep this proposal and agreement in Offers. Use no time or resources.")]
+ if s.phase == "start" then [item("1","Start now","Assign this worker and hold the named resources. No time passes."),item("2","Decide later","Keep this proposal and agreement in Offers. Use no time or resources."),item("0","Return to bridge","Keep this offer in Offers; use no time or resources.")]
  else if s.phase == "assignments" || s.phase == "rests" then numbered(map(\w. "${w}: ${projectName("${if s.phase == "rests" then "rest" else "work"}_${w}")}",workers()),1,"Offer this assignment, hear its worker, then decide whether to start.")
  else if s.phase == "working" then numbered(map(\t. projectName(t.recipe),filter(\t. t.status == Working,s.session.state.tasks)),1,"Ask the worker how it is going; a reply may include a relief request.")
  else if s.phase == "offered" then numbered(map(\t. projectName(t.recipe),filter(\t. t.status == Offered,s.session.state.tasks)),1,"Return to this proposal. Reading and selecting it use no time or resources.")
@@ -63,7 +63,7 @@ pure func reading(v:View) -> bool = v == Crew || v == Work || v == Log || v == G
 pure func page(n:int) -> int = if n < 0 then 0 else if n > 1000000 then 1000000 else n
 pure func unchanged(u:UI) -> Transition = {ui:u,command:None,quit:false}
 pure func chooseNumber(s:Option[PlayState],u:UI,key:string) -> Transition =
- if reading(u.view) then unchanged(u) else if key == "0" then {ui:if u.view == Quit then {u|view:u.previous,cursor:0,page:0} else u,command:if u.view != Quit then Some("0") else None,quit:false}
+ if reading(u.view) then unchanged(u) else if key == "0" then match s {None=>unchanged(openQuit(u)),Some(p)=>if p.phase=="main" then unchanged(openQuit(u)) else {ui:u,command:Some("0"),quit:false}}
  else if length(filter(\c. c.key == key,choices(s))) > 0 then {ui:u,command:Some(key),quit:false} else unchanged(u)
 
 export pure func update(s:Option[PlayState],u:UI,e:Event) -> Transition ! {}
@@ -83,7 +83,7 @@ ensures { result.ui.dimensions.columns >= 1 && result.ui.dimensions.rows >= 1 &&
    Some(p) => if p.phase != "main" then {ui:u,command:Some("0"),quit:false} else unchanged(openQuit(u)),
    None => unchanged(openQuit(u))
   }
-  else if k == Character("b") then unchanged({u|view:rootView(s),page:0})
+  else if k == Character("b") then if reading(u.view) then unchanged({u|view:rootView(s),page:0}) else match s {Some(p)=>if p.phase!="main" then {ui:u,command:Some("0"),quit:false} else unchanged(u),None=>unchanged(u)}
   else if k == Character("h") then unchanged({u|view:Guide,page:0})
   else if k == Character("c") then unchanged({u|view:Crew,page:0})
   else if k == Character("w") then unchanged({u|view:Work,page:0})

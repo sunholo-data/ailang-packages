@@ -18,6 +18,15 @@ test "invalid external dimensions normalize positive before calling viewport" {
  let r=update(None,u,Sized(0,0));
  u.dimensions.columns==160 && u.dimensions.rows==1 && r.ui.dimensions.columns==1 && r.ui.dimensions.rows==1
 }
+test "literal zero asks before quitting intro but returns from displayed proposal" {
+ let u=initial(80,24,false);
+ let intro=update(None,u,Input(Character("0")));
+ match beginWatch("1",42) {Err(_)=>false,Ok(s)=>{
+ let p={s|phase:"start",target:"proposal"};
+ let before=decision(p,80,24,false);
+ intro.command==None && intro.ui.view==Quit && not intro.quit && update(Some(p),before,Input(Character("0"))).command==Some("0") && update(Some(p),before,Input(Character("b"))).command==Some("0")
+ }}
+}
 test "quit modal cannot dispatch domain numbers and preserves safe proposal default" {
  match beginWatch("2",73) {Err(_)=>false,Ok(s)=>{
  let p={s|phase:"start",target:"proposal"};

@@ -1,6 +1,6 @@
 # sunholo/crew_lab
 
-Experimental host example, version0.2.0. Saved `main` and `viewer` use IO only.
+Experimental host example, version0.3.0. Saved `main` and `viewer` use IO only.
 The guided `play` adapter uses IO,Env,FS,AI; `store` uses FS,AI. `actor_policy`,
 `scenario`, `session`, `codec`, `reactions`, `play_flow` and `presenter` remain pure.
 No Net, RNG or clock effect is requested.
@@ -96,7 +96,9 @@ Preparation8-turn marker is UI projection, no deadline/arrival/alien simulation.
 Recipe costs/host configuration, authority, response schema, model and library unchanged.
 Native controls must test evaluator AND strict VM; installed test-journey compares
 all journal payloads against legacy paths and replays recovery recordings both ways.
-Core raw-key/size request: inbox_1791568104057_d08245d1; not implemented here.
+Core raw-key/size request: inbox_1791568104057_d08245d1; the native watch now
+uses the published terminal_ui0.2.0 adapter on standalone AILANG0.54. Old journey
+commands retain their original line-input behavior.
 
 
 Modern default crew-journey uses explicit watch-v2 start, captain plus five specialists,
@@ -140,3 +142,45 @@ checkpoint compaction. The explicit clampIndicator pure contract is Z3 verified;
 complex actor/state effects are established by native controls, not a whole-kernel
 formal proof. Source-inline contracts lacking complex generators are recorded as
 skipped separately from zero-skip native suites.
+
+
+Native watch adapters: native_watch_ui, native_watch_presenter and native_watch_args
+are pure. native_watch is an internal CLI, outside the reusable export inventory.
+play.Run/Applied and openWatch/applyWatch/closeWatch are trusted host adapter APIs;
+caller-manufactured records are not an application permission boundary. They reuse
+existing start/commit/respond/journal/library operations. applyWatch suppresses the
+old waiting renderer only; native_watch displays its honest synchronous waiting
+frame. Generated/cache quotes are selected and journalled before display.
+
+Exactly one input branch owns each read: Native uses adapter.readInput inside
+adapter.run; Line/Plain uses readLineOpt and published lineEvent. Generic lineEvent
+maps bothq and0 to Cancelled; the app intentionally preserves literal0 as Back in
+its displayed proposal, and mapsq to its own quit confirmation. Native Interrupted
+ends immediately; Escape remains contextual Back/quit confirmation. No background
+worker, Process/Clock/Stream or foreign product host is introduced. PTY Python is a
+hermetic acceptance fixture only: its session guardian keeps Darwin's terminal
+observable after the AILANG child exits, and reads a separate cleanup pipe.
+
+UI state is separate from Session and owns only view, cursor, details page, actual
+bounded viewport and ASCII preference. Idle reads cause no redraw, counter change,
+FS access or journal update. Tiny viewports accept resize/quit only. Reading menus
+hide inactive actions. Quit is modal and preserves previous cursor/page; Start
+proposals always initialize on Decide later. Resource/consent/occupancy previews
+are descriptions, and host guards remain authoritative. On failed Start retain
+stage's original phase/target; never call legacy recover to redirect to Bridge.
+
+Native dimensions cap rendering at160x60 and preserve actual smaller sizes. Compose
+preformatted structural rows directly into Screen; prose-only wrap may collapse
+spaces. Screen.lines contain no escapes; trusted focus styling belongs in text.
+Plain/line reserve a blank prompt row. All physiological/personality descriptions
+are qualitative outside --debug; bars represent physical project turns only.
+Eight-turn preparation review is never an arrival countdown or winning grade.
+
+Run native-ui-test (both pure engines and separately reported source-inline
+generators), native-watch-test (installed offline flows/navigation payload parity/
+replay/cached exact words) and native-watch-pty-test (raw input, real sizes and
+restoration) through Makefile.validate. Effectful scoped adapter requires interpreter:
+strict VM lacks bounded @limit execution. Do not broaden any IO budget to mask it.
+Named pure controls run strict VM with zero fallback; distinguish skipped generator
+and Z3 encodings from established controls/proofs. Journal8MiB retention and bounded
+runtime formatters still limit long-watch scaling; no unbounded journey guarantee.

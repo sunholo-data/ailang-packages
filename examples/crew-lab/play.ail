@@ -21,9 +21,9 @@ import ./store (Fetch, loadPolicy, loadWatchPolicy, resolve, openRun, appendRun)
 import ./presenter (briefing, policyBrief, seedBrief, dashboard, guidance, help, dialogue, rejection, consequences, recap)
 import ./play_flow (PlayState, Stage, Intent, begin, beginWatch, isWatch, seedNumber, parseArgs, menu, route, stage, publish, renderStatus, recover)
 
-type Run = { ui: PlayState, home: string, path: string, policy: Policy, policyBody: string, mode: string, remaining: int, lines: int, lastMessage: string, modern: bool, nav: Navigation, dimensions: Dimensions, ansi: bool, debug: bool }
+export type Run = { ui: PlayState, home: string, path: string, policy: Policy, policyBody: string, mode: string, remaining: int, lines: int, lastMessage: string, modern: bool, nav: Navigation, dimensions: Dimensions, ansi: bool, debug: bool }
 
-type Applied = { run: Run, failed: bool, message: string }
+export type Applied = { run: Run, failed: bool, message: string }
 
 export type Reply = { command: string, seed: int, label: string, text: string, metadata: Json }
 
@@ -337,3 +337,29 @@ ensures { result == () } = launch("offline", false)
 -- behaviour is established by the installed CLI controls, not a unit-return proof.
 export func launchJourney(mode: string) -> () ! {IO, Env, FS, AI}
 requires { mode == "live" || mode == "offline" } = launch(mode, true)
+
+-- Trusted app adapters only: these reuse the same start/commit/respond/store
+-- boundaries. UI-owned navigation never calls them. No second input owner.
+export func openWatch(home:string,seed:int,policyChoice:string,mode:string,debug:bool)->Result[Run,string] ! {FS,Env}
+requires { stringLength(home)>0 && stringLength(home)<=4096 && seed>=1 && seed<=2147483646 && (mode=="live" || mode=="offline") }
+ensures { match result {Err(_)=>true,Ok(r)=>r.ui.seed==seed && r.ui.seq==0 && isWatch(r.ui) && r.remaining>=0 && r.remaining<=8} } =
+ match (beginWatch(policyChoice,seed),loadWatchPolicy(home)) {
+  (Err(e),_)=>Err(e),(_,Err(e))=>Err(e),
+  (Ok(ui),Ok(config))=>{
+   let c=command("start",[kv("policy",js(ui.session.policy)),kv("scenario",js("watch-v2"))]);
+   match start(c) {Err(_)=>Err("Startup failed"),Ok(host)=>{
+    let header=envelope(0,jo([kv("kind",js("start")),kv("host_input",js(c)),kv("host_output",js(host.trace)),kv("seed",jint(seed)),kv("policy_body",js(config.body)),kv("model",js(model())),kv("mode",js(mode))]));
+    match openRun(home,"${getPid()}-${seed}",header) {Err(e)=>Err("Run ownership/journal failed: ${e}"),Ok(path)=>Ok({ui:ui,home:home,path:path,policy:config.policy,policyBody:config.body,mode:mode,remaining:config.policy.callLimit,lines:0,lastMessage:"",modern:true,nav:initial(),dimensions:dimensions(80,24),ansi:false,debug:debug})}
+   }}
+  }
+ }
+
+export func applyWatch(r:Run,i:Intent)->Result[Applied,string] ! {IO,FS,AI}
+requires { isWatch(r.ui) && r.remaining>=0 && r.remaining<=8 && (r.mode=="live" || r.mode=="offline") }
+ensures { match result {Err(_)=>true,Ok(a)=>a.run.remaining<=r.remaining && a.run.remaining>=0 && a.run.path==r.path && a.run.ui.session.config.id==r.ui.session.config.id} } =
+ match act({r|modern:false},i) {Err(e)=>Err(e),Ok(a)=>Ok({a|run:{a.run|modern:true}})}
+
+export func closeWatch(r:Run)->Result[(),string] ! {FS}
+requires { isWatch(r.ui) && r.ui.seq>=0 && r.ui.seq<=10000 }
+ensures { match result {Ok(v)=>v==(),Err(_)=>true} } =
+ appendRun(r.path,envelope(r.ui.seq+1,jo([kv("kind",js("quit")),kv("seed",jint(r.ui.seed))])))

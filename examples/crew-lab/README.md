@@ -1,5 +1,104 @@
 # Captain's preparation watch
 
+Start with **`crew-watch-offline`**: this is a small game about being captain of a
+bubble ship, preparing five specialists and equipment for possible first contact.
+Offer work to hear a person, decide whether to commit their time and resources,
+and advance everyone together. There is no preferred command style or winning
+score. Eight turns mark a preparation review; you may continue afterward.
+
+```sh
+# From the package repository; standalone AILANG0.54.0 or newer is required.
+ailang install --path examples/crew-lab
+crew-watch-offline
+crew-watch                  # Existing GLM setup; new replies may wait for AI.
+```
+
+The app is pure AILANG. Auto mode uses native arrows and Enter when both input and
+output are terminals with raw-mode support. `--mode native` requires that support;
+`--mode line` uses typed commands with ANSI; `--mode plain` uses typed commands
+without escapes. Use `--ascii` for simple box/bar characters. Native mode reads
+actual terminal size and resizes without losing a decision. Under40x16 it offers
+only resize/quit; it cannot start an invisible assignment. The larger ship diagram
+is a Bridge/Commons schematic, not a map of anyone's physical location.
+
+**First watch: science before hello**
+
+1. Read the opening. Leave **Ask for agreement** selected and press Enter.
+2. Leave **Choose work** selected and press Enter. Choose the **scientist**.
+3. Read their reply. Work has not started. The proposal defaults to **Decide
+   later**; Up highlights **Start now** and shows its costs. Enter starts only if
+   agreement, worker capacity and the two Archive slots are available.
+4. Press `5` four times. Everyone working advances each time. The bar counts
+   elapsed turns; science benefits apply when the fourth turn completes, and its
+   two slots return. `w` shows assignments and supplies; `c` shows crew observations.
+5. `b` returns from reading to your decision. `q` asks before ending; **Keep
+   playing** is the safe default. Down then Enter ends the watch and keeps its journal.
+
+**Second watch: authority, objections and relief**
+
+Start a fresh run, highlight **Captain's authority** and press Enter. Offer the
+engineer a readiness check. A refusal leaves the proposal open; authority permits
+Start despite it, with a possible loss of cooperation. Read the preview before
+committing. Choose **Check in with working crew** (`6`) and their job to hear how
+it is going. If they request relief, choose **Resolve a relief request** (`8`),
+select it, then read **Grant relief** versus **Deny relief** before choosing.
+Grant stops that work and releases its held compute/module; deny leaves them
+working and can strain cooperation. Replies vary, so a default seed does not
+promise an objection or relief request. The deterministic fixture below exercises
+both, and the installed tests exercise both grant and deny.
+
+Every proposal displays **Start now**, **Decide later** and **0 Return to bridge**.
+The latter two keep the offer/agreement in **7 Offers**, use no time/resources and
+never cancel it. `b`/Escape leaves a decision submenu for the bridge; from a reading
+view it returns to the pending decision. Main Escape or `q` asks before quitting.
+Reading uses arrows or PgUp/PgDn; menus use arrows and Enter. The bottom tally tells
+you which choice is highlighted when a menu is windowed. Numbers execute their
+shown actions immediately in native mode. In line/plain mode type a number or
+`up`, `down`, `enter`, `pgup`, `pgdn`, `b`, `h` or `q` and press Enter. Blank input
+waits without a redraw or decision; actual EOF ends. To run the first flow by pipe:
+
+```sh
+printf '1\n1\n1\n1\n5\n5\n5\n5\n' | crew-watch-offline --mode plain --seed 42
+```
+
+Try competition: start scientist work and engineer work, then offer pilot work.
+Together the first two hold all3 compute slots; the pilot needs2. Highlight Start
+to see the named shortage beside it. Attempting it retains this same proposal
+with an explanation. Decide later, advance the existing work four turns, return
+through Offers, and start the pilot. Physical supplies spent on completion never
+replenish by waiting; rest uses no supplies. Starting passes no time.
+
+Live uses the existing pinned OpenRouter `z-ai/glm-5.3-flash` setup and separate
+watch response policy (default6 attempts, maximum8). Saved wording uses no new
+call. A cache miss may block synchronously: the waiting screen offers no fake
+controls; the next choice follows the reply. Offline and exhausted allowances
+remain playable with labelled authored narrator continuations. Selected AI words
+remain exact in the journal/library; only display controls are sanitized and prose
+wrapped. `--debug` reveals real development state in Crew and diagnostic responses.
+No worker processes, asynchronous replies, alien negotiations or arrival are added.
+
+For a repeatable developer objection/relief experiment, create an isolated home
+and strongly weight those legal labels through its authored policy. This never changes your
+usual library or policy and makes zero provider calls:
+
+```sh
+lab_home=$(mktemp -d)
+printf '1\n' | crew-watch-offline --mode plain --home "$lab_home" >/dev/null
+jq '.rules |= map(.base=(if .label=="decline" or .label=="request_relief" then 1000 else 0 end)|.influences=[])' \
+  "$lab_home/response-policy-watch-v2.json" > "$lab_home/objections.json"
+mv "$lab_home/objections.json" "$lab_home/response-policy-watch-v2.json"
+printf '2\n1\n2\n1\n6\n1\n8\n1\n2\n5\n5\n5\n' | \
+  crew-watch-offline --mode plain --home "$lab_home" --seed 10001
+# Choose1 instead of2 at the relief decision to grant it.
+```
+
+**Existing line consoles**
+
+The following describes the preserved `crew-journey` and `crew-play` interfaces.
+Their durable launchers may continue using the earlier standalone runtime; the
+new commands use0.54 independently of Godot's runtime. Old policies/cache records,
+model identifiers, authored effects and trace schemas remain unchanged.
+
 Run `crew-journey` for the modern ship console, or `crew-journey-offline` to play
 with saved and stock dialogue without AI calls. You are the captain of a bubble
 ship, preparing a strained crew for possible first contact. Eight lab turns mark
@@ -34,8 +133,8 @@ and refunds its reservation. Waiting never restores spent physical stock.
 Use a key followed by **Enter**: `c` Crew, `w` Work, `j` Log, `h` Guide and `b`
 returns to your current decision. `n`/`v` page text. Numbers select the visible
 actions on any page. Reading costs no turn, AI attempt, random draw or journal entry.
-Blank input ends the run because the runtime uses the same value for empty input
-and EOF. The log keeps the last64 notices from this run.
+In these older commands blank input ends the run; the native watch above
+distinguishes blank waiting from EOF through readLineOpt. The log keeps the last64 notices from this run.
 
 After a reply, the proposal screen says whether its worker has agreed and reminds
 you that work has not started. **1 Start now** assigns the worker and holds the

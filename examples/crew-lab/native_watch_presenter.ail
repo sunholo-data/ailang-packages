@@ -41,10 +41,14 @@ pure func twoPanels(left:[string],right:[string],n:int,width:int)->[string] = if
  "${pad(fit(l,25),25)} ${fit(r,width-26)}"::twoPanels(left,right,n+1,width)
 }
 pure func status(s:PlayState)->string = if s.session.state.tick>=8 then "Preparation review available; continue freely" else "Preparation review in ${8-s.session.state.tick} turns"
+pure func agreement(s:PlayState,t:Task)->bool = {
+ let who=match head(t.participants){None=>"worker",Some(w)=>w};
+ any(\b. b.task==t.id && any(\c. c.id==b.agreement && c.parties==["captain",who] && c.active && c.accepted==c.parties && c.due>s.session.state.tick,s.session.state.commitments),s.session.bindings)
+}
 pure func proposal(s:PlayState,message:string)->string = match head(filter(\t. t.id==s.target,s.session.state.tasks)) {
  None=>"This proposal is unavailable. Return to Offers.",Some(t)=>{
  let who=match head(t.participants){None=>"worker",Some(w)=>w};
- let agreed=any(\b. b.task==t.id && any(\c. c.id==b.agreement && c.parties==["captain",who] && c.active && c.accepted==c.parties && c.due>s.session.state.tick,s.session.state.commitments),s.session.bindings);
+ let agreed=agreement(s,t);
  "PROPOSAL / ${projectName(t.recipe)}\n${if agreed then "${who} agreed. Work has not started." else if s.session.policy=="consent" then "No current agreement. Start requires consent." else "No current agreement. Authority permits Start; trust can suffer."}\n${purpose(t.recipe)}\n${costs(s.session,t.recipe)}${if spendsSupplies(s.session,t.recipe) then "\nSupplies spend at completion even when benefits are capped." else ""}\nStart commits this worker; no time passes. Advance moves work forward.\nDecide later keeps this offer and agreement under Offers.\n${if message=="" then "" else "\nCREW REPLY / CONSEQUENCE\n${message}"}\n\nAVAILABLE\n${supplies(s.session)}"
  }
 }
@@ -55,11 +59,11 @@ pure func body(s:Option[PlayState],u:UI,message:string,history:[string],mode:str
  if u.view==Quit then wrap("End this watch? Your journal and response library remain. A fresh launch starts a new crew.",width)
  else if u.view==Guide then wrap(help(mode,remaining),width)
  else match s {
- None=>wrap("You are captain of a bubble ship.\nFive specialists prepare for possible contact.\nOffer work to hear its worker.\nStart holds people and resources.\nAdvance moves everyone one turn.",width),
+ None=>wrap("You are captain of a bubble ship.\nFive specialists prepare for contact.\nOffer work to hear its worker.\nStart holds people and resources.\nAdvance moves everyone one turn.\n\nProjects share3 Archive compute slots. Replacement modules and diagnostic cartridges are finite supplies. Holding resources can prevent another project from starting.",width),
  Some(p)=> if u.view==Crew then wrap(crew(p.session,debug),width)
  else if u.view==Log then wrap(if length(history)==0 then "No decisions yet. Offer work to begin." else join("\n\n",history),width)
  else if u.view==Work then wrap("WORK AND SUPPLIES\n${join("\n",resourceRows(p))}\n\n${if length(p.session.state.tasks)==0 then "No projects yet. Choose work or rest to begin." else join("\n\n",map(\t. "${timeline(p,t,u.ascii)}\n${purpose(t.recipe)}\n${costs(p.session,t.recipe)}",p.session.state.tasks))}",width)
- else if u.view==Ship then schematic(u.ascii)++wrap("Schematic: Bridge / Commons, terraces and open arcades near the Spire approach. Badges show assignments, not crew locations.\n\n${join("\n",roster(p,width))}",width)
+ else if u.view==Ship then schematic(u.ascii)++wrap("Schematic: Bridge / Commons, terraces and open arcades along the Spire / Archive approach. Badges show assignments, not crew locations.\n\n${join("\n",roster(p,width))}",width)
  else if p.phase=="start" then wrap(proposal(p,message),width)
  else if p.phase=="assignments" || p.phase=="rests" then match selected(s,u) {
   None=>wrap("No assignments available.",width),Some(c)=>{
@@ -87,6 +91,7 @@ pure func shownMenu(s:Option[PlayState],u:UI,width:int)->[string] = {
 pure func menuRows(cs:[Choice],selectedIndex:int,n:int,width:int)->[string] = match cs {[]=>[],c::rest=>fit("${if n==selectedIndex then ">" else " "} ${c.key}${if c.key=="" then "" else " "}${c.label}",width)::menuRows(rest,selectedIndex,n+1,width)}
 pure func blank(n:int)->[string] = if n<=0 then [] else ""::blank(n-1)
 pure func title(v:View)->string = match v {Briefing=>"FIRST HELLO",Decision=>"BRIDGE",Crew=>"CREW",Work=>"WORK",Log=>"LOG",Guide=>"HELP",Ship=>"SHIP",Quit=>"END WATCH?"}
+pure func phaseTitle(s:PlayState)->string = if s.phase=="start" then "PROPOSAL" else if s.phase=="assignments" then "CHOOSE WORK" else if s.phase=="rests" then "ARRANGE REST" else if s.phase=="working" then "CHECK-IN" else if s.phase=="offered" then "OFFERS" else if s.phase=="reliefs" || s.phase=="relief" then "RELIEF" else if s.phase=="response" then "REPLY PENDING" else "BRIDGE"
 export pure func consequence(s:Option[PlayState],u:UI)->string ! {}
 ensures { result!="" } = match (s,selected(s,u)) {
  (_,None)=>"Read details; b returns to your decision.",
@@ -95,9 +100,11 @@ ensures { result!="" } = match (s,selected(s,u)) {
   Some(t)=>match head(filter(\r. r.id==t.recipe,p.session.config.recipes)) {
    None=>"Recipe unavailable; Start cannot proceed.",Some(r)=>{
     let shortages=flatMap(\cost. match head(filter(\stock. stock.id==cost.resource,p.session.state.resources)) {
-     None=>["Missing ${resourceName(cost.resource)}."],Some(stock)=>if cost.reserve>stock.available then ["${resourceName(cost.resource)}: need ${cost.reserve}, ${stock.available} free."] else []
+     None=>["Missing ${resourceName(cost.resource)}."],Some(stock)=>if cost.reserve>stock.available then ["${resourceName(cost.resource)}: need ${cost.reserve}, ${stock.available} free / ${stock.reserved} held."] else []
     },r.costs);
-    if length(shortages)>0 then "Cannot Start: ${join(" ",shortages)} Decide later keeps the offer."
+    if p.session.policy=="consent" && not agreement(p,t) then "Cannot Start: the worker's current agreement is required. Decide later keeps the offer."
+    else if length(shortages)>0 then "Cannot Start: ${join(" ",shortages)} Decide later keeps the offer."
+    else if any(\working. working.status==Working && any(\who. any(\assigned. assigned==who,working.participants),t.participants),p.session.state.tasks) then "Cannot Start: this worker is already assigned. Advance existing work or resolve relief."
     else "Assign ${join(", ",t.participants)}; no time passes. ${costs(p.session,t.recipe)}"
    }
   }
@@ -115,21 +122,31 @@ ensures { result.pages>=1 && result.page>=0 && result.page<result.pages && lengt
  else {
   let rule=repeat(if u.ascii then "-" else "─",d.columns);
   let root=match s {None=>true,Some(_)=>false};
-  let header=[fit("VOYAGE / ${title(u.view)}${match s {None=>"",Some(p)=>" / turn ${p.session.state.tick}"}}",d.columns)]++(match s {None=>[],Some(p)=>[if p.session.policy=="consent" then "Agreement: Start needs crew consent" else "Authority: Start despite refusal"]});
+  let header=[fit("VOYAGE / ${match s {None=>title(u.view),Some(p)=>if u.view==Decision then phaseTitle(p) else title(u.view)}}${match s {None=>"",Some(p)=>" / turn ${p.session.state.tick}"}}",d.columns)]++(match s {None=>[],Some(p)=>[if p.session.policy=="consent" then "Agreement: Start needs crew consent" else "Authority: Start despite refusal"]});
   let readView=u.view==Crew || u.view==Work || u.view==Log || u.view==Guide || u.view==Ship;
   let keys=map(\l. fit(l,d.columns),if readView then ["Arrows/PgUp/PgDn read; q Quit","b/Esc return to pending decision"] else if root then ["Up/Down choose; Enter; 1/2; h Help","PgUp/PgDn details; Esc/q Quit"] else ["Arrows / Enter; c Crew w Work s Ship","PgUp/PgDn j Log h Help b Back q Quit"]);
   let policy=root && u.view==Briefing;
   let menu=if policy then flatMap(\c. [fit("${if c.key=="${u.cursor+1}" then ">" else " "} ${c.key} ${c.label}",d.columns),fit("  ${c.preview}",d.columns)],choices(None)) else if readView then ["READING / no time or resources used"] else shownMenu(s,u,d.columns);
   let preview=if policy || readView then [] else take(3,wrap(consequence(s,u),d.columns));
-  let room=d.rows-length(header)-2-length(menu)-length(preview)-length(keys)-1;
+  let room=d.rows-length(header)-2-length(menu)-length(preview)-length(keys)-2;
   let contents=body(s,u,message,history,mode,remaining,path,debug);
   let pages=if length(contents)==0 then 1 else (length(contents)+room-1)/room;
   let page=clampPage(u.page,pages);
   let shown=take(room,drop(page*room,contents));
-  let lines=header++[rule]++shown++blank(room-length(shown))++[rule]++menu++preview++keys++[fit("${if readView then "" else "Choice ${cursor(u.cursor,if u.view==Quit then 2 else length(choices(s)))+1}/${if u.view==Quit then 2 else length(choices(s))} | "}Details ${page+1}/${pages}",d.columns)];
+  let lines=header++[rule]++shown++blank(room-length(shown))++[rule]++menu++preview++keys++[fit("${if readView then "" else "Choice ${cursor(u.cursor,if u.view==Quit then 2 else length(choices(s)))+1}/${if u.view==Quit then 2 else length(choices(s))} | "}Details ${page+1}/${pages}",d.columns),""];
   assemble(lines,page,pages,ansi)
  }
 }
 
 test "fit keeps structural spacing and clips conservative cells" {fit(" a  b ",6)==" a  b " && fit("abcdef",3)=="abc"}
 test "elapsed uses turns rather than psychology" {elapsed(2,4,true)=="[##..] 2/4 turns" && elapsed(4,4,false)=="[████] 4/4 turns"}
+
+export pure func waiting(u:UI,actor:string,mode:string,ansi:bool)->Screen ! {}
+requires {u.dimensions.columns>=1 && u.dimensions.columns<=160 && u.dimensions.rows>=1 && u.dimensions.rows<=60}
+ensures {length(result.lines)<=u.dimensions.rows && not any(\l. cells(l)>u.dimensions.columns,result.lines) && result.pages==1 && result.page==0} = {
+ let d=u.dimensions;
+ if d.columns<40 || d.rows<16 then smallFrame(d,ansi,[],"",[],0) else {
+  let body=take(d.rows-3,wrap("HEARING ${safeText(actor)}\nTheir reply comes before your decision to start.\n${if mode=="offline" then "Choosing saved or authored wording. No provider calls." else "Preparing a personal reply. A missing saved response may call AI synchronously. Controls wait until it finishes."}",d.columns));
+  assemble(["VOYAGE / HEARING YOUR CREW",repeat(if u.ascii then "-" else "─",d.columns)]++body++blank(d.rows-2-length(body)),0,1,ansi)
+ }
+}

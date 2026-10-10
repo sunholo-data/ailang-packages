@@ -1,0 +1,96 @@
+module sunholo/crew_lab/native_watch
+import std/io (println,exit,readLineOpt)
+import std/env (getArgs,getEnvOr)
+import std/list (any,head,filter,length,take,drop)
+import std/string (length as size,trim)
+import std/option (Option,Some,None)
+import std/result (Result,Ok,Err)
+import std/terminal (TerminalSession)
+import pkg/sunholo/terminal_ui/events (Event,Input,Character,Cancelled,NoInput,lineEvent)
+import pkg/sunholo/terminal_ui/adapter (Resolved,Native,choose,run,readInput,writeFrame)
+import pkg/sunholo/terminal_ui/ui (safeText)
+import ./native_watch_args (Options,parse)
+import ./native_watch_ui (UI,initial,decision,update,Decision,Guide)
+import ./native_watch_presenter (frame,waiting)
+import ./watch_presenter (recap)
+import ./play_flow (route)
+import ./play (Run,openWatch,applyWatch,closeWatch)
+
+type State={host:Option[Run],ui:UI,message:string,history:[string],inputs:int}
+pure func history(xs:[string],message:string)->[string] = if message=="" then xs else {let ys=xs++[message];if length(ys)>64 then drop(length(ys)-64,ys) else ys}
+-- Exactly one reader is selected. Published lineEvent treats0 like q; retain
+-- literal0 here because the app displays its existing Back meaning in proposals.
+func read(terminal:Option[TerminalSession],resolved:Resolved)->Result[Event,string] ! {IO} =
+ if resolved.mode==Native then match readInput(terminal){Err(_)=>Err("Terminal input failed; previous journal retained."),Ok(e)=>Ok(e)} else {
+  let line=readLineOpt();
+  Ok(match line {Some(text)=>if trim(text)=="0" then Input(Character("0")) else if trim(text)=="q" then Input(Character("q")) else lineEvent(line),None=>lineEvent(line)})
+ }
+pure func playState(s:State) = match s.host {None=>None,Some(h)=>Some(h.ui)}
+
+func loop(s:State,o:Options,resolved:Resolved,terminal:Option[TerminalSession],dialogueMode:string,redraw:bool)->Result[Option[Run],string] ! {IO,FS,Env,AI} {
+ let f=frame(playState(s),s.ui,s.message,s.history,dialogueMode,match s.host{None=>0,Some(h)=>h.remaining},match s.host{None=>"",Some(h)=>h.path},o.debug,resolved.ansi);
+ if redraw then writeFrame(resolved,f) else ();
+ match read(terminal,resolved) {
+  Err(_)=>Err("Terminal input failed; previous journal retained."),
+  Ok(raw)=>{
+   if resolved.mode!=Native && raw!=NoInput then println("") else ();
+   let e=raw;
+   if e==NoInput then loop(s,o,resolved,terminal,dialogueMode,false)
+   else if s.inputs>=10000 then Err("Input limit reached; previous committed journal retained.")
+   else {
+    let bounded=match e{Input(Character(text))=>size(text)<=65536,_=>true};
+    if not bounded then Err("Input exceeds65536 characters; previous committed journal retained.") else {
+     let t=update(playState(s),{s.ui|page:f.page},e);
+     if t.quit then Ok(s.host) else match t.command {
+      None=>loop({s|ui:t.ui,inputs:s.inputs+1},o,resolved,terminal,dialogueMode,t.ui!=s.ui),
+      Some(key)=>match s.host {
+       None=>match openWatch(o.home,o.seed,key,dialogueMode,o.debug) {
+        Err(error)=>Err(error),Ok(h)=>loop({host:Some(h),ui:decision(h.ui,s.ui.dimensions.columns,s.ui.dimensions.rows,o.ascii),message:"Choose work or rest. Offer first; hear your crew before starting.",history:[],inputs:s.inputs+1},o,resolved,terminal,dialogueMode,true)
+       },
+       Some(h)=>match route(h.ui,key) {
+        Err(error)=>loop({s|message:error,ui:{s.ui|view:Decision,page:0},inputs:s.inputs+1},o,resolved,terminal,dialogueMode,true),
+        Ok(intent)=>if intent.kind=="quit" then {
+         let q=update(Some(h.ui),s.ui,Input(Character("q")));
+         loop({s|ui:q.ui,inputs:s.inputs+1},o,resolved,terminal,dialogueMode,true)
+        } else {
+         let hears=intent.kind=="offer" || intent.kind=="ask" || intent.kind=="retry" || intent.kind=="authored";
+         let who=if intent.worker!="" then intent.worker else if intent.kind=="ask" then match head(filter(\b. b.task==intent.target,h.ui.session.bindings)){None=>"crew member",Some(b)=>b.worker} else match head(filter(\p. p.id==h.ui.target,h.ui.session.pending)){None=>"crew member",Some(p)=>p.actor};
+         if hears then writeFrame(resolved,waiting(s.ui,who,dialogueMode,resolved.ansi)) else ();
+         match applyWatch(h,intent) {
+          Err(error)=>Err(error),Ok(a)=>{
+           let message=if a.message=="" then s.message else a.message;
+           let remembered=if a.run.ui.seq>h.ui.seq then history(s.history,a.message) else s.history;
+           loop({host:Some(a.run),ui:decision(a.run.ui,s.ui.dimensions.columns,s.ui.dimensions.rows,o.ascii),message:message,history:remembered,inputs:s.inputs+1},o,resolved,terminal,dialogueMode,true)
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   }
+  }
+ }
+}
+func launch(mode:string)->() ! {IO,Env,FS,AI} {
+ let args=getArgs();
+ if any(\a. a=="--help",args) then println("crew-watch / Before first hello\nA five-specialist preparation watch. Arrows choose, Enter selects; h explains. Offer work, hear its worker, then Start or Decide later. Advance moves everyone one turn.\n--mode auto|native|line|plain; --ascii; --debug; --seed N (default42); --home PATH; --columns N --rows N (line/plain).\nOffline uses saved/stock wording without providers. Live misses may wait for synchronous AI. Existing crew-journey/play commands remain available.")
+ else match parse(args,"${getEnvOr("HOME",".")}/.ailang/crew-lab") {
+  Err(e)=>{println(safeText(e));exit(1)},
+  Ok(o)=>match choose(o.mode,Some(o.dimensions)) {
+   Err(_)=>{println("Native terminal unavailable or dimensions invalid. Use --mode plain or --mode line.");exit(1)},
+   Ok(resolved)=>{
+    let state={host:None,ui:initial(resolved.dimensions.columns,resolved.dimensions.rows,o.ascii),message:"",history:[],inputs:0};
+    let result=run(resolved,\terminal. loop(state,o,resolved,terminal,mode,true));
+    match result {
+     Err(_)=>{println("Terminal scope failed; controls and cursor have been restored.");exit(1)},
+     Ok(Err(e))=>{println(safeText(e));exit(1)},
+     Ok(Ok(None))=>println("Watch not started. No crew decisions were recorded."),
+     Ok(Ok(Some(h)))=>match closeWatch(h){Err(e)=>{println(safeText("Journal failed: ${e}"));exit(1)},Ok(_)=>println(recap(h.ui,h.path,o.debug))}
+    }
+   }
+  }
+ }
+}
+export func main()->() ! {IO,Env,FS,AI} = launch("live")
+export func offline()->() ! {IO,Env,FS,AI} = launch("offline")

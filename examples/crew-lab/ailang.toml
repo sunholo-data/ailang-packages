@@ -1,12 +1,12 @@
 [package]
 name = "sunholo/crew_lab"
-version = "0.2.0"
+version = "0.3.0"
 edition = "1"
-ailang = ">=0.52.0"
+ailang = ">=0.54.0"
 description = "Captain and crew laboratory with personality decisions and a growing dialogue library"
 license = "Apache-2.0"
 [exports]
-modules = ["sunholo/crew_lab/actor_policy", "sunholo/crew_lab/scenario", "sunholo/crew_lab/watch_scenario", "sunholo/crew_lab/narrative", "sunholo/crew_lab/watch_presenter", "sunholo/crew_lab/native_watch_ui", "sunholo/crew_lab/native_watch_presenter", "sunholo/crew_lab/session", "sunholo/crew_lab/codec", "sunholo/crew_lab/terminal", "sunholo/crew_lab/reactions", "sunholo/crew_lab/store", "sunholo/crew_lab/play_flow", "sunholo/crew_lab/play", "sunholo/crew_lab/presenter", "sunholo/crew_lab/journey_flow", "sunholo/crew_lab/journey_presenter"]
+modules = ["sunholo/crew_lab/actor_policy", "sunholo/crew_lab/scenario", "sunholo/crew_lab/watch_scenario", "sunholo/crew_lab/narrative", "sunholo/crew_lab/watch_presenter", "sunholo/crew_lab/native_watch_ui", "sunholo/crew_lab/native_watch_args", "sunholo/crew_lab/native_watch_presenter", "sunholo/crew_lab/session", "sunholo/crew_lab/codec", "sunholo/crew_lab/terminal", "sunholo/crew_lab/reactions", "sunholo/crew_lab/store", "sunholo/crew_lab/play_flow", "sunholo/crew_lab/play", "sunholo/crew_lab/presenter", "sunholo/crew_lab/journey_flow", "sunholo/crew_lab/journey_presenter"]
 [dependencies]
 "sunholo/terminal_ui" = {path = "../../packages/terminal-ui"}
 "sunholo/social_dynamics" = {path = "../../packages/social-dynamics"}
@@ -22,6 +22,9 @@ crew-play-offline = {module = "play", entry = "offline", caps = "IO,FS,Env,AI", 
 
 crew-journey = {module = "journey", entry = "main", caps = "IO,FS,Env,AI", run_flags = ["--ai", "z-ai/glm-5.3-flash", "--fs-max-bytes", "16MB"]}
 crew-journey-offline = {module = "journey", entry = "offline", caps = "IO,FS,Env,AI", run_flags = ["--ai-stub", "--fs-max-bytes", "16MB"]}
+
+crew-watch = {module = "native_watch", entry = "main", caps = "IO,FS,Env,AI", run_flags = ["--ai", "z-ai/glm-5.3-flash", "--fs-max-bytes", "16MB"]}
+crew-watch-offline = {module = "native_watch", entry = "offline", caps = "IO,FS,Env,AI", run_flags = ["--ai-stub", "--fs-max-bytes", "16MB"]}
 
 [metadata]
 ai_summary = "Pure captain/crew host plus OCEAN reactions, numbered controls and bounded GLM dialogue generation with persistent exact-context bundles; offline mode and complete run journals"

@@ -1,0 +1,27 @@
+module sunholo/crew_lab/native_watch_args
+import std/option (Some,None)
+import std/result (Result,Ok,Err)
+import std/string (length,stringToInt)
+import pkg/sunholo/terminal_ui/adapter (Mode,Auto,Native,Line,Plain)
+import pkg/sunholo/terminal_ui/ui (Dimensions)
+import pkg/sunholo/terminal_ui/widgets (viewport)
+import ./play_flow (seedNumber)
+export type Options={home:string,seed:int,mode:Mode,dimensions:Dimensions,ascii:bool,debug:bool} deriving(Eq)
+pure func loop(xs:[string],o:Options)->Result[Options,string] = match xs {
+ []=>Ok(o),
+ "--home"::h::rest=>if length(h)==0 || length(h)>4096 then Err("Invalid --home") else loop(rest,{o|home:h}),
+ "--seed"::s::rest=>match seedNumber(s){Err(e)=>Err(e),Ok(n)=>loop(rest,{o|seed:n})},
+ "--mode"::m::rest=>if m=="native" then loop(rest,{o|mode:Native}) else if m=="line" then loop(rest,{o|mode:Line}) else if m=="plain" then loop(rest,{o|mode:Plain}) else if m=="auto" then loop(rest,{o|mode:Auto}) else Err("Mode must be auto, native, line or plain"),
+ "--plain"::rest=>loop(rest,{o|mode:Plain}),
+ "--ascii"::rest=>loop(rest,{o|ascii:true}),
+ "--debug"::rest=>loop(rest,{o|debug:true}),
+ "--columns"::n::rest=>match stringToInt(n){None=>Err("Invalid --columns"),Some(v)=>if v<1 || v>10000 then Err("Invalid --columns") else loop(rest,{o|dimensions:viewport(v,o.dimensions.rows)})},
+ "--rows"::n::rest=>match stringToInt(n){None=>Err("Invalid --rows"),Some(v)=>if v<1 || v>10000 then Err("Invalid --rows") else loop(rest,{o|dimensions:viewport(o.dimensions.columns,v)})},
+ _=>Err("Usage: crew-watch [--mode auto|native|line|plain] [--ascii] [--debug] [--home PATH] [--seed N] [--columns N --rows N]")
+}
+export pure func parse(xs:[string],home:string)->Result[Options,string] ! {}
+ensures {match result {Err(_)=>true,Ok(o)=>length(o.home)>0 && length(o.home)<=4096 && o.seed>=1 && o.seed<=2147483646 && o.dimensions.columns>=1 && o.dimensions.columns<=160 && o.dimensions.rows>=1 && o.dimensions.rows<=60}} =
+ if length(home)==0 || length(home)>4096 then Err("Invalid default home") else loop(xs,{home:home,seed:42,mode:Auto,dimensions:viewport(80,24),ascii:false,debug:false})
+
+test "plain explicit small viewport and deterministic seed are retained" {match parse(["--mode","plain","--columns","20","--rows","8","--seed","73","--ascii"],"library"){Err(_)=>false,Ok(o)=>o.mode==Plain && o.seed==73 && o.dimensions.columns==20 && o.dimensions.rows==8 && o.ascii}}
+test "invalid sizes seeds flags reject" {match (parse(["--rows","0"],"library"),parse(["--seed","0"],"library"),parse(["--wat"],"library")){(Err(_),Err(_),Err(_))=>true,_=>false}}

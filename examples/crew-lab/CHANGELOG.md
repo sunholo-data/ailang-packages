@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.3.0
+
+Adds pure AILANG `crew-watch` and `crew-watch-offline` with native arrows/Enter,
+a newcomer briefing, safe proposal/quit defaults, responsive ship/crew panels,
+named resource previews and actual elapsed project bars. Reading and resizing
+leave host state, sampling and journals unchanged. Known shortages stay on the
+same proposal; compute contention recovers after existing work completes. Native
+terminal scope restores raw mode, cursor and alternate screen on quit, interruption
+and host-publication failure. Line/plain distinguish idle blank input from EOF.
+Requires standalone AILANG0.54; Godot runtime and earlier durable commands remain
+separate. Existing journal/store/AI boundaries and exact library words are reused;
+AI remains synchronous. Adds isolated installed/PTY/replay controls and practical
+science/authority/relief walkthroughs. No publication or async worker implementation.
+
 ## 0.2.0
 
 Adds understandable first-choice context and pre-start help, plus a versioned

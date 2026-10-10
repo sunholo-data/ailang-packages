@@ -83,5 +83,17 @@ validate: watch-test
 native-ui-test:
 	@cd "$(EX)" && "$(AILANG)" test native_watch_ui_test.ail native_watch_presenter_test.ail
 	@cd "$(EX)" && "$(AILANG)" test native_watch_ui_test.ail native_watch_presenter_test.ail --bytecode --strict-bytecode
-	@cd "$(EX)" && "$(AILANG)" test --allow-skips native_watch_ui.ail native_watch_presenter.ail
+	@cd "$(EX)" && "$(AILANG)" test --allow-skips native_watch_ui.ail
+	@cd "$(EX)" && "$(AILANG)" test --allow-skips native_watch_presenter.ail
+	@cd "$(EX)" && "$(AILANG)" test --allow-skips native_watch_args.ail
 validate: native-ui-test
+
+.PHONY: native-watch-test
+native-watch-test:
+	@AILANG="$(AILANG)" "$(EX)/test-native-watch.sh"
+validate: native-watch-test
+
+.PHONY: native-watch-pty-test
+native-watch-pty-test:
+	@AILANG="$(AILANG)" python3 "$(EX)/test-native-watch-pty.py"
+validate: native-watch-pty-test
