@@ -48,3 +48,27 @@ test "ASCII ship diagram and elapsed bar are physical facts" {
  contains(text,"BRIDGE") && contains(text,"COMMONS") && not contains(text,"─") && not contains(text,"█") && elapsed(2,4,true)=="[##..] 2/4 turns" && elapsed(0,0,true)=="[....] 0/0 turns"
  }}
 }
+
+test "tall bridge shows all actions even at the last selection" {
+ match beginWatch("1",61) {Err(_)=>false,Ok(s)=>{
+ let u={decision(s,80,40,false)|cursor:5};
+ let f=frame(Some(s),u,"",[],"offline",0,"journal",false,false);
+ let text=join("\n",f.lines);
+ length(f.lines)==40 && all(\l. cells(l)<=80,f.lines) && contains(text,"1 Choose work") && contains(text,"2 Arrange rest") && contains(text,"5 Advance one turn") && contains(text,"6 Check in with working crew") && contains(text,"7 Review open offers") && contains(text,"> 8 Resolve a relief request") && contains(text,"Choices 1-6/6")
+ }}
+}
+test "tall assignment menu shows five specialists and focused details" {
+ match beginWatch("1",61) {Err(_)=>false,Ok(s)=>{
+ let p={s|phase:"assignments"};
+ let u={decision(p,100,30,false)|cursor:4};
+ let text=frame(Some(p),u,"",[],"offline",0,"journal",false,false).text;
+ contains(text,"1 scientist:") && contains(text,"2 engineer:") && contains(text,"3 medic:") && contains(text,"4 pilot:") && contains(text,"> 5 diplomat:") && contains(text,"Practise signals") && contains(text,"Choices 1-5/5")
+ }}
+}
+test "compact menu tells captain which choices are outside the window" {
+ match beginWatch("1",61) {Err(_)=>false,Ok(s)=>{
+ let u={decision(s,40,16,false)|cursor:5};
+ let f=frame(Some(s),u,"",[],"offline",0,"journal",false,false);
+ length(f.lines)==16 && all(\l. cells(l)<=40,f.lines) && contains(f.text,"> 8 Resolve a relief request") && contains(f.text,"Choices 4-6/6")
+ }}
+}

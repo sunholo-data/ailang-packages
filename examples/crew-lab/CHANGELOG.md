@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.3.2
+
+Expand the native action menu with terminal height, retain the complete last
+window and show its visible choice range. Tall screens show all six bridge
+actions and all five specialists. Compact screens retain detail space and
+scrolling; domain commands, resources, AI and cached dialogue are unchanged.
+
 ## 0.3.1
 
 Fix native staircase rendering using terminal_ui0.2.1's explicit raw-mode row

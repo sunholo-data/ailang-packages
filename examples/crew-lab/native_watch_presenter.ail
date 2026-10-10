@@ -80,11 +80,24 @@ pure func body(s:Option[PlayState],u:UI,message:string,history:[string],mode:str
  }
  }
 }
+-- Retain the compact viewport's detail space; extra height reveals more choices.
+pure func menuCapacity(rows:int)->int = clamp(rows-21,3,12)
+pure func menuChoices(s:Option[PlayState],u:UI)->[Choice] =
+ if u.view==Quit then [{key:"",label:"Keep playing",preview:""},{key:"",label:"End this watch",preview:""}] else choices(s)
+pure func menuOffset(count:int,selectedIndex:int,capacity:int)->int =
+ clamp(selectedIndex-capacity+1,0,if count>capacity then count-capacity else 0)
+pure func choiceRange(s:Option[PlayState],u:UI)->string = {
+ let count=length(menuChoices(s,u));
+ let capacity=menuCapacity(u.dimensions.rows);
+ let offset=menuOffset(count,cursor(u.cursor,count),capacity);
+ if count==0 then "No choices" else "Choices ${offset+1}-${if offset+capacity<count then offset+capacity else count}/${count}"
+}
 pure func shownMenu(s:Option[PlayState],u:UI,width:int)->[string] = {
- let cs=if u.view==Quit then [{key:"",label:"Keep playing",preview:""},{key:"",label:"End this watch",preview:""}] else choices(s);
+ let cs=menuChoices(s,u);
  let c=cursor(u.cursor,length(cs));
- let offset=if c<=1 then 0 else c-1;
- let window=take(3,drop(offset,cs));
+ let capacity=menuCapacity(u.dimensions.rows);
+ let offset=menuOffset(length(cs),c,capacity);
+ let window=take(capacity,drop(offset,cs));
  let lines=menuRows(window,c-offset,0,width);
  if length(lines)==0 then ["No choices here; b returns to bridge."] else lines
 }
@@ -133,7 +146,7 @@ ensures { result.pages>=1 && result.page>=0 && result.page<result.pages && lengt
   let pages=if length(contents)==0 then 1 else (length(contents)+room-1)/room;
   let page=clampPage(u.page,pages);
   let shown=take(room,drop(page*room,contents));
-  let lines=header++[rule]++shown++blank(room-length(shown))++[rule]++menu++preview++keys++[fit("${if readView then "" else "Choice ${cursor(u.cursor,if u.view==Quit then 2 else length(choices(s)))+1}/${if u.view==Quit then 2 else length(choices(s))} | "}Details ${page+1}/${pages}",d.columns),""];
+  let lines=header++[rule]++shown++blank(room-length(shown))++[rule]++menu++preview++keys++[fit("${if readView then "" else "${choiceRange(s,u)} | "}Details ${page+1}/${pages}",d.columns),""];
   assemble(lines,page,pages,ansi)
  }
 }

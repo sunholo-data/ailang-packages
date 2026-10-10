@@ -165,3 +165,23 @@ Automatic approval review rejected public registry publication as an external
 durable release needing explicit authorization. terminal_ui0.2.1 is merged and
 used by the local path consumer; publication/new registry smoke are pending that
 approval. The local UI correction is complete; no publication bypass occurred.
+
+## Corrective acceptance: menu uses available height
+
+Mark reported tall screens retaining only three action rows. This repairs the
+approved responsive NU3/NU6 presentation, with no new host or gameplay transition.
+A separate draft covers resource-aware offers and rescinding work.
+
+- Preserve minimum/80x24 detail space; grow the action window with terminal height
+  up to12 rows. Six bridge choices fit from27 rows, five specialists from26.
+- Keep the complete window at its end and show its displayed range. Arrows move
+  focus; PgUp/PgDn still page details. Numbering and emitted commands are unchanged.
+- Red controls: tall bridge/all-six at last focus, tall five-specialist menu and
+  compact visible-range explanation all fail on the fixed-three renderer.
+- Require both pure engines, actual raw PTY tall-window/no-journal-change/resize,
+  existing validate, exact-head CI and independent acceptance before installation.
+
+AILANG prompt version loaded: v0.16.7 (already loaded in this attended session).
+Presenter remains pure !{} with its bounded frame contract; new controls exercise
+layout/selection at real sizes. No new runtime effects or package API are introduced.
+Status: implementation passes both pure engines; installed/CI/evaluation pending.
