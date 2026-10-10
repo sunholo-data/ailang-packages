@@ -1,0 +1,49 @@
+{
+  "reviewer": "in-session independent reviewer A",
+  "review_type": "reject-by-default design re-review, revision 1",
+  "document": "/private/tmp/crew-watch-v2-20261010/design_docs/planned/crew-lab/crew-watch-v2.md",
+  "verdict": "PASS",
+  "required_changes": [],
+  "prior_blocker": {
+    "id": "R1",
+    "status": "RESOLVED IN DESIGN",
+    "resolution": "Explicit opt-in BoundedIndicatorDelta performs checked arithmetic followed by configured bounds clamping; strict legacy constructors/tags remain unchanged. Modern tasks exclusively use bounded indicator effects. The design now requires lower/upper/exact and nonzero/negative bounds, invalid state, reference, overflow, atomic rollback, cross-actor appraisal and installed repeated-work/rest completion controls. Supply costs remain charged when benefits cap, with pre-start disclosure and actual result reporting."
+  },
+  "strongest_objection": "Adding an Effect ADT constructor could otherwise bypass observer ownership, omit an exhaustive match, or change legacy encodings. Revision 1 explicitly covers each known match, preserves strict branches and old tags, adds a unique wire tag, bumps the experimental package to 0.2.0 as breaking, updates consumer locks, and requires forged-appraisal and byte-identical legacy controls. No unresolved design blocker found.",
+  "verified_source": [
+    "packages/social-dynamics/model.ail:17: Effect currently has two constructors; adding an arm is a typed API change.",
+    "packages/social-dynamics/indicators.ail:38-45 and 66-95: shape, reference and application matches are the bounded-effect extension points; legacy branch rejects out-of-range results.",
+    "packages/social-dynamics/relationships.ail:23-33: ownEffect is the observer ownership guard and must include the new arm.",
+    "packages/social-dynamics/wire.ail:93-95: effectJson has both existing distinct encoded tags; a third tag need not change old encoded output.",
+    "examples/crew-lab/journey_presenter.ail:73-74: the known non-kernel exhaustive Effect match is the presenter.",
+    "Repository-scoped non-test AILANG search found the same exhaustive match surface documented by the revision. Other matched consumers construct existing effects without pattern matching.",
+    "packages/social-dynamics/tasks.ail finish applies effects before publishing release; a bounded modern effect can fix predictable boundary failures without changing reserve/release semantics."
+  ],
+  "axioms": [
+    {"id":"A1","judgment":"PASS","reason":"Clamping and selection are deterministic; no hidden state."},
+    {"id":"A2","judgment":"PASS","reason":"Distinct bounded tag and profile identity; old encodings/replay remain explicitly preserved."},
+    {"id":"A3","judgment":"PASS","reason":"New operation is an explicit typed pure effect."},
+    {"id":"A4","judgment":"PASS","reason":"Observer ownership includes new constructor; no raw-effect command; consent/config guards retained."},
+    {"id":"A5","judgment":"PASS","reason":"Original bounds premise corrected and explicit native/installed boundary controls added."},
+    {"id":"A6","judgment":"PASS","reason":"Existing atomic state updates/cache locking retained."},
+    {"id":"A7","judgment":"PASS","reason":"Structured journal retains exact raw provenance and actual state results."},
+    {"id":"A8","judgment":"PASS","reason":"Library ADT extension, no language syntax or runtime modification."},
+    {"id":"A9","judgment":"PASS","reason":"Temporary holds release at bounds; finite costs and capped-benefit charging explicitly disclosed."},
+    {"id":"A10","judgment":"PASS","reason":"Shared bounded effect extends generic machinery and is versioned as a breaking typed API change."},
+    {"id":"A11","judgment":"PASS","reason":"Ordinary task boundaries no longer force completion failure; malformed/overflow cases still fail atomically."},
+    {"id":"A12","judgment":"PASS","reason":"Host owns effects; AI gets local context and expression-only authority."}
+  ],
+  "hard_gates": {
+    "legacy_config_consent_isolation": "PASS design",
+    "cache_policy_isolation": "PASS design",
+    "resource_completion_relief": "PASS design after explicit bounded-effect addition",
+    "npc_perception_confidentiality": "PASS design",
+    "rookie_minimum_ui": "PASS design requirements; actual 40x16 frame remains an implementation acceptance gate",
+    "deterministic_replay_authority": "PASS design",
+    "off_vendor_quorum": "NOT CLAIMED: in-session independent re-review only"
+  },
+  "suggestions": [
+    "Retain exact first-frame 40x16 evidence and local-perception sentinel assertions from round 0; no additional approval or design rewrite required."
+  ],
+  "limitations": "PASS approves the design, not implementation. Source still contains the legacy constructors. Implementation must satisfy the prescribed native, replay, installed UI and package checks. No external AI API, product edit, or test execution performed."
+}
