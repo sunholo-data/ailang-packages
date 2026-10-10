@@ -1,0 +1,41 @@
+module sunholo/terminal_ui/adapter_test
+import std/option (Option, Some, None)
+import std/result (Ok, Err)
+import ./adapter (Native, Line, Plain, Auto, resolve, normalize, MissingSize, NativeUnavailable)
+import ./events (Input, Next, Sized, Finished, Cancelled, NoInput)
+import std/terminal (Key, Down, Resize, EndOfInput, Interrupted, Idle)
+
+pure func tty() -> { input_tty: bool, output_tty: bool, raw_supported: bool, size: Option[{ columns: int, rows: int }] } =
+  { input_tty: true, output_tty: true, raw_supported: true, size: Some({ columns: 20, rows: 8 }) }
+
+test "auto selects once using physical native size" {
+  match resolve(Auto, tty(), None) {
+    Ok(r) => r.mode == Native && r.dimensions.columns == 20 && r.dimensions.rows == 8,
+    _ => false
+  }
+}
+
+test "redirected auto is explicit plain, never native" {
+  match resolve(Auto, { tty() | output_tty: false }, Some({ columns: 60, rows: 24 })) {
+    Ok(r) => r.mode == Plain && not r.ansi,
+    _ => false
+  }
+}
+
+test "native unavailable never silently downgrades" {
+  match resolve(Native, { tty() | raw_supported: false }, None) {
+    Err(NativeUnavailable(_)) => true,
+    _ => false
+  }
+}
+
+test "unknown line size requires explicit dimensions" {
+  match resolve(Line, { tty() | size: None }, None) {
+    Err(MissingSize) => true,
+    _ => false
+  }
+}
+
+test "normalize native keys resize EOF interruption idle" {
+  normalize(Key(Down)) == Input(Next) && normalize(Resize({ columns: 20, rows: 8 })) == Sized(20, 8) && normalize(EndOfInput) == Finished && normalize(Interrupted) == Cancelled && normalize(Idle) == NoInput
+}

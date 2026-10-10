@@ -1,0 +1,112 @@
+module sunholo/terminal_ui/widgets
+import std/option (Option, Some, None)
+import std/list (length, take)
+import std/string (join, chars)
+import ./events (Event, Input, Previous, Next, MoveLeft, MoveRight, Accept, First, Last, PriorPage, FollowingPage, ending)
+import ./ui (Dimensions, Screen, screen, clampPage, wrap)
+
+export type Menu = { count: int, cursor: int, selected: Option[int], done: bool } deriving (Eq)
+
+export type Confirmation = { yes: bool, answer: Option[bool], done: bool } deriving (Eq)
+
+export type Pager = { current: int, pages: int } deriving (Eq)
+
+export pure func menu(count: int) -> Menu ! {}
+requires { count >= 0 && count <= 4096 }
+ensures { result.count == count && result.cursor == 0 && result.selected == None && not result.done } {
+  { count: count, cursor: 0, selected: None, done: false }
+}
+
+export pure func cursor(index: int, count: int) -> int ! {}
+requires { count >= 0 && count <= 4096 }
+ensures { result >= 0 && (count == 0 && result == 0 || count > 0 && result < count) }
+  tests [
+    ((-1, 3), 0),
+    ((100, 3), 2),
+    ((5, 0), 0)
+  ] {
+  if count == 0 || index < 0 then 0 else if index >= count then count - 1 else index
+}
+
+export pure func updateMenu(state: Menu, event: Event) -> Menu ! {}
+requires { state.count >= 0 && state.count <= 4096 && state.cursor >= 0 && (state.count == 0 && state.cursor == 0 || state.cursor < state.count) }
+ensures { result.count == state.count && result.cursor >= 0 && (result.count == 0 && result.cursor == 0 || result.cursor < result.count) } {
+  if state.done then state else if ending(event) then { state | done: true } else match event {
+    Input(Previous) => { state | cursor: cursor(state.cursor - 1, state.count) },
+    Input(Next) => { state | cursor: cursor(state.cursor + 1, state.count) },
+    Input(First) => { state | cursor: 0 },
+    Input(Last) => { state | cursor: cursor(state.count - 1, state.count) },
+    Input(Accept) => if state.count == 0 then state else { state | selected: Some(state.cursor), done: true },
+    _ => state
+  }
+}
+
+export pure func confirm(defaultYes: bool) -> Confirmation ! {}
+ensures { result.yes == defaultYes && result.answer == None && not result.done } {
+  { yes: defaultYes, answer: None, done: false }
+}
+
+export pure func updateConfirm(state: Confirmation, event: Event) -> Confirmation ! {}
+ensures { not state.done || result == state } {
+  if state.done then state else if ending(event) then { state | done: true } else match event {
+    Input(Previous) => { state | yes: not state.yes },
+    Input(Next) => { state | yes: not state.yes },
+    Input(MoveLeft) => { state | yes: false },
+    Input(MoveRight) => { state | yes: true },
+    Input(Accept) => { state | answer: Some(state.yes), done: true },
+    _ => state
+  }
+}
+
+export pure func page(current: int, pages: int) -> Pager ! {}
+requires { pages >= 1 && pages <= 10000 }
+ensures { result.pages == pages && result.current >= 0 && result.current < pages } {
+  { current: clampPage(current, pages), pages: pages }
+}
+
+export pure func updatePage(state: Pager, event: Event) -> Pager ! {}
+requires { state.pages >= 1 && state.pages <= 10000 && state.current >= 0 && state.current < state.pages }
+ensures { result.pages == state.pages && result.current >= 0 && result.current < result.pages } {
+  match event {
+    Input(Next) => page(state.current + 1, state.pages),
+    Input(FollowingPage) => page(state.current + 1, state.pages),
+    Input(Previous) => page(state.current - 1, state.pages),
+    Input(PriorPage) => page(state.current - 1, state.pages),
+    Input(First) => page(0, state.pages),
+    Input(Last) => page(state.pages - 1, state.pages),
+    _ => state
+  }
+}
+
+-- Preserve real small dimensions; cap only the maximum rendering workload.
+export pure func viewport(columns: int, rows: int) -> Dimensions ! {}
+requires { columns > 0 && rows > 0 }
+ensures { result.columns >= 1 && result.columns <= 160 && result.columns <= columns && result.rows >= 1 && result.rows <= 60 && result.rows <= rows }
+  tests [
+    ((20, 8), { columns: 20, rows: 8 }),
+    ((999, 999), { columns: 160, rows: 60 })
+  ] {
+  { columns: if columns > 160 then 160 else columns, rows: if rows > 60 then 60 else rows }
+}
+
+-- Small-terminal chrome is trusted ASCII, so taking codepoints also bounds cells.
+pure func compactLine(text: string, columns: int) -> string = join("", take(columns, chars(text)))
+
+pure func chromeRows(lines: [string], columns: int) -> int = match lines {
+  [] => 0,
+  line :: rest => length(wrap(line, columns)) + chromeRows(rest, columns)
+}
+
+export pure func frame(d: Dimensions, ansi: bool, header: [string], body: string, actions: [string], current: int) -> Screen ! {}
+requires { d.columns >= 1 && d.columns <= 160 && d.rows >= 1 && d.rows <= 60 && (d.columns < 40 || d.rows < 16 || chromeRows(header, d.columns) + chromeRows(actions, d.columns) <= d.rows - 5) }
+ensures { result.page >= 0 && result.page < result.pages && length(result.lines) <= d.rows } {
+  if d.columns < 40 || d.rows < 16 then {
+    let lines = take(d.rows, [compactLine("Terminal too small", d.columns), compactLine("Need 40 x 16", d.columns), compactLine("q quit; resize", d.columns)])
+    let text = join("\n", lines);
+    { lines: lines, text: if ansi then "\u{1B}[2J\u{1B}[H${text}" else text, page: 0, pages: 1 }
+  } else screen(d, ansi, header, body, actions, current)
+}
+
+test "source empty menu cannot select and confirmation has no answer yet" {
+  (menu(0)).selected == None && not (menu(0)).done && (confirm(false)).answer == None && not (confirm(false)).yes
+}

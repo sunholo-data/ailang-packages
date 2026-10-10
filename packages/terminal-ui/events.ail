@@ -1,0 +1,47 @@
+module sunholo/terminal_ui/events
+import std/option (Option, Some, None)
+
+-- Normalized input is independent of the native host and can be replayed purely.
+export type KeyCode = Character(string) | Previous | Next | MoveLeft | MoveRight | Accept | Cancel | Erase | FocusNext | First | Last | PriorPage | FollowingPage | Remove deriving (Eq)
+
+export type Event = Input(KeyCode) | Sized(int, int) | Finished | Cancelled | NoInput deriving (Eq)
+
+-- Blank input is deliberately distinct from EOF. Plain/line adapters need no raw mode.
+export pure func lineEvent(line: Option[string]) -> Event ! {}
+ensures { line != None || result == Finished } {
+  match line {
+    None => Finished,
+    Some(text) => match text {
+      "" => NoInput,
+      "q" => Cancelled,
+      "0" => Cancelled,
+      "esc" => Input(Cancel),
+      "up" => Input(Previous),
+      "down" => Input(Next),
+      "n" => Input(Next),
+      "v" => Input(Previous),
+      "left" => Input(MoveLeft),
+      "right" => Input(MoveRight),
+      "enter" => Input(Accept),
+      "home" => Input(First),
+      "end" => Input(Last),
+      "pgup" => Input(PriorPage),
+      "pgdn" => Input(FollowingPage),
+      _ => Input(Character(text))
+    }
+  }
+}
+
+export pure func ending(event: Event) -> bool ! {}
+ensures { result == (event == Finished || event == Cancelled || event == Input(Cancel)) }
+  tests [
+    (Finished, true),
+    (NoInput, false),
+    (Input(Cancel), true)
+  ] {
+  event == Finished || event == Cancelled || event == Input(Cancel)
+}
+
+test "source line conversion distinguishes blank and EOF" {
+  lineEvent(None) == Finished && lineEvent(Some("")) == NoInput && lineEvent(Some("n")) == Input(Next)
+}

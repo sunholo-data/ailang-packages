@@ -1,0 +1,124 @@
+module sunholo/terminal_ui/adapter
+import std/result (Result, Ok, Err)
+import std/option (Option, Some, None)
+import std/io (print, flush, readLineOpt)
+import std/string (contains)
+import std/terminal (TerminalInfo, TerminalEvent, TerminalKey, TerminalSession, TerminalError, info, withTerminal, readEvent, Key, Resize, EndOfInput, Interrupted, Idle, Text, Up, Down, Left, Right, Enter, Escape, Backspace, Tab, Home, End, PageUp, PageDown, Delete)
+import ./ui (Dimensions, Screen)
+import ./events (Event, KeyCode, Input, Sized, Finished, Cancelled, NoInput, Character, Previous, Next, MoveLeft, MoveRight, Accept, Cancel, Erase, FocusNext, First, Last, PriorPage, FollowingPage, Remove, lineEvent)
+import ./widgets (viewport)
+import ./transcript (validSize)
+
+export type Mode = Native | Line | Plain | Auto deriving (Eq)
+
+export type Resolved = { mode: Mode, dimensions: Dimensions, ansi: bool } deriving (Eq)
+
+export type AdapterError = NativeUnavailable(string) | MissingSize | InvalidSize | HostError(TerminalError)
+
+export pure func modeName(mode: Mode) -> string ! {}
+ensures { result == "native" || result == "line" || result == "plain" || result == "auto" }
+  tests [
+    (Native, "native"),
+    (Plain, "plain")
+  ] {
+  match mode {
+    Native => "native",
+    Line => "line",
+    Plain => "plain",
+    Auto => "auto"
+  }
+}
+
+-- Pure decision. Resolve once; an acquisition failure later is always a HostError.
+export pure func resolve(requested: Mode, facts: TerminalInfo, supplied: Option[Dimensions]) -> Result[Resolved, AdapterError] ! {}
+ensures { match result {
+  Ok(r) => r.mode != Auto && r.dimensions.columns > 0 && r.dimensions.rows > 0 && (r.mode != Plain || not r.ansi),
+  Err(_) => true
+} } {
+  let mode = if requested == Auto then if facts.input_tty && facts.output_tty && facts.raw_supported then Native else if facts.input_tty && facts.output_tty then Line else Plain else requested
+  if mode == Native && not (facts.input_tty && facts.output_tty && facts.raw_supported) then Err(NativeUnavailable("native mode requires supported input and output TTYs")) else {
+    let size = if mode == Native then facts.size else match supplied {
+      Some(d) => Some(d),
+      None => facts.size
+    }
+    match size {
+      None => Err(MissingSize),
+      Some(d) => if not validSize(d.columns, d.rows) then Err(InvalidSize) else Ok({ mode: mode, dimensions: viewport(d.columns, d.rows), ansi: mode != Plain })
+    }
+  }
+}
+
+-- Explicit plain/line with supplied layout need no terminal query.
+export func choose(requested: Mode, supplied: Option[Dimensions]) -> Result[Resolved, AdapterError] ! {IO @limit=1}
+ensures { match result {
+  Ok(r) => r.mode != Auto && r.dimensions.columns > 0 && r.dimensions.rows > 0,
+  Err(_) => true
+} } {
+  if (requested == Plain || requested == Line) && supplied != None then resolve(requested, { input_tty: false, output_tty: false, raw_supported: false, size: None }, supplied) else match info() {
+    Err(error) => Err(HostError(error)),
+    Ok(facts) => resolve(requested, facts, supplied)
+  }
+}
+
+export pure func normalize(event: TerminalEvent) -> Event ! {}
+ensures { match event {
+  EndOfInput => result == Finished,
+  _ => true
+} } {
+  match event {
+    Key(key) => Input(normalizeKey(key)),
+    Resize(size) => Sized(size.columns, size.rows),
+    EndOfInput => Finished,
+    Interrupted => Cancelled,
+    Idle => NoInput
+  }
+}
+
+pure func normalizeKey(key: TerminalKey) -> KeyCode = match key {
+  Text(text) => Character(text),
+  Up => Previous,
+  Down => Next,
+  Left => MoveLeft,
+  Right => MoveRight,
+  Enter => Accept,
+  Escape => Cancel,
+  Backspace => Erase,
+  Tab => FocusNext,
+  Home => First,
+  End => Last,
+  PageUp => PriorPage,
+  PageDown => FollowingPage,
+  Delete => Remove
+}
+
+export func readInput(session: Option[TerminalSession]) -> Result[Event, AdapterError] ! {IO @limit=1}
+ensures { match result {
+  Ok(Sized(columns, rows)) => columns > 0 && rows > 0,
+  _ => true
+} } {
+  match session {
+    None => Ok(lineEvent(readLineOpt())),
+    Some(handle) => match readEvent(handle, -1) {
+      Ok(event) => Ok(normalize(event)),
+      Err(error) => Err(HostError(error))
+    }
+  }
+}
+
+-- The host owns restoration even when the body throws, exits or exhausts IO.
+export func run[a](resolved: Resolved, body: Option[TerminalSession] -> a ! {e}) -> Result[a, AdapterError] ! {IO, e}
+requires { resolved.mode != Auto && validSize(resolved.dimensions.columns, resolved.dimensions.rows) } {
+  if resolved.mode == Native then match withTerminal({ alternate_screen: true, hide_cursor: true }, func(session: TerminalSession) -> a ! {e} {
+    body(Some(session))
+  }) {
+    Ok(value) => Ok(value),
+    Err(error) => Err(HostError(error))
+  } else Ok(body(None))
+}
+
+export func writeFrame(resolved: Resolved, screen: Screen) -> () ! {IO @limit=3}
+requires { resolved.mode != Auto && (resolved.mode != Plain || not contains(screen.text, "\u{1B}")) } {
+  print(screen.text)
+  if resolved.mode == Native then () else print("Choose > ")
+  flush()
+}

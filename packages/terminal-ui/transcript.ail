@@ -1,0 +1,252 @@
+module sunholo/terminal_ui/transcript
+import std/result (Result, Ok, Err)
+import std/option (Option, Some, None)
+import std/list as L
+import std/bytes as B
+import std/json as J
+import std/json (Json, JNumber, JArray, JString)
+import std/math (intToFloat)
+import ./events (Event, KeyCode, Input, Sized, Finished, Cancelled, NoInput, Character, Previous, Next, MoveLeft, MoveRight, Accept, Cancel, Erase, FocusNext, First, Last, PriorPage, FollowingPage, Remove)
+import ./widgets (Menu, menu, updateMenu, viewport, frame)
+import ./ui (Screen, wrap)
+
+export type Config = { columns: int, rows: int, ansi: bool, max_events: int, max_bytes: int, max_frame_bytes: int } deriving (Eq)
+
+export type Transcript = { version: int, config: Config, events: [Event] } deriving (Eq)
+
+export type TranscriptError = BadFormat(string) | LimitExceeded(string) deriving (Eq)
+
+export type Replay = { model: Menu, frames: [Screen] } deriving (Eq)
+
+export pure func validSize(columns: int, rows: int) -> bool ! {}
+ensures { result == (columns >= 1 && columns <= 65535 && rows >= 1 && rows <= 65535) }
+  tests [
+    ((20, 8), true),
+    ((0, 24), false),
+    ((65536, 24), false)
+  ] {
+  columns >= 1 && columns <= 65535 && rows >= 1 && rows <= 65535
+}
+
+export pure func validConfig(c: Config) -> bool ! {}
+ensures { result == (validSize(c.columns, c.rows) && c.max_events >= 0 && c.max_events <= 4096 && c.max_bytes >= 1 && c.max_bytes <= 4194304 && c.max_frame_bytes >= 1 && c.max_frame_bytes <= 1048576) } {
+  validSize(c.columns, c.rows) && c.max_events >= 0 && c.max_events <= 4096 && c.max_bytes >= 1 && c.max_bytes <= 4194304 && c.max_frame_bytes >= 1 && c.max_frame_bytes <= 1048576
+}
+
+pure func keyName(key: KeyCode) -> string = match key {
+  Character(_) => "text",
+  Previous => "up",
+  Next => "down",
+  MoveLeft => "left",
+  MoveRight => "right",
+  Accept => "enter",
+  Cancel => "escape",
+  Erase => "backspace",
+  FocusNext => "tab",
+  First => "home",
+  Last => "end",
+  PriorPage => "page_up",
+  FollowingPage => "page_down",
+  Remove => "delete"
+}
+
+pure func eventJson(event: Event) -> Json = match event {
+  Input(Character(text)) => J.ja([J.js("key"), J.js("text"), J.js(text)]),
+  Input(key) => J.ja([J.js("key"), J.js(keyName(key))]),
+  Sized(columns, rows) => J.ja([J.js("resize"), J.jint(columns), J.jint(rows)]),
+  Finished => J.ja([J.js("eof")]),
+  Cancelled => J.ja([J.js("interrupted")]),
+  NoInput => J.ja([J.js("idle")])
+}
+
+pure func configJson(c: Config) -> Json =
+  J.jo([J.kv("columns", J.jint(c.columns)), J.kv("rows", J.jint(c.rows)), J.kv("ansi", J.jb(c.ansi)), J.kv("max_events", J.jint(c.max_events)), J.kv("max_bytes", J.jint(c.max_bytes)), J.kv("max_frame_bytes", J.jint(c.max_frame_bytes))])
+
+pure func eventListJson(events: [Event]) -> [Json] = match events {
+  [] => [],
+  event :: rest => eventJson(event) :: eventListJson(rest)
+}
+
+pure func validEvents(events: [Event]) -> Result[(), TranscriptError] = match events {
+  [] => Ok(),
+  event :: rest => match event {
+    Sized(columns, rows) => if validSize(columns, rows) then validEvents(rest) else Err(BadFormat("resize requires positive bounded physical size")),
+    Input(Character(text)) => if B.length(B.fromString(text)) == 0 then Err(BadFormat("text key must not be empty")) else if B.length(B.fromString(text)) > 4096 then Err(LimitExceeded("text key exceeds 4096 UTF-8 bytes")) else validEvents(rest),
+    _ => validEvents(rest)
+  }
+}
+
+pure func validate(t: Transcript) -> Result[(), TranscriptError] =
+  if t.version != 1 then Err(BadFormat("unsupported transcript version")) else if not validConfig(t.config) then Err(BadFormat("invalid transcript configuration")) else if L.length(t.events) > t.config.max_events then Err(LimitExceeded("event count exceeds max_events")) else validEvents(t.events)
+
+-- The caller owns persistence and consent; captured text is never sent anywhere.
+export pure func encodeTranscript(t: Transcript) -> Result[string, TranscriptError] ! {}
+ensures { match result {
+  Ok(text) => B.length(B.fromString(text)) <= t.config.max_bytes,
+  Err(_) => true
+} } {
+  match validate(t) {
+    Err(error) => Err(error),
+    Ok(_) => {
+      let text = J.encode(J.jo([J.kv("version", J.jint(t.version)), J.kv("config", configJson(t.config)), J.kv("events", J.ja(eventListJson(t.events)))]))
+      if B.length(B.fromString(text)) > t.config.max_bytes then Err(LimitExceeded("encoded transcript exceeds max_bytes")) else Ok(text)
+    }
+  }
+}
+
+-- getInt deliberately truncates; require exact agreement with the JSON number.
+pure func integer(value: Json) -> Option[int] = match value {
+  JNumber(number) => {
+    let wrapped = J.jo([J.kv("n", value)])
+    match J.getInt(wrapped, "n") {
+      Some(n) => if intToFloat(n) == number then Some(n) else None,
+      None => None
+    }
+  },
+  _ => None
+}
+
+pure func fieldInt(value: Json, key: string) -> Option[int] = match J.get(value, key) {
+  Some(v) => integer(v),
+  None => None
+}
+
+pure func readConfig(value: Json) -> Result[Config, TranscriptError] =
+  match (fieldInt(value, "columns"), fieldInt(value, "rows"), J.getBool(value, "ansi"), fieldInt(value, "max_events"), fieldInt(value, "max_bytes"), fieldInt(value, "max_frame_bytes")) {
+    (Some(columns), Some(rows), Some(ansi), Some(events), Some(bytes), Some(frameBytes)) => Ok({ columns: columns, rows: rows, ansi: ansi, max_events: events, max_bytes: bytes, max_frame_bytes: frameBytes }),
+    _ => Err(BadFormat("configuration fields are missing or have invalid types"))
+  }
+
+pure func readKey(name: string) -> Result[KeyCode, TranscriptError] = match name {
+  "up" => Ok(Previous),
+  "down" => Ok(Next),
+  "left" => Ok(MoveLeft),
+  "right" => Ok(MoveRight),
+  "enter" => Ok(Accept),
+  "escape" => Ok(Cancel),
+  "backspace" => Ok(Erase),
+  "tab" => Ok(FocusNext),
+  "home" => Ok(First),
+  "end" => Ok(Last),
+  "page_up" => Ok(PriorPage),
+  "page_down" => Ok(FollowingPage),
+  "delete" => Ok(Remove),
+  _ => Err(BadFormat("unknown key name"))
+}
+
+pure func readEventJson(value: Json) -> Result[Event, TranscriptError] = match value {
+  JArray([JString("key"), JString("text"), JString(text)]) => Ok(Input(Character(text))),
+  JArray([JString("key"), JString(name)]) => match readKey(name) {
+    Ok(key) => Ok(Input(key)),
+    Err(error) => Err(error)
+  },
+  JArray([JString("resize"), columns, rows]) => match (integer(columns), integer(rows)) {
+    (Some(c), Some(r)) => Ok(Sized(c, r)),
+    _ => Err(BadFormat("resize requires exact integers"))
+  },
+  JArray([JString("eof")]) => Ok(Finished),
+  JArray([JString("interrupted")]) => Ok(Cancelled),
+  JArray([JString("idle")]) => Ok(NoInput),
+  _ => Err(BadFormat("unknown event or invalid event fields"))
+}
+
+@allow_empty_ok("An empty ordered event sequence is a valid transcript and recursion base case")
+pure func readEvents(values: [Json]) -> Result[[Event], TranscriptError] = match values {
+  [] => Ok([]),
+  value :: rest => match readEventJson(value) {
+    Err(error) => Err(error),
+    Ok(event) => match readEvents(rest) {
+      Ok(events) => Ok(event :: events),
+      Err(error) => Err(error)
+    }
+  }
+}
+
+pure func decodeJson(value: Json, inputBytes: int) -> Result[Transcript, TranscriptError] =
+  match (fieldInt(value, "version"), J.get(value, "config"), J.getArray(value, "events")) {
+    (Some(1), Some(config), Some(events)) => match readConfig(config) {
+      Err(error) => Err(error),
+      Ok(c) => if not validConfig(c) then Err(BadFormat("invalid transcript configuration")) else if inputBytes > c.max_bytes then Err(LimitExceeded("input exceeds transcript max_bytes")) else if L.length(events) > c.max_events then Err(LimitExceeded("event count exceeds max_events")) else match readEvents(events) {
+        Err(error) => Err(error),
+        Ok(inputs) => {
+          let transcript = { version: 1, config: c, events: inputs }
+          match validate(transcript) {
+            Ok(_) => Ok(transcript),
+            Err(error) => Err(error)
+          }
+        }
+      }
+    },
+    _ => Err(BadFormat("unsupported version or missing transcript fields"))
+  }
+
+export pure func decodeTranscript(text: string, maxBytes: int) -> Result[Transcript, TranscriptError] ! {}
+ensures { match result {
+  Ok(t) => t.version == 1 && L.length(t.events) <= t.config.max_events,
+  Err(_) => true
+} } {
+  if maxBytes < 1 || maxBytes > 4194304 then Err(BadFormat("decoder byte limit must be 1..4194304")) else if B.length(B.fromString(text)) > maxBytes then Err(LimitExceeded("input exceeds decoder byte limit")) else match J.decode(text) {
+    Err(_) => Err(BadFormat("invalid JSON")),
+    Ok(value) => decodeJson(value, B.length(B.fromString(text)))
+  }
+}
+
+export pure func selectionBody(labels: [string], state: Menu) -> string ! {}
+requires { L.length(labels) == state.count }
+ensures { state.count != 0 || result == "No items" } {
+  if state.count == 0 then "No items" else labelLines(labels, state.cursor, 0)
+}
+
+pure func labelLines(labels: [string], selected: int, index: int) -> string = match labels {
+  [] => "",
+  label :: rest => "${if index == selected then "> " else "  "}${label}${if rest == [] then "" else "\n"}${labelLines(rest, selected, index + 1)}"
+}
+
+pure func selectionOffset(labels: [string], selected: int, columns: int, index: int) -> int =
+  if index >= selected || columns < 2 then 0 else match labels {
+    [] => 0,
+    label :: rest => L.length(wrap("  ${label}", columns)) + selectionOffset(rest, selected, columns, index + 1)
+  }
+
+export pure func selectionFrame(c: Config, labels: [string], state: Menu) -> Result[Screen, TranscriptError] ! {}
+requires { validConfig(c) && L.length(labels) == state.count }
+ensures { match result {
+  Ok(s) => B.length(B.fromString(s.text)) <= c.max_frame_bytes,
+  Err(_) => true
+} } {
+  let screen = frame(viewport(c.columns, c.rows), c.ansi, ["Terminal UI / selection"], selectionBody(labels, state), ["Up/Down choose | Enter select | q Quit"], if c.columns < 40 || c.rows < 16 then 0 else selectionOffset(labels, state.cursor, (viewport(c.columns, c.rows)).columns, 0) / ((if c.rows > 60 then 60 else c.rows) - 6))
+  if B.length(B.fromString(screen.text)) > c.max_frame_bytes then Err(LimitExceeded("frame exceeds max_frame_bytes")) else Ok(screen)
+}
+
+pure func replayInputs(c: Config, labels: [string], state: Menu, inputs: [Event], frames: [Screen]) -> Result[Replay, TranscriptError] =
+  match inputs {
+    [] => Ok({ model: state, frames: frames }),
+    event :: rest => {
+      let updated = updateMenu(state, event)
+      let config = match event {
+        Sized(columns, rows) => { c | columns: columns, rows: rows },
+        _ => c
+      }
+      match selectionFrame(config, labels, updated) {
+        Err(error) => Err(error),
+        Ok(screen) => replayInputs(config, labels, updated, rest, frames ++ [screen])
+      }
+    }
+  }
+
+export pure func replaySelection(t: Transcript, labels: [string]) -> Result[Replay, TranscriptError] ! {}
+ensures { match result {
+  Ok(r) => r.model.count == L.length(labels) && L.length(r.frames) == L.length(t.events) + 1,
+  Err(_) => true
+} } {
+  match encodeTranscript(t) {
+    Err(error) => Err(error),
+    Ok(_) => if L.length(labels) > 4096 then Err(LimitExceeded("selection exceeds 4096 items")) else {
+      let state = menu(L.length(labels))
+      match selectionFrame(t.config, labels, state) {
+        Err(error) => Err(error),
+        Ok(screen) => replayInputs(t.config, labels, state, t.events, [screen])
+      }
+    }
+  }
+}

@@ -1,0 +1,35 @@
+module sunholo/terminal_ui/_smoke
+import std/io (println, exit)
+import std/result (Ok, Err)
+import std/option (Option, Some)
+import std/terminal (TerminalSession)
+import ./adapter (Plain, choose, run)
+import ./events (Input, Next, Accept)
+import ./transcript (encodeTranscript, decodeTranscript, replaySelection)
+
+-- No live terminal is required. Boot every pure layer and the explicit plain scope.
+export func main() -> () ! {IO} {
+  let transcript = { version: 1, config: { columns: 60, rows: 24, ansi: false, max_events: 8, max_bytes: 4096, max_frame_bytes: 4096 }, events: [Input(Next), Input(Accept)] }
+  let valid = match encodeTranscript(transcript) {
+    Err(_) => false,
+    Ok(text) => decodeTranscript(text, 4096) == Ok(transcript) && (match replaySelection(transcript, ["One", "Two"]) {
+      Ok(replay) => replay.model.selected == Some(1),
+      _ => false
+    })
+  }
+  if not valid then {
+    println("terminal-ui smoke failed: transcript/replay")
+    exit(1)
+  } else match choose(Plain, Some({ columns: 60, rows: 24 })) {
+    Err(_) => {
+      println("terminal-ui smoke failed: plain selection")
+      exit(1)
+    },
+    Ok(resolved) => match run(resolved, func(session: Option[TerminalSession]) -> () ! {IO} {
+      println("terminal-ui smoke: codec, replay, plain adapter OK")
+    }) {
+      Err(_) => exit(1),
+      Ok(_) => ()
+    }
+  }
+}

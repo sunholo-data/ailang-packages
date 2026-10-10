@@ -1,0 +1,15 @@
+module sunholo/terminal_ui/events_test
+import std/option (Some, None)
+import ./events (lineEvent, Input, Character, Next, Previous, Accept, NoInput, Finished, Cancelled)
+
+test "blank line is idle, EOF terminates" {
+  lineEvent(Some("")) == NoInput && lineEvent(None) == Finished
+}
+
+test "line adapter preserves typed navigation" {
+  lineEvent(Some("n")) == Input(Next) && lineEvent(Some("v")) == Input(Previous) && lineEvent(Some("enter")) == Input(Accept)
+}
+
+test "line text remains data" {
+  lineEvent(Some("hello")) == Input(Character("hello")) && lineEvent(Some("q")) == Cancelled
+}
