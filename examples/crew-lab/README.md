@@ -37,6 +37,16 @@ actions on any page. Reading costs no turn, AI attempt, random draw or journal e
 Blank input ends the run because the runtime uses the same value for empty input
 and EOF. The log keeps the last64 notices from this run.
 
+After a reply, the proposal screen says whether its worker has agreed and reminds
+you that work has not started. **1 Start now** assigns the worker and holds the
+recipe's resources immediately; it passes no time. Use **5 Advance** from the
+bridge to progress the job. Its duration and exact held/spent resources are shown
+in the decision preview. Rest assigns the worker without holding supplies.
+**2 Decide later** returns to the bridge, leaving the proposal and answer in
+**7 Offers** without using time or resources. **0** does exactly the same thing
+here; it is a compatibility shortcut, not cancellation. **b Decision** returns
+from a reading panel to this same proposal, rather than leaving it.
+
 Try these two complete flows. Replies vary: under agreement, a refusal means
 leave the offer open or choose another assignment. These examples describe the
 acceptance path, rather than promising an agreement.

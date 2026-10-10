@@ -1,5 +1,5 @@
 module sunholo/crew_lab/watch_presenter
-import std/list (map,filter,head,length)
+import std/list (map,filter,head,length,any)
 import std/string (join,length as size)
 import std/option (Some,None)
 import pkg/sunholo/terminal_ui/ui (Screen,Dimensions,screen,safeText)
@@ -12,7 +12,7 @@ import ./narrative (crew,supplies,costs,spendsSupplies,observation, fatigue, str
 
 export pure func guide(mode: string,remaining: int,path: string) -> string ! {}
 ensures { size(result) > 0 } =
- "[ YOUR WATCH ]\nYou are preparing a strained crew for possible first contact. Five specialists have different priorities. There is no best score or required route.\n\n1 Choose work: read its purpose, duration and resources, then offer it. Hear the worker's reaction. Start reserves capacity and supplies; Leave keeps the offer open.\n2 Arrange rest: a two-turn assignment with no supplies. Recovery happens when rest completes.\n5 Advance: time passes for everyone working. People and equipment change at completion, not gradually.\n6 Check-in: hear someone already working. They may ask for relief; choose8 to grant or deny it.\n7 Offers: return to a decision you left open.\n\nArchive compute slots analyse Spire readings. They return when work completes or relief stops it. Replacement modules and diagnostic cartridges are finite: completion spends them, granted relief refunds their reservation. Waiting restores no spent stock. Even capped benefits still spend supplies.\n\nYour command style lasts this run: agreement requires the worker's consent; captain's authority permits starting despite refusal, but cooperation can suffer and resources/capacity still apply.\n\nReading Crew, Work, Log or this guide does not pass time. b returns to the current decision; n/v pages. Numbers choose actions; press Enter after a key. Blank input ends the run.\n\n${if mode == "offline" then "Saved dialogue or authored narrator summaries are used; no AI calls." else "New dialogue has ${remaining} attempts remaining. Saved dialogue needs no new call. The separate response-policy-watch-v2.json sets the limit (maximum8); choose authored continuation if it is exhausted."}\n\nEight turns mark a review, not arrival or a deadline. This watch does not simulate alien negotiations yet.\nJournal: ${path}\nA fresh launch starts a new crew. The response library persists."
+ "[ YOUR WATCH ]\nYou are preparing a strained crew for possible first contact. Five specialists have different priorities. There is no best score or required route.\n\n1 Choose work: read its purpose, duration and resources, then offer it. Hear the worker's reaction. Start now assigns its worker and holds resources without passing time. Decide later keeps the offer and agreement in 7 Offers, using no time or resources. 0 does the same as Decide later here.\n2 Arrange rest: a two-turn assignment with no supplies. Recovery happens when rest completes.\n5 Advance: time passes for everyone working. People and equipment change at completion, not gradually.\n6 Check-in: hear someone already working. They may ask for relief; choose8 to grant or deny it.\n7 Offers: return to a decision you left open.\n\nArchive compute slots analyse Spire readings. They return when work completes or relief stops it. Replacement modules and diagnostic cartridges are finite: completion spends them, granted relief refunds their reservation. Waiting restores no spent stock. Even capped benefits still spend supplies.\n\nYour command style lasts this run: agreement requires the worker's consent; captain's authority permits starting despite refusal, but cooperation can suffer and resources/capacity still apply.\n\nReading Crew, Work, Log or this guide does not pass time. b returns to the current decision; n/v pages. Numbers choose actions; press Enter after a key. Blank input ends the run.\n\n${if mode == "offline" then "Saved dialogue or authored narrator summaries are used; no AI calls." else "New dialogue has ${remaining} attempts remaining. Saved dialogue needs no new call. The separate response-policy-watch-v2.json sets the limit (maximum8); choose authored continuation if it is exhausted."}\n\nEight turns mark a review, not arrival or a deadline. This watch does not simulate alien negotiations yet.\nJournal: ${path}\nA fresh launch starts a new crew. The response library persists."
 
 pure func work(s: PlayState,debug: bool) -> string = {
  let tasks = join("\n\n",map(\t. {
@@ -22,9 +22,35 @@ pure func work(s: PlayState,debug: bool) -> string = {
  "[ RESOURCES ]\n${supplies(s.session)}\nCompute is reusable capacity; physical supplies are finite.\n\n${if tasks == "" then "No assignments offered. Choose work or rest to begin." else tasks}"
 }
 pure func footer(s: PlayState) -> [string] = {
- let choices = if s.phase == "main" then match s.session.state.continuation {Some(_)=>["1 Continue /2 Abort /0 Quit"],None=>["1 Choose work /2 Arrange rest","5 Advance /6 Check-in","7 Offers /8 Relief /0 Quit"]} else if s.phase == "start" then ["1 Start /2 Leave open /0 Back"] else if s.phase == "response" then ["1 Retry /2 Authored /3 Cancel /0 Quit"] else if s.phase == "relief" then ["1 Grant relief /2 Deny /0 Back"] else ["Choose a listed number /0 Back"];
- choices ++ ["c Crew w Work j Log h Guide b Bridge","n Next /v Previous; key + Enter"]
+ let resourceCost = match head(filter(\t. t.id == s.target, s.session.state.tasks)) {
+  None => false,
+  Some(t) => match head(filter(\r. r.id == t.recipe, s.session.config.recipes)) { None => false, Some(r) => length(r.costs) > 0 }
+ };
+ let choices = if s.phase == "main" then match s.session.state.continuation {Some(_)=>["1 Continue /2 Abort /0 Quit"],None=>["1 Choose work /2 Arrange rest","5 Advance /6 Check-in","7 Offers /8 Relief /0 Quit"]} else if s.phase == "start" then [if resourceCost then "1 Start now: assign + hold resources" else "1 Start now: assign rest, no supplies","2 Decide later: keep offer, no costs","0 Also leaves it open"] else if s.phase == "response" then ["1 Retry /2 Authored /3 Cancel /0 Quit"] else if s.phase == "relief" then ["1 Grant relief /2 Deny /0 Back"] else ["Choose a listed number /0 Back"];
+ choices ++ ["c Crew w Work j Log h Guide b ${if s.phase == "main" then "Bridge" else "Decision"}","n Next /v Previous; key + Enter"]
 }
+
+-- Keep the pending assignment distinct from already running work. Every detail
+-- comes from its host-owned recipe/agreement; reading never commits an action.
+pure func startDecision(s: PlayState, message: string) -> string =
+ match head(filter(\t. t.id == s.target, s.session.state.tasks)) {
+  None => "Offer unavailable. Return to the bridge and review Offers.",
+  Some(t) => {
+   let worker = match head(t.participants) { Some(id) => id, None => "Crew" };
+   let agreed = match head(filter(\b. b.task == t.id, s.session.bindings)) {
+    None => false,
+    Some(b) => any(\c. c.id == b.agreement && c.parties == ["captain", worker] && c.active && c.accepted == c.parties && c.due > s.session.state.tick, s.session.state.commitments)
+   };
+   let status = if agreed then "${worker} has agreed; work has not started." else "No active agreement with ${worker}; work has not started.";
+   let permission = if agreed then "" else if s.session.policy == "consent" then "\nStart needs current agreement. Choose a fresh assignment to ask again." else "\nAuthority permits starting despite refusal; trust can suffer.";
+   let conversation = if message == "" then "" else "\n\n[ CREW REPLY ]\n${message}";
+   let person = match head(filter(\a. a.id == worker, s.session.state.actors)) {
+    None => "",
+    Some(a) => "\n\n${observation(a, s.session.state.relationships)}"
+   };
+   "[ PROPOSAL: ${projectName(t.recipe)} ]\n${status}${permission}\n${purpose(t.recipe)}${conversation}\n\n[ YOUR CHOICE ]\nStart now assigns ${worker} until this job ends.\n${costs(s.session,t.recipe)}${if spendsSupplies(s.session,t.recipe) then "\nHeld supplies are spent at completion, even at a benefit limit." else ""}\nStarting does not pass time. Use 5 Advance to move the work forward.\nDecide later returns to the bridge: no time or resources used.\nFind this proposal again under 7 Offers; their agreement is kept.\n\n[ AVAILABLE RESOURCES ]\n${supplies(s.session)}${person}"
+  }
+ }
 pure func indicator(a: Actor,id: string) -> int = match a.indicators {[]=>50,v::rest=>if v.id == id then v.value else indicator({a | indicators:rest},id)}
 pure func shortFatigue(a: Actor) -> string = if indicator(a,"fatigue") < 25 then "rested" else if indicator(a,"fatigue") < 60 then "a little tired" else if indicator(a,"fatigue") < 80 then "tired" else "exhausted"
 pure func shortStress(a: Actor) -> string = if indicator(a,"stress") < 35 then "at ease" else if indicator(a,"stress") < 60 then "watchful" else if indicator(a,"stress") < 80 then "on edge" else "fraught"
@@ -44,8 +70,8 @@ pure func catalog(s: PlayState,xs: [string],n: int) -> [string] = match xs {
 export pure func frame(s: PlayState,nav: Navigation,message: string,mode: string,remaining: int,path: string,d: Dimensions,ansi: bool,debug: bool) -> Screen ! {}
 ensures { result.pages >= 1 && result.page >= 0 && result.page < result.pages } = {
  let selector = s.phase == "assignments" || s.phase == "rests" || s.phase == "working" || s.phase == "offered" || s.phase == "reliefs";
- let context = if s.phase == "start" then match head(filter(\t. t.id == s.target,s.session.state.tasks)) {None=>"Offer unavailable",Some(t)=>"[ START: ${projectName(t.recipe)} ]\n${costs(s.session,t.recipe)}${if spendsSupplies(s.session,t.recipe) then "\nSupplies spend even at a benefit limit." else ""}\n"} else if s.phase == "response" then "[ CREW REPLY PENDING ]\nRetry may request new dialogue. Authored continuation uses no call.\n" else "";
- let body = if nav.view == "crew" then crew(s.session,debug) else if nav.view == "work" then work(s,debug) else if nav.view == "guide" then guide(mode,remaining,path) else if nav.view == "log" then "[ YOUR WATCH LOG ]\n${join("\n\n",nav.history)}" else if selector then "[ CHOOSE AN ASSIGNMENT ]\n${choices(s)}" else "${context}${bridge(s,message)}";
+ let context = if s.phase == "response" then "[ CREW REPLY PENDING ]\nRetry may request new dialogue. Authored continuation uses no call.\n" else "";
+ let body = if nav.view == "crew" then crew(s.session,debug) else if nav.view == "work" then work(s,debug) else if nav.view == "guide" then guide(mode,remaining,path) else if nav.view == "log" then "[ YOUR WATCH LOG ]\n${join("\n\n",nav.history)}" else if selector then "[ CHOOSE AN ASSIGNMENT ]\n${choices(s)}" else if s.phase == "start" then startDecision(s,message) else "${context}${bridge(s,message)}";
  screen(d,ansi,["VOYAGE / ${nav.view} / turn ${s.session.state.tick}","Before first hello / ${if s.session.policy == "consent" then "Ask for agreement" else "Captain's authority"}"],body,footer(s),nav.page)
 }
 export pure func recap(s: PlayState,path: string,debug: bool) -> string ! {}
