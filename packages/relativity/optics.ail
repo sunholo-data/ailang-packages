@@ -41,16 +41,26 @@ export pure func gammaOnePlusBetaCos(phi: float, c: float) -> float
 }
 
 -- Doppler factor from the rest-frame source direction: D = gamma (1 + beta cos theta).
+-- Domain (0.13.0): n and bh are UNIT vectors (AGENT.md conventions), so the
+-- dot product is cos theta and must lie in [-1, 1] - an unnormalised pair's
+-- dot is not a cosine, and it used to flow into gammaOnePlusBetaCos outside
+-- its own contract. And 0 <= phi <= 700.0: cosh/sinh of the rapidity stay
+-- finite (exp saturates at 709.78), so D lies in [e^-phi, e^phi], finite and
+-- positive throughout; at c = -1 the c < 0 branch multiplies sinh(phi) by 0,
+-- which is NaN if sinh has saturated.
 export pure func doppler(n: Vec3, bh: Vec3, phi: float) -> float
-  requires { phi >= 0.0 }
+  requires { phi >= 0.0 && phi <= 700.0 && n.x * bh.x + n.y * bh.y + n.z * bh.z >= -1.0 && n.x * bh.x + n.y * bh.y + n.z * bh.z <= 1.0 }
   ensures { result > 0.0 }
 {
   gammaOnePlusBetaCos(phi, dot(n, bh))
 }
 
 -- Doppler factor from the apparent direction: D = 1 / (gamma (1 - beta cos theta')).
+-- Same unit-vector and rapidity bounds as doppler (0.13.0): the reciprocal's
+-- argument lies in [e^-phi, e^phi], finite and positive, so D is finite and
+-- positive throughout.
 export pure func dopplerApparent(nSeen: Vec3, bh: Vec3, phi: float) -> float
-  requires { phi >= 0.0 }
+  requires { phi >= 0.0 && phi <= 700.0 && nSeen.x * bh.x + nSeen.y * bh.y + nSeen.z * bh.z >= -1.0 && nSeen.x * bh.x + nSeen.y * bh.y + nSeen.z * bh.z <= 1.0 }
   ensures { result > 0.0 }
 {
   1.0 / gammaOnePlusBetaCos(phi, 0.0 - dot(nSeen, bh))
@@ -101,8 +111,10 @@ export pure func cmbForwardTemperature(phi: float) -> float = cmbTemperatureK() 
 -- 2.725 K. At 1 - beta = 1e-6: 3,853.7 K on the pole (HB-63) and
 -- gamma T_CMB = 1,926.9 K for n at 90 deg, which APPEARS at asin(1/gamma)
 -- (0.081 deg) from the pole; 38.44 K ahead at 0.99c (HB-62).
+-- 0.13.0: the same unit-vector and rapidity bounds as doppler, so the
+-- temperature lies in [T_CMB e^-phi, T_CMB e^phi], finite throughout.
 export pure func cmbSeenTemperature(n: Vec3, bh: Vec3, phi: float) -> float
-  requires { phi >= 0.0 }
+  requires { phi >= 0.0 && phi <= 700.0 && n.x * bh.x + n.y * bh.y + n.z * bh.z >= -1.0 && n.x * bh.x + n.y * bh.y + n.z * bh.z <= 1.0 }
   ensures { result > 0.0 }
 {
   cmbTemperatureK() * doppler(n, bh, phi)
@@ -113,7 +125,7 @@ export pure func cmbSeenTemperature(n: Vec3, bh: Vec3, phi: float) -> float
 -- theta' = 1/gamma rad (HB-68); T_CMB / gamma at theta' = 90 deg; everything
 -- beyond cos theta' = (1 - 1/gamma) / beta is redshifted below 2.725 K.
 export pure func cmbSeenTemperatureApparent(nSeen: Vec3, bh: Vec3, phi: float) -> float
-  requires { phi >= 0.0 }
+  requires { phi >= 0.0 && phi <= 700.0 && nSeen.x * bh.x + nSeen.y * bh.y + nSeen.z * bh.z >= -1.0 && nSeen.x * bh.x + nSeen.y * bh.y + nSeen.z * bh.z <= 1.0 }
   ensures { result > 0.0 }
 {
   cmbTemperatureK() * dopplerApparent(nSeen, bh, phi)

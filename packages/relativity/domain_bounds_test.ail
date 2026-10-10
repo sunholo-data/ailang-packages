@@ -1,0 +1,138 @@
+-- Boundary and domain tests for the 0.13.0 float64 contract bounds, which
+-- close the known gap recorded under 0.10.1 (the auto-generated properties
+-- for expm1, sinhc, kinematics.accelerate and the optics Doppler/CMB family
+-- used to see Inf/NaN when the random generator reached |rapidity| ~ 900).
+--
+-- Every expected number here is a float64 identity proved in the comments,
+-- not an oracle constant: exp saturates to +Inf past 709.78 (float64 max,
+-- e^709.782...), exp(700) = 1.0141e304, division by 2 and sign negation are
+-- exact, and the e^-u half of sinh/cosh is far below one ulp of e^u, so
+-- sinh(u) = cosh(u) = exp(u)/2 bit for bit at u = 700.
+
+module sunholo/relativity/domain_bounds_test
+
+import std/math (exp)
+import ./hyper (expm1, sinh, cosh, tanh, sinhc)
+import ./kinematics (Motion, rest, accelerate, coast, betaOf, gammaOf, oneMinusBeta)
+import ./optics (Vec3, doppler, dopplerApparent, cmbSeenTemperature, cmbSeenTemperatureApparent)
+import ./medium (cmbTemperatureK)
+
+pure func inf() -> float = 1.0 / 0.0
+
+-- expm1 at its edges: 0 exactly, the y == 1.0 branch at 1e-30, the
+-- exp-underflow branch at -709 (exactly -1.0), and finite at the 700 edge
+-- (the Kahan ratio's numerator (e^u - 1) u is finite to u = 700; exp's own
+-- saturation is at 709.78).
+pure func checkExpm1Edges() -> bool =
+  expm1(0.0) == 0.0
+  && expm1(1.0e-30) == 1.0e-30
+  && expm1(-709.0) == -1.0
+  && expm1(700.0) == expm1(700.0) && expm1(700.0) > 1.0e303 && expm1(700.0) < 1.1e304
+
+test "expm1 at its domain edges: 0 exactly, -709 -> -1 exactly, finite at 700" { checkExpm1Edges() }
+
+-- sinh: e^a/2 to the last bit across the band where the old e (e + 2) form
+-- overflowed (|u| in (355, 709.78] used to give +Inf, then NaN), and +Inf
+-- saturation past exp's own 709.78 where the old form gave NaN.
+pure func checkSinhEdges() -> bool =
+  sinh(0.0) == 0.0
+  && sinh(351.0) == exp(351.0) / 2.0
+  && sinh(400.0) == exp(400.0) / 2.0
+  && sinh(-400.0) == 0.0 - exp(400.0) / 2.0
+  && sinh(700.0) == exp(700.0) / 2.0 && sinh(700.0) == cosh(700.0)
+  && sinh(710.0) == inf()
+
+test "sinh is e^a/2 to the last bit from 351 to its +Inf saturation at ~709.8 (was Inf/NaN past 355)" { checkSinhEdges() }
+
+-- cosh and tanh at their edges: cosh = exp(u)/2 and saturates with exp;
+-- tanh rounds to +-1 from 20 (where the e (e + 2) form already rounds) out
+-- to the float edge.
+pure func checkCoshTanhEdges() -> bool =
+  cosh(0.0) == 1.0
+  && cosh(700.0) == exp(700.0) / 2.0
+  && cosh(710.0) == inf()
+  && tanh(20.0) == 1.0 && tanh(-20.0) == -1.0
+  && tanh(700.0) == 1.0 && tanh(-700.0) == -1.0
+
+test "cosh saturates like exp; tanh is +-1 from |u| = 20 to the float edge" { checkCoshTanhEdges() }
+
+-- sinhc: 1 at 0, sinh(u)/u (>= 1) and finite at the +-700 domain edge; at
+-- |u| ~ 842 it used to be NaN (sinh's Inf/Inf).
+pure func checkSinhcEdges() -> bool =
+  sinhc(0.0) == 1.0
+  && sinhc(700.0) == sinh(700.0) / 700.0 && sinhc(700.0) > 1.0e299
+  && sinhc(-700.0) == sinh(700.0) / 700.0
+  && sinhc(700.0) >= 1.0
+
+test "sinhc: 1 at 0, finite and >= 1 at the +-700 domain edge" { checkSinhcEdges() }
+
+-- betaOf/gammaOf/oneMinusBeta at the +-700 rapidity edge (the bound
+-- accelerate and coast document).
+pure func checkKinematicEdges() -> bool =
+  betaOf(0.0) == 0.0 && betaOf(700.0) == 1.0 && betaOf(-700.0) == -1.0
+  && gammaOf(0.0) == 1.0 && gammaOf(700.0) == exp(700.0) / 2.0
+  && oneMinusBeta(0.0) == 1.0 && oneMinusBeta(709.0) == 0.0
+
+test "betaOf/gammaOf/oneMinusBeta at the +-700 rapidity edge" { checkKinematicEdges() }
+
+-- A zero-length step is the identity, including at the +-700 domain edge.
+-- This is exactly why the requires bound rapidity: at |phi| past cosh/sinh's
+-- finite range, sinh(mid) * 0 would be NaN (Inf * 0) and t would follow.
+pure func checkZeroStep() -> bool =
+  accelerate(rest(), 5.0, 0.0) == rest()
+  && accelerate({ phi: 700.0, tau: 5.0, t: 9.0, x: 3.0 }, 5.0, 0.0) == { phi: 700.0, tau: 5.0, t: 9.0, x: 3.0 }
+  && accelerate({ phi: -700.0, tau: 5.0, t: 9.0, x: 3.0 }, -5.0, 0.0) == { phi: -700.0, tau: 5.0, t: 9.0, x: 3.0 }
+  && coast({ phi: 700.0, tau: 5.0, t: 9.0, x: 3.0 }, 0.0) == { phi: 700.0, tau: 5.0, t: 9.0, x: 3.0 }
+
+test "a zero-length accelerate/coast step is the identity, at rest and at the +-700 edge" { checkZeroStep() }
+
+-- One exact step at the domain edge: from phi = -350 a burn of a * dtau = 700
+-- lands on phi = 350 with mid = 0, so x is exactly the start (sinh(0) k = 0),
+-- t = sinhc(350) (cosh(0) = 1, k = dtau sinhc(350)) of order e^350/700, and
+-- tau and phi are exact. |h| = 700 is inside the |a dtau| <= 1400 bound.
+pure func checkEdgeStep() -> bool =
+  accelerate({ phi: -350.0, tau: 0.0, t: 0.0, x: 1.0 }, 700.0, 1.0)
+    == { phi: 350.0, tau: 1.0, t: sinhc(350.0), x: 1.0 }
+  && sinhc(350.0) > 1.0e149 && sinhc(350.0) < 2.0e149
+
+test "accelerate across +-350 with mid 0: x unchanged exactly, t = sinhc(350) ~ e^350/700" { checkEdgeStep() }
+
+-- ---------- optics: unit directions at rest and at the 700 edge ----------
+
+pure func fwd() -> Vec3 = { x: 1.0, y: 0.0, z: 0.0 }
+pure func back() -> Vec3 = { x: -1.0, y: 0.0, z: 0.0 }
+pure func side() -> Vec3 = { x: 0.0, y: 1.0, z: 0.0 }
+
+-- D = 1 at rest in all three alignments; at the 700 edge, D = e^phi straight
+-- ahead (bit-exact: cosh + sinh = exp/2 + exp/2), D = e^-phi astern (the
+-- c = -1 branch is exp(-phi) + sinh(phi) * 0 - NaN before sinh stopped
+-- saturating early), and D = cosh(phi) on the equator.
+pure func checkDoppler() -> bool =
+  doppler(fwd(), fwd(), 0.0) == 1.0 && doppler(fwd(), back(), 0.0) == 1.0 && doppler(fwd(), side(), 0.0) == 1.0
+  && doppler(fwd(), fwd(), 700.0) == exp(700.0)
+  && doppler(fwd(), back(), 700.0) == exp(-700.0)
+  && doppler(fwd(), side(), 700.0) == cosh(700.0)
+
+test "doppler of unit directions: 1 at rest; e^phi ahead and e^-phi astern at the 700 edge" { checkDoppler() }
+
+-- Apparent form: 1 at rest; astern at the edge, D = 1 / (gamma (1 - beta (-1)))
+-- = 1 / (gamma (1 + beta)) = 1 / e^phi; and the forward pole stays finite
+-- (its conditioning is gamma^2 ulp, but it is not NaN).
+pure func checkDopplerApparent() -> bool =
+  dopplerApparent(fwd(), fwd(), 0.0) == 1.0 && dopplerApparent(fwd(), back(), 0.0) == 1.0 && dopplerApparent(fwd(), side(), 0.0) == 1.0
+  && dopplerApparent(fwd(), back(), 700.0) == 1.0 / exp(700.0)
+  && not (dopplerApparent(fwd(), fwd(), 700.0) != dopplerApparent(fwd(), fwd(), 700.0))
+
+test "dopplerApparent of unit directions: 1 at rest; 1/e^phi astern at the 700 edge, finite at the pole" { checkDopplerApparent() }
+
+-- The CMB seen: T_CMB D. 2.725 K at rest on the equator (D = 1); at the 700
+-- edge, T_CMB e^phi ahead, T_CMB e^-phi astern, and T_CMB / e^phi for the
+-- astern APPARENT direction (the per-pixel form).
+pure func checkCmb() -> bool =
+  cmbSeenTemperature(fwd(), side(), 0.0) == 2.725
+  && cmbSeenTemperatureApparent(fwd(), side(), 0.0) == 2.725
+  && cmbSeenTemperature(fwd(), fwd(), 700.0) == 2.725 * exp(700.0)
+  && cmbSeenTemperature(fwd(), back(), 700.0) == 2.725 * exp(-700.0)
+  && cmbSeenTemperatureApparent(fwd(), back(), 700.0) == 2.725 * (1.0 / exp(700.0))
+
+test "cmbSeenTemperature pair: 2.725 K at rest; T_CMB e^phi / e^-phi at the 700 edge" { checkCmb() }
