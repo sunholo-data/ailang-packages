@@ -25,6 +25,23 @@ rg -q 'You are captain' intro-40x16.txt
 rg -q 'first contact' intro-40x16.txt
 rg -q 'Start despite refusal; trust can fall' intro-40x16.txt
 rg -q 'Example' intro-40x16.txt
+# Newcomer proposal choices are explained on the real minimum frame. Reading,
+# deciding later, reviewing and the old0 alias keep the answer/offer unchanged.
+run_flow decide_later_40 '1\n1\n1\nc\nb\nn\nn\nn\nn\nn\nn\nn\nn\nv\n2\n7\n1\n0\n0\n' --columns 40 --rows 16
+run_flow decide_back_80 '1\n1\n1\n0\n0\n' --columns 80 --rows 24
+rg -q 'has agreed' decide_later_40.txt
+rg -q '1 Start now: assign \+ hold resources' decide_later_40.txt
+rg -q '2 Decide later: keep offer, no costs' decide_later_40.txt
+rg -q '0 Also leaves it open' decide_later_40.txt
+rg -q 'b Decision' decide_later_40.txt
+rg -q 'Starting does not pass time' decide_later_40.txt
+for sample in decide_later_40 decide_back_80; do
+ decision_journal=("$LAB_TMP/$sample"/runs/*/journal.jsonl)
+ jq -s 'map(select(.payload.kind=="host")|.payload)' "${decision_journal[0]}" > "$sample-payload.json"
+ jq -sr 'map(select(.payload.host_output!=null)|.payload.host_output|fromjson|select(.state!=null))|last.state' "${decision_journal[0]}" > "$sample-state.json"
+ jq -e '.tick==0 and all(.tasks[];.status=="offered") and all(.resources[];.reserved==0 and .consumed==0) and any(.commitments[];any(.accepted[];.=="scientist"))' "$sample-state.json" >/dev/null
+done
+cmp decide_later_40-payload.json decide_back_80-payload.json
 # Scientist + engineer use all compute; pilot offer cannot start until capacity returns.
 FLOW='1\n1\n1\n1\n1\n2\n1\n1\n4\n1\n5\n5\n5\n5\n1\n3\n1\n1\n5\n1\n5\n5\n5\nc\nn\nv\nw\nn\nj\nh\nn\nb\n0\n'
 run_flow journey "$FLOW" --columns 80 --rows 24
@@ -119,7 +136,7 @@ jq -e '(.ok|not) and .calls==1 and (.body|contains("development metrics"))' reje
 test ! -e "generated-reject/cache/$key.json"
 if [[ -n "${EVIDENCE_DIR:-}" ]]; then
  mkdir -p "$EVIDENCE_DIR"
- for item in intro-40x16 journey rest_limits work_limits relief debug ai leaking; do sed "s|$LAB_TMP|<temporary-home>|g" "$item.txt" > "$EVIDENCE_DIR/$item.txt"; done
+ for item in intro-40x16 decide_later_40 decide_back_80 journey rest_limits work_limits relief debug ai leaking; do sed "s|$LAB_TMP|<temporary-home>|g" "$item.txt" > "$EVIDENCE_DIR/$item.txt"; done
  cp reject.json "$EVIDENCE_DIR/generated-disclosure.json"
 fi
 printf 'Watch: installed intro/help, five-role resource contention/completion, normal/debug views, cache guard/isolation and both-engine exact recovery passed; provider calls0 (one deterministic AI stub attempt).\n'

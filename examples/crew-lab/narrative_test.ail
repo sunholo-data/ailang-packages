@@ -1,7 +1,8 @@
 module sunholo/crew_lab/narrative_test
 import std/result (Ok, Err)
 import std/string (contains)
-import ./session (Session)
+import std/list (map)
+import ./session (Session, offer)
 import ./watch_scenario (config, actors, resources)
 import pkg/sunholo/social_dynamics/engine (init)
 import ./narrative (crew, fatigue, stress, morale)
@@ -49,4 +50,49 @@ test "normal minimum frame has named resources actionable work rest and help" {
       contains(f.text, "1 Choose work /2 Arrange rest") && contains(f.text, "5 Advance /6 Check-in") && contains(f.text, "h Guide") && not contains(f.text, "fatigue 45")
     }
   }
+}
+
+test "pending assignment explains immediate choices on minimum first frame" {
+ match fixture() {
+  Err(_) => false,
+  Ok(session) => match offer(session, "scientist", "work_scientist", "science") {
+   Err(_) => false,
+   Ok(o) => {
+    let s = { session: o.session, seed: 42, nextId: 2, seq: 0, phase: "start", target: "science" };
+    let f = frame(s, initial(), "", "offline", 2, "journal", dimensions(40, 16), false, false);
+    contains(f.text, "1 Start now: assign + hold resources") && contains(f.text, "2 Decide later: keep offer, no costs") && contains(f.text, "0 Also leaves it open") && contains(f.text, "b Decision") && not contains(f.text, "0 Back")
+   }
+  }
+ }
+}
+
+test "rest preview does not claim to hold resources" {
+ match fixture() {
+  Err(_) => false,
+  Ok(session) => match offer(session, "scientist", "rest_scientist", "rest") {
+   Err(_) => false,
+   Ok(o) => {
+    let s = { session: o.session, seed: 42, nextId: 2, seq: 0, phase: "start", target: "rest" };
+    let f = frame(s, initial(), "", "offline", 2, "journal", dimensions(40, 16), false, false);
+    contains(f.text, "1 Start now: assign rest, no supplies") && not contains(f.text, "assign + hold resources")
+   }
+  }
+ }
+}
+
+test "proposal agreement preview matches current active unexpired permission" {
+ match fixture() {
+  Err(_) => false,
+  Ok(session) => match offer(session, "scientist", "work_scientist", "science") {
+   Err(_) => false,
+   Ok(o) => {
+    let agreed = { o.session | state: { o.session.state | commitments: map(\c. { c | accepted: c.parties, active: true }, o.session.state.commitments) } };
+    let s = { session: agreed, seed: 42, nextId: 2, seq: 0, phase: "start", target: "science" };
+    let valid = frame(s, initial(), "", "offline", 2, "journal", dimensions(80, 24), false, false);
+    let expired = frame({ s | session: { agreed | state: { agreed.state | tick: 20 } } }, initial(), "", "offline", 2, "journal", dimensions(80, 24), false, false);
+    let inactive = frame({ s | session: { agreed | state: { agreed.state | commitments: map(\c. { c | active: false }, agreed.state.commitments) } } }, initial(), "", "offline", 2, "journal", dimensions(80, 24), false, false);
+    contains(valid.text, "scientist has agreed") && contains(expired.text, "No active agreement with scientist") && not contains(expired.text, "scientist has agreed") && contains(inactive.text, "No active agreement with scientist")
+   }
+  }
+ }
 }
