@@ -2,9 +2,27 @@ module sunholo/crew_lab/store_probe
 import std/result (Ok, Err)
 import std/json (jo, kv, js, jint, jb, encode)
 import std/io (println, exit)
-import ./store (loadPolicy, resolve, openRun, appendRun)
+import ./store (loadPolicy, resolve, resolveChosen, openRun, appendRun)
 import pkg/sunholo/content_library/library (encodeBundle, cacheKey)
-import ./reactions (prompt)
+import ./reactions (prompt,watchSignature,chooseReaction,decodePolicy,shortSignature)
+import ./session (Request)
+
+export func shortRequestProbe(args:{request:Request,policy:string,seed:int})->() ! {IO} = match decodePolicy(args.policy) {
+ Err(e)=>{println(e);exit(1)},Ok(p)=>match chooseReaction(p,args.request,args.seed) {
+  Err(e)=>{println(e);exit(1)},Ok(label)=>{
+   let base=watchSignature(args.request,args.policy,"z-ai/glm-5.3-flash");
+   match shortSignature(base,label) {
+    Err(e)=>{println(e);exit(1)},Ok(sig)=>println(encode(jo([kv("base",js(base)),kv("signature",js(sig)),kv("label",js(label)),kv("prompt",js(prompt(sig,[label]))),kv("original_prompt",js(prompt(base,args.request.legal)))])))
+   }
+  }
+ }
+}
+
+export func chosenProbe(args:{home:string,signature:string,legal:[string],label:string,mode:string,remaining:int})->() ! {IO,FS,AI @limit=1} {
+ let found=resolveChosen(args.home,args.signature,args.legal,args.label,"z-ai/glm-5.3-flash",args.mode,args.remaining);
+ let body=match found.outcome {Ok(b)=>encodeBundle(b),Err(e)=>e};
+ println(encode(jo([kv("ok",jb(match found.outcome {Ok(_)=>true,Err(_)=>false})),kv("source",js(found.source)),kv("calls",jint(found.calls)),kv("input_tokens",jint(found.inputTokens)),kv("output_tokens",jint(found.outputTokens)),kv("usage_known",jb(found.usageKnown)),kv("body",js(body))])))
+}
 
 export func promptProbe(signature: string) -> () ! {IO} =
   println(prompt(signature, ["accept", "decline", "concern", "defer"]))

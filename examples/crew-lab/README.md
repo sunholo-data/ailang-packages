@@ -77,6 +77,30 @@ remain exact in the journal/library; only display controls are sanitized and pro
 wrapped. `--debug` reveals real development state in Crew and diagnostic responses.
 No worker processes, asynchronous replies, alien negotiations or arrival are added.
 
+**What a live dialogue call sends and receives**
+
+The simulation first draws a reaction from the authored personality policy and
+seed. AI writes its wording. A new watch request sends that fixed reaction, the
+proposal and its purpose, and nested actor-local context: OCEAN, current state,
+values, relationships, received evidence, known briefing, conversation issue and
+exact captain speech. It receives `generated_dialogue/1` JSON with exactly two
+different variants of the selected reaction, each with an id, text of at most240
+characters and weight1. The player sees one selected speech. The model cannot
+start work, change resources, choose probabilities or invent a fulfilled promise.
+
+This reduces the previous request for alternatives covering every legal reaction.
+Other reactions remain possible under different simulation conditions or seeds.
+Cache identity still binds the full original context, policy/configuration, model,
+chosen reaction and new generation profile. Existing complete library entries are
+preferred unchanged; new selected-reaction entries occupy separate keys. Repeat
+hits spend no AI allowance. Invalid output spends one attempt, retains the same
+pending request and seed, and offers authored continuation.
+
+In one paired GLM-5.3-Flash sample, the old request took83.7 seconds and6,502 output
+tokens for12 variants; the selected-reaction request took10.9 seconds and967
+tokens for two. Provider latency varies. This optimization remains synchronous;
+streaming and the background reply inbox are separate follow-up work.
+
 For a repeatable developer objection/relief experiment, create an isolated home
 and strongly weight those legal labels through its authored policy. This never changes your
 usual library or policy and makes zero provider calls:

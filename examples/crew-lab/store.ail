@@ -1,14 +1,14 @@
 module sunholo/crew_lab/store
 import std/result (Result, Ok, Err)
 import std/option (Some, None)
-import std/list (length, foldl, filter)
+import std/list (length, foldl, filter, contains)
 import std/string (length as stringLength, endsWith, split, charCode, foldChars)
 import std/json (Json, JObject, get, getString, decode, encode)
 import std/fs (mkdirAllResult, mkdirResult, readFileResult, writeFileResult, renameFileResult, removeFileResult, fileExists)
 import std/ai (step, Message)
 import pkg/sunholo/content_library/library (Bundle, cacheKey, decodeBundle, encodeBundle, decodeGenerated, starterBundle)
 import ./codec (object, fields, integer)
-import ./reactions (Policy, decodePolicy, defaultPolicyBody, watchPolicyBody, narrativeBundle, prompt)
+import ./reactions (Policy, decodePolicy, defaultPolicyBody, watchPolicyBody, narrativeBundle, prompt, shortSignature, shortBundleOK)
 
 export type PolicyFile = { policy: Policy, body: string }
 
@@ -119,7 +119,7 @@ func cacheRead(path: string, signature: string, legal: [string], model: string) 
     Err(_) => failed("cannot read cached dialogue", 0, 0, 0, true),
     Ok(body) => match decodeBundle(body, signature, legal) {
       Err(e) => failed("invalid cached dialogue: ${e}", 0, 0, 0, true),
-      Ok(bundle) => if not narrativeBundle(signature, bundle) then failed("cached dialogue reveals development metrics; request retained", 0, 0, 0, true) else if bundle.origin == "ai" && bundle.model != model then failed("cached model metadata mismatch", 0, 0, 0, true) else loaded(bundle, "cache", 0, 0, 0)
+      Ok(bundle) => if not shortBundleOK(signature,bundle) then failed("cached short dialogue exceeds response bounds; request retained",0,0,0,true) else if not narrativeBundle(signature, bundle) then failed("cached dialogue reveals development metrics; request retained", 0, 0, 0, true) else if bundle.origin == "ai" && bundle.model != model then failed("cached model metadata mismatch", 0, 0, 0, true) else loaded(bundle, "cache", 0, 0, 0)
     }
   }
 
@@ -131,7 +131,7 @@ func generate(path: string, lock: string, signature: string, legal: [string], mo
     Err(e) => failed("AI generation unavailable (${e.code}); request retained", 1, 0, 0, false),
     Ok(reply) => match decodeGenerated(reply.message.content, signature, legal, model, reply.input_tokens, reply.output_tokens) {
       Err(e) => failed("AI output rejected: ${e}", 1, reply.input_tokens, reply.output_tokens, true),
-      Ok(bundle) => if not narrativeBundle(signature, bundle) then failed("AI output reveals development metrics; request retained", 1, reply.input_tokens, reply.output_tokens, true) else {
+      Ok(bundle) => if not shortBundleOK(signature,bundle) then failed("AI output rejected: short_response_bounds",1,reply.input_tokens,reply.output_tokens,true) else if not narrativeBundle(signature, bundle) then failed("AI output reveals development metrics; request retained", 1, reply.input_tokens, reply.output_tokens, true) else {
         let body = encodeBundle(bundle)
         if stringLength(body) > 65536 then failed("generated bundle exceeds file bound", 1, reply.input_tokens, reply.output_tokens, true) else match atomic(path, "${lock}/bundle.tmp", body) {
           Err(e) => failed(e, 1, reply.input_tokens, reply.output_tokens, true),
@@ -170,6 +170,16 @@ ensures { result.calls >= 0 && result.calls <= 1 } =
       }
     }
   }
+
+-- Prefer complete existing libraries verbatim, including their corruption
+-- checks. A new live miss requests wording for only the already-drawn reaction.
+export func resolveChosen(home:string,base:string,legal:[string],label:string,model:string,mode:string,remaining:int)->Fetch ! {FS,AI @limit=1}
+ensures {result.calls>=0 && result.calls<=1} =
+ if not contains(legal,label) then failed("invalid selected reaction",0,0,0,true)
+ else if mode=="offline" || fileExists("${home}/cache/${cacheKey(base)}.json") then resolve(home,base,legal,model,mode,remaining)
+ else match shortSignature(base,label) {
+  Err(e)=>failed(e,0,0,0,true),Ok(sig)=>resolve(home,sig,[label],model,mode,remaining)
+ }
 
 export func openRun(home: string, owner: string, header: string) -> Result[string, string] ! {FS}
 ensures { match result {

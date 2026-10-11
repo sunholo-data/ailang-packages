@@ -16,8 +16,8 @@ import ./watch_presenter (frame as watchFrame, recap as watchRecap)
 import ./narrative (stock as watchStock, consequences as watchConsequences)
 import ./watch_scenario (resourceName)
 import ./codec (object)
-import ./reactions (Policy, weights, signature, watchSignature, fixtureBody, conversationStarter)
-import ./store (Fetch, loadPolicy, loadWatchPolicy, resolve, openRun, appendRun)
+import ./reactions (Policy, weights, signature, watchSignature, fixtureBody, conversationStarter, chooseReaction)
+import ./store (Fetch, loadPolicy, loadWatchPolicy, resolve, resolveChosen, openRun, appendRun)
 import ./presenter (briefing, policyBrief, seedBrief, dashboard, guidance, help, dialogue, rejection, consequences, recap)
 import ./play_flow (PlayState, Stage, Intent, begin, beginWatch, beginConversationWatch, isWatch, seedNumber, parseArgs, menu, route, stage, publish, renderStatus, recover)
 
@@ -128,7 +128,10 @@ func respond(r: Run, explicitAuthored: bool) -> Result[Applied, string] ! {IO, F
     Some(request) => {
       let sig = if isWatch(r.ui) then watchSignature(request,r.policyBody,model()) else signature(request, r.policyBody, model())
       waiting(r,request.actor)
-      let fetch = if explicitAuthored then { outcome: starterBundle(sig, request.legal), source: "explicit-authored", calls: 0, inputTokens: 0, outputTokens: 0, usageKnown: true } else resolve(r.home, sig, request.legal, model(), r.mode, r.remaining)
+      let fetch = if explicitAuthored then { outcome: starterBundle(sig, request.legal), source: "explicit-authored", calls: 0, inputTokens: 0, outputTokens: 0, usageKnown: true } else if isWatch(r.ui) && r.mode=="live" then match chooseReaction(r.policy,request,r.ui.seed) {
+        Err(e)=>{outcome:Err(e),source:"error",calls:0,inputTokens:0,outputTokens:0,usageKnown:true},
+        Ok(label)=>resolveChosen(r.home,sig,request.legal,label,model(),r.mode,r.remaining)
+      } else resolve(r.home, sig, request.legal, model(), r.mode, r.remaining)
       match fetch.outcome {
         Err(e) => match noteFailure(r, fetch, e) {
           Err(j) => Err(j),

@@ -1,0 +1,65 @@
+module sunholo/crew_lab/short_reply_test
+import std/result (Result,Ok,Err)
+import std/option (Some,None)
+import std/list (head,map,any,length)
+import std/string (contains,repeat)
+import std/json (Json,encode,decode,get,getString,getArray,jo,kv,js,ja,jint)
+import ./session (Request,start,offer,ask)
+import ./reactions (decodePolicy,watchPolicyBody,watchSignature,chooseReaction,shortSignature,shortProfile,shortBundleOK,prompt,narrativeBundle)
+import ./play (selectReply,selectReplyRecent)
+import pkg/sunholo/content_library/library (starterBundle,decodeGenerated,cacheKey)
+
+pure func request()->Result[Request,string] = match start("{\"command\":\"start\",\"policy\":\"consent\",\"scenario\":\"watch-v3\"}") {
+ Err(_)=>Err("start"),Ok(s)=>match offer(s.session,"scientist","work_scientist","science") {
+  Err(_)=>Err("offer"),Ok(o)=>match ask(o.session,"scientist","science","r1") {
+   Err(_)=>Err("ask"),Ok(a)=>match head(a.session.pending) {None=>Err("request"),Some(r)=>Ok(r)}
+  }
+ }
+}
+
+pure func generated(label:string,words:string,count:int)->string = encode(jo([kv("schema",js("generated_dialogue/1")),kv("variants",ja(if count==1 then [variant("a",label,words)] else if count==2 then [variant("a",label,words),variant("b",label,"Let's discuss the scope.")] else [variant("a",label,words),variant("b",label,"Let's discuss the scope."),variant("c",label,"A third response.")]))]))
+pure func variant(id:string,label:string,words:string)->Json = jo([kv("id",js(id)),kv("label",js(label)),kv("text",js(words)),kv("weight",jint(1))])
+pure func every(f:int->bool,xs:[int])->bool = not any(\n. not f(n),xs)
+
+test "preparing selected reaction retains original answer and two-roll seed" {
+ match (request(),decodePolicy(watchPolicyBody())) {(Ok(r),Ok(p))=>match starterBundle(watchSignature(r,watchPolicyBody(),"m"),r.legal) {
+  Err(_)=>false,Ok(full)=>every(\seed. match (chooseReaction(p,r,seed),selectReply(r,p,full,seed)) {
+   (Ok(label),Ok(original))=>match (shortSignature(full.signature,label),starterBundle(full.signature,[label])) {
+    (Ok(sig),Ok(one))=>match selectReplyRecent(r,p,{one|signature:sig,key:cacheKey(sig)},seed,[]) {
+     Ok(selected)=>selected.label==original.label && selected.command==original.command && selected.seed==original.seed,
+     _=>false
+    },_=>false
+   },_=>false
+  },[1,42,1000,34500,100000,1000000,2147483646])
+ },_=>false}
+}
+
+test "invalid seed cannot prepare or silently redraw" {
+ match (request(),decodePolicy(watchPolicyBody())) {(Ok(r),Ok(p))=>match (chooseReaction(p,r,0),chooseReaction(p,r,2147483647)) {(Err(_),Err(_))=>true,_=>false},_=>false}
+}
+
+test "short signature separates response policy model context and old cache" {
+ match request() {Err(_)=>false,Ok(r)=>{
+  let base=watchSignature(r,"PRIVATE-POLICY","m");
+  match (shortSignature(base,"accept"),shortSignature(base,"defer"),shortSignature(watchSignature(r,"different","m"),"accept"),shortSignature(watchSignature(r,"PRIVATE-POLICY","other"),"accept"),shortSignature(watchSignature({r|context:"{}"},"PRIVATE-POLICY","m"),"accept"),shortSignature(base,"invented")) {
+   (Ok(a),Ok(d),Ok(p),Ok(m),Ok(c),Err(_))=>shortProfile(a) && a!=base && a!=d && a!=p && a!=m && a!=c && cacheKey(a)!=cacheKey(base),_=>false
+  }
+ }}
+}
+
+test "short prompt has one fixed reaction nested received facts and no policy internals" {
+ match request() {Err(_)=>false,Ok(r)=>match shortSignature(watchSignature(r,"PRIVATE-POLICY","m"),"concern") {
+  Err(_)=>false,Ok(sig)=>{
+   let words=prompt(sig,["concern"]);
+   contains(words,"exactly 2") && contains(words,"240") && contains(words,"\"reaction\":\"concern\"") && contains(words,"perception") && contains(words,"Which uncertainty") && contains(words,"openness") && not contains(words,"PRIVATE-POLICY") && not contains(words,"bounded_indicator_delta") && not contains(words,"\"legal-label\"")
+  }
+ }}
+}
+
+test "short bundle requires two bounded same-label equal-weight variants" {
+ match request() {Err(_)=>false,Ok(r)=>match shortSignature(watchSignature(r,"policy","m"),"concern") {
+  Err(_)=>false,Ok(sig)=>match (decodeGenerated(generated("concern","Which uncertainty matters most?",2),sig,["concern"],"m",1,2),decodeGenerated(generated("concern","Question?",1),sig,["concern"],"m",1,2),decodeGenerated(generated("concern","Question?",3),sig,["concern"],"m",1,2),decodeGenerated(generated("concern",repeat("x",241),2),sig,["concern"],"m",1,2)) {
+   (Ok(good),Ok(one),Ok(three),Ok(long))=>shortBundleOK(sig,good) && not shortBundleOK(sig,one) && not shortBundleOK(sig,three) && not shortBundleOK(sig,long) && not shortBundleOK(sig,{good|variants:map(\v. {v|label:"defer"},good.variants)}) && not shortBundleOK(sig,{good|variants:map(\v. {v|weight:2},good.variants)}) && not narrativeBundle(sig,{good|variants:map(\v. {v|text:"My openness is high."},good.variants)}),_=>false
+  }
+ }}
+}
