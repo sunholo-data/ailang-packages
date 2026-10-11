@@ -98,6 +98,11 @@ native-watch-pty-test:
 	@AILANG="$(AILANG)" python3 "$(EX)/test-native-watch-pty.py"
 validate: native-watch-pty-test
 
+.PHONY: short-reply-test
+short-reply-test:
+	@AILANG="$(AILANG)" bash "$(EX)/test-short-reply.sh"
+validate: short-reply-test
+
 .PHONY: conversations-test
 conversations-test:
 	@cd "$(EX)" && "$(AILANG)" test --allow-skips conversations.ail

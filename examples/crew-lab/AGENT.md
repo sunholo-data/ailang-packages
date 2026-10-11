@@ -1,9 +1,23 @@
 # sunholo/crew_lab
 
-Experimental host example, version0.3.0. Saved `main` and `viewer` use IO only.
+Experimental host example, version0.4.1. Saved `main` and `viewer` use IO only.
 The guided `play` adapter uses IO,Env,FS,AI; `store` uses FS,AI. `actor_policy`,
 `scenario`, `session`, `codec`, `reactions`, `play_flow` and `presenter` remain pure.
 No Net, RNG or clock effect is requested.
+
+Modern live watch misses use `chooseReaction` to preview the original authored
+opinion draw without advancing state. `resolveChosen` first preserves existing
+complete caches and offline behavior, then uses a `crew-reply-short-v1` signature
+binding the chosen label and complete original signature as nested JSON. Send
+only actor-local perception, proposal, purpose and fixed reaction to the model;
+policy/configuration remain in the cache identity. Accept exactly two variants
+of that label, each1..240 characters with weight1, subject to the same disclosure
+guard. Publication recomputes the original two draws and advances the seed only
+after host/journal success. Never let AI choose mechanics, probabilities or a
+different reaction. Older signatures retain their original bounds. Do not repair
+or automatically retry invalid output. `test-short-reply.sh` exercises the actual
+generated live launcher with explicit test-only provider fixtures and both-engine
+host replay, including rejection followed by authored continuation.
 
 Reuse the social kernel and pure decisions0.4.0 API. Do not change core permission
 rules or trust model-provided principals, sources, raw effects or authority.

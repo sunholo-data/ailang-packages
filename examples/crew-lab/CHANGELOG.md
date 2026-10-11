@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.4.1
+
+Reduce new live watch requests to two short wordings of the reaction already
+chosen by the authored personality policy. Send nested actor-local context;
+retain exact policy/configuration in a separate versioned cache identity.
+Both random draws, consequences, existing complete cache hits and offline
+continuations retain their previous behavior. Validate both saved and generated
+short replies: two matching labels, equal weights, at most240 characters each,
+and no exposed development metrics. Rejected generation retains the pending
+request and supports authored continuation.
+
+One paired GLM-5.3-Flash sample fell from83.7 seconds/6,502 output tokens/12
+alternatives to10.9 seconds/967 output tokens/two alternatives. This is a sample,
+not a latency guarantee. Streaming and background inbox delivery remain separate
+work; this version still waits synchronously for a new reply.
+
 ## 0.4.0
 
 Add captain conversations to the native watch: actionable crew concerns, known
