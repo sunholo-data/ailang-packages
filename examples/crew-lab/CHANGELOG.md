@@ -1,5 +1,27 @@
 # Changelog
 
+## 0.5.0
+
+Local only; never published. The captain/crew host moves to the new published
+package `sunholo/crew_core`; this example keeps the watch, AI dialogue wording,
+journals and tools. The ship is data: `data/watch-scenario.json`
+(`crew_scenario/1`), and `crew-watch` / `crew-watch-offline` accept
+`--scenario FILE` and `--policy FILE`, validated before the watch opens. Journals
+record the scenario hash, policy hash and canonical scenario.
+
+New `crew-sim`: batch runs without AI under a consent, orders or random captain,
+one JSON line per seed, `--summary` medians and spreads, never ranked. Same inputs
+give byte-identical output on both engines; 20 seeds x 12 turns take about 12 s.
+
+`crew-host` (formerly `crew-lab`) is the NDJSON host; its recordings now use the
+watch scenario. Retired: `crew-lab`, `crew-view`, `crew-play*` and `crew-journey*`
+with their modules, scripts and the legacy two-crew scenario; their menu
+recordings are kept under `recordings/retired/`. The line-mode watch menu now
+names running work (it showed "Unknown project").
+
+Known limits: the host keeps at most 64 answered questions per session (about
+12-15 turns with five crew); live AI wording is still synchronous.
+
 ## 0.4.1
 
 Reduce new live watch requests to two short wordings of the reaction already

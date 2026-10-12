@@ -1,4 +1,4 @@
-module sunholo/crew_lab/session
+module sunholo/crew_core/session
 import std/result (Result, Ok, Err)
 import std/option (Option, Some, None)
 import std/list (length, map, filter, head, any)
@@ -10,8 +10,9 @@ import pkg/sunholo/social_dynamics/proposals (apply)
 import pkg/sunholo/social_dynamics/tasks (findTask)
 import pkg/sunholo/social_dynamics/relationships (appraisalContext, deliver)
 import pkg/sunholo/social_dynamics/wire (encodeState, encodeEvents, encodeError, encodeConfig)
-import ./scenario (config, actors, resources, workerRecipe, policies)
-import ./watch_scenario (config as watchConfig, actors as watchActors, resources as watchResources, workerRecipe as watchWorkerRecipe, projectName as watchProjectName, purpose as watchPurpose, resourceName as watchResourceName)
+import ./scenario (Scenario, config as scenarioConfig, workerRecipe, projectName, resourceName, purpose)
+import ./host_policy (policies)
+import ./example (firstContact)
 import ./codec (object, fields, text, integer, number, CrewOutcome, AgreedStart, RefusedOrder, GrantedRelief, DeniedRelief, encodeOutcome)
 import ./actor_policy (evaluate, requestBody, encodeChoice)
 import pkg/sunholo/social_dynamics/personality (Personality,MajorReceived)
@@ -28,7 +29,7 @@ export type Bank = { request: Request, status: string, body: string, roll: float
 
 export type Report = { id: string, task: string, agreement: string, worker: string, code: CrewOutcome } deriving (Eq)
 
-export type Session = { policy: string, config: Config, state: State, bindings: [TaskAgreement], pending: [Request], bank: [Bank], reports: [Report], chat: ConversationStore, personalities: [Personality] } deriving (Eq)
+export type Session = { scenario: Scenario, policy: string, config: Config, state: State, bindings: [TaskAgreement], pending: [Request], bank: [Bank], reports: [Report], chat: ConversationStore, personalities: [Personality], traced: bool } deriving (Eq)
 
 export type Output = { session: Session, trace: string, failed: bool } deriving (Eq)
 
@@ -51,14 +52,18 @@ export pure func snapshot(s: Session) -> string
 ensures { stringLength(result) > 0 } =
   encode(jo([kv("state", js(encodeState(s.state))), kv("policy", js(s.policy)), kv("bindings", ja(map(\b. jo([kv("task", js(b.task)), kv("agreement", js(b.agreement)), kv("captain", js(b.captain)), kv("worker", js(b.worker)), kv("recipe", js(b.recipe))]), s.bindings))), kv("pending", ja(map(requestJson, s.pending))), kv("bank", ja(map(bankJson, s.bank))), kv("reports", ja(map(reportJson, s.reports)))] ++ (if s.chat.version == 1 then [kv("conversations", conversationJson(s.chat)),kv("personalities",personalitiesJson(s.personalities))] else [])))
 
+-- Untraced sessions (batch runs) skip the per-call state encoding; their
+-- outputs carry an empty trace. Journals require traced sessions.
 pure func output(s: Session, events: [Event]) -> Output =
-  { session: s, trace: "{\"state\":${encodeState(s.state)},\"events\":${encodeEvents(events)},\"host\":${snapshot(s)}}", failed: false }
+  { session: s, trace: if s.traced then "{\"state\":${encodeState(s.state)},\"events\":${encodeEvents(events)},\"host\":${snapshot(s)}}" else "", failed: false }
+
+export pure func untraced(s: Session) -> Session
+ensures { not result.traced && result.state == s.state } = {s | traced: false}
 
 pure func checkedId(id: string) -> bool = validId(id) && stringLength(id) <= 64
 
-pure func modern(s: Session) -> bool = s.config.id == "crew-watch-v2-${s.policy}"
-pure func owned(s: Session, worker: string, recipe: string) -> bool = if modern(s) then watchWorkerRecipe(worker, recipe) else workerRecipe(worker, recipe)
-pure func identity(s: Session) -> bool = match (if modern(s) then watchConfig(s.policy) else config(s.policy)) {
+pure func owned(s: Session, worker: string, recipe: string) -> bool = workerRecipe(s.scenario, worker, recipe)
+pure func identity(s: Session) -> bool = match scenarioConfig(s.scenario, s.policy) {
   Err(_) => false,
   Ok(c) => encodeConfig(c) == encodeConfig(s.config) && encodeConfig(c) == s.state.configBody && s.state.config == c.id && s.state.session == c.session
 }
@@ -131,11 +136,11 @@ ensures {match result {None=>true,Some(i)=>i.task==task && i.status=="open"}} = 
 -- request. No other actor's private thoughts, traits or unseen evidence enter it.
 pure func sharedBriefing(s:Session,task:string,actor:string,recipeId:string)->[string] = match head(filter(\r. r.id==recipeId,s.config.recipes)) {
  None=>[],Some(recipe)=>{
- let costs=map(\c. "${watchResourceName(c.resource)}: holds ${c.reserve}; consumes ${c.consume} on completion",recipe.costs);
- let stock=map(\r. "${watchResourceName(r.id)}: ${r.available} free, ${r.reserved} held, ${r.consumed} spent",s.state.resources);
- let jobs=map(\j. "${j.id}: ${watchProjectName(j.recipe)}; ${join(", ",j.participants)}",filter(\j. j.status==Working,s.state.tasks));
+ let costs=map(\c. "${resourceName(s.scenario,c.resource)}: holds ${c.reserve}; consumes ${c.consume} on completion",recipe.costs);
+ let stock=map(\r. "${resourceName(s.scenario,r.id)}: ${r.available} free, ${r.reserved} held, ${r.consumed} spent",s.state.resources);
+ let jobs=map(\j. "${j.id}: ${projectName(s.scenario,j.recipe)}; ${join(", ",j.participants)}",filter(\j. j.status==Working,s.state.tasks));
  let history=map(\p. "Captain previously said: ${p.text}",filter(\p. p.task==task,s.chat.speech));
- ["Proposal ${task}: ${watchProjectName(recipeId)} / ${actor}",watchPurpose(recipeId),"${recipe.duration} turns. Speaking does not advance time or start work.","Unknown: who or what we may encounter, medical needs, and how contact will go."]++costs++stock++["Current work:"]++jobs++["Relevant conversation:"]++history
+ ["Proposal ${task}: ${projectName(s.scenario,recipeId)} / ${actor}",purpose(s.scenario,recipeId),"${recipe.duration} turns. Speaking does not advance time or start work.","Unknown: who or what we may encounter, medical needs, and how contact will go."]++costs++stock++["Current work:"]++jobs++["Relevant conversation:"]++history
  }
 }
 
@@ -327,9 +332,9 @@ pure func advanceOutput(s:Session,state:State,events:[Event])->Result[Output,Hos
  }
 
 @allow_empty_ok("Legacy hosts intentionally have no personality sidecar; only watch-v3 initializes profiles")
-pure func initialized(policy:string,c:Config,state:State,version:int)->Result[Output,HostError] =
+pure func initialized(scenario:Scenario,policy:string,c:Config,state:State,version:int)->Result[Output,HostError] =
  match (if version==1 then initializeShip(state) else Ok([])) {
-  Err(e)=>Err(HostFailure("personality initialization: ${e}")),Ok(ps)=>Ok(output({policy:policy,config:c,state:state,bindings:[],pending:[],bank:[],reports:[],chat:emptyConversation(version),personalities:ps},[]))
+  Err(e)=>Err(HostFailure("personality initialization: ${e}")),Ok(ps)=>Ok(output({scenario:scenario,policy:policy,config:c,state:state,bindings:[],pending:[],bank:[],reports:[],chat:emptyConversation(version),personalities:ps,traced:true},[]))
  }
 
 pure func majorDeliveries(s:Session,observers:[string],evidence:string,events:[Event])->Result[{session:Session,events:[Event]},HostError] = match observers {
@@ -375,18 +380,20 @@ pure func advanced(s: Session, tick: int, budget: int) -> Result[Output, HostErr
   }
 }
 
-export pure func start(line: string) -> Result[Output, HostError]
+-- Start a session for `scenario`. The start line names the host profile:
+-- "watch-v3" adds personality and conversation sidecars; "watch-v2" omits them.
+export pure func start(scenario: Scenario, line: string) -> Result[Output, HostError]
 ensures { match result {
   Ok(o) => o.session.state.tick == 0 && o.session.pending == [] && o.session.bank == [],
   Err(_) => true
 } } = match object(line) {
   Err(e) => Err(HostFailure(e)),
-  Ok(j) => if not fields(j, ["command", "policy"]) && not (fields(j, ["command", "policy", "scenario"]) && (getString(j, "scenario") == Some("watch-v2") || getString(j, "scenario") == Some("watch-v3"))) then Err(HostFailure("start fields")) else match (getString(j, "command"), getString(j, "policy")) {
-    (Some("start"), Some(policy)) => match (if getString(j, "scenario") == Some("watch-v2") || getString(j, "scenario") == Some("watch-v3") then watchConfig(policy) else config(policy)) {
+  Ok(j) => if not fields(j, ["command", "policy", "scenario"]) || not (getString(j, "scenario") == Some("watch-v2") || getString(j, "scenario") == Some("watch-v3")) then Err(HostFailure("start fields: command, policy, scenario (watch-v2 or watch-v3)")) else match (getString(j, "command"), getString(j, "policy")) {
+    (Some("start"), Some(policy)) => match scenarioConfig(scenario, policy) {
       Err(e) => Err(HostFailure(e)),
-      Ok(c) => match init(c, if getString(j, "scenario") == Some("watch-v2") || getString(j, "scenario") == Some("watch-v3") then watchActors() else actors(), if getString(j, "scenario") == Some("watch-v2") || getString(j, "scenario") == Some("watch-v3") then watchResources() else resources()) {
+      Ok(c) => match init(c, scenario.actors, scenario.resources) {
         Err(e) => Err(DomainFailure(e)),
-        Ok(state) => initialized(policy,c,state,if getString(j, "scenario") == Some("watch-v3") then 1 else 0)
+        Ok(state) => initialized(scenario,policy,c,state,if getString(j, "scenario") == Some("watch-v3") then 1 else 0)
       }
     },
     _ => Err(HostFailure("start command required"))
@@ -458,16 +465,16 @@ pure func tail(s: Session, lines: [string], records: [string]) -> [string] = mat
   }
 }
 
-export pure func recording(lines: [string]) -> string
+export pure func recording(scenario: Scenario, lines: [string]) -> string
 ensures { stringLength(result) > 0 } =
   if length(lines) > 10000 then "{\"error\":\"recording_limit\"}" else match lines {
     [] => "{\"error\":\"empty_recording\"}",
-    first :: rest => match start(first) {
+    first :: rest => match start(scenario, first) {
       Err(e) => "{\"error\":${encodeHostError(e)}}",
       Ok(o) => join("\n", tail(o.session, rest, [o.trace]))
     }
   }
 
 test "empty recording is explicit failure" {
-  recording([]) == "{\"error\":\"empty_recording\"}"
+  match firstContact() { Ok(sc) => recording(sc, []) == "{\"error\":\"empty_recording\"}", Err(_) => false }
 }

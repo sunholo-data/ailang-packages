@@ -1,0 +1,13 @@
+module sunholo/crew_core/_smoke
+import std/io (println)
+import std/result (Ok, Err)
+import ./scenario (decodeScenario, config, scenarioHash)
+
+pure func tiny() -> string = "{\"schema\":\"crew_scenario/1\",\"id\":\"smoke\",\"indicators\":[\"stress\",\"trust\"],\"indicator_defaults\":{\"stress\":0},\"captain\":{\"id\":\"captain\",\"values\":{},\"start\":{}},\"crew\":[{\"id\":\"cook\",\"role\":\"Cook\",\"ocean\":{\"openness\":1,\"conscientiousness\":2,\"extraversion\":3,\"agreeableness\":4,\"neuroticism\":5},\"values\":{},\"start\":{},\"work\":[{\"id\":\"work_cook\",\"name\":\"Bake\",\"purpose\":\"Feed.\",\"duration\":1,\"costs\":[],\"effects\":{\"stress\":1}}]}],\"rest\":{\"purpose\":\"Rest.\",\"duration\":1,\"effects\":{}},\"overextended\":{\"indicator\":\"stress\",\"threshold\":70,\"recovery\":40,\"duration\":1,\"cooldown\":1},\"trust_in_captain\":50,\"resources\":[]}"
+
+export pure func smokeChecks() -> bool = match decodeScenario(tiny()) {
+ Err(_) => false,
+ Ok(s) => match config(s, "consent") { Ok(c) => c.id == "smoke-consent" && scenarioHash(s) != "", Err(_) => false }
+}
+export func main() -> () ! {IO @limit=1} = println(if smokeChecks() then "OK crew_core scenario decode" else "FAIL crew_core scenario decode")
+test "smoke decodes a one-crew scenario" { smokeChecks() }

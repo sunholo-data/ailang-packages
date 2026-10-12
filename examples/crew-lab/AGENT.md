@@ -1,5 +1,17 @@
 # sunholo/crew_lab
 
+> **0.5.0 layout (S-CREW-CORE-SPLIT).** The host (session, policies, personality,
+> conversations, scenario decoding) is `pkg/sunholo/crew_core/*`; edit it in
+> `packages/crew-core`. This app keeps the watch (`native_watch*`, `play`,
+> `play_flow`, `watch_presenter`, `narrative`), `dialogue` (prompts, cache
+> signatures), `store`, `ship` (default first-contact ship), `crew_sim`/`sim_cli`
+> and `main` (crew-host). Bins: `crew-watch`, `crew-watch-offline`, `crew-sim`,
+> `crew-host`. The ship is `data/watch-scenario.json`; after editing it run
+> `packages/crew-core/tools/gen-example.sh`. Paragraphs below that mention
+> `crew-play`, `crew-journey`, `crew-view` or the two-crew scenario describe
+> retired interfaces kept for history.
+
+
 Experimental host example, version0.4.1. Saved `main` and `viewer` use IO only.
 The guided `play` adapter uses IO,Env,FS,AI; `store` uses FS,AI. `actor_policy`,
 `scenario`, `session`, `codec`, `reactions`, `play_flow` and `presenter` remain pure.

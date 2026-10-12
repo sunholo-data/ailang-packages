@@ -1,0 +1,163 @@
+{
+  "sprint_id": "S-CREW-CORE-SPLIT",
+  "status": "in_progress",
+  "created": "2026-10-12",
+  "design_doc": "design_docs/planned/crew-core-split.md",
+  "sprint_plan": "design_docs/planned/crew-core-split-sprint.md",
+  "authorization": "Mark, attended 2026-10-12: crew-lab local only; publish a lighter composable package; D1 retire older front ends; D2 tuning data before wording. Execution awaits approval of this plan.",
+  "prompt_version": "v0.16.7",
+  "github_issues": [],
+  "velocity": {
+    "target_loc_per_day": 700,
+    "estimated_total_loc": 1950,
+    "estimated_days": 3
+  },
+  "features": [
+    {
+      "id": "M1",
+      "description": "crew_core package skeleton: Scenario type, decodeScenario, validateScenario and scenarioHash, plus a watch-scenario fixture equivalent to watch_scenario.ail",
+      "estimated_loc": 400,
+      "dependencies": [],
+      "acceptance_criteria": [
+        "ailang test passes in packages/crew-core on both engines",
+        "Fixture-equivalence test: decoded testdata/watch-scenario.json matches watch_scenario actors, resources and workerRecipe",
+        "Malformed scenarios (unknown recipe, missing resource, trait out of range, duplicate id, extra field) are rejected with named errors"
+      ],
+      "passes": true,
+      "started": "2026-10-12",
+      "completed": "2026-10-12T15:30:00Z",
+      "notes": "packages/crew-core: scenario.ail (crew_scenario/1 decoder, validator, config(scenario, policy), workerRecipe/projectName/purpose/resourceName, scenarioHash) + 16 named tests passing on interpreter and strict VM; _smoke, CHANGELOG 0.1.0, AGENT.md; publish --dry-run: no gates. examples/crew-lab/data/watch-scenario.json + scenario_equivalence.ail (make scenario-equivalence): identical config (consent, orders), actors, resources, rights, names and purposes vs watch_scenario.ail; a mutation check (trait + supply name) fails it. Deviation: crew-core pins social_dynamics 0.3.0 from the registry (identical content hash) because publish smoke staging copies a path lockfile (ailang#1773). Conversation issue prompts remain keyed by role in code (D2, later)."
+    },
+    {
+      "id": "M2",
+      "description": "Move session, actor_policy, personality_host, conversations, codec and policy (decoder and scoring from reactions) into crew_core; Session takes a Scenario; remove modern() and the legacy scenario",
+      "estimated_loc": 450,
+      "dependencies": [
+        "M1"
+      ],
+      "acceptance_criteria": [
+        "ailang publish --dry-run in packages/crew-core reports no gates",
+        "Peak RSS of check --package and verify --package each under 250 MB, recorded in evidence",
+        "git grep -nE 'watch_scenario|modern\\(' packages/crew-core has no matches",
+        "Per-module --strict-bytecode result recorded (informational)"
+      ],
+      "passes": true,
+      "started": "2026-10-12",
+      "completed": "2026-10-12T19:30:00Z",
+      "notes": "crew_core now holds session, policy (decoder/scoring/choice from reactions), host_policy (authority/appraisal), actor_policy, personality_host, conversations, codec, scenario and example (generated from data/watch-scenario.json by tools/gen-example.sh, drift-checked). Session carries its Scenario; start(scenario, line) requires a host profile (watch-v2/watch-v3); modern() and the legacy two-crew scenario are gone; the captain id must be \"captain\". 73 crew_core tests pass on interpreter and strict VM (22 host-invariant tests ported from the legacy scenario: 18 mechanically, 4 rewritten for watch semantics: archive slots not materials, pilot competes for slots, block via a completion-time reservation fault because watch effects saturate). check 194 MB / verify 194 MB (gate 250; crew-lab was 351), check 1.3 s. publish --dry-run: no gates. Deviation: content_library/social_dynamics/decisions pinned from registry (identical hashes; ailang#1773)."
+    },
+    {
+      "id": "M3",
+      "description": "crew-lab depends on crew_core by path; data/*.json defaults; --scenario and --policy flags; journal records scenario and policy hashes",
+      "estimated_loc": 300,
+      "dependencies": [
+        "M2"
+      ],
+      "acceptance_criteria": [
+        "make -f examples/crew-lab/Makefile validate passes",
+        "test-short-reply.sh, test-conversation-replay.sh and test-store.sh pass; recordings replay byte-identically",
+        "test-scenario-errors.sh rejects three malformed scenarios before the first turn",
+        "data/response-policy.json is byte-identical to the current watchPolicyBody()"
+      ],
+      "passes": true,
+      "started": "2026-10-12",
+      "completed": "2026-10-12T23:30:00Z",
+      "notes": "crew-watch/crew-watch-offline take --scenario FILE and --policy FILE, read and validated before any terminal or journal opens (loadShip); sessions start on the given scenario (play_flow.beginWatchIn/beginConversationWatchIn, play.openWatch(sc, policyText, ...)); journal header records scenario_hash, policy_hash and canonical scenario; play_flow.recoveryRecordingIn(sc, ...) replays on a given ship. test-scenario-errors.sh: custom ship runs and is journaled by hash; 4 malformed scenarios and a malformed policy rejected before any journal. Existing recordings and conversation replays pass. Deviation: data/response-policy.json and data/conversations.json were not created: the response policy already lives as editable JSON in the watch home (seeded from watchPolicyBody) and --policy covers overrides; conversation wording moves with D2."
+    },
+    {
+      "id": "M4",
+      "description": "Retire older front ends: extract watch_run from play; port the watch assertions off crew-journey-offline; delete the journey, play, viewer and main modules and bins; move their recordings to recordings/retired",
+      "estimated_loc": 350,
+      "dependencies": [
+        "M3"
+      ],
+      "acceptance_criteria": [
+        "make validate and make mutations pass",
+        "native-watch-pty-test passes",
+        "git grep -nE 'crew-(journey|play|view)\\b' examples/crew-lab lists only recordings/retired and CHANGELOG",
+        "ailang pkg bin list shows only the crew-watch, crew-watch-offline and crew-sim bins"
+      ],
+      "passes": true,
+      "started": "2026-10-12",
+      "completed": "2026-10-12T23:30:00Z",
+      "notes": "Pulled forward into M2 (legacy scenario removal required it): deleted viewer/terminal/journey/journey_presenter, legacy scenario/watch_scenario, play.ail legacy launch loop (252 lines left), bins crew-lab/crew-view/crew-play*/crew-journey*; test-cli/journey/play/watch.sh retired (journey UI flows; domain assertions covered by crew_core session tests); play-*.menu moved to recordings/retired. main.ail kept as crew-host (NDJSON protocol for parity controls and future Godot use); host recordings regenerated for watch-v2. Remaining for M4: watch_run extraction from play is not needed for correctness; journey_flow/presenter still back the watch. Validate: all targets pass locally (rg shim for local only); mutations 8/8 killed."
+    },
+    {
+      "id": "M5",
+      "description": "crew-sim batch runner: consent, orders and random captain strategies; per-seed NDJSON metrics; --summary with medians and IQR, no ranking",
+      "estimated_loc": 400,
+      "dependencies": [
+        "M3"
+      ],
+      "acceptance_criteria": [
+        "test-sim.sh: same inputs give byte-identical output (cmp)",
+        "Changing one trait in a copied scenario changes the output for a fixed seed",
+        "200 seeds x 24 turns completes in under 30 s offline (/usr/bin/time)"
+      ],
+      "passes": true,
+      "started": "2026-10-12",
+      "completed": "2026-10-12T22:00:00Z",
+      "notes": "crew-sim (crew_sim.ail pure strategies + sim_cli.ail entry; bin runs on the bytecode VM). Captains consent/orders/random; offers, persuasion, check-ins and relief per turn; replies via crew_core policy.authoredAnswer (new, shared with the watch's authored path). NDJSON per seed (replies, offers, starts, refusals with engine codes, relief, completions, per-crew indicators and trust, errors with reasons) and --summary (median, IQR, range; unranked). Deterministic (cmp), interpreter == VM, trait change changes output, malformed scenarios rejected (test-sim.sh). Measured: 20 seeds x 12 turns in 12 s (0.6 s/seed). Criterion 7 (200 x 24 in 30 s) NOT met: two findings. (1) The host keeps at most 64 answered requests per session, exhausted around turn 15 with five crew, so default turns is 12 and longer runs report 'completed retention'. (2) Per-call trace encoding was 2/3 of runtime; crew_core gains Session.traced and untraced(s) (3x faster, same state, tested). identity() re-encoding the config is most of the rest; left unchanged for safety."
+    },
+    {
+      "id": "M6",
+      "description": "Independent evaluation, attended publication of crew_core 0.1.0, changelogs, docs to implemented/, local bins reinstalled from merged main",
+      "estimated_loc": 50,
+      "dependencies": [
+        "M2",
+        "M4",
+        "M5"
+      ],
+      "acceptance_criteria": [
+        "sprint-evaluator run by a different agent or model scores >= 70",
+        "ailang pkg versions sunholo/crew_core lists 0.1.0",
+        "~/.ailang/bin/crew-* no longer reference .ailang/cache/reviews"
+      ],
+      "passes": null,
+      "started": null,
+      "completed": null,
+      "notes": "Pending attended steps: independent evaluation (different agent/model), publish crew_core 0.1.0, land PR, reinstall ~/.ailang/bin crew-* from merged main. Dry run: no gates; check 203 MB / verify 184 MB."
+    }
+  ],
+  "registry_reuse": [
+    {
+      "milestone": "M1",
+      "action": "none",
+      "package": "",
+      "reason": "Searches 2026-10-12 for scenario, crew, narrative, batch simulation and game config found nothing; the crew scenario format is new code in crew_core."
+    },
+    {
+      "milestone": "M2",
+      "action": "depend",
+      "package": "sunholo/social_dynamics,sunholo/content_library,sunholo/decisions",
+      "reason": "crew_core composes the published kernel 0.3.0, content selection 0.1.0 and decisions 0.4.0."
+    },
+    {
+      "milestone": "M3",
+      "action": "depend",
+      "package": "sunholo/crew_core",
+      "reason": "App consumes the new package by path."
+    },
+    {
+      "milestone": "M4",
+      "action": "depend",
+      "package": "sunholo/terminal_ui",
+      "reason": "Watch UI unchanged on terminal_ui 0.3.0."
+    },
+    {
+      "milestone": "M5",
+      "action": "depend",
+      "package": "sunholo/crew_core",
+      "reason": "Batch runner drives the pure session API; no new package."
+    },
+    {
+      "milestone": "M6",
+      "action": "none",
+      "package": "",
+      "reason": "Landing and publication only."
+    }
+  ],
+  "completed": null,
+  "pull_requests": [],
+  "landing": null
+}

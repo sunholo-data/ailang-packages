@@ -5,9 +5,9 @@ import std/option (Some,None)
 import pkg/sunholo/terminal_ui/ui (Screen,Dimensions,screen,safeText)
 import pkg/sunholo/social_dynamics/model (Actor,Working,Completed,Offered,Stopped)
 import ./play_flow (PlayState,menu)
-import ./session (Session)
+import pkg/sunholo/crew_core/session (Session)
 import ./journey_flow (Navigation)
-import ./watch_scenario (projectName,purpose,workers)
+import pkg/sunholo/crew_core/scenario (projectName,purpose)
 import ./narrative (crew,supplies,costs,spendsSupplies,observation, fatigue, stress, morale)
 
 export pure func guide(mode: string,remaining: int,path: string) -> string ! {}
@@ -17,7 +17,7 @@ ensures { size(result) > 0 } =
 pure func work(s: PlayState,debug: bool) -> string = {
  let tasks = join("\n\n",map(\t. {
   let progress = if t.status == Working then "Working: ${s.session.state.tick - t.started}/${t.due - t.started} turns" else if t.status == Completed then "Completed" else if t.status == Stopped then "Stopped" else "Offered; waiting for your Start decision";
-  "[ ${projectName(t.recipe)} / ${join(", ",t.participants)} ]\n${progress}\n${purpose(t.recipe)}\n${costs(s.session,t.recipe)}\n${if debug then "Task ${t.id}; recipe ${t.recipe}" else "Supplies are spent on completion even when a benefit is already at its limit."}"
+  "[ ${projectName(s.session.scenario,t.recipe)} / ${join(", ",t.participants)} ]\n${progress}\n${purpose(s.session.scenario,t.recipe)}\n${costs(s.session,t.recipe)}\n${if debug then "Task ${t.id}; recipe ${t.recipe}" else "Supplies are spent on completion even when a benefit is already at its limit."}"
  },s.session.state.tasks));
  "[ RESOURCES ]\n${supplies(s.session)}\nCompute is reusable capacity; physical supplies are finite.\n\n${if tasks == "" then "No assignments offered. Choose work or rest to begin." else tasks}"
 }
@@ -48,7 +48,7 @@ pure func startDecision(s: PlayState, message: string) -> string =
     None => "",
     Some(a) => "\n\n${observation(a, s.session.state.relationships)}"
    };
-   "[ PROPOSAL: ${projectName(t.recipe)} ]\n${status}${permission}\n${purpose(t.recipe)}${conversation}\n\n[ YOUR CHOICE ]\nStart now assigns ${worker} until this job ends.\n${costs(s.session,t.recipe)}${if spendsSupplies(s.session,t.recipe) then "\nHeld supplies are spent at completion, even at a benefit limit." else ""}\nStarting does not pass time. Use 5 Advance to move the work forward.\nDecide later returns to the bridge: no time or resources used.\nFind this proposal again under 7 Offers; their agreement is kept.\n\n[ AVAILABLE RESOURCES ]\n${supplies(s.session)}${person}"
+   "[ PROPOSAL: ${projectName(s.session.scenario,t.recipe)} ]\n${status}${permission}\n${purpose(s.session.scenario,t.recipe)}${conversation}\n\n[ YOUR CHOICE ]\nStart now assigns ${worker} until this job ends.\n${costs(s.session,t.recipe)}${if spendsSupplies(s.session,t.recipe) then "\nHeld supplies are spent at completion, even at a benefit limit." else ""}\nStarting does not pass time. Use 5 Advance to move the work forward.\nDecide later returns to the bridge: no time or resources used.\nFind this proposal again under 7 Offers; their agreement is kept.\n\n[ AVAILABLE RESOURCES ]\n${supplies(s.session)}${person}"
   }
  }
 pure func indicator(a: Actor,id: string) -> int = match a.indicators {[]=>50,v::rest=>if v.id == id then v.value else indicator({a | indicators:rest},id)}
@@ -60,11 +60,11 @@ pure func bridge(s: PlayState,message: string) -> string = {
  "${if s.session.state.tick >= 8 then "[ PREPARATION REVIEW ]\nReview what changed. You may continue; this is not arrival or a grade.\n" else ""}${if message == "" then "Start by choosing work or rest. Offering lets you hear the crew before committing." else "[ CONVERSATION / CONSEQUENCE ]\n${message}"}\n\n${supplies(s.session)}\n\n${crewLines}"
 }
 pure func choices(s: PlayState) -> string =
- if s.phase == "assignments" || s.phase == "rests" then join("\n\n",catalog(s,workers(),1)) else menu(s)
+ if s.phase == "assignments" || s.phase == "rests" then join("\n\n",catalog(s,s.session.scenario.workers,1)) else menu(s)
 pure func catalog(s: PlayState,xs: [string],n: int) -> [string] = match xs {
  []=>[],worker::rest=>{
   let recipe = "${if s.phase == "rests" then "rest" else "work"}_${worker}";
-  "${n}. ${projectName(recipe)} / ${worker}\n${purpose(recipe)}\n${costs(s.session,recipe)}${if spendsSupplies(s.session,recipe) then "\nSupplies spend on completion even at a benefit limit." else ""}" :: catalog(s,rest,n+1)
+  "${n}. ${projectName(s.session.scenario,recipe)} / ${worker}\n${purpose(s.session.scenario,recipe)}\n${costs(s.session,recipe)}${if spendsSupplies(s.session,recipe) then "\nSupplies spend on completion even at a benefit limit." else ""}" :: catalog(s,rest,n+1)
  }
 }
 export pure func frame(s: PlayState,nav: Navigation,message: string,mode: string,remaining: int,path: string,d: Dimensions,ansi: bool,debug: bool) -> Screen ! {}

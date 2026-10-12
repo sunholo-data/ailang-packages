@@ -1,0 +1,279 @@
+module sunholo/crew_core/scenario
+import std/result (Result, Ok, Err)
+import std/option (Option, Some, None)
+import std/list (map, length, filter, any, contains, head, flatMap)
+import std/string (length as stringLength)
+import std/json (Json, decode, encode, keys, asObject, asArray, getString, getInt, get, jo, kv)
+import std/crypto (sha256Hex)
+import pkg/sunholo/social_dynamics/model (Config, Actor, Resource, Recipe, Cost, Value, Rule, Relationship, Effect, BoundedIndicatorDelta, validId)
+
+-- Scenario data for a captain and crew: who is aboard, their OCEAN traits and
+-- priorities, starting indicators, the work each may be offered, rest, stress
+-- rules and supplies. Data only; host behaviour and policies live elsewhere.
+-- Experimental tuning: neither OCEAN nor these numbers assert a human model.
+
+export type Label = {id: string, text: string} deriving (Eq)
+
+export type Scenario = {id: string, captain: string, workers: [string], indicators: [string], actors: [Actor], resources: [Resource], recipes: [Recipe], owners: [Label], rules: [Rule], relationships: [Relationship], projectNames: [Label], purposes: [Label], restPurpose: string, resourceNames: [Label], canonical: string} deriving (Eq)
+
+type Work = {recipe: Recipe, name: string, purpose: string} deriving (Eq)
+type Crew = {actor: Actor, role: string, work: [Work]} deriving (Eq)
+type Rest = {purpose: string, duration: int, effects: [Value]} deriving (Eq)
+type Supply = {resource: Resource, name: string} deriving (Eq)
+type Strain = {indicator: string, threshold: int, recovery: int, duration: int, cooldown: int} deriving (Eq)
+
+pure func topFields() -> [string] = ["schema","id","indicators","indicator_defaults","captain","crew","rest","overextended","trust_in_captain","resources"]
+pure func oceanIds() -> [string] = ["openness","conscientiousness","extraversion","agreeableness","neuroticism"]
+
+-- ------------------------------------------------------------ JSON helpers
+
+pure func unique(xs: [string]) -> bool = not any(\x. length(filter(\y. y == x, xs)) != 1, xs)
+
+pure func exact(j: Json, required: [string]) -> bool = match asObject(j) {
+ None => false,
+ Some(_) => unique(keys(j)) && length(keys(j)) == length(required) && not any(\k. not contains(keys(j), k), required)
+}
+
+pure func ident(j: Json, key: string, at: string) -> Result[string, string] = match getString(j, key) {
+ Some(s) => if validId(s) && stringLength(s) <= 64 then Ok(s) else Err("${at}: ${key} must be an id of 1-64 characters"),
+ None => Err("${at}: ${key} must be a string")
+}
+
+pure func words(j: Json, key: string, at: string) -> Result[string, string] = match getString(j, key) {
+ Some(s) => if stringLength(s) > 0 && stringLength(s) <= 240 then Ok(s) else Err("${at}: ${key} must be 1-240 characters"),
+ None => Err("${at}: ${key} must be a string")
+}
+
+pure func whole(j: Json, key: string, lo: int, hi: int, at: string) -> Result[int, string] = match getInt(j, key) {
+ Some(n) => if n >= lo && n <= hi then Ok(n) else Err("${at}: ${key} must be ${show(lo)}..${show(hi)}"),
+ None => Err("${at}: ${key} must be a whole number")
+}
+
+pure func items(j: Json, key: string, at: string) -> Result[[Json], string] = match get(j, key) {
+ Some(v) => match asArray(v) { Some(xs) => Ok(xs), None => Err("${at}: ${key} must be a list") },
+ None => Err("${at}: ${key} missing")
+}
+
+pure func member(j: Json, key: string, at: string) -> Result[Json, string] = match get(j, key) {
+ Some(v) => match asObject(v) { Some(_) => Ok(v), None => Err("${at}: ${key} must be an object") },
+ None => Err("${at}: ${key} missing")
+}
+
+@allow_empty_ok("Recursion base case: the empty tail of a list that was already checked")
+pure func collect[a](xs: [Json], f: Json -> Result[a, string]) -> Result[[a], string] = match xs {
+ [] => Ok([]),
+ x :: rest => match f(x) {
+  Err(e) => Err(e),
+  Ok(v) => match collect(rest, f) { Err(e) => Err(e), Ok(vs) => Ok(v :: vs) }
+ }
+}
+
+-- An object of whole numbers in the author's order. An empty `allowed` accepts any id.
+pure func numbers(j: Json, key: string, allowed: [string], lo: int, hi: int, at: string) -> Result[[Value], string] = match member(j, key, at) {
+ Err(e) => Err(e),
+ Ok(o) => match asObject(o) {
+  None => Err("${at}: ${key} must be an object"),
+  Some(kvs) => if not unique(map(\p. p.key, kvs)) then Err("${at}: ${key} repeats a name") else pairs(kvs, allowed, lo, hi, "${at}: ${key}")
+ }
+}
+
+@allow_empty_ok("Recursion base case: the empty tail of a list that was already checked")
+pure func pairs(kvs: [{key: string, value: Json}], allowed: [string], lo: int, hi: int, at: string) -> Result[[Value], string] = match kvs {
+ [] => Ok([]),
+ p :: rest => if length(allowed) > 0 && not contains(allowed, p.key) then Err("${at}: unknown ${p.key}") else match whole(jo([kv(p.key, p.value)]), p.key, lo, hi, at) {
+  Err(e) => Err(e),
+  Ok(n) => match pairs(rest, allowed, lo, hi, at) { Err(e) => Err(e), Ok(vs) => Ok({id: p.key, value: n} :: vs) }
+ }
+}
+
+pure func idsOf(vs: [Value]) -> [string] = map(\v. v.id, vs)
+
+pure func lookup(xs: [Label], id: string) -> Option[string] = match head(filter(\l. l.id == id, xs)) {
+ Some(l) => Some(l.text), None => None
+}
+
+-- --------------------------------------------------------------- sections
+
+-- Defaults give every actor the same indicators, in the defaults' order.
+pure func indicatorsFor(defaults: [Value], start: [Value]) -> [Value] =
+ map(\d. match head(filter(\s. s.id == d.id, start)) { Some(s) => s, None => d }, defaults)
+
+pure func readCaptain(j: Json, defaults: [Value]) -> Result[Actor, string] =
+ if not exact(j, ["id","values","start"]) then Err("captain: fields must be id, values, start") else
+ match (ident(j, "id", "captain"), numbers(j, "values", [], 0, 100, "captain"), numbers(j, "start", idsOf(defaults), 0, 100, "captain")) {
+  (Ok(id), Ok(vs), Ok(start)) => Ok({id: id, capacity: 1, attributes: [], values: vs, indicators: indicatorsFor(defaults, start)}),
+  (Err(e), _, _) => Err(e), (_, Err(e), _) => Err(e), (_, _, Err(e)) => Err(e)
+ }
+
+@allow_empty_ok("Recursion base case: the empty tail of a list that was already checked")
+pure func oceanValues(o: Json, ids: [string], at: string) -> Result[[Value], string] = match ids {
+ [] => Ok([]),
+ id :: rest => match whole(o, id, 0, 100, "${at}: ocean") {
+  Err(e) => Err(e),
+  Ok(n) => match oceanValues(o, rest, at) { Err(e) => Err(e), Ok(vs) => Ok({id: id, value: n} :: vs) }
+ }
+}
+
+-- Stored in canonical OCEAN order whatever the author's key order.
+pure func readOcean(j: Json, at: string) -> Result[[Value], string] = match member(j, "ocean", at) {
+ Err(e) => Err(e),
+ Ok(o) => if not exact(o, oceanIds()) then Err("${at}: ocean needs exactly openness, conscientiousness, extraversion, agreeableness, neuroticism") else oceanValues(o, oceanIds(), at)
+}
+
+pure func readCost(j: Json, supplies: [string], at: string) -> Result[Cost, string] =
+ if not exact(j, ["resource","reserve","consume"]) then Err("${at}: a cost needs resource, reserve, consume") else
+ match (ident(j, "resource", at), whole(j, "reserve", 0, 1000, at), whole(j, "consume", 0, 1000, at)) {
+  (Ok(r), Ok(reserve), Ok(consume)) => if not contains(supplies, r) then Err("${at}: unknown resource ${r}") else if consume > reserve then Err("${at}: consume ${show(consume)} exceeds reserve ${show(reserve)}") else Ok({resource: r, reserve: reserve, consume: consume}),
+  (Err(e), _, _) => Err(e), (_, Err(e), _) => Err(e), (_, _, Err(e)) => Err(e)
+ }
+
+pure func bounded(worker: string, changes: [Value]) -> [Effect] = map(\c. BoundedIndicatorDelta(worker, c.id, c.value), changes)
+
+pure func readWork(j: Json, worker: string, indicators: [string], supplies: [string]) -> Result[Work, string] =
+ if not exact(j, ["id","name","purpose","duration","costs","effects"]) then Err("${worker}: work fields must be id, name, purpose, duration, costs, effects") else
+ match ident(j, "id", worker) {
+  Err(e) => Err(e),
+  Ok(id) => match (words(j, "name", id), words(j, "purpose", id), whole(j, "duration", 1, 64, id), items(j, "costs", id), numbers(j, "effects", indicators, 0 - 100, 100, id)) {
+   (Ok(name), Ok(purpose), Ok(duration), Ok(cs), Ok(changes)) => if length(changes) > 8 then Err("${id}: at most 8 effects") else match collect(cs, \c. readCost(c, supplies, id)) {
+    Err(e) => Err(e),
+    Ok(costs) => Ok({recipe: {id: id, duration: duration, allocation: 1, costs: costs, effects: bounded(worker, changes)}, name: name, purpose: purpose})
+   },
+   (Err(e), _, _, _, _) => Err(e), (_, Err(e), _, _, _) => Err(e), (_, _, Err(e), _, _) => Err(e), (_, _, _, Err(e), _) => Err(e), (_, _, _, _, Err(e)) => Err(e)
+  }
+ }
+
+pure func readCrew(j: Json, indicators: [string], defaults: [Value], supplies: [string]) -> Result[Crew, string] =
+ if not exact(j, ["id","role","ocean","values","start","work"]) then Err("crew: fields must be id, role, ocean, values, start, work") else
+ match ident(j, "id", "crew") {
+  Err(e) => Err(e),
+  Ok(id) => match (words(j, "role", id), readOcean(j, id), numbers(j, "values", [], 0, 100, id), numbers(j, "start", idsOf(defaults), 0, 100, id), items(j, "work", id)) {
+   (Ok(role), Ok(ocean), Ok(vs), Ok(start), Ok(ws)) => if length(ws) < 1 || length(ws) > 8 then Err("${id}: work needs 1-8 entries") else match collect(ws, \w. readWork(w, id, indicators, supplies)) {
+    Err(e) => Err(e),
+    Ok(work) => Ok({actor: {id: id, capacity: 1, attributes: ocean, values: vs, indicators: indicatorsFor(defaults, start)}, role: role, work: work})
+   },
+   (Err(e), _, _, _, _) => Err(e), (_, Err(e), _, _, _) => Err(e), (_, _, Err(e), _, _) => Err(e), (_, _, _, Err(e), _) => Err(e), (_, _, _, _, Err(e)) => Err(e)
+  }
+ }
+
+pure func readRest(j: Json, indicators: [string]) -> Result[Rest, string] =
+ if not exact(j, ["purpose","duration","effects"]) then Err("rest: fields must be purpose, duration, effects") else
+ match (words(j, "purpose", "rest"), whole(j, "duration", 1, 64, "rest"), numbers(j, "effects", indicators, 0 - 100, 100, "rest")) {
+  (Ok(p), Ok(d), Ok(e)) => if length(e) > 8 then Err("rest: at most 8 effects") else Ok({purpose: p, duration: d, effects: e}),
+  (Err(e), _, _) => Err(e), (_, Err(e), _) => Err(e), (_, _, Err(e)) => Err(e)
+ }
+
+pure func readStrain(j: Json, indicators: [string]) -> Result[Strain, string] =
+ if not exact(j, ["indicator","threshold","recovery","duration","cooldown"]) then Err("overextended: fields must be indicator, threshold, recovery, duration, cooldown") else
+ match (ident(j, "indicator", "overextended"), whole(j, "threshold", 0, 100, "overextended"), whole(j, "recovery", 0, 100, "overextended"), whole(j, "duration", 1, 64, "overextended"), whole(j, "cooldown", 0, 64, "overextended")) {
+  (Ok(i), Ok(t), Ok(r), Ok(d), Ok(c)) => if not contains(indicators, i) then Err("overextended: unknown indicator ${i}") else Ok({indicator: i, threshold: t, recovery: r, duration: d, cooldown: c}),
+  (Err(e), _, _, _, _) => Err(e), (_, Err(e), _, _, _) => Err(e), (_, _, Err(e), _, _) => Err(e), (_, _, _, Err(e), _) => Err(e), (_, _, _, _, Err(e)) => Err(e)
+ }
+
+pure func readSupply(j: Json) -> Result[Supply, string] =
+ if not exact(j, ["id","name","initial"]) then Err("resources: fields must be id, name, initial") else
+ match (ident(j, "id", "resources"), words(j, "name", "resources"), whole(j, "initial", 0, 1000, "resources")) {
+  (Ok(id), Ok(name), Ok(n)) => Ok({resource: {id: id, initial: n, available: n, reserved: 0, consumed: 0, transferredIn: 0, transferredOut: 0}, name: name}),
+  (Err(e), _, _) => Err(e), (_, Err(e), _) => Err(e), (_, _, Err(e)) => Err(e)
+ }
+
+pure func names(j: Json, key: string) -> Result[[string], string] = match items(j, key, "scenario") {
+ Err(e) => Err(e),
+ Ok(xs) => match collect(xs, \x. ident(jo([kv("v", x)]), "v", key)) {
+  Err(e) => Err(e),
+  Ok(ids) => if length(ids) < 1 || length(ids) > 32 then Err("${key}: 1-32 entries") else if not unique(ids) then Err("${key}: repeated id") else Ok(ids)
+ }
+}
+
+-- ---------------------------------------------------------------- assembly
+
+pure func assemble(id: string, indicators: [string], captain: Actor, crew: [Crew], rest: Rest, strain: Strain, trust: int, supplies: [Supply], canonical: string) -> Result[Scenario, string] = {
+ let workers = map(\c. c.actor.id, crew);
+ let actorIds = captain.id :: workers;
+ let work = flatMap(\c. c.work, crew);
+ let rests = map(\c. {id: "rest_${c.actor.id}", duration: rest.duration, allocation: 1, costs: [], effects: bounded(c.actor.id, rest.effects)}, crew);
+ let recipeIds = map(\w. w.recipe.id, work) ++ map(\r. r.id, rests);
+ if length(crew) < 1 || length(crew) > 15 then Err("crew: 1-15 members") else
+ if captain.id != "captain" then Err("captain: id must be \"captain\" in crew_scenario/1 (the host addresses the captain by that id)") else
+ if not unique(actorIds) then Err("crew: actor ids must be unique, including the captain") else
+ if not unique(recipeIds) then Err("crew: work ids must be unique and not rest_<crew id>") else
+ if not contains(indicators, "trust") then Err("indicators: trust is required for trust_in_captain") else
+ if not unique(map(\s. s.resource.id, supplies)) then Err("resources: ids must be unique") else
+ Ok({
+  id: id, captain: captain.id, workers: workers, indicators: indicators,
+  actors: captain :: map(\c. c.actor, crew),
+  resources: map(\s. s.resource, supplies),
+  recipes: map(\w. w.recipe, work) ++ rests,
+  owners: flatMap(\c. map(\w. {id: w.recipe.id, text: c.actor.id}, c.work) ++ [{id: "rest_${c.actor.id}", text: c.actor.id}], crew),
+  rules: map(\w. {id: "overextended_${w}", actor: w, indicator: strain.indicator, above: true, threshold: strain.threshold, recovery: strain.recovery, duration: strain.duration, cooldown: strain.cooldown}, workers),
+  relationships: map(\w. {from: w, to: captain.id, dimension: "trust", value: trust}, workers),
+  projectNames: map(\w. {id: w.recipe.id, text: w.name}, work) ++ map(\c. {id: "rest_${c.actor.id}", text: "${c.role} rest"}, crew),
+  purposes: map(\w. {id: w.recipe.id, text: w.purpose}, work),
+  restPurpose: rest.purpose,
+  resourceNames: map(\s. {id: s.resource.id, text: s.name}, supplies),
+  canonical: canonical
+ })
+}
+
+pure func fromJson(j: Json) -> Result[Scenario, string] =
+ if not exact(j, topFields()) then Err("scenario: top-level fields must be schema, id, indicators, indicator_defaults, captain, crew, rest, overextended, trust_in_captain, resources") else
+ if getString(j, "schema") != Some("crew_scenario/1") then Err("scenario: schema must be crew_scenario/1") else
+ match (ident(j, "id", "scenario"), names(j, "indicators")) {
+  (Err(e), _) => Err(e), (_, Err(e)) => Err(e),
+  (Ok(id), Ok(indicators)) => match (numbers(j, "indicator_defaults", indicators, 0, 100, "scenario"), items(j, "resources", "scenario")) {
+   (Err(e), _) => Err(e), (_, Err(e)) => Err(e),
+   (Ok(defaults), Ok(rs)) => match collect(rs, readSupply) {
+    Err(e) => Err(e),
+    Ok(supplies) => {
+     let ids = map(\s. s.resource.id, supplies);
+     match (member(j, "captain", "scenario"), items(j, "crew", "scenario"), member(j, "rest", "scenario"), member(j, "overextended", "scenario"), whole(j, "trust_in_captain", 0, 100, "scenario")) {
+      (Ok(cj), Ok(crewJ), Ok(rj), Ok(sj), Ok(trust)) => match (readCaptain(cj, defaults), collect(crewJ, \c. readCrew(c, indicators, defaults, ids)), readRest(rj, indicators), readStrain(sj, indicators)) {
+       (Ok(captain), Ok(crew), Ok(rest), Ok(strain)) => assemble(id, indicators, captain, crew, rest, strain, trust, supplies, encode(j)),
+       (Err(e), _, _, _) => Err(e), (_, Err(e), _, _) => Err(e), (_, _, Err(e), _) => Err(e), (_, _, _, Err(e)) => Err(e)
+      },
+      (Err(e), _, _, _, _) => Err(e), (_, Err(e), _, _, _) => Err(e), (_, _, Err(e), _, _) => Err(e), (_, _, _, Err(e), _) => Err(e), (_, _, _, _, Err(e)) => Err(e)
+     }
+    }
+   }
+  }
+ }
+
+-- ------------------------------------------------------------------ public
+
+-- Decode and validate a crew_scenario/1 document. Errors name the field.
+export pure func decodeScenario(body: string) -> Result[Scenario, string]
+ensures { match result { Ok(s) => length(s.actors) == length(s.workers) + 1 && s.canonical != "", Err(_) => true } } =
+ if stringLength(body) > 262144 then Err("scenario: larger than 256 KiB") else match decode(body) {
+  Err(e) => Err("scenario JSON: ${e}"),
+  Ok(j) => fromJson(j)
+ }
+
+-- sha256 of the canonical re-encoding: whitespace and layout do not change it.
+export pure func scenarioHash(s: Scenario) -> string
+ensures { stringLength(result) == 64 } = sha256Hex(s.canonical)
+
+-- The engine configuration for one command policy ("consent" or "orders").
+export pure func config(s: Scenario, policy: string) -> Result[Config, string]
+ensures { match result { Ok(c) => c.version == 1 && c.timeUnit == "turn" && c.limits.actors == length(s.actors), Err(_) => true } } =
+ if policy != "consent" && policy != "orders" then Err("policy") else Ok({
+  id: "${s.id}-${policy}", version: 1, session: "${s.id}-${policy}", timeUnit: "turn",
+  authorityId: "captain-cooperation-v1", appraisalId: "received-outcome-v1",
+  limits: {actors: length(s.actors), tasks: 64, commitments: 64, reliefs: 64, evidence: 512, knowledge: 2048, accepted: 4096, operations: 16, effects: 16, text: 4096, wire: 65536},
+  indicators: map(\id. {id: id, minimum: 0, maximum: 100}, s.indicators),
+  recipes: s.recipes, rules: s.rules, evidence: [], knowledge: [], relationships: s.relationships
+ })
+
+export pure func workerRecipe(s: Scenario, worker: string, recipe: string) -> bool
+ensures { not result || contains(s.workers, worker) } =
+ contains(s.workers, worker) && any(\o. o.id == recipe && o.text == worker, s.owners)
+
+export pure func projectName(s: Scenario, recipe: string) -> string
+ensures { result != "" } =
+ if recipe == "" then "Unknown project" else match lookup(s.projectNames, recipe) { Some(n) => n, None => recipe }
+
+export pure func purpose(s: Scenario, recipe: string) -> string
+ensures { result != "" } =
+ match lookup(s.purposes, recipe) { Some(p) => p, None => if s.restPurpose == "" then "Recover." else s.restPurpose }
+
+export pure func resourceName(s: Scenario, id: string) -> string
+ensures { result != "" } =
+ if id == "" then "Unknown supply" else match lookup(s.resourceNames, id) { Some(n) => n, None => id }

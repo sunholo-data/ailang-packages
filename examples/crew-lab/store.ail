@@ -7,8 +7,9 @@ import std/json (Json, JObject, get, getString, decode, encode)
 import std/fs (mkdirAllResult, mkdirResult, readFileResult, writeFileResult, renameFileResult, removeFileResult, fileExists)
 import std/ai (step, Message)
 import pkg/sunholo/content_library/library (Bundle, cacheKey, decodeBundle, encodeBundle, decodeGenerated, starterBundle)
-import ./codec (object, fields, integer)
-import ./reactions (Policy, decodePolicy, defaultPolicyBody, watchPolicyBody, narrativeBundle, prompt, shortSignature, shortBundleOK)
+import pkg/sunholo/crew_core/codec (object, fields, integer)
+import pkg/sunholo/crew_core/policy (Policy, decodePolicy, defaultPolicyBody, watchPolicyBody)
+import ./dialogue (narrativeBundle, prompt, shortSignature, shortBundleOK)
 
 export type PolicyFile = { policy: Policy, body: string }
 

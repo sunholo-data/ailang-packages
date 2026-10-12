@@ -1,0 +1,197 @@
+module sunholo/crew_lab/crew_sim
+import std/io (println, exit)
+import std/fs (readFileResult)
+import std/env (getArgs)
+import std/result (Result, Ok, Err)
+import std/option (Option, Some, None)
+import std/list (map, filter, foldl, length, head, any, contains, range, sortBy, nth, flatMap)
+import std/string (join, split, stringToInt, startsWith, substring, length as stringLength)
+import std/json (Json, JObject, JNumber, decode, encode, getString, jo, kv, js, jint, jnum, ja)
+import std/math (intToFloat)
+import std/crypto (sha256Hex)
+import pkg/sunholo/social_dynamics/model (Task, Offered, Working, Completed)
+import pkg/sunholo/content_library/library (nextRoll)
+import pkg/sunholo/crew_core/scenario (Scenario, decodeScenario, scenarioHash)
+import pkg/sunholo/crew_core/example (firstContactJson)
+import pkg/sunholo/crew_core/session (Session, Output, HostError, start, untraced, offer, ask, complete, startTask, resolve, input, cancel, encodeHostError)
+import pkg/sunholo/crew_core/policy (Policy, decodePolicy, watchPolicyBody, authoredAnswer)
+
+-- crew-sim: batch runs of the captain/crew host without AI, for tuning.
+-- Each seed plays `turns` turns with one captain strategy; replies come from
+-- the authored response policy (the same draw the offline watch uses). One
+-- NDJSON line per seed. `--summary FILE` reports medians and spreads; it never
+-- ranks strategies or scenarios.
+
+export type Count = {id: string, value: int} deriving (Eq)
+export type Tally = {replies: [Count], offers: int, starts: int, refused: int, stockouts: int, reliefAsked: int, granted: int, denied: int, errors: int, why: [Count], refusals: [Count]} deriving (Eq)
+export type Sim = {session: Session, seed: int, tally: Tally, captain: string, policy: Policy, scenario: Scenario, agreed: [string]} deriving (Eq)
+
+pure func zero() -> Tally = {replies: [], offers: 0, starts: 0, refused: 0, stockouts: 0, reliefAsked: 0, granted: 0, denied: 0, errors: 0, why: [], refusals: []}
+
+pure func bump(xs: [Count], id: string) -> [Count] =
+ if any(\c. c.id == id, xs) then map(\c. if c.id == id then {c | value: c.value + 1} else c, xs) else xs ++ [{id: id, value: 1}]
+
+pure func withTally(sim: Sim, t: Tally) -> Sim = {sim | tally: t}
+pure func failed(sim: Sim, why: string) -> Sim = { let t = sim.tally; withTally(sim, {t | errors: t.errors + 1, why: bump(t.why, why)}) }
+pure func reason(e: HostError) -> string = substring(encodeHostError(e), 0, 70)
+pure func countOffer(sim: Sim) -> Sim = { let t = sim.tally; withTally(sim, {t | offers: t.offers + 1}) }
+pure func countStart(sim: Sim) -> Sim = { let t = sim.tally; withTally(sim, {t | starts: t.starts + 1}) }
+pure func countRefusal(sim: Sim, why: string) -> Sim = { let t = sim.tally; withTally(sim, {t | refused: t.refused + 1, stockouts: t.stockouts + (if why == "insufficient_resource" then 1 else 0), refusals: bump(t.refusals, why)}) }
+pure func countReply(sim: Sim, label: string) -> Sim = { let t = sim.tally; withTally(sim, {t | replies: bump(t.replies, label)}) }
+pure func countRelief(sim: Sim) -> Sim = { let t = sim.tally; withTally(sim, {t | reliefAsked: t.reliefAsked + 1}) }
+pure func countDecision(sim: Sim, granted: bool) -> Sim = { let t = sim.tally; if granted then withTally(sim, {t | granted: t.granted + 1}) else withTally(sim, {t | denied: t.denied + 1}) }
+pure func withSession(sim: Sim, s: Session) -> Sim = {sim | session: s}
+pure func release(sim: Sim, id: string) -> Sim = match cancel(sim.session, id) { Ok(o) => {sim | session: o.session}, Err(_) => sim }
+pure func remember(sim: Sim, task: string, label: string) -> Sim = if label == "accept" && not contains(sim.agreed, task) then {sim | agreed: sim.agreed ++ [task]} else sim
+
+pure func indicator(s: Session, actor: string, id: string) -> int = match head(filter(\a. a.id == actor, s.state.actors)) {
+ None => 0,
+ Some(a) => match head(filter(\v. v.id == id, a.indicators)) { Some(v) => v.value, None => 0 }
+}
+
+pure func trust(s: Session, actor: string) -> int = match head(filter(\r. r.from == actor && r.to == s.scenario.captain && r.dimension == "trust", s.state.relationships)) {
+ Some(r) => r.value, None => 0
+}
+
+pure func busy(s: Session, worker: string) -> bool = any(\t. (t.status == Offered || t.status == Working) && contains(t.participants, worker), s.state.tasks)
+
+-- A seeded coin in [0, 1); returns the advanced seed with it.
+pure func coin(sim: Sim) -> {sim: Sim, roll: float} = match nextRoll(sim.seed) {
+ Ok(r) => {sim: {sim | seed: r.seed}, roll: r.roll},
+ Err(_) => {sim: sim, roll: 0.5}
+}
+
+pure func workRecipe(sc: Scenario, worker: string) -> string = match head(filter(\o. o.text == worker && o.id != "rest_${worker}", sc.owners)) {
+ Some(o) => o.id, None => "rest_${worker}"
+}
+
+-- Ask `actor` about `task`; the authored policy chooses the reaction.
+pure func hear(sim: Sim, actor: string, task: string, id: string) -> {sim: Sim, label: string} = match ask(sim.session, actor, task, id) {
+ Err(e) => {sim: failed(sim, "ask: ${reason(e)}"), label: ""},
+ Ok(a) => match head(filter(\q. q.id == id, a.session.pending)) {
+  None => {sim: failed({sim | session: a.session}, "ask: no pending request"), label: ""},
+  Some(request) => match authoredAnswer(sim.policy, request, sim.seed) {
+   Err(e) => {sim: failed({sim | session: a.session}, "answer: ${e}"), label: ""},
+   Ok(answer) => match complete(a.session, id, answer.body, answer.roll) {
+    Err(e) => {sim: failed(release({sim | session: a.session, seed: answer.seed}, id), "complete: ${reason(e)}"), label: ""},
+    Ok(c) => {sim: remember(countReply({sim | session: c.session, seed: answer.seed}, answer.label), task, answer.label), label: answer.label}
+   }
+  }
+ }
+}
+
+pure func begin(sim: Sim, task: string) -> Sim = match startTask(sim.session, task) {
+ Ok(o) => if o.failed then failed({sim | session: o.session}, "start: blocked") else countStart({sim | session: o.session}),
+ Err(e) => {
+  let text = encodeHostError(e);
+  countRefusal(sim, refusalCode(text))
+ }
+}
+
+-- The engine's error code when present (e.g. insufficient_resource), else the host text.
+pure func refusalCode(text: string) -> string = match decode(text) {
+ Ok(j) => match getString(j, "code") { Some(c) => c, None => match getString(j, "host") { Some(h) => h, None => substring(text, 0, 60) } },
+ Err(_) => substring(text, 0, 60)
+}
+
+-- Captain strategies. consent: start only agreed work, grant relief.
+-- orders: start whatever was offered, deny relief. random: seeded choices.
+pure func wantsStart(sim: Sim, label: string) -> {sim: Sim, go: bool} =
+ if sim.captain == "orders" then {sim: sim, go: true}
+ else if sim.captain == "consent" then {sim: sim, go: label == "accept"}
+ else { let c = coin(sim); {sim: c.sim, go: label == "accept" || c.roll < 0.5} }
+
+pure func grants(sim: Sim) -> {sim: Sim, go: bool} =
+ if sim.captain == "orders" then {sim: sim, go: false}
+ else if sim.captain == "consent" then {sim: sim, go: true}
+ else { let c = coin(sim); {sim: c.sim, go: c.roll < 0.5} }
+
+pure func chooseRecipe(sim: Sim, worker: string) -> {sim: Sim, recipe: string} = {
+ let tired = indicator(sim.session, worker, "fatigue") >= 70 || indicator(sim.session, worker, "stress") >= 75;
+ if sim.captain == "random" then { let c = coin(sim); {sim: c.sim, recipe: if c.roll < 0.3 then "rest_${worker}" else workRecipe(sim.scenario, worker)} }
+ else {sim: sim, recipe: if tired then "rest_${worker}" else workRecipe(sim.scenario, worker)}
+}
+
+-- Offer each idle specialist work (or rest), hear them, decide whether to start.
+pure func assign(sim: Sim, turn: int, worker: string) -> Sim =
+ if busy(sim.session, worker) then sim else {
+  let pick = chooseRecipe(sim, worker);
+  let id = "t${show(turn)}-${worker}";
+  match offer(pick.sim.session, worker, pick.recipe, id) {
+   Err(e) => failed(pick.sim, "offer: ${reason(e)}"),
+   Ok(o) => {
+    let offered = countOffer(withSession(pick.sim, o.session));
+    let heard = hear(offered, worker, id, "q-${id}");
+    let decision = wantsStart(heard.sim, heard.label);
+    if decision.go then begin(decision.sim, id) else decision.sim
+   }
+  }
+ }
+
+-- Re-ask about work still offered from an earlier turn.
+pure func persuade(sim: Sim, turn: int, t: Task) -> Sim = if contains(sim.agreed, t.id) then begin(sim, t.id) else match head(t.participants) {
+ None => sim,
+ Some(worker) => {
+  let heard = hear(sim, worker, t.id, "p${show(turn)}-${t.id}");
+  let decision = wantsStart(heard.sim, heard.label);
+  if decision.go then begin(decision.sim, t.id) else decision.sim
+ }
+}
+
+-- Check in with working crew every other turn; relief requests get an answer.
+pure func checkIn(sim: Sim, turn: int, t: Task) -> Sim = match head(t.participants) {
+ None => sim,
+ Some(worker) => if turn % 2 != 0 then sim else {
+  let rid = "c${show(turn)}-${t.id}";
+  let heard = hear(sim, worker, t.id, rid);
+  if heard.label != "request_relief" then heard.sim else {
+   let asked = countRelief(heard.sim);
+   let d = grants(asked);
+   match resolve(d.sim.session, "relief-${rid}", d.go) {
+    Err(e) => failed(d.sim, "relief: ${reason(e)}"),
+    Ok(o) => countDecision(withSession(d.sim, o.session), d.go)
+   }
+  }
+ }
+}
+
+pure func advanceTo(sim: Sim, turn: int) -> Sim = match input(sim.session, "{\"command\":\"advance\",\"tick\":${show(turn)},\"budget\":64}") {
+ Ok(o) => if o.failed then failed({sim | session: o.session}, "advance: blocked") else {sim | session: o.session},
+ Err(e) => failed(sim, "advance: ${reason(e)}")
+}
+
+pure func turnOf(sim: Sim, turn: int) -> Sim = {
+ let offered = filter(\t. t.status == Offered, sim.session.state.tasks);
+ let s1 = foldl(\acc t. persuade(acc, turn, t), sim, offered);
+ let working = filter(\t. t.status == Working, s1.session.state.tasks);
+ let s2 = foldl(\acc t. checkIn(acc, turn, t), s1, working);
+ let s3 = foldl(\acc w. assign(acc, turn, w), s2, s2.scenario.workers);
+ advanceTo(s3, turn)
+}
+
+export pure func play(sc: Scenario, policy: Policy, captain: string, seed: int, turns: int) -> Result[Sim, string]
+ensures { match result { Ok(sim) => sim.session.state.tick <= turns && sim.captain == captain, Err(_) => true } } =
+ if captain != "consent" && captain != "orders" && captain != "random" then Err("captain must be consent, orders or random")
+ else if turns < 1 || turns > 500 then Err("turns must be 1..500")
+ else match start(sc, "{\"command\":\"start\",\"policy\":\"${if captain == "orders" then "orders" else "consent"}\",\"scenario\":\"watch-v2\"}") {
+  Err(e) => Err(encodeHostError(e)),
+  Ok(o) => Ok(foldl(\acc turn. turnOf(acc, turn), {session: untraced(o.session), seed: seed, tally: zero(), captain: captain, policy: policy, scenario: sc, agreed: []}, range(1, turns + 1)))
+ }
+
+pure func counts(xs: [Count]) -> Json = jo(map(\c. kv(c.id, jint(c.value)), xs))
+
+export pure func report(sim: Sim, seed: int, turns: int, scenarioHashText: string, policyHash: string) -> string
+ensures { result != "" } = {
+ let s = sim.session;
+ let completed = map(\r. {id: r.id, value: length(filter(\t. t.recipe == r.id && t.status == Completed, s.state.tasks))}, sim.scenario.recipes);
+ let crew = map(\w. kv(w, jo([kv("fatigue", jint(indicator(s, w, "fatigue"))), kv("stress", jint(indicator(s, w, "stress"))), kv("morale", jint(indicator(s, w, "morale"))), kv("readiness", jint(indicator(s, w, "readiness"))), kv("observations", jint(indicator(s, w, "observations"))), kv("trust", jint(trust(s, w)))])), sim.scenario.workers);
+ encode(jo([
+  kv("schema", js("crew_sim/1")), kv("captain", js(sim.captain)), kv("seed", jint(seed)), kv("turns", jint(turns)), kv("tick", jint(s.state.tick)),
+  kv("scenario", js(scenarioHashText)), kv("policy", js(policyHash)),
+  kv("replies", counts(sim.tally.replies)),
+  kv("offers", jint(sim.tally.offers)), kv("starts", jint(sim.tally.starts)), kv("refused", jint(sim.tally.refused)), kv("refusal_reasons", counts(sim.tally.refusals)), kv("stockouts", jint(sim.tally.stockouts)),
+  kv("relief", jo([kv("asked", jint(sim.tally.reliefAsked)), kv("granted", jint(sim.tally.granted)), kv("denied", jint(sim.tally.denied))])),
+  kv("completed", counts(filter(\c. c.value > 0, completed))),
+  kv("crew", jo(crew)), kv("errors", jint(sim.tally.errors)), kv("error_kinds", counts(sim.tally.why))
+ ]))
+}

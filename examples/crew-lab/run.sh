@@ -14,6 +14,6 @@ ARGFILE=$(mktemp "${TMPDIR:-/tmp}/crew-args.XXXXXX")
 TRACEFILE=$(mktemp "${TMPDIR:-/tmp}/crew-trace.XXXXXX")
 trap 'rm -f "$ARGFILE" "$TRACEFILE"' EXIT
 jq -Rs 'split("\n") | map(select(length>0))' "$INPUT" > "$ARGFILE"
-"$AILANG" run --bytecode --strict-bytecode --package-dir "$ROOT/examples/crew-lab" --entry recording --args-file "$ARGFILE" "$ROOT/examples/crew-lab/session.ail" > "$TRACEFILE"
+"$AILANG" run --bytecode --strict-bytecode --package-dir "$ROOT/examples/crew-lab" --entry hostRecording --args-file "$ARGFILE" "$ROOT/examples/crew-lab/ship.ail" > "$TRACEFILE"
 cat "$TRACEFILE"
 jq -s -e 'all(.[]; (has("error") or has("blocked")) | not)' "$TRACEFILE" >/dev/null

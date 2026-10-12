@@ -2,11 +2,11 @@ module sunholo/crew_lab/journey_flow_test
 import std/result (Ok, Err)
 import std/string (contains)
 import ./journey_flow (navigation, initial, options, remember, styleDefault, onboardingAllowed)
-import ./session (start)
+import ./ship (start)
 import ./play_flow (PlayState)
 
 pure func base(phase: string) -> Result[PlayState, string] =
-  match start("{\"command\":\"start\",\"policy\":\"consent\"}") {
+  match start("{\"command\":\"start\",\"policy\":\"consent\",\"scenario\":\"watch-v2\"}") {
     Err(_) => Err("host"),
     Ok(o) => Ok({ session: o.session, seed: 42, nextId: 4, seq: 5, phase: phase, target: "project-1" })
   }

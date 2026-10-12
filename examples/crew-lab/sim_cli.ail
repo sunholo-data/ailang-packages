@@ -1,0 +1,122 @@
+module sunholo/crew_lab/sim_cli
+import std/io (println, exit)
+import std/fs (readFileResult)
+import std/env (getArgs)
+import std/result (Result, Ok, Err)
+import std/option (Option, Some, None)
+import std/list (map, filter, foldl, length, head, any, range, sortBy, nth, flatMap, forEachE)
+import std/string (join, split, stringToInt, trim)
+import std/json (Json, JObject, JNumber, decode)
+import std/math (intToFloat, floatToInt, floor)
+import std/crypto (sha256Hex)
+import pkg/sunholo/crew_core/scenario (Scenario, decodeScenario, scenarioHash)
+import pkg/sunholo/crew_core/example (firstContactJson)
+import pkg/sunholo/crew_core/policy (Policy, decodePolicy, watchPolicyBody)
+import ./crew_sim (play, report)
+
+export type Options = {scenario: string, policy: string, captain: string, first: int, last: int, turns: int, summary: string} deriving (Eq)
+
+pure func defaults() -> Options = {scenario: "", policy: "", captain: "consent", first: 1, last: 20, turns: 12, summary: ""}
+
+pure func seedRange(text: string) -> Result[{first: int, last: int}, string] = match split(text, "..") {
+ [a] => match stringToInt(a) { Some(n) => if n >= 1 && n <= 2147483646 then Ok({first: n, last: n}) else Err("seed out of range"), None => Err("--seeds takes N or A..B") },
+ [a, b] => match (stringToInt(a), stringToInt(b)) {
+  (Some(x), Some(y)) => if x >= 1 && y >= x && y <= 2147483646 && y - x < 100000 then Ok({first: x, last: y}) else Err("--seeds A..B needs 1 <= A <= B and at most 100000 seeds"),
+  _ => Err("--seeds takes N or A..B")
+ },
+ _ => Err("--seeds takes N or A..B")
+}
+
+export pure func parse(xs: [string], o: Options) -> Result[Options, string]
+ensures { match result { Ok(r) => r.first >= 1 && r.last >= r.first && r.turns >= 1 && r.turns <= 500, Err(_) => true } } = match xs {
+ [] => if o.first >= 1 && o.last >= o.first && o.turns >= 1 && o.turns <= 500 then Ok(o) else Err("invalid options"),
+ "--scenario" :: p :: rest => parse(rest, {o | scenario: p}),
+ "--policy" :: p :: rest => parse(rest, {o | policy: p}),
+ "--captain" :: c :: rest => if c == "consent" || c == "orders" || c == "random" then parse(rest, {o | captain: c}) else Err("--captain must be consent, orders or random"),
+ "--seeds" :: r :: rest => match seedRange(r) { Ok(x) => parse(rest, {o | first: x.first, last: x.last}), Err(e) => Err(e) },
+ "--turns" :: n :: rest => match stringToInt(n) { Some(t) => if t >= 1 && t <= 500 then parse(rest, {o | turns: t}) else Err("--turns must be 1..500"), None => Err("--turns must be a whole number") },
+ "--summary" :: p :: rest => parse(rest, {o | summary: p}),
+ "--help" :: _ => Err("help"),
+ x :: _ => Err("unknown argument ${x}")
+}
+
+pure func usage() -> string =
+ "crew-sim: batch runs of the captain/crew host without AI.\n  crew-sim [--scenario FILE] [--policy FILE] [--captain consent|orders|random] [--seeds A..B] [--turns N] > runs.ndjson\n  crew-sim --summary runs.ndjson\nDefaults: the first-contact example ship, its authored response policy, consent, seeds 1..20, 12 turns (the host keeps at most 64 answered questions per session).\nOne JSON line per seed; the same inputs always give the same output."
+
+func readOr(path: string, fallback: string) -> Result[string, string] ! {FS} =
+ if path == "" then Ok(fallback) else match readFileResult(path) { Ok(b) => Ok(b), Err(e) => Err("cannot read ${path}: ${e}") }
+
+-- ---------------------------------------------------------------- summary
+
+type Sample = {path: string, value: float} deriving (Eq)
+
+pure func leaves(prefix: string, j: Json) -> [Sample] = match j {
+ JNumber(n) => [{path: prefix, value: n}],
+ JObject(kvs) => flatMap(\p. leaves(if prefix == "" then p.key else "${prefix}.${p.key}", p.value), kvs),
+ _ => []
+}
+
+pure func paths(xs: [Sample], seen: [string]) -> [string] = match xs {
+ [] => seen,
+ x :: rest => paths(rest, if any(\p. p == x.path, seen) then seen else seen ++ [x.path])
+}
+
+pure func at(sorted: [float], q: float) -> float = {
+ let n = length(sorted);
+ let pos = q * intToFloat(n - 1);
+ let lo = floatIndex(pos);
+ let frac = pos - intToFloat(lo);
+ match (nth(sorted, lo), nth(sorted, if lo + 1 < n then lo + 1 else lo)) {
+  (Some(a), Some(b)) => a + (b - a) * frac,
+  _ => 0.0
+ }
+}
+
+pure func floatIndex(x: float) -> int = floatToInt(floor(x))
+
+pure func fmt(x: float) -> string = show(floor(x * 10.0 + 0.5) / 10.0)
+
+export pure func summarise(lines: [string]) -> string
+ensures { result != "" } = {
+ let rows = flatMap(\l. match decode(l) { Ok(j) => [j], Err(_) => [] }, filter(\l. trim(l) != "", lines));
+ let samples = flatMap(\j. leaves("", j), rows);
+ let ps = filter(\p. p != "seed" && p != "turns", paths(samples, []));
+ let header = "${show(length(rows))} runs. Median [25th..75th percentile] (min..max). No ranking: compare runs, not winners.";
+ join("\n", header :: map(\p. {
+  let vs = sortBy(\a b. if a < b then 0 - 1 else if a > b then 1 else 0, map(\s. s.value, filter(\s. s.path == p, samples)));
+  "${p}: ${fmt(at(vs, 0.5))} [${fmt(at(vs, 0.25))}..${fmt(at(vs, 0.75))}] (${fmt(at(vs, 0.0))}..${fmt(at(vs, 1.0))})"
+ }, ps))
+}
+
+-- ---------------------------------------------------------------- main
+
+export func main() -> () ! {IO, FS, Env} = match parse(getArgs(), defaults()) {
+ Err("help") => println(usage()),
+ Err(e) => { println("${e}\n\n${usage()}"); exit(2) },
+ Ok(o) => if o.summary != "" then match readFileResult(o.summary) {
+  Err(e) => { println("cannot read ${o.summary}: ${e}"); exit(1) },
+  Ok(body) => println(summarise(split(body, "\n")))
+ } else match (readOr(o.scenario, firstContactJson()), readOr(o.policy, watchPolicyBody())) {
+  (Err(e), _) => { println(e); exit(1) },
+  (_, Err(e)) => { println(e); exit(1) },
+  (Ok(sb), Ok(pb)) => match (decodeScenario(sb), decodePolicy(pb)) {
+   (Err(e), _) => { println("invalid scenario: ${e}"); exit(1) },
+   (_, Err(e)) => { println("invalid policy: ${e}"); exit(1) },
+   (Ok(sc), Ok(policy)) => forEachE(\seed. match play(sc, policy, o.captain, seed, o.turns) {
+     Err(e) => { println("{\"error\":\"${e}\"}"); exit(1) },
+     Ok(sim) => println(report(sim, seed, o.turns, scenarioHash(sc), sha256Hex(pb)))
+    }, range(o.first, o.last + 1))
+  }
+ }
+}
+
+test "arguments parse ranges and reject unknown flags" {
+ match (parse(["--captain", "orders", "--seeds", "3..9", "--turns", "6"], defaults()), parse(["--seeds", "9..3"], defaults()), parse(["--captain", "mutiny"], defaults()), parse(["--wat"], defaults())) {
+  (Ok(o), Err(_), Err(_), Err(_)) => o.captain == "orders" && o.first == 3 && o.last == 9 && o.turns == 6,
+  _ => false
+ }
+}
+
+test "summary reports median and spread per measure" {
+ summarise(["{\"seed\":1,\"offers\":2}", "{\"seed\":2,\"offers\":4}", "{\"seed\":3,\"offers\":9}"]) == "3 runs. Median [25th..75th percentile] (min..max). No ranking: compare runs, not winners.\noffers: 4.0 [3.0..6.5] (2.0..9.0)"
+}

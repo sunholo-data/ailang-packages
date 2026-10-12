@@ -103,7 +103,7 @@ cp -R "$EX" "$TMP/app"
 python3 - "$TMP/app/ailang.toml" "$EX" "$TMP/valid.json" <<'PY'
 import pathlib,sys
 p=pathlib.Path(sys.argv[1]);s=p.read_text()
-for dep in ('terminal-ui','social-dynamics','content-library'):
+for dep in ('terminal-ui','social-dynamics','content-library','crew-core'):
  s=s.replace(f'path = "../../packages/{dep}"',f'path = "{pathlib.Path(sys.argv[2]).parents[1]}/packages/{dep}"')
 s=s.replace('crew-watch = {module = "native_watch", entry = "main", caps = "IO,FS,Env,AI", run_flags = ["--ai", "z-ai/glm-5.3-flash", "--fs-max-bytes", "16MB"]}',f'crew-watch-fixture = {{module = "native_watch", entry = "main", caps = "IO,FS,Env,AI", run_flags = ["--ai-stub", "--ai-stub-fixtures", "{sys.argv[3]}", "--fs-max-bytes", "16MB"]}}')
 p.write_text(s)

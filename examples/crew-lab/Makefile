@@ -1,68 +1,48 @@
 ROOT := $(abspath $(dir $(lastword $(MAKEFILE_LIST)))/../..)
 EX := $(ROOT)/examples/crew-lab
+CORE := $(ROOT)/packages/crew-core
 AILANG ?= ailang
 INPUT ?= $(EX)/recordings/agreed-science.ndjson
 ENGINE ?= interpreter
 OUT := $(ROOT)/.ailang/state/crew-lab
-.PHONY: experiment deps tests library-tests store-test play-test scenarios parity replay cli-test quality validate fixtures
+.PHONY: experiment deps fixtures tests core-tests library-tests terminal-tests store-test scenarios parity replay quality validate mutations native-ui-test native-watch-test native-watch-pty-test short-reply-test conversations-test sim-test scenario-test
+
+# One NDJSON host run (crew-host protocol) over a saved recording.
 experiment:
 	@mkdir -p "$(OUT)"
 	@AILANG="$(AILANG)" "$(EX)/run.sh" "$(ENGINE)" "$(INPUT)" > "$(OUT)/latest.ndjson"
 	@jq -s 'last.state | {tick,actors,resources,relationships,conditions}' "$(OUT)/latest.ndjson"
 	@printf 'Full causal trace: %s\n' "$(OUT)/latest.ndjson"
 deps:
-	@cd "$(EX)" && "$(AILANG)" lock
+	@cd "$(CORE)" && "$(AILANG)" lock >/dev/null
+	@cd "$(EX)" && "$(AILANG)" lock >/dev/null
 fixtures:
 	@"$(EX)/generate-recordings.sh"
+
+# crew_core: the publishable pure host. example.ail must match data/watch-scenario.json.
+core-tests:
+	@"$(CORE)/tools/gen-example.sh" --check
+	@"$(AILANG)" check --package "$(CORE)"
+	@cd "$(CORE)" && "$(AILANG)" test --package . --allow-skips
+	@cd "$(CORE)" && "$(AILANG)" test --package . --allow-skips --bytecode --strict-bytecode
+	@cd "$(CORE)" && "$(AILANG)" test --allow-skips scenario.ail
+	@cd "$(CORE)" && "$(AILANG)" test --allow-skips session.ail
+	@cd "$(CORE)" && "$(AILANG)" test --allow-skips conversations.ail
+	@cd "$(CORE)" && "$(AILANG)" test --allow-skips personality_host.ail
+	@cd "$(CORE)" && "$(AILANG)" pkg quality --strict .
+
 tests:
 	@"$(AILANG)" check --package "$(EX)"
-	@cd "$(EX)" && "$(AILANG)" test --package .
-	@cd "$(EX)" && "$(AILANG)" test --package . --bytecode --strict-bytecode
-	@cd "$(EX)" && "$(AILANG)" test scenario.ail
-	@cd "$(EX)" && "$(AILANG)" test --allow-skips watch_scenario.ail
-	@cd "$(EX)" && "$(AILANG)" test --allow-skips narrative.ail
-	@cd "$(EX)" && "$(AILANG)" test --allow-skips watch_presenter.ail
-	@cd "$(EX)" && "$(AILANG)" test --allow-skips session.ail
-	@cd "$(EX)" && "$(AILANG)" test --allow-skips reactions.ail
-	@cd "$(EX)" && "$(AILANG)" test --allow-skips play_flow.ail
-	@cd "$(EX)" && "$(AILANG)" test --allow-skips presenter.ail
-	@cd "$(EX)" && "$(AILANG)" test --allow-skips journey_flow.ail
-	@cd "$(EX)" && "$(AILANG)" test --allow-skips journey_presenter.ail
+	@cd "$(EX)" && "$(AILANG)" test --package . --allow-skips
+	@cd "$(EX)" && "$(AILANG)" test --package . --allow-skips --bytecode --strict-bytecode
+	@cd "$(EX)" && for m in narrative watch_presenter dialogue play_flow presenter journey_flow ship sim_cli; do "$(AILANG)" test --allow-skips $$m.ail || exit; done
 
-scenarios:
-	@mkdir -p "$(OUT)"
-	@for recording in "$(EX)"/recordings/*.ndjson; do name=$$(basename "$$recording" .ndjson); AILANG="$(AILANG)" "$(EX)/run.sh" interpreter "$$recording" > "$(OUT)/$$name.ndjson" || exit; done
-	@printf 'Five saved crew scenarios executed\n'
-parity:
-	@mkdir -p "$(OUT)"
-	@for recording in "$(EX)"/recordings/*.ndjson; do name=$$(basename "$$recording" .ndjson); for engine in interpreter vm; do AILANG="$(AILANG)" "$(EX)/run.sh" "$$engine" "$$recording" > "$(OUT)/$$name-$$engine.ndjson" || exit; done; cmp "$(OUT)/$$name-interpreter.ndjson" "$(OUT)/$$name-vm.ndjson" || exit; done
-	@printf 'Five evaluator/strict-VM traces identical\n'
-replay:
-	@mkdir -p "$(OUT)"
-	@for recording in "$(EX)"/recordings/*.ndjson; do name=$$(basename "$$recording" .ndjson); for pass in 1 2; do AILANG="$(AILANG)" "$(EX)/run.sh" interpreter "$$recording" > "$(OUT)/$$name-replay$$pass.ndjson" || exit; done; cmp "$(OUT)/$$name-replay1.ndjson" "$(OUT)/$$name-replay2.ndjson" || exit; done
-	@printf 'Five saved recordings replay identically\n'
-cli-test: scenarios
-	@AILANG="$(AILANG)" "$(EX)/test-cli.sh"
 library-tests:
 	@"$(AILANG)" check --package "$(ROOT)/packages/content-library"
 	@cd "$(ROOT)/packages/content-library" && "$(AILANG)" test --package .
 	@cd "$(ROOT)/packages/content-library" && "$(AILANG)" test --package . --bytecode --strict-bytecode
 	@cd "$(ROOT)/packages/content-library" && "$(AILANG)" test --allow-skips library.ail
 	@cd "$(ROOT)/packages/content-library" && "$(AILANG)" pkg quality --strict .
-store-test:
-	@AILANG="$(AILANG)" "$(EX)/test-store.sh"
-play-test:
-	@AILANG="$(AILANG)" "$(EX)/test-play.sh"
-quality:
-	@cd "$(EX)" && "$(AILANG)" pkg quality --strict .
-validate: deps library-tests tests scenarios replay parity cli-test store-test play-test quality
-.PHONY: mutations
-mutations:
-	@AILANG="$(AILANG)" python3 "$(EX)/test-mutations.py"
-.PHONY: view
-view:
-	@"$(AILANG)" run --package-dir "$(EX)" --caps IO --entry main "$(EX)/viewer.ail" < "$(INPUT)"
-.PHONY: terminal-tests journey-test
 terminal-tests:
 	@"$(AILANG)" check --package "$(ROOT)/packages/terminal-ui"
 	@cd "$(ROOT)/packages/terminal-ui" && "$(AILANG)" test --package .
@@ -70,45 +50,48 @@ terminal-tests:
 	@cd "$(ROOT)/packages/terminal-ui" && "$(AILANG)" test --allow-skips ui.ail
 	@cd "$(ROOT)/packages/terminal-ui" && "$(AILANG)" test --allow-skips demo.ail
 	@cd "$(ROOT)/packages/terminal-ui" && "$(AILANG)" pkg quality --strict .
-journey-test:
-	@AILANG="$(AILANG)" "$(EX)/test-journey.sh"
-validate: terminal-tests journey-test
 
-.PHONY: watch-test
-watch-test:
-	@AILANG="$(AILANG)" "$(EX)/test-watch.sh"
-validate: watch-test
+# Host protocol recordings: run, replay twice, and compare interpreter with strict VM.
+scenarios:
+	@mkdir -p "$(OUT)"
+	@for recording in "$(EX)"/recordings/*.ndjson; do name=$$(basename "$$recording" .ndjson); AILANG="$(AILANG)" "$(EX)/run.sh" interpreter "$$recording" > "$(OUT)/$$name.ndjson" || exit; done
+	@printf 'Saved host recordings executed\n'
+parity:
+	@mkdir -p "$(OUT)"
+	@for recording in "$(EX)"/recordings/*.ndjson; do name=$$(basename "$$recording" .ndjson); for engine in interpreter vm; do AILANG="$(AILANG)" "$(EX)/run.sh" "$$engine" "$$recording" > "$(OUT)/$$name-$$engine.ndjson" || exit; done; cmp "$(OUT)/$$name-interpreter.ndjson" "$(OUT)/$$name-vm.ndjson" || exit; done
+	@printf 'Interpreter and strict-VM host traces identical\n'
+replay:
+	@mkdir -p "$(OUT)"
+	@for recording in "$(EX)"/recordings/*.ndjson; do name=$$(basename "$$recording" .ndjson); for pass in 1 2; do AILANG="$(AILANG)" "$(EX)/run.sh" interpreter "$$recording" > "$(OUT)/$$name-replay$$pass.ndjson" || exit; done; cmp "$(OUT)/$$name-replay1.ndjson" "$(OUT)/$$name-replay2.ndjson" || exit; done
+	@printf 'Saved host recordings replay identically\n'
 
-.PHONY: native-ui-test
+store-test:
+	@AILANG="$(AILANG)" "$(EX)/test-store.sh"
+quality:
+	@cd "$(EX)" && "$(AILANG)" pkg quality --strict .
+mutations:
+	@AILANG="$(AILANG)" python3 "$(EX)/test-mutations.py"
+
 native-ui-test:
 	@cd "$(EX)" && "$(AILANG)" test native_watch_ui_test.ail native_watch_presenter_test.ail
 	@cd "$(EX)" && "$(AILANG)" test native_watch_ui_test.ail native_watch_presenter_test.ail --bytecode --strict-bytecode
 	@cd "$(EX)" && "$(AILANG)" test --allow-skips native_watch_ui.ail
 	@cd "$(EX)" && "$(AILANG)" test --allow-skips native_watch_presenter.ail
 	@cd "$(EX)" && "$(AILANG)" test --allow-skips native_watch_args.ail
-validate: native-ui-test
-
-.PHONY: native-watch-test
 native-watch-test:
 	@AILANG="$(AILANG)" "$(EX)/test-native-watch.sh"
-validate: native-watch-test
-
-.PHONY: native-watch-pty-test
 native-watch-pty-test:
 	@AILANG="$(AILANG)" python3 "$(EX)/test-native-watch-pty.py"
-validate: native-watch-pty-test
-
-.PHONY: short-reply-test
 short-reply-test:
 	@AILANG="$(AILANG)" bash "$(EX)/test-short-reply.sh"
-validate: short-reply-test
-
-.PHONY: conversations-test
+scenario-test:
+	@AILANG="$(AILANG)" "$(EX)/test-scenario-errors.sh"
+sim-test:
+	@AILANG="$(AILANG)" "$(EX)/test-sim.sh"
 conversations-test:
-	@cd "$(EX)" && "$(AILANG)" test --allow-skips conversations.ail
-	@cd "$(EX)" && "$(AILANG)" test --allow-skips personality_host.ail
 	@cd "$(ROOT)/packages/terminal-ui" && "$(AILANG)" test --allow-skips text_field.ail
 	@cd "$(ROOT)/packages/social-dynamics" && "$(AILANG)" test --allow-skips personality.ail
 	@AILANG="$(AILANG)" python3 "$(EX)/test-conversations.py"
 	@AILANG="$(AILANG)" "$(EX)/test-conversation-replay.sh"
-validate: conversations-test
+
+validate: deps core-tests library-tests terminal-tests tests scenarios replay parity store-test quality native-ui-test native-watch-test native-watch-pty-test short-reply-test conversations-test sim-test scenario-test

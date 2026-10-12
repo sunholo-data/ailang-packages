@@ -1,0 +1,60 @@
+module sunholo/crew_lab/ship
+import std/result (Result, Ok, Err)
+import pkg/sunholo/crew_core/session (Output, HostError, HostFailure, start as startWith, recording as recordingWith)
+import pkg/sunholo/crew_core/example (firstContact)
+import pkg/sunholo/crew_core/scenario (Scenario, config as scenarioConfig, workerRecipe as scenarioWorkerRecipe, projectName as scenarioProjectName, resourceName as scenarioResourceName)
+import pkg/sunholo/social_dynamics/model (Config, Actor, Resource)
+import std/list (length)
+
+-- The ship this app runs when no --scenario is given: crew_core's first-contact
+-- example, generated from data/watch-scenario.json.
+
+export pure func start(line: string) -> Result[Output, HostError]
+ensures { match result { Ok(o) => o.session.state.tick == 0, Err(_) => true } } = match firstContact() {
+ Ok(sc) => startWith(sc, line),
+ Err(e) => Err(HostFailure("default scenario: ${e}"))
+}
+
+-- Strict-VM entry for run.sh (named apart from session.recording; see the
+-- entry-resolution note in the sprint log).
+export pure func hostRecording(lines: [string]) -> string
+ensures { result != "" } = match firstContact() {
+ Ok(sc) => recordingWith(sc, lines),
+ Err(e) => "{\"error\":\"default scenario: ${e}\"}"
+}
+
+export pure func recording(lines: [string]) -> string
+ensures { result != "" } = match firstContact() {
+ Ok(sc) => recordingWith(sc, lines),
+ Err(e) => "{\"error\":\"default scenario: ${e}\"}"
+}
+
+-- Default-ship views for tests and presentation fallbacks. An undecodable
+-- example yields empty values; the example's own test guards against that.
+export pure func scenario() -> Result[Scenario, string]
+ensures { match result { Ok(sc) => sc.captain == "captain", Err(_) => true } } = firstContact()
+export pure func config(policy: string) -> Result[Config, string]
+ensures { match result { Ok(c) => c.version == 1, Err(_) => true } } = match firstContact() { Ok(sc) => scenarioConfig(sc, policy), Err(e) => Err(e) }
+export pure func actors() -> [Actor]
+ensures { length(result) >= 0 } = match firstContact() { Ok(sc) => sc.actors, Err(_) => [] }
+export pure func resources() -> [Resource]
+ensures { length(result) >= 0 } = match firstContact() { Ok(sc) => sc.resources, Err(_) => [] }
+export pure func workers() -> [string]
+ensures { length(result) >= 0 } = match firstContact() { Ok(sc) => sc.workers, Err(_) => [] }
+export pure func workerRecipe(worker: string, recipe: string) -> bool
+ensures { not result || worker != "captain" } = match firstContact() { Ok(sc) => scenarioWorkerRecipe(sc, worker, recipe), Err(_) => false }
+export pure func projectName(recipe: string) -> string
+ensures { result != "" } = match firstContact() { Ok(sc) => scenarioProjectName(sc, recipe), Err(_) => "Unknown project" }
+export pure func resourceName(id: string) -> string
+ensures { result != "" } = match firstContact() { Ok(sc) => scenarioResourceName(sc, id), Err(_) => "Unknown supply" }
+
+test "default ship is the five-specialist first-contact watch" {
+ length(actors()) == 6 && length(workers()) == 5 && length(resources()) == 3 && workerRecipe("medic", "work_medic") && not workerRecipe("captain", "work_medic") && projectName("work_pilot") == "Plan approach observations" && resourceName("archive_compute") == "Archive compute slots"
+}
+
+test "default start requires a host profile" {
+ match (start("{\"command\":\"start\",\"policy\":\"consent\"}"), start("{\"command\":\"start\",\"policy\":\"consent\",\"scenario\":\"watch-v3\"}")) {
+  (Err(_), Ok(o)) => length(o.session.personalities) == 5,
+  _ => false
+ }
+}

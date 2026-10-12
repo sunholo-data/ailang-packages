@@ -1,0 +1,88 @@
+module sunholo/crew_core/scenario_test
+import std/result (Result, Ok, Err)
+import std/list (map, length)
+import std/string (replace, length as stringLength)
+import pkg/sunholo/social_dynamics/model (BoundedIndicatorDelta)
+import ./scenario (Scenario, decodeScenario, config, workerRecipe, projectName, purpose, resourceName, scenarioHash)
+
+-- A two-person ship: the smallest scenario that exercises every field.
+pure func body() -> string =
+ "{\"schema\":\"crew_scenario/1\",\"id\":\"tiny\",\"indicators\":[\"fatigue\",\"stress\",\"trust\"],\"indicator_defaults\":{\"fatigue\":0,\"stress\":10},\"captain\":{\"id\":\"captain\",\"values\":{\"mission\":80},\"start\":{\"fatigue\":5}},\"crew\":[{\"id\":\"cook\",\"role\":\"Cook\",\"ocean\":{\"openness\":10,\"conscientiousness\":20,\"extraversion\":30,\"agreeableness\":40,\"neuroticism\":50},\"values\":{\"care\":60},\"start\":{\"stress\":40},\"work\":[{\"id\":\"work_cook\",\"name\":\"Bake\",\"purpose\":\"Feed everyone.\",\"duration\":2,\"costs\":[{\"resource\":\"flour\",\"reserve\":1,\"consume\":1}],\"effects\":{\"fatigue\":10,\"stress\":-5}}]}],\"rest\":{\"purpose\":\"Recover.\",\"duration\":1,\"effects\":{\"fatigue\":-10}},\"overextended\":{\"indicator\":\"stress\",\"threshold\":70,\"recovery\":40,\"duration\":2,\"cooldown\":3},\"trust_in_captain\":50,\"resources\":[{\"id\":\"flour\",\"name\":\"Flour sacks\",\"initial\":2}]}"
+
+pure func decoded() -> Result[Scenario, string] = decodeScenario(body())
+
+pure func rejected(b: string) -> bool = match decodeScenario(b) { Err(_) => true, Ok(_) => false }
+
+pure func errorOf(b: string) -> string = match decodeScenario(b) { Err(e) => e, Ok(_) => "" }
+
+test "decodes the tiny ship" {
+ match decoded() {
+  Err(_) => false,
+  Ok(s) => s.id == "tiny" && s.captain == "captain" && s.workers == ["cook"] && length(s.actors) == 2 && length(s.resources) == 1
+ }
+}
+
+test "actor indicators follow default order with overrides" {
+ match decoded() {
+  Err(_) => false,
+  Ok(s) => map(\a. a.indicators, s.actors) == [[{id:"fatigue",value:5},{id:"stress",value:10}],[{id:"fatigue",value:0},{id:"stress",value:40}]]
+ }
+}
+
+test "ocean traits are stored in canonical order" {
+ match decoded() {
+  Err(_) => false,
+  Ok(s) => match s.actors {
+   _ :: cook :: [] => map(\v. v.id, cook.attributes) == ["openness","conscientiousness","extraversion","agreeableness","neuroticism"] && map(\v. v.value, cook.attributes) == [10,20,30,40,50],
+   _ => false
+  }
+ }
+}
+
+test "work then rest recipes with bounded effects on the worker" {
+ match decoded() {
+  Err(_) => false,
+  Ok(s) => map(\r. r.id, s.recipes) == ["work_cook","rest_cook"] && match s.recipes {
+   w :: _ => w.effects == [BoundedIndicatorDelta("cook","fatigue",10),BoundedIndicatorDelta("cook","stress",0 - 5)] && w.duration == 2,
+   _ => false
+  }
+ }
+}
+
+test "config derives ids, limits, rules and trust" {
+ match decoded() {
+  Err(_) => false,
+  Ok(s) => match config(s, "consent") {
+   Err(_) => false,
+   Ok(c) => c.id == "tiny-consent" && c.session == "tiny-consent" && c.limits.actors == 2 && length(c.rules) == 1 && c.relationships == [{from:"cook",to:"captain",dimension:"trust",value:50}] && length(c.indicators) == 3
+  }
+ }
+}
+
+test "unknown policy is refused" {
+ match decoded() { Err(_) => false, Ok(s) => match config(s, "mutiny") { Err(_) => true, Ok(_) => false } }
+}
+
+test "worker rights, names and fallbacks" {
+ match decoded() {
+  Err(_) => false,
+  Ok(s) => workerRecipe(s,"cook","work_cook") && workerRecipe(s,"cook","rest_cook") && not workerRecipe(s,"captain","work_cook") && projectName(s,"work_cook") == "Bake" && projectName(s,"rest_cook") == "Cook rest" && projectName(s,"") == "Unknown project" && purpose(s,"rest_cook") == "Recover." && resourceName(s,"flour") == "Flour sacks" && resourceName(s,"") == "Unknown supply"
+ }
+}
+
+test "hash ignores whitespace but not content" {
+ match (decoded(), decodeScenario(replace(body(), ",\"", ", \"")), decodeScenario(replace(body(), "\"initial\":2", "\"initial\":3"))) {
+  (Ok(a), Ok(b), Ok(c)) => scenarioHash(a) == scenarioHash(b) && scenarioHash(a) != scenarioHash(c) && stringLength(scenarioHash(a)) == 64,
+  _ => false
+ }
+}
+
+test "rejects an unknown cost resource" { rejected(replace(body(), "\"resource\":\"flour\"", "\"resource\":\"sugar\"")) }
+test "rejects an out of range trait" { rejected(replace(body(), "\"neuroticism\":50", "\"neuroticism\":101")) }
+test "rejects a duplicate actor id" { rejected(replace(body(), "\"id\":\"cook\"", "\"id\":\"captain\"")) }
+test "rejects an extra field" { rejected(replace(body(), "\"trust_in_captain\":50", "\"trust_in_captain\":50,\"bonus\":1")) }
+test "rejects an effect on an unknown indicator" { rejected(replace(body(), "\"stress\":-5", "\"morale\":-5")) }
+test "rejects the wrong schema" { rejected(replace(body(), "crew_scenario/1", "crew_scenario/9")) }
+test "rejects consume above reserve" { rejected(replace(body(), "\"reserve\":1,\"consume\":1", "\"reserve\":1,\"consume\":2")) }
+test "errors name the problem" { errorOf(replace(body(), "\"resource\":\"flour\"", "\"resource\":\"sugar\"")) == "work_cook: unknown resource sugar" }
+test "rejects a captain not named captain" { rejected(replace(body(), "\"id\":\"captain\"", "\"id\":\"skipper\"")) }

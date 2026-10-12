@@ -26,11 +26,6 @@ nav=("$TMP/navigation"/runs/*/journal.jsonl)
 jq -s 'map(.payload)' "${journal[0]}" > "$TMP/base-payload.json"
 jq -s 'map(.payload)' "${nav[0]}" > "$TMP/nav-payload.json"
 cmp "$TMP/base-payload.json" "$TMP/nav-payload.json"
-prepare legacy
-printf '1\n1\n1\n1\n5\n5\n5\n5\n0\n' | "$TMP/bin/crew-journey-offline" --plain --home "$TMP/legacy" --seed 42 > "$TMP/legacy.out"
-old=("$TMP/legacy"/runs/*/journal.jsonl)
-jq -s 'map(.payload)' "${old[0]}" > "$TMP/legacy-payload.json"
-cmp "$TMP/base-payload.json" "$TMP/legacy-payload.json"
 prepare zero_back
 printf '1\n1\n1\n0\n7\n1\n' | "$TMP/bin/crew-watch-offline" --mode plain --legacy --home "$TMP/zero_back" --seed 42 > "$TMP/zero-back.out"
 rg -q '0 Return to bridge' "$TMP/zero-back.out"
