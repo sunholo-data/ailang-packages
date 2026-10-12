@@ -218,14 +218,25 @@ ensures { match result {
 pure func mapped(s: Session, r: Request, b: TaskAgreement, selected: string) -> Result[Step, HostError] =
   if selected == "defer" || selected == "continue" then Ok({ state: s.state, events: [], disposition: Applied }) else if selected == "accept" then domain(s, "answer-${r.id}", r.actor, ActorInput, [AcceptCommitment(b.agreement)]) else if selected == "request_relief" then domain(s, "answer-${r.id}", r.actor, ActorInput, [RequestRelief("relief-${r.id}", r.task, [b.agreement])]) else if selected == "decline" || selected == "concern" then domain(s, "answer-${r.id}", r.actor, ActorInput, [RaiseConcern("concern-${r.id}", [b.agreement], ["captain"], selected)]) else Err(HostFailure("illegal response mapping"))
 
+-- The bank keeps answers for idempotent retries and id uniqueness. A request
+-- expires one turn after it is asked, after which no retry can be applied, so a
+-- full bank drops answers to expired requests before taking a new one. A retry
+-- of a dropped answer then reports "unknown request" instead of a no-op.
+export pure func bankLimit() -> int ! {}
+ensures { result >= 1 } = 64
+
+export pure func compacted(bank: [Bank], tick: int) -> [Bank] ! {}
+ensures { length(result) <= length(bank) && (length(bank) < bankLimit() || not any(\b. b.request.expires <= tick, result)) } =
+  if length(bank) < bankLimit() then bank else filter(\b. b.request.expires > tick, bank)
+
 export pure func complete(s: Session, id: string, body: string, roll: float) -> Result[Output, HostError]
 ensures { match result {
-  Ok(o) => length(o.session.bank) >= length(s.bank),
+  Ok(o) => length(o.session.bank) <= bankLimit(),
   Err(_) => true
 } } =
   if not idle(s) || not identity(s) then Err(HostFailure("answer context")) else match head(filter(\b. b.request.id == id, s.bank)) {
     Some(b) => if b.status == "completed" && b.body == body && b.rollKey == encode(jnum(roll)) then Ok(output(s, [])) else Err(HostFailure("altered/cancelled retry")),
-    None => if length(s.bank) >= 64 then Err(HostFailure("completed retention")) else match head(filter(\r. r.id == id, s.pending)) {
+    None => if length(compacted(s.bank, s.state.tick)) >= bankLimit() then Err(HostFailure("completed retention")) else match head(filter(\r. r.id == id, s.pending)) {
       None => Err(HostFailure("unknown request")),
       Some(r) => if r.configBody != s.state.configBody || r.policyId != (if s.chat.version == 1 then "crew-conversation-v1" else "crew-choice-v1") || r.tick != s.state.tick || r.revision != s.state.revision || s.state.tick >= r.expires then Err(HostFailure("stale request")) else match binding(s, r.task) {
         Err(e) => Err(e),
@@ -240,7 +251,7 @@ ensures { match result {
                 Err(e) => Err(e),
                 Ok(received) => {
                   let entry: Bank = { request: r, status: "completed", body: body, roll: roll, rollKey: encode(jnum(roll)), choice: encode(encodeChoice(choice)), selected: choice.selected }
-                  Ok(output({ staged | state: received.state, pending: filter(\p. p.id != id, s.pending), bank: s.bank ++ [entry], chat: registerIssue(s.chat, r.task, r.actor, b.recipe, r.id, s.state.tick, choice.selected) }, step.events ++ received.events))
+                  Ok(output({ staged | state: received.state, pending: filter(\p. p.id != id, s.pending), bank: compacted(s.bank, s.state.tick) ++ [entry], chat: registerIssue(s.chat, r.task, r.actor, b.recipe, r.id, s.state.tick, choice.selected) }, step.events ++ received.events))
                 }
               }
             }
@@ -255,11 +266,12 @@ ensures { match result {
   Ok(o) => o.session.state == s.state && length(o.session.pending) == length(s.pending) - 1,
   Err(_) => true
 } } =
-  if not idle(s) || not identity(s) || length(s.bank) >= 64 then Err(HostFailure("cancel context/retention")) else match head(filter(\r. r.id == id, s.pending)) {
+  if not idle(s) || not identity(s) || length(compacted(s.bank, s.state.tick)) >= bankLimit() then Err(HostFailure("cancel context/retention")) else match head(filter(\r. r.id == id, s.pending)) {
     None => Err(HostFailure("unknown request")),
     Some(r) => {
       let entry: Bank = { request: r, status: "cancelled", body: "", roll: 0.0, rollKey: "", choice: "", selected: "" }
-      Ok(output({ s | pending: filter(\p. p.id != id, s.pending), bank: s.bank ++ [entry] }, []))
+      let kept = compacted(s.bank, s.state.tick)
+      Ok(output({ s | pending: filter(\p. p.id != id, s.pending), bank: kept ++ [entry] }, []))
     }
   }
 

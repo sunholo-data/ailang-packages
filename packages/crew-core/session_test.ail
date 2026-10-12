@@ -6,7 +6,7 @@ import std/string (contains)
 import std/json (encode, jo, kv, js, jnum, jint)
 import pkg/sunholo/social_dynamics/model (State, AI, ActorPrincipal, AcceptCommitment, Authored, Event, Pending, Done, Working, Offered)
 import pkg/sunholo/social_dynamics/proposals (apply)
-import ./session (Session, Output, HostError, HostFailure, start as startWith, untraced, input, offer, ask, complete, startTask, resolve, cancel, snapshot)
+import ./session (Session, Output, HostError, HostFailure, start as startWith, untraced, input, offer, ask, complete, startTask, resolve, cancel, snapshot, compacted)
 import ./example (firstContact)
 import ./host_policy (policies)
 import ./policy (decodePolicy, watchPolicyBody, authoredAnswer)
@@ -292,7 +292,7 @@ test "cooperation floor constrains orders" {
 test "offer receipt failure stages all host and domain changes atomically" {
   match base("orders") {
     Err(_) => false,
-    Ok(s) => let full = paddedKnowledge(s, 2045) in
+    Ok(s) => let full = paddedKnowledge(s, 8189) in
     rejected(offer(full, "scientist", "work_scientist", "science")) && full.bindings == [] && full.state.tasks == []
   }
 }
@@ -300,7 +300,7 @@ test "offer receipt failure stages all host and domain changes atomically" {
 test "actor receipt failure cannot commit concern or consume pending request" {
   match prepared("consent") {
     Err(_) => false,
-    Ok(s) => let full = paddedKnowledge(s, 2047) in
+    Ok(s) => let full = paddedKnowledge(s, 8191) in
     rejected(complete(full, "r1", response("decline", 0.8, false), 0.0)) && length(full.pending) == 1 && length(full.bank) == 0 && length(full.state.evidence) == 2
   }
 }
@@ -308,7 +308,7 @@ test "actor receipt failure cannot commit concern or consume pending request" {
 test "captain report failure cannot commit work or reserve resources" {
   match project("orders") {
     Err(_) => false,
-    Ok(s) => let full = { s | state: { s.state | evidence: s.state.evidence ++ map(\i. { id: "padding-${i}", author: "captain", kind: "note", text: "", causes: [] }, range(1, 511)) } } in
+    Ok(s) => let full = { s | state: { s.state | evidence: s.state.evidence ++ map(\i. { id: "padding-${i}", author: "captain", kind: "note", text: "", causes: [] }, range(1, 2047)) } } in
     rejected(startTask(full, "science")) && resource(full.state, "reserved") == 0
   }
 }
@@ -322,6 +322,43 @@ test "completed retention refuses further answer and cancellation" {
         (Ok(a), Some(b)) => let full = { a.session | bank: map(\i. { b | request: { b.request | id: "done-${i}" } }, range(1, 65)) } in
         rejected(complete(full, "retention", response("defer", 0.8, false), 0.0)) && rejected(cancel(full, "retention")),
         _ => false
+      }
+    }
+  }
+}
+
+test "a full bank of expired answers is compacted, then the answer is kept" {
+  match prepared("consent") {
+    Err(_) => false,
+    Ok(s) => match complete(s, "r1", response("defer", 0.8, false), 0.0) {
+      Err(_) => false,
+      Ok(o) => match (ask(o.session, "scientist", "science", "fresh"), head(o.session.bank)) {
+        (Ok(a), Some(b)) => let full = { a.session | bank: map(\i. { b | request: { b.request | id: "old-${i}", expires: 0 } }, range(1, 65)) } in
+        match complete(full, "fresh", response("defer", 0.8, false), 0.0) {
+          Err(_) => false,
+          Ok(c) => length(c.session.bank) == 1 && (match head(c.session.bank) {Some(x) => x.request.id == "fresh", None => false})
+            && rejected(complete(c.session, "old-3", response("defer", 0.8, false), 0.0))
+            && (match complete(c.session, "fresh", response("defer", 0.8, false), 0.0) {Ok(again) => again.session == c.session, Err(_) => false})
+        },
+        _ => false
+      }
+    }
+  }
+}
+
+test "compaction keeps answers whose requests can still be retried" {
+  match prepared("consent") {
+    Err(_) => false,
+    Ok(s) => match complete(s, "r1", response("defer", 0.8, false), 0.0) {
+      Err(_) => false,
+      Ok(o) => match head(o.session.bank) {
+        None => false,
+        Some(b) => {
+          let live = map(\i. { b | request: { b.request | id: "live-${i}", expires: 5 } }, range(1, 11));
+          let dead = map(\i. { b | request: { b.request | id: "dead-${i}", expires: 1 } }, range(1, 55));
+          let kept = compacted(dead ++ live, 1);
+          length(kept) == 10 && compacted(live, 1) == live
+        }
       }
     }
   }

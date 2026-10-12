@@ -257,7 +257,7 @@ ensures { match result { Ok(c) => c.version == 1 && c.timeUnit == "turn" && c.li
  if policy != "consent" && policy != "orders" then Err("policy") else Ok({
   id: "${s.id}-${policy}", version: 1, session: "${s.id}-${policy}", timeUnit: "turn",
   authorityId: "captain-cooperation-v1", appraisalId: "received-outcome-v1",
-  limits: {actors: length(s.actors), tasks: 64, commitments: 64, reliefs: 64, evidence: 512, knowledge: 2048, accepted: 4096, operations: 16, effects: 16, text: 4096, wire: 65536},
+  limits: {actors: length(s.actors), tasks: 256, commitments: 256, reliefs: 256, evidence: 2048, knowledge: 8192, accepted: 4096, operations: 16, effects: 16, text: 4096, wire: 65536},
   indicators: map(\id. {id: id, minimum: 0, maximum: 100}, s.indicators),
   recipes: s.recipes, rules: s.rules, evidence: [], knowledge: [], relationships: s.relationships
  })

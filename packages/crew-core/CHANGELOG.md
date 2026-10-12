@@ -20,6 +20,13 @@ captain/crew host for social and narrative games on `social_dynamics`:
 - `example`: the five-specialist first-contact ship (generated from crew-lab's
   `data/watch-scenario.json`).
 
+Long sessions: the answer bank keeps 64 answers for idempotent retries; when full,
+answers to expired requests (which can never be retried) are dropped first, so a
+session can run for many turns (60-turn crew-sim runs are clean). Scenario limits:
+256 tasks, commitments and reliefs, 2048 evidence, 8192 knowledge. `callLimit` in
+`crew_response_policy/1` is 0..64; the watch policy default is 12.
+
 The public API is pure and deterministic. Known limits: the captain's id must be
-`captain`; a session keeps at most 64 answered requests; conversation prompts are
+`captain`; finished tasks are never archived, so runs slow down as they grow (one
+seed: 12 turns about 1 s, 60 about 8 s, 120 about 40 s); conversation prompts are
 still keyed by role in code.

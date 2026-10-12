@@ -99,5 +99,11 @@ reply-test:
 	@cd "$(EX)" && for m in reply_jobs reply_codec; do "$(AILANG)" test --allow-skips $$m.ail || exit; "$(AILANG)" test --allow-skips --bytecode --strict-bytecode $$m.ail || exit; done
 async-test:
 	@AILANG="$(AILANG)" "$(EX)/test-async.sh"
+# Verification loop: claims over crew-sim runs, and long sessions.
+claims-test:
+	@cd "$(EX)" && "$(AILANG)" test --allow-skips claims.ail
+	@AILANG="$(AILANG)" "$(EX)/test-claims.sh"
+sample-test:
+	@AILANG="$(AILANG)" "$(EX)/test-sample.sh"
 
-validate: deps core-tests library-tests terminal-tests tests scenarios replay parity store-test quality native-ui-test native-watch-test native-watch-pty-test short-reply-test conversations-test sim-test scenario-test reply-test async-test
+validate: deps core-tests library-tests terminal-tests tests scenarios replay parity store-test quality native-ui-test native-watch-test native-watch-pty-test short-reply-test conversations-test sim-test scenario-test reply-test async-test claims-test sample-test

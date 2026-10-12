@@ -83,9 +83,9 @@ test "modern cache guard checks every variant without altering text" {
   }
 }
 
-test "modern default has six bounded calls and leaves legacy untouched" {
+test "modern default has twelve bounded calls and leaves legacy untouched" {
   match decodePolicy(watchPolicyBody()) {
-    Ok(p) => p.callLimit == 6,
+    Ok(p) => p.callLimit == 12,
     _ => false
   }
 }

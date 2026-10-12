@@ -157,7 +157,7 @@ func locked(path: string, lock: string, signature: string, legal: [string], mode
 
 export func resolve(home: string, signature: string, legal: [string], model: string, mode: string, remaining: int) -> Fetch ! {FS, AI @limit=1}
 ensures { result.calls >= 0 && result.calls <= 1 } =
-  if stringLength(signature) > 32768 || stringLength(signature) == 0 || mode != "live" && mode != "offline" || remaining < 0 || remaining > 8 then failed("invalid dialogue resolver settings", 0, 0, 0, true) else match ensureHome(home) {
+  if stringLength(signature) > 32768 || stringLength(signature) == 0 || mode != "live" && mode != "offline" || remaining < 0 || remaining > 64 then failed("invalid dialogue resolver settings", 0, 0, 0, true) else match ensureHome(home) {
     Err(e) => failed(e, 0, 0, 0, true),
     Ok(_) => {
       let key = cacheKey(signature)

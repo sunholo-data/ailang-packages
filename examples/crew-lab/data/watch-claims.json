@@ -1,0 +1,12 @@
+{"schema":"crew_claims/1","claims":[
+ {"id":"consent-runs-clean","captain":"consent","metric":"errors","stat":"max","op":"==","value":0,"note":"no host errors in any run"},
+ {"id":"orders-runs-clean","captain":"orders","metric":"errors","stat":"max","op":"==","value":0},
+ {"id":"consent-keeps-scientist-trust","captain":"consent","metric":"crew.scientist.trust","stat":"median","op":">=","value":55,"note":"asking for agreement builds trust"},
+ {"id":"consent-keeps-medic-trust","captain":"consent","metric":"crew.medic.trust","stat":"median","op":">=","value":55},
+ {"id":"orders-erode-medic-trust","captain":"orders","metric":"crew.medic.trust","stat":"median","op":"<","value":40,"note":"starting despite refusal costs trust"},
+ {"id":"orders-erode-medic-trust-usually","captain":"orders","metric":"crew.medic.trust","stat":"share","when":{"op":"<","value":45},"op":">=","value":0.75},
+ {"id":"consent-grants-every-relief","captain":"consent","metric":"relief.denied","stat":"max","op":"==","value":0},
+ {"id":"orders-grants-no-relief","captain":"orders","metric":"relief.granted","stat":"max","op":"==","value":0},
+ {"id":"supplies-block-work","captain":"consent","metric":"stockouts","stat":"median","op":">=","value":5,"note":"shared supplies, not opinions, stop most starts"},
+ {"id":"crew-still-work-under-consent","captain":"consent","metric":"starts","stat":"median","op":">=","value":12}
+]}

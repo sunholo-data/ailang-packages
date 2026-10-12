@@ -1,0 +1,144 @@
+module sunholo/crew_lab/claims
+import std/json (Json, JNumber, decode, get, getString, getNumber, getArray, keys)
+import std/list (map, filter, foldl, length, any, contains, nth, sortBy, dedup)
+import std/string (split, join, length as size, startsWith)
+import std/option (Option, Some, None)
+import std/result (Result, Ok, Err)
+import std/math (intToFloat, floatToInt, floor)
+import pkg/sunholo/crew_core/scenario (Scenario)
+
+-- crew_claims/1: what a designer expects the simulation to do, checked over
+-- crew-sim runs. A claim states a statistic of one crew_sim/1 measure for one
+-- captain. It never scores or ranks; it either holds over the seeds or not.
+export type Claim = {id:string, captain:string, metric:string, stat:string, op:string, value:float, whenOp:string, whenValue:float, note:string} deriving (Eq)
+export type Verdict = {claim:Claim, observed:float, runs:int, holds:bool} deriving (Eq)
+
+pure func str(j:Json, k:string) -> string = match getString(j, k) {Some(s) => s, None => ""}
+pure func ops() -> [string] = ["<", "<=", ">", ">=", "=="]
+pure func scalars() -> [string] = ["tick", "offers", "starts", "refused", "stockouts", "errors"]
+pure func crewFields() -> [string] = ["fatigue", "stress", "morale", "readiness", "observations", "trust"]
+pure func replyLabels() -> [string] = ["accept", "decline", "concern", "defer", "continue", "request_relief"]
+
+-- Only measures crew_sim/1 can report, for crew and work in this scenario, so a
+-- mistyped path is rejected instead of reading as zero.
+export pure func metricOK(sc:Scenario, path:string) -> bool ! {}
+ensures { not result || size(path) > 0 } = match split(path, ".") {
+ [x] => contains(scalars(), x),
+ ["relief", x] => contains(["asked", "granted", "denied"], x),
+ ["replies", x] => contains(replyLabels(), x),
+ ["refusal_reasons", x] => size(x) > 0 && size(x) <= 64,
+ ["completed", x] => any(\r. r.id == x, sc.recipes),
+ ["crew", w, f] => contains(sc.workers, w) && contains(crewFields(), f),
+ _ => false
+}
+
+pure func number(j:Json, k:string) -> Option[float] = match getNumber(j, k) {Some(n) => Some(n), None => None}
+
+pure func decodeClaim(sc:Scenario, j:Json) -> Result[Claim, string] = {
+ let ks = keys(j);
+ let allowed = ["id", "captain", "metric", "stat", "op", "value", "when", "note"];
+ let id = str(j, "id");
+ if size(id) == 0 || size(id) > 64 then Err("claim id must be 1..64 characters")
+ else if any(\k. not contains(allowed, k), ks) || length(dedup(ks)) != length(ks) then Err("${id}: unknown field")
+ else if not contains(["consent", "orders", "random"], str(j, "captain")) then Err("${id}: captain must be consent, orders or random")
+ else if not metricOK(sc, str(j, "metric")) then Err("${id}: unknown metric ${str(j, "metric")}")
+ else if not contains(["median", "mean", "min", "max", "share"], str(j, "stat")) then Err("${id}: stat must be median, mean, min, max or share")
+ else if not contains(ops(), str(j, "op")) then Err("${id}: op must be <, <=, >, >= or ==")
+ else match number(j, "value") {
+  None => Err("${id}: value must be a number"),
+  Some(v) => {
+   let share = str(j, "stat") == "share";
+   match (share, get(j, "when")) {
+    (true, None) => Err("${id}: share needs when {op, value}"),
+    (false, Some(_)) => Err("${id}: when is only for share"),
+    (true, Some(w)) => match number(w, "value") {
+     None => Err("${id}: when.value must be a number"),
+     Some(wv) => if not contains(ops(), str(w, "op")) || length(keys(w)) != 2 then Err("${id}: when needs exactly op and value") else if v < 0.0 || v > 1.0 then Err("${id}: a share is 0..1") else Ok({id:id, captain:str(j, "captain"), metric:str(j, "metric"), stat:"share", op:str(j, "op"), value:v, whenOp:str(w, "op"), whenValue:wv, note:str(j, "note")})
+    },
+    (false, None) => Ok({id:id, captain:str(j, "captain"), metric:str(j, "metric"), stat:str(j, "stat"), op:str(j, "op"), value:v, whenOp:"", whenValue:0.0, note:str(j, "note")})
+   }
+  }
+ }
+}
+
+pure func decodeAll(sc:Scenario, xs:[Json], acc:[Claim]) -> Result[[Claim], string] = match xs {
+ [] => Ok(acc),
+ j :: rest => match decodeClaim(sc, j) {Err(e) => Err(e), Ok(c) => if any(\d. d.id == c.id, acc) then Err("${c.id}: duplicate claim id") else decodeAll(sc, rest, acc ++ [c])}
+}
+
+export pure func decodeClaims(sc:Scenario, body:string) -> Result[[Claim], string] ! {}
+ensures { match result {Err(_) => true, Ok(cs) => length(cs) >= 1 && length(cs) <= 200 && not any(\c. not metricOK(sc, c.metric), cs)} } =
+ if size(body) > 262144 then Err("claims file too large") else match decode(body) {
+  Err(_) => Err("claims file is not JSON"),
+  Ok(j) => if str(j, "schema") != "crew_claims/1" || any(\k. k != "schema" && k != "claims", keys(j)) then Err("schema must be crew_claims/1 with claims") else match getArray(j, "claims") {
+   None => Err("claims must be a list"),
+   Some(xs) => if length(xs) == 0 || length(xs) > 200 then Err("1..200 claims") else decodeAll(sc, xs, [])
+  }
+ }
+
+-- A measure in one crew_sim/1 line. Count maps omit zero entries, so an absent
+-- key under a validated path is 0.
+pure func walk(j:Json, parts:[string]) -> float = match parts {
+ [] => match j {JNumber(n) => n, _ => 0.0},
+ p :: rest => match get(j, p) {Some(x) => walk(x, rest), None => 0.0}
+}
+
+export pure func measure(rows:[Json], metric:string) -> [float] ! {}
+ensures { length(result) == length(rows) } = map(\r. walk(r, split(metric, ".")), rows)
+
+pure func compare(a:float, op:string, b:float) -> bool =
+ if op == "<" then a < b else if op == "<=" then a <= b else if op == ">" then a > b else if op == ">=" then a >= b else a == b
+
+pure func at(sorted:[float], q:float) -> float = {
+ let n = length(sorted);
+ let pos = q * intToFloat(n - 1);
+ let lo = floatToInt(floor(pos));
+ match (nth(sorted, lo), nth(sorted, if lo + 1 < n then lo + 1 else lo)) {
+  (Some(a), Some(b)) => a + (b - a) * (pos - intToFloat(lo)),
+  _ => 0.0
+ }
+}
+
+export pure func statistic(c:Claim, vs:[float]) -> float ! {}
+ensures { c.stat != "share" || result >= 0.0 && result <= 1.0 } =
+ if length(vs) == 0 then 0.0 else {
+  let sorted = sortBy(\a b. if a < b then 0 - 1 else if a > b then 1 else 0, vs);
+  if c.stat == "median" then at(sorted, 0.5)
+  else if c.stat == "min" then at(sorted, 0.0)
+  else if c.stat == "max" then at(sorted, 1.0)
+  else if c.stat == "mean" then foldl(\s v. s + v, 0.0, vs) / intToFloat(length(vs))
+  else intToFloat(length(filter(\v. compare(v, c.whenOp, c.whenValue), vs))) / intToFloat(length(vs))
+ }
+
+-- rows: crew_sim/1 lines for this claim's captain.
+export pure func judge(c:Claim, rows:[Json]) -> Verdict ! {}
+ensures { result.runs == length(rows) && (length(rows) > 0 || not result.holds) } = {
+ let observed = statistic(c, measure(rows, c.metric));
+ {claim:c, observed:observed, runs:length(rows), holds:length(rows) > 0 && compare(observed, c.op, c.value)}
+}
+
+pure func fmt(x:float) -> string = show(floor(x * 100.0 + 0.5) / 100.0)
+
+export pure func line(v:Verdict) -> string ! {}
+ensures { size(result) > 0 } = {
+ let c = v.claim;
+ let what = if c.stat == "share" then "share of runs with ${c.metric} ${c.whenOp} ${fmt(c.whenValue)}" else "${c.stat} ${c.metric}";
+ "${if v.holds then "PASS" else "FAIL"} ${c.id}: ${c.captain} captain, ${what} over ${show(v.runs)} runs = ${fmt(v.observed)} (expected ${c.op} ${fmt(c.value)})${if c.note == "" then "" else " — ${c.note}"}"
+}
+
+export pure func captains(cs:[Claim]) -> [string] ! {}
+ensures { length(result) <= 3 } = filter(\k. any(\c. c.captain == k, cs), ["consent", "orders", "random"])
+
+pure func c(stat:string, op:string, value:float) -> Claim = {id:"t", captain:"orders", metric:"starts", stat:stat, op:op, value:value, whenOp:"<", whenValue:3.0, note:""}
+
+test "statistics over runs: median, extremes, mean and share" {
+ let vs = [1.0, 2.0, 3.0, 10.0];
+ statistic(c("median", "<", 0.0), vs) == 2.5 && statistic(c("min", "<", 0.0), vs) == 1.0 && statistic(c("max", "<", 0.0), vs) == 10.0 &&
+ statistic(c("mean", "<", 0.0), vs) == 4.0 && statistic(c("share", "<", 0.0), vs) == 0.5
+}
+test "a claim with no runs never holds; absent count keys read as zero" {
+ match (decode("{\"replies\":{\"accept\":2}}"), decode("{\"replies\":{}}")) {
+  (Ok(a), Ok(b)) => not judge(c("max", ">=", 0.0), []).holds && measure([a, b], "replies.accept") == [2.0, 0.0],
+  _ => false
+ }
+}

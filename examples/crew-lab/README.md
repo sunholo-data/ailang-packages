@@ -69,7 +69,7 @@ through Offers, and start the pilot. Physical supplies spent on completion never
 replenish by waiting; rest uses no supplies. Starting passes no time.
 
 Live uses the existing pinned OpenRouter `z-ai/glm-5.3-flash` setup and separate
-watch response policy (default6 attempts, maximum8). Saved wording uses no new
+watch response policy (default12 attempts, maximum64). Saved wording uses no new
 call. A cache miss never blocks: see "Background replies" below. Offline and exhausted allowances
 remain playable with labelled authored narrator continuations. Selected AI words
 remain exact in the journal/library; only display controls are sanitized and prose
@@ -188,13 +188,56 @@ What the default ship shows (20 seeds, 12 turns): trust in the captain rises und
 consent (median scientist 59, medic 62) and falls under orders (42, 32); supplies,
 not opinions, block most work (every refused start is `insufficient_resource`).
 
+### Check what you expect: claims
+
+Write what you expect the crew to do as claims and let `crew-sim` check them over
+many seeds. Each claim is about one captain and one measure of a `crew_sim/1` line:
+
+```json
+{"schema":"crew_claims/1","claims":[
+ {"id":"orders-erode-medic-trust","captain":"orders","metric":"crew.medic.trust","stat":"median","op":"<","value":40},
+ {"id":"orders-erode-medic-trust-usually","captain":"orders","metric":"crew.medic.trust","stat":"share","when":{"op":"<","value":45},"op":">=","value":0.75}
+]}
+```
+
+```sh
+crew-sim --check examples/crew-lab/data/watch-claims.json                 # 10 of 10 claims hold
+crew-sim --check examples/crew-lab/data/watch-claims.json --scenario my-ship.json
+```
+
+Stats: `median`, `mean`, `min`, `max`, or `share` of runs meeting `when`. Metrics:
+`tick`, `offers`, `starts`, `refused`, `stockouts`, `errors`, `relief.asked|granted|denied`,
+`replies.<reaction>`, `refusal_reasons.<code>`, `completed.<recipe>` and
+`crew.<member>.<fatigue|stress|morale|readiness|observations|trust>`. Unknown crew,
+recipes or fields are rejected, so a typo cannot pass as zero. Each claim prints
+PASS or FAIL with the observed value; any FAIL exits 1. `data/watch-claims.json`
+records what the default ship does today: change the ship, re-run, and the named
+claims say what moved. Claims describe the simulation; they never score a captain.
+
+### Read the words: crew-sample
+
+`crew-sample` shows what crew members would actually say across varied moments,
+fetched exactly as the watch would (same prompts, checks and library):
+
+```sh
+crew-sample --max-calls 6 --report words.txt > words.ndjson   # live: at most 6 new calls
+crew-sample --offline --report words.txt                     # authored words, no provider
+```
+
+It plays the consent captain without AI, picks moments that differ by crew member,
+reaction and fatigue/stress/morale, and prints one `crew_sample/1` line each (crew
+member, project, reaction, state, the words, source, calls, and whether the words
+leak mechanics). Saved words are free; new words cost one call each, up to
+`--max-calls`. Samples go into the watch's library, so the watch reuses them.
+Samples use the watch-v2 prompts (crew-sim does not play conversations).
+
 Limits worth knowing:
 
-- The host keeps at most 64 answered crew questions per session, about 12–15
-  turns with five specialists. `crew-sim` defaults to 12 turns; longer runs show
-  `completed retention` errors. Compaction is follow-up work in `crew_core`.
-- AI attempts per watch are the response policy's `callLimit` (default 6, at most
-  8); prefetch only uses attempts above a reserve of three.
+- Sessions keep their last 64 answers and drop answers that can no longer be
+  retried, so runs can be long; finished work is not archived, so they slow down
+  (one seed: 60 turns about 8 s, 120 about 40 s).
+- AI attempts per watch are the response policy's `callLimit` (default 12 for new homes, at most
+  64); prefetch only uses attempts above a reserve of three.
 - Journals stop safely at 8 MiB; this is a watch-sized lab, not a whole voyage.
 
 ## The host protocol: crew-host
