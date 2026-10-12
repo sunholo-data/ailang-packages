@@ -94,10 +94,10 @@
         "Changing one trait in a copied scenario changes the output for a fixed seed",
         "200 seeds x 24 turns completes in under 30 s offline (/usr/bin/time)"
       ],
-      "passes": null,
-      "started": null,
-      "completed": null,
-      "notes": null
+      "passes": true,
+      "started": "2026-10-12",
+      "completed": "2026-10-12T22:00:00Z",
+      "notes": "crew-sim (crew_sim.ail pure strategies + sim_cli.ail entry; bin runs on the bytecode VM). Captains consent/orders/random; offers, persuasion, check-ins and relief per turn; replies via crew_core policy.authoredAnswer (new, shared with the watch's authored path). NDJSON per seed (replies, offers, starts, refusals with engine codes, relief, completions, per-crew indicators and trust, errors with reasons) and --summary (median, IQR, range; unranked). Deterministic (cmp), interpreter == VM, trait change changes output, malformed scenarios rejected (test-sim.sh). Measured: 20 seeds x 12 turns in 12 s (0.6 s/seed). Criterion 7 (200 x 24 in 30 s) NOT met: two findings. (1) The host keeps at most 64 answered requests per session, exhausted around turn 15 with five crew, so default turns is 12 and longer runs report 'completed retention'. (2) Per-call trace encoding was 2/3 of runtime; crew_core gains Session.traced and untraced(s) (3x faster, same state, tested). identity() re-encoding the config is most of the rest; left unchanged for safety."
     },
     {
       "id": "M6",

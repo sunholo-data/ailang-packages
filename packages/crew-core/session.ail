@@ -29,7 +29,7 @@ export type Bank = { request: Request, status: string, body: string, roll: float
 
 export type Report = { id: string, task: string, agreement: string, worker: string, code: CrewOutcome } deriving (Eq)
 
-export type Session = { scenario: Scenario, policy: string, config: Config, state: State, bindings: [TaskAgreement], pending: [Request], bank: [Bank], reports: [Report], chat: ConversationStore, personalities: [Personality] } deriving (Eq)
+export type Session = { scenario: Scenario, policy: string, config: Config, state: State, bindings: [TaskAgreement], pending: [Request], bank: [Bank], reports: [Report], chat: ConversationStore, personalities: [Personality], traced: bool } deriving (Eq)
 
 export type Output = { session: Session, trace: string, failed: bool } deriving (Eq)
 
@@ -52,8 +52,13 @@ export pure func snapshot(s: Session) -> string
 ensures { stringLength(result) > 0 } =
   encode(jo([kv("state", js(encodeState(s.state))), kv("policy", js(s.policy)), kv("bindings", ja(map(\b. jo([kv("task", js(b.task)), kv("agreement", js(b.agreement)), kv("captain", js(b.captain)), kv("worker", js(b.worker)), kv("recipe", js(b.recipe))]), s.bindings))), kv("pending", ja(map(requestJson, s.pending))), kv("bank", ja(map(bankJson, s.bank))), kv("reports", ja(map(reportJson, s.reports)))] ++ (if s.chat.version == 1 then [kv("conversations", conversationJson(s.chat)),kv("personalities",personalitiesJson(s.personalities))] else [])))
 
+-- Untraced sessions (batch runs) skip the per-call state encoding; their
+-- outputs carry an empty trace. Journals require traced sessions.
 pure func output(s: Session, events: [Event]) -> Output =
-  { session: s, trace: "{\"state\":${encodeState(s.state)},\"events\":${encodeEvents(events)},\"host\":${snapshot(s)}}", failed: false }
+  { session: s, trace: if s.traced then "{\"state\":${encodeState(s.state)},\"events\":${encodeEvents(events)},\"host\":${snapshot(s)}}" else "", failed: false }
+
+export pure func untraced(s: Session) -> Session
+ensures { not result.traced && result.state == s.state } = {s | traced: false}
 
 pure func checkedId(id: string) -> bool = validId(id) && stringLength(id) <= 64
 
@@ -329,7 +334,7 @@ pure func advanceOutput(s:Session,state:State,events:[Event])->Result[Output,Hos
 @allow_empty_ok("Legacy hosts intentionally have no personality sidecar; only watch-v3 initializes profiles")
 pure func initialized(scenario:Scenario,policy:string,c:Config,state:State,version:int)->Result[Output,HostError] =
  match (if version==1 then initializeShip(state) else Ok([])) {
-  Err(e)=>Err(HostFailure("personality initialization: ${e}")),Ok(ps)=>Ok(output({scenario:scenario,policy:policy,config:c,state:state,bindings:[],pending:[],bank:[],reports:[],chat:emptyConversation(version),personalities:ps},[]))
+  Err(e)=>Err(HostFailure("personality initialization: ${e}")),Ok(ps)=>Ok(output({scenario:scenario,policy:policy,config:c,state:state,bindings:[],pending:[],bank:[],reports:[],chat:emptyConversation(version),personalities:ps,traced:true},[]))
  }
 
 pure func majorDeliveries(s:Session,observers:[string],evidence:string,events:[Event])->Result[{session:Session,events:[Event]},HostError] = match observers {

@@ -6,9 +6,10 @@ import std/string (contains)
 import std/json (encode, jo, kv, js, jnum, jint)
 import pkg/sunholo/social_dynamics/model (State, AI, ActorPrincipal, AcceptCommitment, Authored, Event, Pending, Done, Working, Offered)
 import pkg/sunholo/social_dynamics/proposals (apply)
-import ./session (Session, Output, HostError, HostFailure, start as startWith, input, offer, ask, complete, startTask, resolve, cancel, snapshot)
+import ./session (Session, Output, HostError, HostFailure, start as startWith, untraced, input, offer, ask, complete, startTask, resolve, cancel, snapshot)
 import ./example (firstContact)
 import ./host_policy (policies)
+import ./policy (decodePolicy, watchPolicyBody, authoredAnswer)
 
 -- Host invariants on the first-contact example ship (ported from the
 -- legacy two-person scenario in S-CREW-CORE-SPLIT).
@@ -388,5 +389,28 @@ test "numeric clock limit and altered captured policy/config are rejected" {
       None => false,
       Some(r) => rejected(complete({ s | pending: [{ r | policyId: "forged" }] }, "r1", response("accept", 0.8, false), 0.0)) && rejected(complete({ s | pending: [{ r | configBody: "forged" }] }, "r1", response("accept", 0.8, false), 0.0))
     })
+  }
+}
+
+test "authored answer is legal, seeded and accepted by the host" {
+  match (prepared("consent"), decodePolicy(watchPolicyBody())) {
+    (Ok(s), Ok(p)) => match head(s.pending) {
+      None => false,
+      Some(r) => match (authoredAnswer(p, r, 42), authoredAnswer(p, r, 42), authoredAnswer(p, r, 43)) {
+        (Ok(a), Ok(b), Ok(_)) => a == b && a.seed != 42 && contains(a.body, a.label) && (match complete(s, r.id, a.body, a.roll) { Ok(o) => length(o.session.pending) == 0, Err(_) => false }),
+        _ => false
+      }
+    },
+    _ => false
+  }
+}
+
+test "untraced sessions give the same state with an empty trace" {
+  match working() {
+    Err(_) => false,
+    Ok(s) => match (input(s, "{\"command\":\"advance\",\"tick\":4,\"budget\":64}"), input(untraced(s), "{\"command\":\"advance\",\"tick\":4,\"budget\":64}")) {
+      (Ok(a), Ok(b)) => a.session.state == b.session.state && a.trace != "" && b.trace == "",
+      _ => false
+    }
   }
 }

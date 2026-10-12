@@ -5,7 +5,7 @@ AILANG ?= ailang
 INPUT ?= $(EX)/recordings/agreed-science.ndjson
 ENGINE ?= interpreter
 OUT := $(ROOT)/.ailang/state/crew-lab
-.PHONY: experiment deps fixtures tests core-tests library-tests terminal-tests store-test scenarios parity replay quality validate mutations native-ui-test native-watch-test native-watch-pty-test short-reply-test conversations-test
+.PHONY: experiment deps fixtures tests core-tests library-tests terminal-tests store-test scenarios parity replay quality validate mutations native-ui-test native-watch-test native-watch-pty-test short-reply-test conversations-test sim-test
 
 # One NDJSON host run (crew-host protocol) over a saved recording.
 experiment:
@@ -35,7 +35,7 @@ tests:
 	@"$(AILANG)" check --package "$(EX)"
 	@cd "$(EX)" && "$(AILANG)" test --package . --allow-skips
 	@cd "$(EX)" && "$(AILANG)" test --package . --allow-skips --bytecode --strict-bytecode
-	@cd "$(EX)" && for m in narrative watch_presenter dialogue play_flow presenter journey_flow ship; do "$(AILANG)" test --allow-skips $$m.ail || exit; done
+	@cd "$(EX)" && for m in narrative watch_presenter dialogue play_flow presenter journey_flow ship sim_cli; do "$(AILANG)" test --allow-skips $$m.ail || exit; done
 
 library-tests:
 	@"$(AILANG)" check --package "$(ROOT)/packages/content-library"
@@ -84,10 +84,12 @@ native-watch-pty-test:
 	@AILANG="$(AILANG)" python3 "$(EX)/test-native-watch-pty.py"
 short-reply-test:
 	@AILANG="$(AILANG)" bash "$(EX)/test-short-reply.sh"
+sim-test:
+	@AILANG="$(AILANG)" "$(EX)/test-sim.sh"
 conversations-test:
 	@cd "$(ROOT)/packages/terminal-ui" && "$(AILANG)" test --allow-skips text_field.ail
 	@cd "$(ROOT)/packages/social-dynamics" && "$(AILANG)" test --allow-skips personality.ail
 	@AILANG="$(AILANG)" python3 "$(EX)/test-conversations.py"
 	@AILANG="$(AILANG)" "$(EX)/test-conversation-replay.sh"
 
-validate: deps core-tests library-tests terminal-tests tests scenarios replay parity store-test quality native-ui-test native-watch-test native-watch-pty-test short-reply-test conversations-test
+validate: deps core-tests library-tests terminal-tests tests scenarios replay parity store-test quality native-ui-test native-watch-test native-watch-pty-test short-reply-test conversations-test sim-test

@@ -5,7 +5,7 @@ import std/json (Json, decode, encode, get, getArray, getString, getInt, getNumb
 import std/list (map, filter, foldl, length, dedup, contains, any)
 import std/string (length as size, charCode, chars, toLower, contains as stringContains, find, substring, startsWith, trim)
 import pkg/sunholo/crew_core/session (Request)
-import pkg/sunholo/crew_core/policy (Policy, decodePolicy, weights)
+import pkg/sunholo/crew_core/policy (Policy, decodePolicy, weights, fixtureBody)
 import pkg/sunholo/crew_core/scenario (Scenario, projectName, purpose)
 import pkg/sunholo/crew_core/example (firstContact)
 import std/crypto (sha256Hex)
@@ -131,11 +131,6 @@ ensures { not result || size(text) > 0 && size(text) <= 512 } = {
 export pure func narrativeBundle(signature: string, bundle: Bundle) -> bool ! {}
 ensures { not modernSignature(signature) || not result || not any(\v. not narrativeText(v.text), bundle.variants) } =
   not modernSignature(signature) || not any(\v. not narrativeText(v.text), bundle.variants)
-
-export pure func fixtureBody(request: Request, label: string) -> string
-requires { contains(request.legal, label) }
-ensures { size(result) > 0 } =
-  encode(jo([kv("model", js("synthetic:library-v1")), kv("id", js("library-${request.id}")), kv("answers", jo([kv("response", jo([kv("type", js("choice")), kv("choice", js(label)), kv("confidence", jnum(1.0)), kv("probabilities", jo(map(\l. kv(l, jnum(if l == label then 1.0 else 0.0)), request.legal)))]))])), kv("usage", jo([kv("input_tokens", jint(0)), kv("output_tokens", jint(0)), kv("cost", jnum(0.0))]))]))
 
 export pure func conversationStarter(request:Request,sig:string)->Result[Bundle,string] ! {}
 ensures {match result {Err(_)=>true,Ok(b)=>length(b.variants)==2*length(request.legal)}} = match starterBundle(sig,request.legal) {

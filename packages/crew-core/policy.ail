@@ -196,3 +196,24 @@ ensures {match result {Err(_)=>true,Ok(label)=>contains(request.legal,label)}} =
   (Err(e),_)=>Err(e),(_,Err(e))=>Err(e)
  }
 
+-- The authored answer a crew member gives: the decisions-format body for
+-- session.complete, choosing exactly `label` with confidence 1.
+export pure func fixtureBody(request: Request, label: string) -> string
+requires { contains(request.legal, label) }
+ensures { size(result) > 0 } =
+  encode(jo([kv("model", js("synthetic:library-v1")), kv("id", js("library-${request.id}")), kv("answers", jo([kv("response", jo([kv("type", js("choice")), kv("choice", js(label)), kv("confidence", jnum(1.0)), kv("probabilities", jo(map(\l. kv(l, jnum(if l == label then 1.0 else 0.0)), request.legal)))]))])), kv("usage", jo([kv("input_tokens", jint(0)), kv("output_tokens", jint(0)), kv("cost", jnum(0.0))]))]))
+
+export type Answer = {label: string, body: string, roll: float, seed: int} deriving (Eq)
+
+-- Choose a reaction with the policy's weights and the caller's seed, and build
+-- its authored answer. `seed` is the next seed to use; `roll` goes to complete.
+export pure func authoredAnswer(policy: Policy, request: Request, seed: int) -> Result[Answer, string]
+ensures { match result { Ok(a) => contains(request.legal, a.label), Err(_) => true } } =
+ match (weights(policy, request), nextRoll(seed)) {
+  (Ok(ws), Ok(r)) => match pickLabel(ws, r.roll) {
+   Ok(label) => Ok({label: label, body: fixtureBody(request, label), roll: r.roll, seed: r.seed}),
+   Err(e) => Err(e)
+  },
+  (Err(e), _) => Err(e),
+  (_, Err(e)) => Err(e)
+ }
