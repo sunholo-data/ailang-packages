@@ -66,9 +66,10 @@ if ls "$TMP"/cached/runs/*/replies >/dev/null 2>&1; then echo "saved words still
 
 # 3. Quit while a worker is still running: it is stopped, nothing is left behind.
 prepare quit
-open_watch quit PATH="$TMP/fake:$BASE" CREW_FIXTURE_DELAY_MS=30000
+open_watch quit PATH="$TMP/fake:$BASE" CREW_FIXTURE_DELAY_MS=30000 CREW_FIXTURE_LOCK=1
 send 1 1 1
 waitfor "$TMP/quit.out" 'Replies: 1 preparing'
+until ls -d "$TMP"/quit/cache/*.lock >/dev/null 2>&1; do sleep 0.1; done
 [ "$(workers)" -ge 1 ] || { echo "no worker to stop" >&2; exit 1; }
 send q
 close_watch
@@ -76,7 +77,10 @@ grep -q 'Stopped 1 background reply' "$TMP/quit.out"
 sleep 0.5
 [ "$(workers)" = 0 ] || { echo "worker survived quit" >&2; pgrep -fl "$WORKERS" >&2; exit 1; }
 quitj=("$TMP"/quit/runs/*/journal.jsonl)
-jq -s -e '[.[].payload|select(.kind=="wording")]|length==0' "${quitj[0]}" >/dev/null
+# The stopped worker's cache lock is released (later fetches are not "busy"), and
+# the possibly attempted call is journalled before the quit record.
+if ls -d "$TMP"/quit/cache/*.lock >/dev/null 2>&1; then echo "stale cache lock after quit" >&2; exit 1; fi
+jq -s -e '[.[].payload|select(.kind=="wording")] as $w | ($w|length)==1 and $w[0].source=="stopped" and $w[0].usage.calls==1 and (.[-1].payload.kind=="quit")' "${quitj[0]}" >/dev/null
 
 # 4. No worker installed: the authored line stands and Replies says why.
 prepare missing

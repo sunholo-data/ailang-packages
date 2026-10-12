@@ -1,7 +1,7 @@
 module sunholo/crew_lab/native_watch
 import std/io (println,exit,readLineOpt)
 import std/env (getArgs,getEnvOr)
-import std/list (any,head,filter,length,take,drop)
+import std/list (any,head,filter,length,take,drop,map)
 import std/string (length as size,trim)
 import std/option (Option,Some,None)
 import std/result (Result,Ok,Err)
@@ -16,8 +16,8 @@ import ./native_watch_presenter (frameWith,waiting)
 import ./watch_presenter (recap)
 import ./play_flow (route)
 import ./play (Run,Prediction,openWatch,openConversationWatch,applyWatch,closeWatch,noteWording,model,prefetchCandidates)
-import ./reply_jobs (Inbox,Job,Spec,empty,enqueue,dispatchable,started,complete,withdraw,markRead,statusLine,lines,liveCount,find,known)
-import ./reply_runner (Running,workerAvailable,launch as startWorker,check,stopAll)
+import ./reply_jobs (Inbox,Job,Spec,empty,enqueue,dispatchable,started,complete,withdraw,markRead,statusLine,lines,liveCount,find,known,retire)
+import ./reply_runner (Running,workerAvailable,launch as startWorker,check,abortAll)
 import ./reply_codec (Outcome)
 import ./store (savedWording,cachedChosen)
 import std/fs (readFileResult)
@@ -30,7 +30,7 @@ type Ship={scenario:Scenario,policy:string}
 -- whether crew-reply-worker is installed. Only live mode creates jobs.
 type Background={inbox:Inbox,running:[Running],available:bool}
 type State={host:Option[Run],ui:UI,message:string,history:[string],inputs:int,ship:Ship,bg:Background}
-type Exit={host:Option[Run],error:string,running:[Running]}
+type Exit={host:Option[Run],error:string,running:[Running],inbox:Inbox}
 type Pump={run:Run,inbox:Inbox,running:[Running],changed:bool,error:string}
 pure func worker()->string = "crew-reply-worker"
 pure func replyTimeoutMs()->int = 120000
@@ -78,7 +78,7 @@ func finish(p:Pump,j:Job,res:Result[Outcome,string])->Pump ! {FS} = match res {
 -- Look at every running worker once; keep the busy ones.
 func collect(p:Pump,rs:[Running])->Pump ! {FS,Process,Clock} = match rs {
  []=>p,
- r::rest=>if p.error!="" then p else match check(replyDir(p.run.path),r,replyTimeoutMs()) {
+ r::rest=>if p.error!="" then p else match check(p.run.home,replyDir(p.run.path),r,replyTimeoutMs()) {
   None=>collect({p|running:p.running++[r]},rest),
   Some(res)=>match find(p.inbox,r.id) {
    None=>collect(p,rest),
@@ -118,7 +118,9 @@ func pump(s:State,ahead:int)->Result[{state:State,changed:bool},string] ! {FS,Pr
   let collected=collect(start,s.bg.running);
   if collected.error!="" then Err(collected.error) else {
    let first=dispatch(collected,dispatchable(collected.inbox),s.bg.available);
-   let queued2=if s.bg.available && length(dispatchable(first.inbox))==0 then prefetch(first,prefetchCandidates(first.run,ahead)) else first;
+   let preds=if s.bg.available then prefetchCandidates(first.run,ahead) else [];
+   let pruned={first|inbox:retire(first.inbox,map(\x. x.spec.signature,preds))};
+   let queued2=if s.bg.available && length(dispatchable(pruned.inbox))==0 then prefetch(pruned,preds) else pruned;
    let p=dispatch(queued2,dispatchable(queued2.inbox),s.bg.available);
    let bg=s.bg;
    if p.error!="" then Err(p.error) else Ok({state:{s|host:Some(p.run),bg:{bg|inbox:p.inbox,running:p.running}},changed:p.changed})
@@ -126,7 +128,7 @@ func pump(s:State,ahead:int)->Result[{state:State,changed:bool},string] ! {FS,Pr
  }
 }
 
-pure func leave(s:State,error:string)->Exit = {host:s.host,error:error,running:s.bg.running}
+pure func leave(s:State,error:string)->Exit = {host:s.host,error:error,running:s.bg.running,inbox:s.bg.inbox}
 
 func loop(s0:State,o:Options,resolved:Resolved,terminal:Option[TerminalSession],dialogueMode:string,redraw0:bool)->Exit ! {IO,FS,Env,AI,Process,Clock} = match pump(s0,o.prefetch) {
  Err(e)=>leave(s0,e),
@@ -183,6 +185,16 @@ func loop(s0:State,o:Options,resolved:Resolved,terminal:Option[TerminalSession],
  }
  }
 }
+-- Workers still running at quit may already have reached a provider: each gets
+-- a wording record charged one attempt, before the quit record.
+func journalStopped(h:Run,inbox:Inbox,rs:[Running])->Result[Run,string] ! {FS} = match rs {
+ []=>Ok(h),
+ r::rest=>match find(inbox,r.id) {
+  None=>journalStopped(h,inbox,rest),
+  Some(j)=>match noteWording(h,j.id,j.spec.request,"stopped",1,0,0,"","stopped when the watch ended") {Err(e)=>Err(e),Ok(n)=>journalStopped(n,inbox,rest)}
+ }
+}
+
 -- The ship is read and validated before any terminal or journal is opened, so a
 -- malformed scenario or policy fails before the first turn.
 @allow_empty_ok("No --policy means the home response policy; an empty text selects it")
@@ -211,10 +223,10 @@ func launch(mode:string)->() ! {IO,Env,FS,AI,Process,Clock} {
     match result {
      Err(_)=>{println("Terminal scope failed; controls and cursor have been restored.");exit(1)},
      Ok(x)=>{
-      stopAll(x.running);
+      let stopped=match x.host {None=>Ok(()),Some(h)=>abortAll(h.home,x.running)};
       if x.error!="" then {println(safeText(x.error));exit(1)} else match x.host {
        None=>println("Watch not started. No crew decisions were recorded."),
-       Some(h)=>match closeWatch(h){Err(e)=>{println(safeText("Journal failed: ${e}"));exit(1)},Ok(_)=>println("${recap(h.ui,h.path,o.debug)}${if length(x.running)>0 then "\nStopped ${length(x.running)} background repl${if length(x.running)==1 then "y" else "ies"} still being prepared; the authored lines stand." else ""}")}
+       Some(h0)=>match journalStopped(h0,x.inbox,x.running) {Err(e)=>{println(safeText("Journal failed: ${e}"));exit(1)},Ok(h)=>match closeWatch(h){Err(e)=>{println(safeText("Journal failed: ${e}"));exit(1)},Ok(_)=>println("${recap(h.ui,h.path,o.debug)}${if length(x.running)>0 then "\nStopped ${length(x.running)} background repl${if length(x.running)==1 then "y" else "ies"} still being prepared; the authored lines stand." else ""}${match stopped {Ok(_)=>"",Err(e)=>"\n${e}"}}")}}
       }
      }
     }

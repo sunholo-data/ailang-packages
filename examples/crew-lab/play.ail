@@ -47,7 +47,8 @@ func waiting(r: Run,actor: string) -> () ! {IO} = if not r.modern then () else {
   flush()
 }
 
-export pure func model() -> string = "z-ai/glm-5.3-flash"
+export pure func model() -> string ! {}
+ensures { stringLength(result) > 0 } = "z-ai/glm-5.3-flash"
 
 export pure func selectReply(r: Request, policy: Policy, bundle: Bundle, seed: int) -> Result[Reply, string]
 ensures { match result {

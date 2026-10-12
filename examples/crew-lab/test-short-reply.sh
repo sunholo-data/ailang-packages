@@ -151,7 +151,7 @@ cp "$TMP/rejected.json" "$TMP/valid.json"
 play recovery "$TMP/recovery.out"
 recovery=("$TMP/recovery"/runs/*/journal.jsonl)
 test "$(domain "${recovery[0]}")" = "$(domain "${journal[0]}")"
-jq -s -e '([.[]|select(.payload.kind=="library_error")]|length)==0 and ([.[].payload|select(.kind=="wording")] as $w | ($w|length)==1 and $w[0].usage.calls==1 and ($w[0].error|startswith("AI output rejected")) and $w[0].seed==$w[0].seed)' "${recovery[0]}" >/dev/null
+jq -s -e '([.[]|select(.payload.kind=="library_error")]|length)==0 and ([.[].payload|select(.kind=="wording")] as $w | ($w|length)==1 and $w[0].usage.calls==1 and ($w[0].error|startswith("AI output rejected")))' "${recovery[0]}" >/dev/null
 test ! -e "$TMP/recovery/cache/$KEY.json"
 jq -r 'select(.payload.host_input!=null)|.payload.host_input' "${recovery[0]}" > "$TMP/commands.jsonl"
 for engine in interpreter vm; do AILANG="$AILANG" "$EX/run.sh" "$engine" "$TMP/commands.jsonl" > "$TMP/recovery-$engine.jsonl"; done

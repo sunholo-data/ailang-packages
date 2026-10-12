@@ -40,3 +40,19 @@ shares the Choices row (no layout change), and `test-short-reply.sh`'s installed
 now checks the background path (live domain records equal the offline baseline).
 Found and reported: `spawnProcess` aborts the run on an unknown command (ailang#1784);
 the watch checks PATH first.
+
+## Evaluation round 1 (independent agent): PASS 80/100
+
+Report: `.ailang/state/evaluations/eval_S-CREW-REPLY-INBOX-2_round_1.json`. Fixed after it:
+- Major: a force-stopped worker could leave `cache/<key>.lock`, making later fetches of
+  those words "busy" forever. `reply_runner.abort` now releases it on timeout and quit;
+  `async-test` scenario 3 holds the lock in the fixture and checks it is gone after quit.
+- Workers stopped at quit get a `wording` record charged one attempt, before `quit`.
+- Queued prefetches the current state no longer predicts are retired (`reply_jobs.retire`).
+- Added the out-of-order completion test; removed a tautological jq clause; CHANGELOG count.
+- Quality gate PUB011: contracts on the 16 new exports; reply_worker no longer exported.
+Left as known limits: result file read before its 8 KiB check (FS reads are capped at
+16 MB by the bin flags); PATH check does not test the executable bit (ailang#1784);
+Replies lists newest first, so an arrival while it is open shifts its lines; the async
+scenarios use `--legacy` (the conversation watch was checked by hand, same code path);
+workers survive only if the terminal scope itself fails (the runtime reaps them at exit).

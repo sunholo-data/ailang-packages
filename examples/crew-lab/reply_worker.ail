@@ -1,10 +1,11 @@
 module sunholo/crew_lab/reply_worker
 import std/env (getArgs)
-import std/fs (readFileResult, writeFileResult, renameFileResult)
+import std/fs (readFileResult)
 import std/result (Result, Ok, Err)
 import std/string (length as size)
-import ./reply_codec (JobFile, Outcome, decodeJob, encodeOutcome)
+import ./reply_codec (JobFile, Outcome, decodeJob)
 import ./store (Fetch, resolve)
+import ./reply_runner (publishOutcome)
 
 -- crew-reply-worker HOME JOBFILE: fetch the words for one already-decided reply
 -- into the shared dialogue library (locked, atomic, bounded as for the watch),
@@ -14,18 +15,12 @@ pure func outcome(job:int, f:Fetch) -> Outcome = match f.outcome {
  Err(e) => {job:job, ok:false, source:f.source, calls:f.calls, inputTokens:f.inputTokens, outputTokens:f.outputTokens, error:if size(e) > 512 then "worker error" else e}
 }
 
-export func publish(jobPath:string, o:Outcome) -> Result[(), string] ! {FS} =
- match writeFileResult("${jobPath}.tmp", encodeOutcome(o)) {
-  Err(_) => Err("result write failed"),
-  Ok(_) => match renameFileResult("${jobPath}.tmp", "${jobPath}.result") {Err(_) => Err("result rename failed"), Ok(_) => Ok(())}
- }
-
-export func work(home:string, jobPath:string) -> Result[(), string] ! {FS, AI @limit=1} =
+func work(home:string, jobPath:string) -> Result[(), string] ! {FS, AI @limit=1} =
  match readFileResult(jobPath) {
   Err(_) => Err("cannot read job"),
   Ok(raw) => match decodeJob(raw) {
    Err(e) => Err(e),
-   Ok(f) => publish(jobPath, outcome(f.job, resolve(home, f.signature, [f.label], f.model, "live", 1)))
+   Ok(f) => publishOutcome(jobPath, outcome(f.job, resolve(home, f.signature, [f.label], f.model, "live", 1)))
   }
  }
 

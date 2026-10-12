@@ -13,7 +13,8 @@ export type Status = Queued | Preparing | Ready | Failed | Cancelled deriving (E
 export type Job = {id:int, spec:Spec, status:Status, text:string, note:string, read:bool, calls:int} deriving (Eq)
 export type Inbox = {jobs:[Job], next:int, concurrency:int} deriving (Eq)
 
-export pure func liveLimit() -> int = 16
+export pure func liveLimit() -> int ! {}
+ensures { result >= 1 } = 16
 pure func historyLimit() -> int = 48
 
 pure func live(j:Job) -> bool = j.status == Queued || j.status == Preparing
@@ -32,11 +33,13 @@ export pure func unread(b:Inbox) -> int ! {}
 ensures { result >= 0 && result <= length(b.jobs) } = length(filter(\j. j.status == Ready && not j.read && not j.spec.prefetch, b.jobs))
 
 -- One live job per signature: the same words are never fetched twice at once.
-export pure func pendingFor(b:Inbox, signature:string) -> bool ! {} =
+export pure func pendingFor(b:Inbox, signature:string) -> bool ! {}
+ensures { not result || liveCount(b) > 0 } =
  any(\j. live(j) && j.spec.signature == signature, b.jobs)
 
 -- Any job, finished or not, for these words: a failed prefetch is not retried.
-export pure func known(b:Inbox, signature:string) -> bool ! {} =
+export pure func known(b:Inbox, signature:string) -> bool ! {}
+ensures { result || not pendingFor(b, signature) } =
  any(\j. j.spec.signature == signature, b.jobs)
 
 -- Finished jobs beyond the history bound are dropped oldest first; live jobs stay.
@@ -89,8 +92,15 @@ ensures { length(result.jobs) == length(b.jobs) && liveCount(result) >= liveCoun
  })
 
 -- A queued job that never started can be withdrawn (allowance refunded by caller).
-export pure func withdraw(b:Inbox, id:int, reason:string) -> Inbox ! {} =
+export pure func withdraw(b:Inbox, id:int, reason:string) -> Inbox ! {}
+ensures { length(result.jobs) == length(b.jobs) && liveCount(result) <= liveCount(b) } =
  setStatus(b, id, Queued, \j. {j | status:Cancelled, note:reason})
+
+-- Queued prefetches the current state no longer predicts are withdrawn before
+-- they spend an attempt; running ones finish (their words are still saved).
+export pure func retire(b:Inbox, keep:[string]) -> Inbox ! {}
+ensures { length(result.jobs) == length(b.jobs) && liveCount(result) <= liveCount(b) } =
+ {jobs:map(\j. if j.status == Queued && j.spec.prefetch && not any(\k. k == j.spec.signature, keep) then {j | status:Cancelled, note:"no longer predicted"} else j, b.jobs), next:b.next, concurrency:b.concurrency}
 
 export pure func cancelAll(b:Inbox) -> Inbox ! {}
 ensures { liveCount(result) == 0 } =
@@ -100,7 +110,8 @@ export pure func markRead(b:Inbox) -> Inbox ! {}
 ensures { unread(result) == 0 } =
  {jobs:map(\j. if j.status == Ready then {j | read:true} else j, b.jobs), next:b.next, concurrency:b.concurrency}
 
-export pure func find(b:Inbox, id:int) -> Option[Job] ! {} = match filter(\j. j.id == id, b.jobs) {
+export pure func find(b:Inbox, id:int) -> Option[Job] ! {}
+ensures { match result {None => true, Some(j) => j.id == id} } = match filter(\j. j.id == id, b.jobs) {
  [] => None,
  j :: _ => Some(j)
 }
@@ -160,6 +171,35 @@ test "an offer adopts the prefetch already fetching its words" {
   Ok(b) => match enqueue(started(b, 1), p) {
    Err(_) => false,
    Ok(c) => liveCount(c) == 1 && statusLine(c) == "Replies: 1 preparing, 0 new (r)" && (match find(complete(c, 1, Ok("words"), 1), 1) {Some(j) => not j.spec.prefetch && j.spec.textRoll == 0.5 && j.status == Ready, None => false})
+  }
+ }
+}
+test "out-of-order results each reach their own job" {
+ match enqueue(empty(3), spec("one")) {
+  Err(_) => false,
+  Ok(a) => match enqueue(a, spec("two")) {
+   Err(_) => false,
+   Ok(b) => {
+    let s = started(started(b, 1), 2);
+    let done = complete(complete(s, 2, Ok("second"), 1), 1, Ok("first"), 0);
+    (match (find(done, 1), find(done, 2)) {(Some(x), Some(y)) => x.text == "first" && x.calls == 0 && y.text == "second" && y.calls == 1, _ => false}) && unread(done) == 2
+   }
+  }
+ }
+}
+test "stale queued prefetches are retired, running ones kept" {
+ let p = spec("p");
+ match enqueue(empty(1), {p | prefetch:true}) {
+  Err(_) => false,
+  Ok(a) => {
+   let q = spec("q");
+   match enqueue(a, {q | prefetch:true}) {
+    Err(_) => false,
+    Ok(b) => {
+     let r = retire(started(b, 1), []);
+     (match (find(r, 1), find(r, 2)) {(Some(x), Some(y)) => x.status == Preparing && y.status == Cancelled, _ => false})
+    }
+   }
   }
  }
 }

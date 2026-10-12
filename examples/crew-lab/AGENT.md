@@ -186,6 +186,9 @@ reply_worker the `crew-reply-worker` bin (store.resolve, then an atomic result).
 native_watch polls keys every 100 ms while jobs are live and stops all workers on exit.
 play.predictOffer stages offer+ask on a copy of the pure state for prefetch.
 spawnProcess aborts the run on an unknown command, so the watch checks PATH first.
+reply_worker is a bin module, not exported; publishOutcome lives in reply_runner. A forced
+stop (timeout, quit) uses reply_runner.abort, which also removes the signature's cache
+lock the worker may hold; a normal result uses reap only (the store released it).
 
 Exactly one input branch owns each read: Native uses adapter.readInput inside
 adapter.run; Line/Plain uses readLineOpt and published lineEvent. Generic lineEvent
