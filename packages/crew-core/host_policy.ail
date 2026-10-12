@@ -1,0 +1,34 @@
+module sunholo/crew_core/host_policy
+import std/result (Ok, Err)
+import std/option (Some, None)
+import std/list (any, filter, head)
+import pkg/sunholo/social_dynamics/model (Policies, Principal, ActorPrincipal, State, Task, Authority, Allowed, Refused, Appraisal, Effect, RelationshipDelta)
+import ./codec (decodeOutcome, outcomeDelta)
+
+-- The captain may assign work while every participant's trust in the captain
+-- is at least 20. A crew member appraises only the captain's reported outcome
+-- of an offer they saw, moving their own trust in the captain within 0..100.
+-- Experimental tuning: neither the floor nor the deltas assert a human model.
+
+pure func authority(s: State, p: Principal, t: Task) -> Authority = match p {
+  ActorPrincipal("captain") => if any(\worker. not any(\r. r.from == worker && r.to == "captain" && r.dimension == "trust" && r.value >= 20, s.relationships), t.participants) then Refused("cooperation floor") else Allowed,
+  _ => Refused("captain assignment only")
+}
+
+pure func appraisal(a: Appraisal) -> [Effect] =
+  if a.evidence.author != "captain" || a.evidence.kind != "concern" || not any(\id. any(\e. e.id == id && e.author == "captain" && e.kind == "task_offer", a.visible), a.evidence.causes) then [] else match decodeOutcome(a.evidence.text) {
+    Err(_) => [],
+    Ok(outcome) => match head(filter(\r. r.to == "captain" && r.dimension == "trust", a.relationships)) {
+      None => [],
+      Some(r) => {
+        let delta = outcomeDelta(outcome)
+        let boundedDelta = if r.value + delta < 0 then 0 - r.value else if r.value + delta > 100 then 100 - r.value else delta;
+        [RelationshipDelta(a.observer.id, "captain", "trust", boundedDelta)]
+      }
+    }
+  }
+
+export pure func policies() -> Policies
+ensures { result.authorityId == "captain-cooperation-v1" && result.appraisalId == "received-outcome-v1" } =
+  { authorityId: "captain-cooperation-v1", appraisalId: "received-outcome-v1", authority: authority, appraisal: appraisal }
+

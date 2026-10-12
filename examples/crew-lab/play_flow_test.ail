@@ -1,21 +1,22 @@
 module sunholo/crew_lab/play_flow_test
-import ./play_flow (begin, seedNumber, parseArgs, route, stage, publish, menu, renderStatus, recover, recoveryRecording, PlayState)
+import ./play_flow (beginWatch, seedNumber, parseArgs, route, stage, publish, menu, renderStatus, recover, recoveryRecording, PlayState)
 import std/result (Ok, Err)
 import std/option (Some)
 import std/string (contains)
 import std/list (length, map)
-import ./session (start, offer, startTask)
+import pkg/sunholo/crew_core/session (offer, startTask)
+import ./ship (start)
 
 -- Initialise host fixtures directly, matching the existing native host tests.
 -- Installed UI tests separately execute the composed begin/start path.
 pure func base(choice: string, seed: int) -> Result[PlayState, string] =
-  if choice != "1" && choice != "2" then Err("choice") else if seed < 1 || seed > 2147483646 then Err("seed") else match start("{\"command\":\"start\",\"policy\":\"${if choice == "1" then "consent" else "orders"}\"}") {
+  if choice != "1" && choice != "2" then Err("choice") else if seed < 1 || seed > 2147483646 then Err("seed") else match start("{\"command\":\"start\",\"policy\":\"${if choice == "1" then "consent" else "orders"}\",\"scenario\":\"watch-v2\"}") {
     Err(_) => Err("host"),
     Ok(o) => Ok({ session: o.session, seed: seed, nextId: 1, seq: 0, phase: "main", target: "" })
   }
 
 test "startup guards reject invalid authority and seed alongside host policy fixtures" {
-  match (base("1", 42), base("2", 42), begin("3", 42), begin("1", 0)) {
+  match (base("1", 42), base("2", 42), beginWatch("3", 42), beginWatch("1", 0)) {
     (Ok(a), Ok(b), Err(_), Err(_)) => a.session.policy == "consent" && b.session.policy == "orders" && a.seed == 42,
     _ => false
   }
@@ -38,8 +39,8 @@ test "arguments reject unknown flags duplicate flags and missing values" {
 test "captain menu chooses owned science and rest recipes without manual IDs" {
   match base("1", 42) {
     Err(_) => false,
-    Ok(s) => match (route(s, "1"), route(s, "3"), route(s, "0"), route(s, "manual reply")) {
-      (Ok(a), Ok(b), Ok(q), Err(_)) => a.kind == "offer" && a.worker == "scientist" && a.recipe == "observations" && b.recipe == "rest_scientist" && q.kind == "quit",
+    Ok(s) => match (route({ s | phase: "assignments" }, "1"), route({ s | phase: "rests" }, "1"), route(s, "0"), route(s, "manual reply")) {
+      (Ok(a), Ok(b), Ok(q), Err(_)) => a.kind == "offer" && a.worker == "scientist" && a.recipe == "work_scientist" && b.recipe == "rest_scientist" && q.kind == "quit",
       _ => false
     }
   }
@@ -48,7 +49,7 @@ test "captain menu chooses owned science and rest recipes without manual IDs" {
 test "publication failure retains prior Session seed sequence and ID counter" {
   match base("1", 42) {
     Err(_) => false,
-    Ok(s) => match stage(s, "{\"command\":\"offer\",\"worker\":\"scientist\",\"recipe\":\"observations\",\"id\":\"project-1\"}", 123, "start", "project-1", 2) {
+    Ok(s) => match stage(s, "{\"command\":\"offer\",\"worker\":\"scientist\",\"recipe\":\"work_scientist\",\"id\":\"project-1\"}", 123, "start", "project-1", 2) {
       Err(_) => false,
       Ok(candidate) => {
         let failed = publish(s, candidate, false)
@@ -62,7 +63,7 @@ test "publication failure retains prior Session seed sequence and ID counter" {
 test "offered task requires separate explicit start or leave choice" {
   match base("2", 42) {
     Err(_) => false,
-    Ok(s) => match stage(s, "{\"command\":\"offer\",\"worker\":\"scientist\",\"recipe\":\"observations\",\"id\":\"project-1\"}", 42, "start", "project-1", 2) {
+    Ok(s) => match stage(s, "{\"command\":\"offer\",\"worker\":\"scientist\",\"recipe\":\"work_scientist\",\"id\":\"project-1\"}", 42, "start", "project-1", 2) {
       Err(_) => false,
       Ok(o) => match (route(o.state, "1"), route(o.state, "2")) {
         (Ok(a), Ok(b)) => a.kind == "start" && b.kind == "back" && contains(menu(o.state), "Start"),
@@ -87,7 +88,7 @@ test "dashboard renders exact crew gauges materials and directed trust" {
     Err(_) => false,
     Ok(s) => {
       let view = renderStatus(s, 2)
-      contains(view, "fatigue [####------] 45") && contains(view, "readiness [#####-----] 50") && contains(view, "scientist -> captain trust [#####-----] 50") && contains(view, "available 6, reserved 0, consumed 0") && contains(view, "BRIDGE / Tick 0")
+      contains(view, "fatigue [####------] 45") && contains(view, "readiness [#####-----] 50") && contains(view, "scientist -> captain trust [#####-----] 50") && contains(view, "available 3, reserved 0, consumed 0") && contains(view, "BRIDGE / Tick 0")
     }
   }
 }
@@ -104,7 +105,7 @@ test "published rejection returns to bridge without undoing RNG journal or host"
 }
 
 test "recovery replay records rejection and still processes following tick" {
-  contains(recoveryRecording(["{\"command\":\"start\",\"policy\":\"consent\"}", "{\"command\":\"start_task\",\"task\":\"missing\"}", "{\"command\":\"advance\",\"tick\":1,\"budget\":64}"]), "\"tick\":1")
+  contains(recoveryRecording(["{\"command\":\"start\",\"policy\":\"consent\",\"scenario\":\"watch-v2\"}", "{\"command\":\"start_task\",\"task\":\"missing\"}", "{\"command\":\"advance\",\"tick\":1,\"budget\":64}"]), "\"tick\":1")
 }
 
 test "recovery preserves earlier completion when advance blocks at later boundary" {
@@ -114,12 +115,12 @@ test "recovery preserves earlier completion when advance blocks at later boundar
       Err(_) => false,
       Ok(r) => match startTask(r.session, "rest") {
         Err(_) => false,
-        Ok(w) => match offer(w.session, "engineer", "maintenance", "repair") {
+        Ok(w) => match offer(w.session, "engineer", "work_engineer", "repair") {
           Err(_) => false,
           Ok(e) => match startTask(e.session, "repair") {
             Err(_) => false,
             Ok(t) => {
-              let high = { t.session | state: { t.session.state | actors: map(\a. if a.id == "engineer" then { a | indicators: map(\v. if v.id == "readiness" then { v | value: 90 } else v, a.indicators) } else a, t.session.state.actors) } }
+              let high = { t.session | state: { t.session.state | resources: map(\x. if x.id == "replacement_modules" then { x | reserved: x.reserved - 1, available: x.available + 1 } else x, t.session.state.resources) } }
               let ui = { s | session: high }
               match stage(ui, "{\"command\":\"advance\",\"tick\":10,\"budget\":64}", 123, "main", "", 2) {
                 Err(_) => false,
@@ -159,7 +160,7 @@ test "new dashboard excludes inert actor trust scalar" {
 test "existing offered review navigates without asking or advancing RNG" {
   match base("1", 42) {
     Err(_) => false,
-    Ok(s) => match offer(s.session, "scientist", "observations", "science") {
+    Ok(s) => match offer(s.session, "scientist", "work_scientist", "science") {
       Err(_) => false,
       Ok(o) => match route({ s | session: o.session, phase: "offered" }, "1") {
         Err(_) => false,

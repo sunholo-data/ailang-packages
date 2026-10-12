@@ -41,10 +41,10 @@
         "git grep -nE 'watch_scenario|modern\\(' packages/crew-core has no matches",
         "Per-module --strict-bytecode result recorded (informational)"
       ],
-      "passes": null,
-      "started": null,
-      "completed": null,
-      "notes": null
+      "passes": true,
+      "started": "2026-10-12",
+      "completed": "2026-10-12T19:30:00Z",
+      "notes": "crew_core now holds session, policy (decoder/scoring/choice from reactions), host_policy (authority/appraisal), actor_policy, personality_host, conversations, codec, scenario and example (generated from data/watch-scenario.json by tools/gen-example.sh, drift-checked). Session carries its Scenario; start(scenario, line) requires a host profile (watch-v2/watch-v3); modern() and the legacy two-crew scenario are gone; the captain id must be \"captain\". 73 crew_core tests pass on interpreter and strict VM (22 host-invariant tests ported from the legacy scenario: 18 mechanically, 4 rewritten for watch semantics: archive slots not materials, pilot competes for slots, block via a completion-time reservation fault because watch effects saturate). check 194 MB / verify 194 MB (gate 250; crew-lab was 351), check 1.3 s. publish --dry-run: no gates. Deviation: content_library/social_dynamics/decisions pinned from registry (identical hashes; ailang#1773)."
     },
     {
       "id": "M3",
@@ -78,9 +78,9 @@
         "ailang pkg bin list shows only the crew-watch, crew-watch-offline and crew-sim bins"
       ],
       "passes": null,
-      "started": null,
+      "started": "2026-10-12",
       "completed": null,
-      "notes": null
+      "notes": "Pulled forward into M2 (legacy scenario removal required it): deleted viewer/terminal/journey/journey_presenter, legacy scenario/watch_scenario, play.ail legacy launch loop (252 lines left), bins crew-lab/crew-view/crew-play*/crew-journey*; test-cli/journey/play/watch.sh retired (journey UI flows; domain assertions covered by crew_core session tests); play-*.menu moved to recordings/retired. main.ail kept as crew-host (NDJSON protocol for parity controls and future Godot use); host recordings regenerated for watch-v2. Remaining for M4: watch_run extraction from play is not needed for correctness; journey_flow/presenter still back the watch. Validate: all targets pass locally (rg shim for local only); mutations 8/8 killed."
     },
     {
       "id": "M5",

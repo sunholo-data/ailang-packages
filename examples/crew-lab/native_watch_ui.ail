@@ -2,7 +2,7 @@ module sunholo/crew_lab/native_watch_ui
 import std/json (encode,jo,kv,js,jint)
 import std/result (Result,Ok,Err)
 import pkg/sunholo/terminal_ui/text_field (Field,create,update as edit)
-import ./session (describeConversation,lookupConversation)
+import pkg/sunholo/crew_core/session (describeConversation, lookupConversation)
 import std/option (Option,Some,None)
 import std/list (length,map,filter,nth,take)
 import pkg/sunholo/terminal_ui/ui (Dimensions)
@@ -10,7 +10,7 @@ import pkg/sunholo/terminal_ui/widgets (viewport,cursor)
 import pkg/sunholo/terminal_ui/events (Event,Input,Sized,Finished,Cancelled,NoInput,Character,Next,Previous,Accept,Cancel,First,Last,PriorPage,FollowingPage,FocusNext)
 import pkg/sunholo/social_dynamics/model (Working,Offered)
 import ./play_flow (PlayState)
-import ./watch_scenario (workers,projectName)
+import pkg/sunholo/crew_core/scenario (projectName)
 
 -- Presentation state owns no Session, RNG, journal or AI allowance.
 export type View = Briefing | Decision | Crew | Work | Log | Guide | Ship | Quit | Editor | ReplyReview deriving(Eq)
@@ -33,9 +33,9 @@ pure func sessionChoices(s:PlayState) -> [Choice] =
  if s.phase=="conversation" then match describeConversation(s.session,s.target,s.seed) {Err(_)=>[item("0","Return to proposal","Keep this offer; no time passes.")],Ok(c)=>map(\r. item(r.key,r.text,r.preview),c.suggestions)++[item("4","Write my own reply","Type your words, then confirm your intended approach before sending."),item("0","Return to proposal","Keep the concern and offer open.")]}
  else if s.phase == "start" then [item("1","Start now","Assign this worker and hold the named resources. No time passes."),item("2","Decide later","Keep this proposal and agreement in Offers. Use no time or resources."),item("0","Return to bridge","Keep this offer in Offers; use no time or resources.")]++(match lookupConversation(s.session,s.target) {None=>[],Some(_)=>[item("3","Talk through the concern","Read known context and answer this worker. Work stays offered.")]})
  else if s.phase=="events" then [item("1","Lab: confirmed first contact","Introduce a received scenario report. No arrival is simulated; traits may change slowly on future turns."),item("2","Lab: a major loss","Introduce a received loss report; no invented supplies are removed."),item("3","Lab: a long passage of time","Introduce a received deep-time report; the simulation clock advances only when you Advance."),item("4","Lab: a serious betrayal","Introduce a received betrayal report; trust consequences remain separate from gradual temperament."),item("0","Return without a report","Change nothing.")]
- else if s.phase == "assignments" || s.phase == "rests" then numbered(map(\w. "${w}: ${projectName("${if s.phase == "rests" then "rest" else "work"}_${w}")}",workers()),1,"Offer this assignment, hear its worker, then decide whether to start.")
- else if s.phase == "working" then numbered(map(\t. projectName(t.recipe),filter(\t. t.status == Working,s.session.state.tasks)),1,"Ask the worker how it is going; a reply may include a relief request.")
- else if s.phase == "offered" then numbered(map(\t. projectName(t.recipe),filter(\t. t.status == Offered,s.session.state.tasks)),1,"Return to this proposal. Reading and selecting it use no time or resources.")
+ else if s.phase == "assignments" || s.phase == "rests" then numbered(map(\w. "${w}: ${projectName(s.session.scenario,"${if s.phase == "rests" then "rest" else "work"}_${w}")}",s.session.scenario.workers),1,"Offer this assignment, hear its worker, then decide whether to start.")
+ else if s.phase == "working" then numbered(map(\t. projectName(s.session.scenario,t.recipe),filter(\t. t.status == Working,s.session.state.tasks)),1,"Ask the worker how it is going; a reply may include a relief request.")
+ else if s.phase == "offered" then numbered(map(\t. projectName(s.session.scenario,t.recipe),filter(\t. t.status == Offered,s.session.state.tasks)),1,"Return to this proposal. Reading and selecting it use no time or resources.")
  else if s.phase == "reliefs" then numbered(map(\r. "Relief requested for ${r.task}",filter(\r. not r.resolved,s.session.state.reliefs)),1,"Review the relief request before granting or denying it.")
  else if s.phase == "relief" then [item("1","Grant relief","Stop this job and release its held resources; completed work stays done."),item("2","Deny relief","The worker remains assigned. Cooperation can suffer.")]
  else if s.phase == "response" then [item("1","Retry personal reply","Use a saved reply or a permitted AI attempt. No time passes."),item("2","Use authored continuation","Continue with a contextual narrator summary; uses no AI call."),item("3","Cancel this request","Leave the pending conversation without starting work.")]

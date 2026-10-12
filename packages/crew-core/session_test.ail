@@ -1,4 +1,4 @@
-module sunholo/crew_lab/session_test
+module sunholo/crew_core/session_test
 import std/result (Result, Ok, Err)
 import std/option (Some, None)
 import std/list (head, filter, length, map, range)
@@ -6,18 +6,26 @@ import std/string (contains)
 import std/json (encode, jo, kv, js, jnum, jint)
 import pkg/sunholo/social_dynamics/model (State, AI, ActorPrincipal, AcceptCommitment, Authored, Event, Pending, Done, Working, Offered)
 import pkg/sunholo/social_dynamics/proposals (apply)
-import ./session (Session, Output, HostError, HostFailure, start, input, offer, ask, complete, startTask, resolve, cancel, snapshot)
-import ./scenario (policies)
+import ./session (Session, Output, HostError, HostFailure, start as startWith, input, offer, ask, complete, startTask, resolve, cancel, snapshot)
+import ./example (firstContact)
+import ./host_policy (policies)
+
+-- Host invariants on the first-contact example ship (ported from the
+-- legacy two-person scenario in S-CREW-CORE-SPLIT).
+pure func start(line: string) -> Result[Output, HostError] = match firstContact() {
+  Ok(sc) => startWith(sc, line),
+  Err(e) => Err(HostFailure(e))
+}
 
 pure func base(policy: string) -> Result[Session, HostError] =
-  match start("{\"command\":\"start\",\"policy\":\"${policy}\"}") {
+  match start("{\"command\":\"start\",\"policy\":\"${policy}\",\"scenario\":\"watch-v2\"}") {
     Err(e) => Err(e),
     Ok(o) => Ok(o.session)
   }
 
 pure func project(policy: string) -> Result[Session, HostError] = match base(policy) {
   Err(e) => Err(e),
-  Ok(s) => match offer(s, "scientist", "observations", "science") {
+  Ok(s) => match offer(s, "scientist", "work_scientist", "science") {
     Err(e) => Err(e),
     Ok(o) => Ok(o.session)
   }
@@ -107,12 +115,12 @@ test "consent policy refuses unaccepted project; orders records no personal cons
   }
 }
 
-test "agreed work consumes materials and accrues fatigue only at completion" {
+test "agreed science holds archive slots and accrues fatigue only at completion" {
   match working() {
     Err(_) => false,
-    Ok(s) => resource(s.state, "reserved") == 4 && value(s.state, "scientist", "fatigue") == 45 && (match input(s, "{\"command\":\"advance\",\"tick\":4,\"budget\":64}") {
+    Ok(s) => resource(s.state, "reserved") == 2 && value(s.state, "scientist", "fatigue") == 45 && value(s.state, "scientist", "observations") == 0 && (match input(s, "{\"command\":\"advance\",\"tick\":4,\"budget\":64}") {
       Err(_) => false,
-      Ok(o) => resource(o.session.state, "consumed") == 4 && value(o.session.state, "scientist", "fatigue") == 70 && value(o.session.state, "scientist", "observations") == 25 && trust(o.session.state, "scientist") == 52
+      Ok(o) => resource(o.session.state, "consumed") == 0 && resource(o.session.state, "reserved") == 0 && resource(o.session.state, "available") == 3 && value(o.session.state, "scientist", "fatigue") == 65 && value(o.session.state, "scientist", "observations") == 25 && trust(o.session.state, "scientist") == 52
     })
   }
 }
@@ -120,7 +128,7 @@ test "agreed work consumes materials and accrues fatigue only at completion" {
 test "same parties consent for another task cannot unlock project" {
   match accepted("consent") {
     Err(_) => false,
-    Ok(s) => match offer(s, "scientist", "observations", "other") {
+    Ok(s) => match offer(s, "scientist", "work_scientist", "other") {
       Err(_) => false,
       Ok(o) => rejected(startTask(o.session, "other")) && (match startTask(o.session, "science") {
         Err(_) => false,
@@ -133,7 +141,7 @@ test "same parties consent for another task cannot unlock project" {
 test "ask is worker local and excludes unseen colleague offers" {
   match project("consent") {
     Err(_) => false,
-    Ok(s) => match offer(s, "engineer", "maintenance", "engineering") {
+    Ok(s) => match offer(s, "engineer", "work_engineer", "engineering") {
       Err(_) => false,
       Ok(o) => rejected(ask(o.session, "engineer", "science", "forged")) && (match ask(o.session, "scientist", "science", "local") {
         Err(_) => false,
@@ -191,7 +199,7 @@ test "duplicate complete after later work is full-body-and-roll no-op" {
 test "revision mutation invalidates answer and cancellation recovers" {
   match prepared("consent") {
     Err(_) => false,
-    Ok(s) => match offer(s, "engineer", "maintenance", "engineering") {
+    Ok(s) => match offer(s, "engineer", "work_engineer", "engineering") {
       Err(_) => false,
       Ok(o) => rejected(complete(o.session, "r1", response("accept", 0.8, false), 0.0)) && (match cancel(o.session, "r1") {
         Err(_) => false,
@@ -247,9 +255,9 @@ test "granted relief refunds untouched reservation while denial completes work" 
   match relief() {
     Err(_) => false,
     Ok(s) => match (resolve(s, "relief-r2", true), resolve(s, "relief-r2", false)) {
-      (Ok(c), Ok(d)) => resource(c.session.state, "available") == 6 && resource(c.session.state, "consumed") == 0 && value(c.session.state, "scientist", "fatigue") == 45 && trust(c.session.state, "scientist") == 56 && trust(d.session.state, "scientist") == 48 && (match input(d.session, "{\"command\":\"advance\",\"tick\":4,\"budget\":64}") {
+      (Ok(c), Ok(d)) => resource(c.session.state, "available") == 3 && resource(c.session.state, "consumed") == 0 && value(c.session.state, "scientist", "fatigue") == 45 && trust(c.session.state, "scientist") == 56 && trust(d.session.state, "scientist") == 48 && (match input(d.session, "{\"command\":\"advance\",\"tick\":4,\"budget\":64}") {
         Err(_) => false,
-        Ok(o) => resource(o.session.state, "consumed") == 4
+        Ok(o) => value(o.session.state, "scientist", "observations") == 25 && resource(o.session.state, "reserved") == 0
       }),
       _ => false
     }
@@ -259,13 +267,13 @@ test "granted relief refunds untouched reservation while denial completes work" 
 test "resource competition rejects second start without committing reservation or report" {
   match working() {
     Err(_) => false,
-    Ok(s) => match offer(s, "engineer", "maintenance", "engineering") {
+    Ok(s) => match offer(s, "pilot", "work_pilot", "engineering") {
       Err(_) => false,
-      Ok(o) => match ask(o.session, "engineer", "engineering", "eng") {
+      Ok(o) => match ask(o.session, "pilot", "engineering", "eng") {
         Err(_) => false,
         Ok(a) => match complete(a.session, "eng", response("accept", 0.8, false), 0.0) {
           Err(_) => false,
-          Ok(c) => rejected(startTask(c.session, "engineering")) && resource(c.session.state, "reserved") == 4 && length(c.session.reports) == 1
+          Ok(c) => rejected(startTask(c.session, "engineering")) && resource(c.session.state, "reserved") == 2 && length(c.session.reports) == 1
         }
       }
     }
@@ -284,7 +292,7 @@ test "offer receipt failure stages all host and domain changes atomically" {
   match base("orders") {
     Err(_) => false,
     Ok(s) => let full = paddedKnowledge(s, 2045) in
-    rejected(offer(full, "scientist", "observations", "science")) && full.bindings == [] && full.state.tasks == []
+    rejected(offer(full, "scientist", "work_scientist", "science")) && full.bindings == [] && full.state.tasks == []
   }
 }
 
@@ -347,6 +355,8 @@ test "pending scheduler precedes duplicate completion until abort" {
   }
 }
 
+-- Tampered state: the engineer's held module is no longer reserved, so its
+-- completion at turn 3 cannot consume it. The rest finished at turn 2 is kept.
 test "blocked advance retains earlier completed rest and does not claim target" {
   match base("orders") {
     Err(_) => false,
@@ -354,14 +364,14 @@ test "blocked advance retains earlier completed rest and does not claim target" 
       Err(_) => false,
       Ok(r) => match startTask(r.session, "rest") {
         Err(_) => false,
-        Ok(w) => match offer(w.session, "engineer", "maintenance", "repair") {
+        Ok(w) => match offer(w.session, "engineer", "work_engineer", "repair") {
           Err(_) => false,
           Ok(e) => match startTask(e.session, "repair") {
             Err(_) => false,
-            Ok(t) => let high = { t.session | state: { t.session.state | actors: map(\a. if a.id == "engineer" then { a | indicators: map(\v. if v.id == "readiness" then { v | value: 90 } else v, a.indicators) } else a, t.session.state.actors) } } in
+            Ok(t) => let high = { t.session | state: { t.session.state | resources: map(\x. if x.id == "replacement_modules" then { x | reserved: x.reserved - 1, available: x.available + 1 } else x, t.session.state.resources) } } in
             match input(high, "{\"command\":\"advance\",\"tick\":10,\"budget\":64}") {
               Err(_) => false,
-              Ok(o) => o.failed && o.session.state.tick == 2 && value(o.session.state, "scientist", "fatigue") == 30 && resource(o.session.state, "reserved") == 3 && contains(o.trace, "blocked")
+              Ok(o) => o.failed && o.session.state.tick == 2 && value(o.session.state, "scientist", "fatigue") == 25 && resource(o.session.state, "reserved") == 1 && contains(o.trace, "blocked")
             }
           }
         }
@@ -374,7 +384,7 @@ test "numeric clock limit and altered captured policy/config are rejected" {
   match prepared("consent") {
     Err(_) => false,
     Ok(s) => let ceiling = { s | state: { s.state | tick: 1000000000 } } in
-    rejected(ask(ceiling, "scientist", "science", "ceiling")) && rejected(offer(ceiling, "engineer", "maintenance", "overflow")) && (match head(s.pending) {
+    rejected(ask(ceiling, "scientist", "science", "ceiling")) && rejected(offer(ceiling, "engineer", "work_engineer", "overflow")) && (match head(s.pending) {
       None => false,
       Some(r) => rejected(complete({ s | pending: [{ r | policyId: "forged" }] }, "r1", response("accept", 0.8, false), 0.0)) && rejected(complete({ s | pending: [{ r | configBody: "forged" }] }, "r1", response("accept", 0.8, false), 0.0))
     })

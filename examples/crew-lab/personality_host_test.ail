@@ -1,8 +1,9 @@
 module sunholo/crew_lab/personality_host_test
 import std/result (Ok,Err)
 import pkg/sunholo/social_dynamics/personality (FirstContact)
-import ./session (start,labMajor)
-import ./personality_host (receiveMajor,receiveSpeech)
+import pkg/sunholo/crew_core/session (labMajor)
+import ./ship (start)
+import pkg/sunholo/crew_core/personality_host (receiveMajor,receiveSpeech)
 
 test "host rejects a major receipt for evidence that no crew actually received" {
  match start("{\"command\":\"start\",\"policy\":\"consent\",\"scenario\":\"watch-v3\"}") {

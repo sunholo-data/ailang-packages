@@ -5,12 +5,12 @@ import std/option (Option,Some,None)
 import pkg/sunholo/terminal_ui/ui (Screen,cells,pad,wrap,safeText,clampPage)
 import pkg/sunholo/terminal_ui/widgets (frame as smallFrame,cursor)
 import pkg/sunholo/social_dynamics/model (Actor,Task,Working,Completed,Stopped)
-import ./personality_host (development)
-import ./session (describeConversation)
+import pkg/sunholo/crew_core/personality_host (development)
+import pkg/sunholo/crew_core/session (describeConversation)
 import std/result (Ok,Err)
 import ./play_flow (PlayState)
 import ./native_watch_ui (UI,View,Choice,choices,viewChoices,draftDescription,declaredApproach,selected,Briefing,Decision,Crew,Work,Log,Guide,Ship,Quit,Editor,ReplyReview)
-import ./watch_scenario (projectName,resourceName,purpose)
+import pkg/sunholo/crew_core/scenario (projectName,resourceName,purpose)
 import ./narrative (crew,supplies,costs,spendsSupplies,fatigue,stress,morale,observation)
 
 pure func clamp(n:int,lo:int,hi:int)->int = if n<lo then lo else if n>hi then hi else n
@@ -32,11 +32,11 @@ pure func tired(a:Actor)->string = if value(a,"fatigue")<25 then "rested" else i
 pure func tense(a:Actor)->string = if value(a,"stress")<35 then "at ease" else if value(a,"stress")<60 then "watchful" else if value(a,"stress")<80 then "on edge" else "fraught"
 pure func spirit(a:Actor)->string = if value(a,"morale")<30 then "discouraged" else if value(a,"morale")<70 then "steady" else "in good spirits"
 pure func assigned(s:PlayState,id:string)->string = match head(filter(\t. t.status==Working && any(\p. p==id,t.participants),s.session.state.tasks)) {
- None=>"Available",Some(t)=>if t.recipe=="rest_${id}" then "Resting" else projectName(t.recipe)
+ None=>"Available",Some(t)=>if t.recipe=="rest_${id}" then "Resting" else projectName(s.session.scenario,t.recipe)
 }
 pure func roster(s:PlayState,width:int)->[string] = map(\a. fit("${pad(a.id,10)} ${assigned(s,a.id)} | ${tired(a)}, ${tense(a)}, ${spirit(a)}",width),filter(\a. a.id!="captain",s.session.state.actors))
-pure func resourceRows(s:PlayState)->[string] = map(\r. "${resourceName(r.id)}: ${r.available} free / ${r.reserved} held${if r.id=="archive_compute" then " (reusable)" else " / ${r.consumed} spent"}",s.session.state.resources)
-pure func timeline(s:PlayState,t:Task,ascii:bool)->string = "${projectName(t.recipe)} ${if t.status==Working then elapsed(clamp(s.session.state.tick-t.started,0,1000000000),clamp(t.due-t.started,0,1000000000),ascii) else if t.status==Completed then "Completed" else if t.status==Stopped then "Stopped" else "Offered; not started"}"
+pure func resourceRows(s:PlayState)->[string] = map(\r. "${resourceName(s.session.scenario,r.id)}: ${r.available} free / ${r.reserved} held${if r.id=="archive_compute" then " (reusable)" else " / ${r.consumed} spent"}",s.session.state.resources)
+pure func timeline(s:PlayState,t:Task,ascii:bool)->string = "${projectName(s.session.scenario,t.recipe)} ${if t.status==Working then elapsed(clamp(s.session.state.tick-t.started,0,1000000000),clamp(t.due-t.started,0,1000000000),ascii) else if t.status==Completed then "Completed" else if t.status==Stopped then "Stopped" else "Offered; not started"}"
 pure func schematic(ascii:bool)->[string] = if ascii then ["     +----------+","     |  BRIDGE  |","     +-----+----+","           |","  +--------+---------+","  |     COMMONS      |","  | terraces / lift  |","  +------------------+"] else ["     ╭──────────╮","     │  BRIDGE  │","     ╰─────┬────╯","           │","  ╭────────┴─────────╮","  │     COMMONS      │","  │ terraces / lift  │","  ╰──────────────────╯"]
 pure func twoPanels(left:[string],right:[string],n:int,width:int)->[string] = if n>=length(left) && n>=length(right) then [] else {
  let l=match nth(left,n){None=>"",Some(v)=>v};
@@ -52,7 +52,7 @@ pure func proposal(s:PlayState,message:string)->string = match head(filter(\t. t
  None=>"This proposal is unavailable. Return to Offers.",Some(t)=>{
  let who=match head(t.participants){None=>"worker",Some(w)=>w};
  let agreed=agreement(s,t);
- "PROPOSAL / ${projectName(t.recipe)}\n${if agreed then "${who} agreed. Work has not started." else if s.session.policy=="consent" then "No current agreement. Start requires consent." else "No current agreement. Authority permits Start; trust can suffer."}\n${purpose(t.recipe)}\n${costs(s.session,t.recipe)}${if spendsSupplies(s.session,t.recipe) then "\nSupplies spend at completion even when benefits are capped." else ""}\nStart commits this worker; no time passes. Advance moves work forward.\nDecide later keeps this offer and agreement under Offers.\n${if message=="" then "" else "\nCREW REPLY / CONSEQUENCE\n${message}"}\n\nAVAILABLE\n${supplies(s.session)}"
+ "PROPOSAL / ${projectName(s.session.scenario,t.recipe)}\n${if agreed then "${who} agreed. Work has not started." else if s.session.policy=="consent" then "No current agreement. Start requires consent." else "No current agreement. Authority permits Start; trust can suffer."}\n${purpose(s.session.scenario,t.recipe)}\n${costs(s.session,t.recipe)}${if spendsSupplies(s.session,t.recipe) then "\nSupplies spend at completion even when benefits are capped." else ""}\nStart commits this worker; no time passes. Advance moves work forward.\nDecide later keeps this offer and agreement under Offers.\n${if message=="" then "" else "\nCREW REPLY / CONSEQUENCE\n${message}"}\n\nAVAILABLE\n${supplies(s.session)}"
  }
 }
 pure func conversation(s:PlayState)->string = match describeConversation(s.session,s.target,s.seed) {
@@ -68,7 +68,7 @@ pure func body(s:Option[PlayState],u:UI,message:string,history:[string],mode:str
  None=>wrap("You are captain of a bubble ship.\nFive specialists prepare for contact.\nOffer work to hear its worker.\nStart holds people and resources.\nAdvance moves everyone one turn.\n\nProjects share3 Archive compute slots. Replacement modules and diagnostic cartridges are finite supplies. Holding resources can prevent another project from starting.",width),
  Some(p)=> if u.view==Crew then wrap("${crew(p.session,debug)}${if debug && p.session.chat.version==1 then "\n\n${development(p.session.personalities)}" else ""}",width)
  else if u.view==Log then wrap(if length(history)==0 then "No decisions yet. Offer work to begin." else join("\n\n",history),width)
- else if u.view==Work then wrap("WORK AND SUPPLIES\n${join("\n",resourceRows(p))}\n\n${if length(p.session.state.tasks)==0 then "No projects yet. Choose work or rest to begin." else join("\n\n",map(\t. "${timeline(p,t,u.ascii)}\n${purpose(t.recipe)}\n${costs(p.session,t.recipe)}",p.session.state.tasks))}",width)
+ else if u.view==Work then wrap("WORK AND SUPPLIES\n${join("\n",resourceRows(p))}\n\n${if length(p.session.state.tasks)==0 then "No projects yet. Choose work or rest to begin." else join("\n\n",map(\t. "${timeline(p,t,u.ascii)}\n${purpose(p.session.scenario,t.recipe)}\n${costs(p.session,t.recipe)}",p.session.state.tasks))}",width)
  else if u.view==Ship then schematic(u.ascii)++wrap("Schematic: Bridge / Commons, terraces and open arcades along the Spire / Archive approach. Badges show assignments, not crew locations.\n\n${join("\n",roster(p,width))}",width)
  else if u.view==Editor || u.view==ReplyReview then wrap("${draftDescription(u)}\n\n${conversation(p)}",width)
  else if p.phase=="conversation" then wrap("${if message=="" then "" else "CREW REPLY / CONSEQUENCE\n${message}\n\n"}${conversation(p)}\n\n${match selected(s,u){None=>"",Some(c)=>"SELECTED STARTING POINT\n${c.label}"}}",width)
@@ -79,7 +79,7 @@ pure func body(s:Option[PlayState],u:UI,message:string,history:[string],mode:str
    let idx=cursor(u.cursor,5);
    let who=match nth(["scientist","engineer","medic","pilot","diplomat"],idx){None=>"scientist",Some(w)=>w};
    let recipe="${if p.phase=="rests" then "rest" else "work"}_${who}";
-   wrap("${c.label}\n${purpose(recipe)}\n${costs(p.session,recipe)}${if spendsSupplies(p.session,recipe) then "\nSupplies spend even if benefits are capped." else ""}\nOffer first. The worker replies before you commit anything.\n\n${supplies(p.session)}",width)
+   wrap("${c.label}\n${purpose(p.session.scenario,recipe)}\n${costs(p.session,recipe)}${if spendsSupplies(p.session,recipe) then "\nSupplies spend even if benefits are capped." else ""}\nOffer first. The worker replies before you commit anything.\n\n${supplies(p.session)}",width)
   }
  }
  else {
@@ -122,7 +122,7 @@ ensures { result!="" } = match (s,selected(s,u)) {
   Some(t)=>match head(filter(\r. r.id==t.recipe,p.session.config.recipes)) {
    None=>"Recipe unavailable; Start cannot proceed.",Some(r)=>{
     let shortages=flatMap(\cost. match head(filter(\stock. stock.id==cost.resource,p.session.state.resources)) {
-     None=>["Missing ${resourceName(cost.resource)}."],Some(stock)=>if cost.reserve>stock.available then ["${resourceName(cost.resource)}: need ${cost.reserve}, ${stock.available} free / ${stock.reserved} held."] else []
+     None=>["Missing ${resourceName(p.session.scenario,cost.resource)}."],Some(stock)=>if cost.reserve>stock.available then ["${resourceName(p.session.scenario,cost.resource)}: need ${cost.reserve}, ${stock.available} free / ${stock.reserved} held."] else []
     },r.costs);
     if p.session.policy=="consent" && not agreement(p,t) then "Cannot Start: the worker's current agreement is required. Decide later keeps the offer."
     else if length(shortages)>0 then "Cannot Start: ${join(" ",shortages)} Decide later keeps the offer."

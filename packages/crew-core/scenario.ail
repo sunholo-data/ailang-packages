@@ -193,6 +193,7 @@ pure func assemble(id: string, indicators: [string], captain: Actor, crew: [Crew
  let rests = map(\c. {id: "rest_${c.actor.id}", duration: rest.duration, allocation: 1, costs: [], effects: bounded(c.actor.id, rest.effects)}, crew);
  let recipeIds = map(\w. w.recipe.id, work) ++ map(\r. r.id, rests);
  if length(crew) < 1 || length(crew) > 15 then Err("crew: 1-15 members") else
+ if captain.id != "captain" then Err("captain: id must be \"captain\" in crew_scenario/1 (the host addresses the captain by that id)") else
  if not unique(actorIds) then Err("crew: actor ids must be unique, including the captain") else
  if not unique(recipeIds) then Err("crew: work ids must be unique and not rest_<crew id>") else
  if not contains(indicators, "trust") then Err("indicators: trust is required for trust_in_captain") else

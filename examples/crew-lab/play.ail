@@ -1,5 +1,7 @@
 module sunholo/crew_lab/play
 import std/io (readLine, println, exit, print, flush)
+import ./presenter (rejection, consequences, dialogue)
+import ./journey_flow (Navigation, initial, options as journeyOptions, styleDefault, onboardingAllowed, navigation, remember)
 import std/env (getArgs, getEnvOr, getPid, hasEnv)
 import std/result (Result, Ok, Err)
 import std/option (Some, None)
@@ -9,16 +11,15 @@ import std/json (Json, encode, decode, get, getString, jo, ja, kv, js, jint, jnu
 import pkg/sunholo/content_library/library (Bundle, encodeBundle, starterBundle, nextRoll, pickLabel, pickVariant)
 import pkg/sunholo/social_dynamics/model (Offered)
 import pkg/sunholo/terminal_ui/ui (Dimensions, dimensions, screen, safeText)
-import ./journey_flow (Navigation, initial, options as journeyOptions, styleDefault, onboardingAllowed, navigation, remember)
-import ./journey_presenter (frame, opening, onboarding, indicatorChanges, journeyRecap)
-import ./session (Request, start, lookupConversation, isConversation)
+import pkg/sunholo/crew_core/session (Request, lookupConversation, isConversation)
+import ./ship (start)
 import ./watch_presenter (frame as watchFrame, recap as watchRecap)
 import ./narrative (stock as watchStock, consequences as watchConsequences)
-import ./watch_scenario (resourceName)
-import ./codec (object)
-import ./reactions (Policy, weights, signature, watchSignature, fixtureBody, conversationStarter, chooseReaction)
+import pkg/sunholo/crew_core/scenario (Scenario, resourceName)
+import pkg/sunholo/crew_core/codec (object)
+import pkg/sunholo/crew_core/policy (Policy, weights, chooseReaction)
+import ./dialogue (signature, watchSignature, watchSignatureIn, fixtureBody, conversationStarter)
 import ./store (Fetch, loadPolicy, loadWatchPolicy, resolve, resolveChosen, openRun, appendRun)
-import ./presenter (briefing, policyBrief, seedBrief, dashboard, guidance, help, dialogue, rejection, consequences, recap)
 import ./play_flow (PlayState, Stage, Intent, begin, beginWatch, beginConversationWatch, isWatch, seedNumber, parseArgs, menu, route, stage, publish, renderStatus, recover)
 
 export type HeardReply = {actor:string,text:string} deriving (Eq)
@@ -33,6 +34,12 @@ pure func command(name: string, fields: [{ key: string, value: Json }]) -> strin
 
 pure func envelope(seq: int, payload: Json) -> string =
   encode(jo([kv("version", jint(1)), kv("seq", jint(seq)), kv("payload", payload)]))
+
+func waiting(r: Run,actor: string) -> () ! {IO} = if not r.modern then () else {
+  let f = if isWatch(r.ui) && not r.debug then screen(r.dimensions,r.ansi,["HEARING YOUR CREW"],"The ${actor} is considering the assignment. Their response comes before your decision to start work.",["Please wait; your next choice follows."],0) else screen(r.dimensions, r.ansi, ["Stapledon's Voyage / crew reply", "Request recorded; awaiting crew reply."], "HEARING THE CREW\nLooking for a matching saved response. In live mode, a library miss may call AI within the allowance. No answer or consequence is committed yet.", ["Please wait; next decision follows."], 0)
+  if r.ansi then print(f.text) else println(f.text)
+  flush()
+}
 
 pure func model() -> string = "z-ai/glm-5.3-flash"
 
@@ -89,14 +96,14 @@ ensures {length(result)<=8 && (published || result==recent)} =
 pure func usage(fetch: Fetch) -> Json =
   jo([kv("source", js(fetch.source)), kv("calls", jint(fetch.calls)), kv("input_tokens", jint(fetch.inputTokens)), kv("output_tokens", jint(fetch.outputTokens)), kv("usage_known", jb(fetch.usageKnown))])
 
-pure func watchRejection(trace: string) -> string = match decode(trace) {
+pure func watchRejection(sc: Scenario, trace: string) -> string = match decode(trace) {
  Err(_)=>"This action could not be completed. You can choose again.",
  Ok(j)=>match get(j,"error") {
   None=>"The advance stopped; earlier completed work is retained. Review Work before continuing.",
   Some(e)=>{
    let code=match getString(e,"code") {Some(x)=>x,None=>""};
    let detail=match getString(e,"detail") {Some(x)=>x,None=>""};
-   if code == "insufficient_resource" then "Not enough available ${resourceName(detail)}. Other work may be holding capacity. Review Work, advance existing jobs, or leave this offer open. Spent physical supplies do not return by waiting." else if code == "capacity_exceeded" then "That worker is occupied. Advance their current assignment or handle requested relief; this offer stays open." else "This action needs agreement, cooperation and available resources. Review the offer and your command style; you can choose again."
+   if code == "insufficient_resource" then "Not enough available ${resourceName(sc,detail)}. Other work may be holding capacity. Review Work, advance existing jobs, or leave this offer open. Spent physical supplies do not return by waiting." else if code == "capacity_exceeded" then "That worker is occupied. Advance their current assignment or handle requested relief; this offer stays open." else "This action needs agreement, cooperation and available resources. Review the offer and your command style; you can choose again."
   }
  }
 }
@@ -110,7 +117,7 @@ func commit(r: Run, c: string, seed: int, phase: string, target: string, nextId:
         Err(e) => Err("Journal failed; prior Session and seed retained: ${e}"),
         Ok(_) => {
           let publication = publish(r.ui, candidate, true)
-          Ok({ run: { r | ui: publication.state, remaining: r.remaining - calls }, failed: candidate.failed, message: if candidate.failed then if isWatch(r.ui) then watchRejection(candidate.trace) else rejection(candidate.trace) else if isWatch(r.ui) && not r.debug then watchConsequences(r.ui.session, publication.state.session, c) else consequences(r.ui.session, publication.state.session, c) })
+          Ok({ run: { r | ui: publication.state, remaining: r.remaining - calls }, failed: candidate.failed, message: if candidate.failed then if isWatch(r.ui) then watchRejection(r.ui.session.scenario,candidate.trace) else rejection(candidate.trace) else if isWatch(r.ui) && not r.debug then watchConsequences(r.ui.session, publication.state.session, c) else consequences(r.ui.session, publication.state.session, c) })
         }
       }
     }
@@ -126,7 +133,7 @@ func respond(r: Run, explicitAuthored: bool) -> Result[Applied, string] ! {IO, F
   match head(filter(\q. q.id == r.ui.target, r.ui.session.pending)) {
     None => Err("No pending response"),
     Some(request) => {
-      let sig = if isWatch(r.ui) then watchSignature(request,r.policyBody,model()) else signature(request, r.policyBody, model())
+      let sig = if isWatch(r.ui) then watchSignatureIn(r.ui.session.scenario,request,r.policyBody,model()) else signature(request, r.policyBody, model())
       waiting(r,request.actor)
       let fetch = if explicitAuthored then { outcome: starterBundle(sig, request.legal), source: "explicit-authored", calls: 0, inputTokens: 0, outputTokens: 0, usageKnown: true } else if isWatch(r.ui) && r.mode=="live" then match chooseReaction(r.policy,request,r.ui.seed) {
         Err(e)=>{outcome:Err(e),source:"error",calls:0,inputTokens:0,outputTokens:0,usageKnown:true},
@@ -149,7 +156,7 @@ func respond(r: Run, explicitAuthored: bool) -> Result[Applied, string] ! {IO, F
             let nextPhase = if hasConcern then "conversation" else if offered then "start" else "main"
             match commit(r, reply.command, reply.seed, nextPhase, if offered then request.task else "", r.ui.nextId, jo([kv("selection", reply.metadata), kv("usage", usage(fetch))]), fetch.calls) {
               Err(e) => Err(e),
-              Ok(applied) => Ok({ applied | run:{applied.run|recent:if isConversation(r.ui.session) then rememberReply(r.recent,request.actor,reply.text,not applied.failed) else r.recent}, message: if applied.failed then applied.message else if isWatch(r.ui) && not r.debug then if bundle.origin == "authored" && not isConversation(r.ui.session) then watchStock(request,reply.label) else "${request.actor}: ${reply.text}" else "${dialogue(request.actor, reply.label, reply.text, fetch.source, bundle.origin)}${if isWatch(r.ui) && r.debug then "\nDevelopment selection: ${encode(reply.metadata)}" else ""}" })
+              Ok(applied) => Ok({ applied | run:{applied.run|recent:if isConversation(r.ui.session) then rememberReply(r.recent,request.actor,reply.text,not applied.failed) else r.recent}, message: if applied.failed then applied.message else if isWatch(r.ui) && not r.debug then if bundle.origin == "authored" && not isConversation(r.ui.session) then watchStock(r.ui.session.scenario,request,reply.label) else "${request.actor}: ${reply.text}" else "${dialogue(request.actor, reply.label, reply.text, fetch.source, bundle.origin)}${if isWatch(r.ui) && r.debug then "\nDevelopment selection: ${encode(reply.metadata)}" else ""}" })
             }
           }
         }
@@ -198,195 +205,16 @@ func act(r: Run, i: Intent) -> Result[Applied, string] ! {IO, FS, AI} = if i.kin
   None => Err("No pending advance")
 } else if i.kind == "abort" then commit(r, command("abort", []), r.ui.seed, "main", "", r.ui.nextId, jo([]), 0) else if i.kind == "relief_choice" then Ok({ run: { r | ui: { r.ui | phase: "relief", target: i.target } }, failed: false, message: "" }) else if i.kind == "back" then Ok({ run: { r | ui: { r.ui | phase: "main", target: "" } }, failed: false, message: "" }) else if i.kind == "working" || i.kind == "offered" || i.kind == "reliefs" || i.kind == "assignments" || i.kind == "rests" then Ok({ run: { r | ui: { r.ui | phase: i.kind, target: "" } }, failed: false, message: "" }) else Err("Unknown captain action")
 
-func status(r: Run) -> () ! {IO} {
-  println(dashboard(r.ui.session, r.remaining))
-  println(if r.mode == "offline" then "Dialogue: saved or stock wording / OFFLINE / no AI calls" else "Dialogue: LIVE / AI attempts remaining ${show(r.remaining)}")
-}
 
-func finish(r: Run) -> () ! {IO, FS} =
-  match appendRun(r.path, envelope(r.ui.seq + 1, jo([kv("kind", js("quit")), kv("seed", jint(r.ui.seed))]))) {
-    Err(e) => {
-      println(if r.modern then safeText("Journal failed: ${e}") else "Journal failed: ${e}")
-      exit(1)
-    },
-    Ok(_) => if r.modern then {
-      println("")
-      println(if isWatch(r.ui) then watchRecap(r.ui,r.path,r.debug) else journeyRecap(r.ui, r.path))
-    } else println(recap(r.ui.session, r.path))
-  }
 
-func loop(r: Run) -> () ! {IO, FS, AI} = if r.modern then journeyLoop(r) else {
-  status(r)
-  if r.lastMessage != "" then println(r.lastMessage) else ()
-  println(guidance(r.ui.session, r.ui.phase, r.ui.target))
-  println(menu(r.ui))
-  let line = readLine()
-  if line == "" then finish(r) else if r.lines >= 10000 || stringLength(line) > 65536 then {
-    println("Input limit reached; previous committed journal retained")
-    exit(1)
-  } else match route(r.ui, line) {
-    Err(e) => loop({ r | lines: r.lines + 1, lastMessage: e }),
-    Ok(i) => if i.kind == "quit" then finish(r) else if i.kind == "status" then {
-      loop({ r | lines: r.lines + 1 })
-    } else if i.kind == "help" then {
-      loop({ r | lines: r.lines + 1, lastMessage: help(r.ui.session, r.ui.phase, r.ui.target, r.mode, r.remaining) })
-    } else match act({ r | lines: r.lines + 1 }, i) {
-      Err(e) => {
-        println(e)
-        exit(1)
-      },
-      Ok(a) => if a.failed then {
-        loop({ a.run | ui: recover(a.run.ui), lastMessage: "${a.message}\nAction not completed; returning to the bridge." })
-      } else loop({ a.run | lastMessage: if a.message == "" then a.run.lastMessage else a.message })
-    }
-  }
-}
 
-func waiting(r: Run,actor: string) -> () ! {IO} = if not r.modern then () else {
-  let f = if isWatch(r.ui) && not r.debug then screen(r.dimensions,r.ansi,["HEARING YOUR CREW"],"The ${actor} is considering the assignment. Their response comes before your decision to start work.",["Please wait; your next choice follows."],0) else screen(r.dimensions, r.ansi, ["Stapledon's Voyage / crew reply", "Request recorded; awaiting crew reply."], "HEARING THE CREW\nLooking for a matching saved response. In live mode, a library miss may call AI within the allowance. No answer or consequence is committed yet.", ["Please wait; next decision follows."], 0)
-  if r.ansi then print(f.text) else println(f.text)
-  flush()
-}
 
-func journeyLoop(r: Run) -> () ! {IO, FS, AI} = {
-  let f = if isWatch(r.ui) then watchFrame(r.ui,r.nav,r.lastMessage,r.mode,r.remaining,r.path,r.dimensions,r.ansi,r.debug) else frame(r.ui, r.nav, r.lastMessage, r.mode, r.remaining, r.path, r.dimensions, r.ansi)
-  print(f.text)
-  print("Choose > ")
-  flush()
-  let line = readLine()
-  if not r.ansi then println("") else ()
-  if line == "" then finish(r) else if r.lines >= 10000 || stringLength(line) > 65536 then {
-    println("Input limit reached; previous committed journal retained")
-    exit(1)
-  } else {
-    let nav = navigation(r.ui, { r.nav | page: f.page }, line)
-    if nav.handled then journeyLoop({ r | nav: nav.nav, lines: r.lines + 1 }) else match route(r.ui, line) {
-      Err(e) => journeyLoop({ r | lastMessage: e, nav: { r.nav | view: "bridge", page: 0 }, lines: r.lines + 1 }),
-      Ok(i) => if i.kind == "quit" then finish(r) else match act({ r | lines: r.lines + 1 }, i) {
-        Err(e) => {
-          println(safeText(e))
-          exit(1)
-        },
-        Ok(a) => {
-          let detail = if a.run.ui.seq > r.ui.seq && (not isWatch(r.ui) || r.debug) then indicatorChanges(r.ui.session, a.run.ui.session) else ""
-          let message = if a.message == "" then a.run.lastMessage else "${a.message}${detail}"
-          let published = a.run.ui.seq > r.ui.seq && a.message != ""
-          let readNav = if published then remember(a.run.nav, message) else { a.run.nav | view: "bridge", page: 0 }
-          journeyLoop({ a.run | ui: if a.failed then recover(a.run.ui) else a.run.ui, nav: readNav, lastMessage: if a.failed then "${message}\nAction not completed; you can choose again." else message })
-        }
-      }
-    }
-  }
-}
 
-func envNumber(name: string, fallback: int) -> int ! {Env} = match stringToInt(getEnvOr(name, "")) {
-  Some(n) => n,
-  None => fallback
-}
 
-func choosePolicy(mode: string, seed: int, d: Dimensions, ansi: bool, page: int, inputs: int, explain: bool) -> string ! {IO} =
-  {
-    let f = onboarding(mode, seed, d, ansi, page, explain)
-    print(f.text)
-    print("Choose > ")
-    flush()
-    let key = readLine()
-    if not ansi then println("") else ()
-    if not onboardingAllowed(inputs, stringLength(key)) then {
-      println("Onboarding input limit reached; no game commands recorded.")
-      exit(1)
-    } else ()
-    if key == "" || key == "0" then {
-      println("Preparation not started. No game commands recorded.")
-      exit(0);
-      ""
-    } else if key == "n" then choosePolicy(mode, seed, d, ansi, f.page + 1, inputs + 1, explain) else if key == "v" then choosePolicy(mode, seed, d, ansi, if f.page <= 0 then 0 else f.page - 1, inputs + 1, explain) else if key == "h" || key == "help" then choosePolicy(mode, seed, d, ansi, 0, inputs + 1, true) else if key == "b" then choosePolicy(mode, seed, d, ansi, 0, inputs + 1, false) else if key == "1" || key == "2" then key else {
-      println("Choose 1 agreement or 2 authority; h explains with an example.")
-      choosePolicy(mode, seed, d, ansi, f.page, inputs + 1, explain)
-    }
-  }
 
-func launch(mode: string, modern: bool) -> () ! {IO, Env, FS, AI} = {
-  let home = getEnvOr("HOME", "")
-  let envDims = dimensions(envNumber("COLUMNS", 80), envNumber("LINES", 24))
-  let flags = if modern then journeyOptions(getArgs(), envDims.columns, envDims.rows, styleDefault(getEnvOr("TERM", ""), hasEnv("NO_COLOR"))) else Ok({ args: getArgs(), columns: 80, rows: 28, ansi: false, debug:false, legacy:true })
-  match flags {
-    Err(e) => {
-      println(if modern then safeText(e) else e)
-      exit(1)
-    },
-    Ok(f) => match parseArgs(f.args, "${home}/.ailang/crew-lab") {
-      Err(e) => {
-        println(if modern then safeText(e) else e)
-        exit(1)
-      },
-      Ok(o) => {
-        let d = dimensions(f.columns, f.rows)
-        if modern then () else {
-          println(briefing(mode))
-          if o.hasSeed then println("Seed ${show(o.seed)}: the same seed, policy, library and choices repeat the variation.") else ()
-          println(policyBrief())
-        }
-        let policyChoice = if modern then choosePolicy(mode, o.seed, d, f.ansi, 0, 0, false) else readLine()
-        let seed = if o.hasSeed then Ok(o.seed) else {
-          println(seedBrief())
-          seedNumber(readLine())
-        }
-        match seed {
-          Err(e) => {
-            println(if modern then safeText(e) else e)
-            exit(1)
-          },
-          Ok(seedValue) => match (if modern && not f.legacy then beginWatch(policyChoice, seedValue) else begin(policyChoice, seedValue), if modern && not f.legacy then loadWatchPolicy(o.home) else loadPolicy(o.home)) {
-            (Err(e), _) => {
-              println(if modern then safeText(e) else e)
-              exit(1)
-            },
-            (_, Err(e)) => {
-              println(if modern then safeText(e) else e)
-              exit(1)
-            },
-            (Ok(ui), Ok(config)) => {
-              let c = command("start", [kv("policy", js(ui.session.policy))] ++ (if isWatch(ui) then [kv("scenario",js("watch-v2"))] else []))
-              match start(c) {
-                Err(_) => {
-                  println("Startup failed")
-                  exit(1)
-                },
-                Ok(initialHost) => {
-                  let header = envelope(0, jo([kv("kind", js("start")), kv("host_input", js(c)), kv("host_output", js(initialHost.trace)), kv("seed", jint(seedValue)), kv("policy_body", js(config.body)), kv("model", js(model())), kv("mode", js(mode))]))
-                  match openRun(o.home, "${getPid()}-${seedValue}", header) {
-                    Err(e) => {
-                      println(if modern then safeText("Run ownership/journal failed: ${e}") else "Run ownership/journal failed: ${e}")
-                      exit(1)
-                    },
-                    Ok(path) => {
-                      if modern then () else println("Welcome to the bridge. Choose your next captain action.")
-                      loop({ ui: ui, home: o.home, path: path, policy: config.policy, policyBody: config.body, mode: mode, remaining: config.policy.callLimit, lines: if o.hasSeed then 1 else 2, lastMessage: "", modern: modern, nav: initial(), dimensions: d, ansi: f.ansi, debug:f.debug, recent:[] })
-                    }
-                  }
-                }
-              }
-            }
-          }
-        }
-      }
-    }
-  }
-}
 
--- CLI contracts state the unit-return interface only; installed integration tests
--- validate publication, usage and dialogue behaviour across these effects.
-export func main() -> () ! {IO, Env, FS, AI}
-ensures { result == () } = launch("live", false)
 
-export func offline() -> () ! {IO, Env, FS, AI}
-ensures { result == () } = launch("offline", false)
 
--- The public adapter accepts only supported dialogue modes. Effectful launch
--- behaviour is established by the installed CLI controls, not a unit-return proof.
-export func launchJourney(mode: string) -> () ! {IO, Env, FS, AI}
-requires { mode == "live" || mode == "offline" } = launch(mode, true)
 
 -- Trusted app adapters only: these reuse the same start/commit/respond/store
 -- boundaries. UI-owned navigation never calls them. No second input owner.

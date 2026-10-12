@@ -85,3 +85,4 @@ test "rejects an effect on an unknown indicator" { rejected(replace(body(), "\"s
 test "rejects the wrong schema" { rejected(replace(body(), "crew_scenario/1", "crew_scenario/9")) }
 test "rejects consume above reserve" { rejected(replace(body(), "\"reserve\":1,\"consume\":1", "\"reserve\":1,\"consume\":2")) }
 test "errors name the problem" { errorOf(replace(body(), "\"resource\":\"flour\"", "\"resource\":\"sugar\"")) == "work_cook: unknown resource sugar" }
+test "rejects a captain not named captain" { rejected(replace(body(), "\"id\":\"captain\"", "\"id\":\"skipper\"")) }
