@@ -112,3 +112,15 @@ conversations-test:
 	@AILANG="$(AILANG)" python3 "$(EX)/test-conversations.py"
 	@AILANG="$(AILANG)" "$(EX)/test-conversation-replay.sh"
 validate: conversations-test
+
+.PHONY: core-tests scenario-equivalence
+core-tests:
+	@cd "$(ROOT)/packages/crew-core" && "$(AILANG)" lock >/dev/null
+	@"$(AILANG)" check --package "$(ROOT)/packages/crew-core"
+	@cd "$(ROOT)/packages/crew-core" && "$(AILANG)" test --package . --allow-skips
+	@cd "$(ROOT)/packages/crew-core" && "$(AILANG)" test --package . --allow-skips --bytecode --strict-bytecode
+	@cd "$(ROOT)/packages/crew-core" && "$(AILANG)" test --allow-skips scenario.ail
+	@cd "$(ROOT)/packages/crew-core" && "$(AILANG)" pkg quality --strict .
+scenario-equivalence:
+	@cd "$(EX)" && "$(AILANG)" run --quiet --package-dir . --caps IO,FS scenario_equivalence.ail
+validate: core-tests scenario-equivalence

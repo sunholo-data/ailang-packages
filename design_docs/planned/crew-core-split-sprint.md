@@ -41,7 +41,7 @@ no packages (2026-10-12).
 
 ## Milestones
 
-### M1: the Scenario type and its JSON format (~400 lines, ~1 executor run)
+### M1: the Scenario type and its JSON format (~400 lines, ~1 executor run) ✅ 2026-10-12
 
 Create `packages/crew-core/` with `ailang.toml` (`sunholo/crew_core` 0.1.0, experimental,
 effects max `["IO"]` only for `_smoke.ail`) and `scenario.ail`:

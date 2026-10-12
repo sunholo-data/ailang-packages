@@ -1,0 +1,22 @@
+[package]
+name = "sunholo/crew_core"
+version = "0.1.0"
+edition = "1"
+ailang = ">=0.54.0"
+description = "Pure captain/crew host for social and narrative games: scenarios as JSON data, consent and command, relief, personality drift and conversations on social_dynamics"
+license = "Apache-2.0"
+[exports]
+modules = ["sunholo/crew_core/scenario"]
+[dependencies]
+"sunholo/social_dynamics" = "0.3.0" # registry pin, not path: ailang#1773 (publish smoke copies a path lock). Content hash equals ../social-dynamics.
+[effects]
+max = ["IO"] # only private smoke; public API pure
+[metadata]
+tags = ["simulation", "social", "narrative", "games", "crew"]
+ai_summary = "Pure crew host with scenario data decoded from JSON (crew_scenario/1); deterministic, no file or AI effects in the public API."
+repository = "https://github.com/sunholo-data/ailang-packages/tree/main/packages/crew-core"
+license_url = "https://github.com/sunholo-data/ailang-packages/blob/main/LICENSE"
+[stability]
+level = "experimental"
+[release]
+kind = "feature"

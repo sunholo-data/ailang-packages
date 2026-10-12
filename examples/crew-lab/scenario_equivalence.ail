@@ -1,0 +1,43 @@
+module sunholo/crew_lab/scenario_equivalence
+import std/io (println, exit)
+import std/fs (readFileResult)
+import std/list (map, filter, flatMap, length)
+import std/string (join)
+import std/result (Result, Ok, Err)
+import pkg/sunholo/crew_core/scenario (Scenario, decodeScenario, config, workerRecipe, projectName, purpose, resourceName)
+import ./watch_scenario (config as watchConfig, actors as watchActors, resources as watchResources, workers as watchWorkers, workerRecipe as watchWorkerRecipe, projectName as watchProjectName, purpose as watchPurpose, resourceName as watchResourceName)
+
+-- Transitional control (S-CREW-CORE-SPLIT M1): data/watch-scenario.json must
+-- reproduce the coded watch scenario exactly before watch_scenario.ail is retired.
+
+pure func same(label: string, ok: bool) -> [string] = if ok then [] else [label]
+
+pure func policyDiffs(s: Scenario, policy: string) -> [string] = match (config(s, policy), watchConfig(policy)) {
+ (Ok(a), Ok(b)) => same("config ${policy}", a == b),
+ _ => ["config ${policy} unavailable"]
+}
+
+pure func diffs(s: Scenario) -> [string] = {
+ let recipes = map(\r. r.id, s.recipes) ++ ["", "work_captain", "observations"];
+ let people = watchWorkers() ++ ["captain", "stowaway"];
+ let supplies = map(\r. r.id, watchResources()) ++ ["", "materials"];
+ policyDiffs(s, "consent") ++ policyDiffs(s, "orders")
+ ++ same("actors", s.actors == watchActors())
+ ++ same("resources", s.resources == watchResources())
+ ++ same("workers", s.workers == watchWorkers())
+ ++ flatMap(\w. flatMap(\r. same("workerRecipe ${w} ${r}", workerRecipe(s, w, r) == watchWorkerRecipe(w, r)), recipes), people)
+ ++ flatMap(\r. same("projectName ${r}", projectName(s, r) == watchProjectName(r)) ++ same("purpose ${r}", purpose(s, r) == watchPurpose(r)), recipes)
+ ++ flatMap(\x. same("resourceName ${x}", resourceName(s, x) == watchResourceName(x)), supplies)
+}
+
+export func main() -> () ! {IO, FS} =
+ match readFileResult("data/watch-scenario.json") {
+  Err(e) => { println("cannot read data/watch-scenario.json: ${e}"); exit(1) },
+  Ok(body) => match decodeScenario(body) {
+   Err(e) => { println("invalid scenario: ${e}"); exit(1) },
+   Ok(s) => match diffs(s) {
+    [] => println("scenario equivalent: config(consent, orders), ${show(length(s.actors))} actors, ${show(length(s.resources))} resources, rights, names and purposes"),
+    ds => { println("scenario differs: ${join("; ", ds)}"); exit(1) }
+   }
+  }
+ }
