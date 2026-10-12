@@ -1,0 +1,59 @@
+{
+  "schema": "crew_claims/1",
+  "claims": [
+    {
+      "id": "consent-runs-clean",
+      "captain": "consent",
+      "metric": "errors",
+      "stat": "max",
+      "op": "==",
+      "value": 0
+    },
+    {
+      "id": "orders-runs-clean",
+      "captain": "orders",
+      "metric": "errors",
+      "stat": "max",
+      "op": "==",
+      "value": 0
+    },
+    {
+      "id": "medic-asks-for-relief",
+      "captain": "consent",
+      "metric": "relief.asked",
+      "stat": "share",
+      "op": ">=",
+      "value": 0.5,
+      "when": {
+        "op": ">=",
+        "value": 1
+      },
+      "note": "grief makes the medic ask to stop at least sometimes"
+    },
+    {
+      "id": "consent-eases-medic-stress",
+      "captain": "consent",
+      "metric": "crew.medic.stress",
+      "stat": "median",
+      "op": "<=",
+      "value": 80,
+      "note": "agreement and relief keep stress from climbing past where it started"
+    },
+    {
+      "id": "orders-keep-medic-strained",
+      "captain": "orders",
+      "metric": "crew.medic.stress",
+      "stat": "median",
+      "op": ">=",
+      "value": 70
+    },
+    {
+      "id": "dreamer-holds-together",
+      "captain": "consent",
+      "metric": "crew.dreamer.morale",
+      "stat": "median",
+      "op": ">=",
+      "value": 40
+    }
+  ]
+}

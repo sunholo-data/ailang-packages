@@ -1,0 +1,260 @@
+{
+ "schema": "crew_scenario/1",
+ "id": "stapledon-archive-misremembers",
+ "indicators": [
+  "fatigue",
+  "stress",
+  "morale",
+  "readiness",
+  "observations",
+  "trust"
+ ],
+ "indicator_defaults": {
+  "fatigue": 0,
+  "stress": 0,
+  "morale": 50,
+  "readiness": 50,
+  "observations": 0
+ },
+ "captain": {
+  "id": "captain",
+  "values": {
+   "mission": 80
+  },
+  "start": {
+   "fatigue": 20,
+   "stress": 50,
+   "morale": 55
+  }
+ },
+ "crew": [
+  {
+   "id": "analyst",
+   "role": "Analyst",
+   "ocean": {
+    "openness": 65,
+    "conscientiousness": 85,
+    "extraversion": 15,
+    "agreeableness": 35,
+    "neuroticism": 40
+   },
+   "values": {
+    "truth": 95,
+    "autonomy": 70
+   },
+   "start": {
+    "fatigue": 30,
+    "stress": 55,
+    "morale": 50
+   },
+   "work": [
+    {
+     "id": "work_analyst",
+     "name": "Audit the Archive's household records",
+     "purpose": "Compare the Archive's records of who belongs to which household against what the crew remember.",
+     "duration": 3,
+     "costs": [
+      {
+       "resource": "archive_access",
+       "reserve": 2,
+       "consume": 0
+      }
+     ],
+     "effects": {
+      "observations": 25,
+      "fatigue": 15,
+      "stress": 15
+     }
+    }
+   ]
+  },
+  {
+   "id": "skeptic",
+   "role": "Skeptic",
+   "ocean": {
+    "openness": 55,
+    "conscientiousness": 60,
+    "extraversion": 40,
+    "agreeableness": 30,
+    "neuroticism": 45
+   },
+   "values": {
+    "truth": 85,
+    "autonomy": 80
+   },
+   "start": {
+    "fatigue": 30,
+    "stress": 65,
+    "morale": 40
+   },
+   "work": [
+    {
+     "id": "work_skeptic",
+     "name": "Keep a hand-written ledger",
+     "purpose": "Start a record of decisions on paper, outside the Archive, so mistakes cannot be rewritten.",
+     "duration": 2,
+     "costs": [
+      {
+       "resource": "paper_stock",
+       "reserve": 1,
+       "consume": 1
+      }
+     ],
+     "effects": {
+      "observations": 10,
+      "fatigue": 10,
+      "stress": -5,
+      "morale": 5
+     }
+    }
+   ]
+  },
+  {
+   "id": "zealot",
+   "role": "Zealot",
+   "ocean": {
+    "openness": 25,
+    "conscientiousness": 80,
+    "extraversion": 55,
+    "agreeableness": 45,
+    "neuroticism": 55
+   },
+   "values": {
+    "faith": 90,
+    "cooperation": 70
+   },
+   "start": {
+    "fatigue": 25,
+    "stress": 45,
+    "morale": 65
+   },
+   "work": [
+    {
+     "id": "work_zealot",
+     "name": "Lead the Archive rite",
+     "purpose": "Hold the Cathedral rite that affirms trust in the Archive that brought the ship home once already.",
+     "duration": 2,
+     "costs": [],
+     "effects": {
+      "morale": 10,
+      "fatigue": 10,
+      "stress": 5
+     }
+    }
+   ]
+  },
+  {
+   "id": "engineer",
+   "role": "Chief Engineer",
+   "ocean": {
+    "openness": 20,
+    "conscientiousness": 85,
+    "extraversion": 25,
+    "agreeableness": 45,
+    "neuroticism": 30
+   },
+   "values": {
+    "reliability": 90,
+    "family": 75
+   },
+   "start": {
+    "fatigue": 40,
+    "stress": 55,
+    "morale": 50
+   },
+   "work": [
+    {
+     "id": "work_engineer",
+     "name": "Test the memory cores",
+     "purpose": "Run checks on the Archive's memory cores; a full test ties up access the analyst also needs.",
+     "duration": 3,
+     "costs": [
+      {
+       "resource": "archive_access",
+       "reserve": 2,
+       "consume": 0
+      },
+      {
+       "resource": "spare_parts",
+       "reserve": 1,
+       "consume": 1
+      }
+     ],
+     "effects": {
+      "readiness": 20,
+      "fatigue": 20,
+      "stress": 10
+     }
+    }
+   ]
+  },
+  {
+   "id": "counselor",
+   "role": "Counselor",
+   "ocean": {
+    "openness": 70,
+    "conscientiousness": 60,
+    "extraversion": 60,
+    "agreeableness": 90,
+    "neuroticism": 30
+   },
+   "values": {
+    "care": 90,
+    "cooperation": 80
+   },
+   "start": {
+    "fatigue": 30,
+    "stress": 55,
+    "morale": 55
+   },
+   "work": [
+    {
+     "id": "work_counselor",
+     "name": "Mediate between the factions",
+     "purpose": "Bring Loyalists and Skeptics into the same room before the disagreement hardens.",
+     "duration": 2,
+     "costs": [],
+     "effects": {
+      "morale": 15,
+      "fatigue": 10,
+      "stress": -5
+     }
+    }
+   ]
+  }
+ ],
+ "rest": {
+  "purpose": "Step back to rest and recover before another assignment.",
+  "duration": 2,
+  "effects": {
+   "fatigue": -20,
+   "stress": -15,
+   "morale": 5
+  }
+ },
+ "overextended": {
+  "indicator": "stress",
+  "threshold": 70,
+  "recovery": 45,
+  "duration": 2,
+  "cooldown": 3
+ },
+ "trust_in_captain": 45,
+ "resources": [
+  {
+   "id": "archive_access",
+   "name": "Archive core access",
+   "initial": 3
+  },
+  {
+   "id": "paper_stock",
+   "name": "Paper stock",
+   "initial": 4
+  },
+  {
+   "id": "spare_parts",
+   "name": "Spare memory modules",
+   "initial": 2
+  }
+ ]
+}

@@ -1,0 +1,55 @@
+{
+ "schema": "crew_claims/1",
+ "claims": [
+  {
+   "id": "consent-runs-clean",
+   "captain": "consent",
+   "metric": "errors",
+   "stat": "max",
+   "op": "==",
+   "value": 0
+  },
+  {
+   "id": "orders-runs-clean",
+   "captain": "orders",
+   "metric": "errors",
+   "stat": "max",
+   "op": "==",
+   "value": 0
+  },
+  {
+   "id": "core-access-contested",
+   "captain": "consent",
+   "metric": "stockouts",
+   "stat": "median",
+   "op": ">=",
+   "value": 2,
+   "note": "the audit and the core test both need Archive access"
+  },
+  {
+   "id": "orders-lose-the-skeptic",
+   "captain": "orders",
+   "metric": "crew.skeptic.trust",
+   "stat": "median",
+   "op": "<",
+   "value": 45,
+   "note": "a captain who overrides a skeptic over the Archive loses them"
+  },
+  {
+   "id": "consent-keeps-skeptic",
+   "captain": "consent",
+   "metric": "crew.skeptic.trust",
+   "stat": "median",
+   "op": ">=",
+   "value": 45
+  },
+  {
+   "id": "audit-finds-things",
+   "captain": "consent",
+   "metric": "crew.analyst.observations",
+   "stat": "median",
+   "op": ">=",
+   "value": 25
+  }
+ ]
+}

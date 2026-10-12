@@ -1,0 +1,259 @@
+{
+ "schema": "crew_scenario/1",
+ "id": "stapledon-news-decades-late",
+ "indicators": [
+  "fatigue",
+  "stress",
+  "morale",
+  "readiness",
+  "observations",
+  "trust"
+ ],
+ "indicator_defaults": {
+  "fatigue": 0,
+  "stress": 0,
+  "morale": 50,
+  "readiness": 50,
+  "observations": 0
+ },
+ "captain": {
+  "id": "captain",
+  "values": {
+   "mission": 80
+  },
+  "start": {
+   "fatigue": 25,
+   "stress": 55,
+   "morale": 45
+  }
+ },
+ "crew": [
+  {
+   "id": "medic",
+   "role": "Medic",
+   "ocean": {
+    "openness": 55,
+    "conscientiousness": 60,
+    "extraversion": 45,
+    "agreeableness": 85,
+    "neuroticism": 65
+   },
+   "values": {
+    "care": 90,
+    "family": 90
+   },
+   "start": {
+    "fatigue": 45,
+    "stress": 80,
+    "morale": 30
+   },
+   "work": [
+    {
+     "id": "work_medic",
+     "name": "Run the post-leg medical round",
+     "purpose": "Check every crew member after the long leg, while carrying news that the sibling on Earth died decades ago.",
+     "duration": 2,
+     "costs": [
+      {
+       "resource": "clinic_hours",
+       "reserve": 1,
+       "consume": 0
+      },
+      {
+       "resource": "diagnostic_cartridges",
+       "reserve": 1,
+       "consume": 1
+      }
+     ],
+     "effects": {
+      "readiness": 15,
+      "fatigue": 15,
+      "stress": 10
+     }
+    }
+   ]
+  },
+  {
+   "id": "counselor",
+   "role": "Counselor",
+   "ocean": {
+    "openness": 70,
+    "conscientiousness": 60,
+    "extraversion": 60,
+    "agreeableness": 90,
+    "neuroticism": 30
+   },
+   "values": {
+    "care": 90,
+    "cooperation": 80
+   },
+   "start": {
+    "fatigue": 40,
+    "stress": 65,
+    "morale": 45
+   },
+   "work": [
+    {
+     "id": "work_counselor",
+     "name": "Open grief sessions",
+     "purpose": "Sit with anyone who wants to talk about the people at home who aged and died while the ship flew.",
+     "duration": 2,
+     "costs": [],
+     "effects": {
+      "morale": 15,
+      "fatigue": 10,
+      "stress": -5
+     }
+    }
+   ]
+  },
+  {
+   "id": "analyst",
+   "role": "Analyst",
+   "ocean": {
+    "openness": 60,
+    "conscientiousness": 80,
+    "extraversion": 15,
+    "agreeableness": 40,
+    "neuroticism": 45
+   },
+   "values": {
+    "truth": 85,
+    "autonomy": 70
+   },
+   "start": {
+    "fatigue": 35,
+    "stress": 55,
+    "morale": 45
+   },
+   "work": [
+    {
+     "id": "work_analyst",
+     "name": "Decode the message bundle",
+     "purpose": "Sort decades of delayed messages so each person receives their own news privately and in order.",
+     "duration": 3,
+     "costs": [
+      {
+       "resource": "relay_bandwidth",
+       "reserve": 1,
+       "consume": 0
+      }
+     ],
+     "effects": {
+      "observations": 20,
+      "fatigue": 15,
+      "stress": 15
+     }
+    }
+   ]
+  },
+  {
+   "id": "scientist",
+   "role": "Scientist",
+   "ocean": {
+    "openness": 80,
+    "conscientiousness": 75,
+    "extraversion": 25,
+    "agreeableness": 55,
+    "neuroticism": 50
+   },
+   "values": {
+    "curiosity": 85,
+    "family": 80
+   },
+   "start": {
+    "fatigue": 35,
+    "stress": 60,
+    "morale": 50
+   },
+   "work": [
+    {
+     "id": "work_scientist",
+     "name": "Re-check the dilation log",
+     "purpose": "Confirm how much time passed at home; the answer will not change, but people want to know exactly.",
+     "duration": 2,
+     "costs": [
+      {
+       "resource": "relay_bandwidth",
+       "reserve": 1,
+       "consume": 0
+      }
+     ],
+     "effects": {
+      "observations": 15,
+      "fatigue": 10,
+      "stress": 10
+     }
+    }
+   ]
+  },
+  {
+   "id": "dreamer",
+   "role": "Dreamer",
+   "ocean": {
+    "openness": 90,
+    "conscientiousness": 35,
+    "extraversion": 55,
+    "agreeableness": 70,
+    "neuroticism": 60
+   },
+   "values": {
+    "meaning": 85,
+    "beauty": 75
+   },
+   "start": {
+    "fatigue": 30,
+    "stress": 70,
+    "morale": 40
+   },
+   "work": [
+    {
+     "id": "work_dreamer",
+     "name": "Write the remembrance for the Cathedral",
+     "purpose": "Put words to what was lost so the crew can mark it together.",
+     "duration": 2,
+     "costs": [],
+     "effects": {
+      "morale": 10,
+      "fatigue": 10,
+      "stress": -5
+     }
+    }
+   ]
+  }
+ ],
+ "rest": {
+  "purpose": "Step back to rest and recover before another assignment.",
+  "duration": 2,
+  "effects": {
+   "fatigue": -20,
+   "stress": -15,
+   "morale": 5
+  }
+ },
+ "overextended": {
+  "indicator": "stress",
+  "threshold": 70,
+  "recovery": 45,
+  "duration": 2,
+  "cooldown": 3
+ },
+ "trust_in_captain": 50,
+ "resources": [
+  {
+   "id": "clinic_hours",
+   "name": "Clinic hours",
+   "initial": 2
+  },
+  {
+   "id": "relay_bandwidth",
+   "name": "Archive message bandwidth",
+   "initial": 2
+  },
+  {
+   "id": "diagnostic_cartridges",
+   "name": "Diagnostic cartridges",
+   "initial": 3
+  }
+ ]
+}

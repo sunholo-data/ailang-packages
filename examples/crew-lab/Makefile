@@ -105,5 +105,8 @@ claims-test:
 	@AILANG="$(AILANG)" "$(EX)/test-claims.sh"
 sample-test:
 	@AILANG="$(AILANG)" "$(EX)/test-sample.sh"
+# Draft Stapledon scenario pack: every scenario and claims file loads and runs clean.
+scenario-pack-test:
+	@cd "$(EX)" && for f in scenarios/stapledon/*.claims.json; do s=$${f%.claims.json}.json; "$(AILANG)" run --quiet --bytecode --package-dir . --caps IO,FS,Env --fs-max-bytes 64MB sim_cli.ail -- --scenario "$$s" --seeds 1..3 --turns 12 | jq -s -e 'length==3 and all(.[]; .errors==0)' >/dev/null || { echo "scenario failed: $$s" >&2; exit 1; }; "$(AILANG)" run --quiet --bytecode --package-dir . --caps IO,FS,Env --fs-max-bytes 64MB sim_cli.ail -- --check "$$f" --scenario "$$s" --seeds 1 | grep -q 'claims hold' || { echo "claims did not run: $$f" >&2; exit 1; }; done; printf 'Stapledon scenario pack: all scenarios run clean and all claims files load\n'
 
-validate: deps core-tests library-tests terminal-tests tests scenarios replay parity store-test quality native-ui-test native-watch-test native-watch-pty-test short-reply-test conversations-test sim-test scenario-test reply-test async-test claims-test sample-test
+validate: deps core-tests library-tests terminal-tests tests scenarios replay parity store-test quality native-ui-test native-watch-test native-watch-pty-test short-reply-test conversations-test sim-test scenario-test reply-test async-test claims-test sample-test scenario-pack-test

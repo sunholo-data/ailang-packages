@@ -1,0 +1,271 @@
+{
+ "schema": "crew_scenario/1",
+ "id": "stapledon-last-messages-home",
+ "indicators": [
+  "fatigue",
+  "stress",
+  "morale",
+  "readiness",
+  "observations",
+  "trust"
+ ],
+ "indicator_defaults": {
+  "fatigue": 0,
+  "stress": 0,
+  "morale": 50,
+  "readiness": 50,
+  "observations": 0
+ },
+ "captain": {
+  "id": "captain",
+  "values": {
+   "mission": 85
+  },
+  "start": {
+   "fatigue": 10,
+   "stress": 40,
+   "morale": 60
+  }
+ },
+ "crew": [
+  {
+   "id": "medic",
+   "role": "Medic",
+   "ocean": {
+    "openness": 55,
+    "conscientiousness": 60,
+    "extraversion": 45,
+    "agreeableness": 85,
+    "neuroticism": 55
+   },
+   "values": {
+    "care": 90,
+    "family": 85
+   },
+   "start": {
+    "fatigue": 30,
+    "stress": 70,
+    "morale": 50
+   },
+   "work": [
+    {
+     "id": "work_medic",
+     "name": "Record the household messages",
+     "purpose": "Help families record the last messages Earth will receive while they still know the people they address.",
+     "duration": 2,
+     "costs": [
+      {
+       "resource": "relay_window",
+       "reserve": 1,
+       "consume": 0
+      }
+     ],
+     "effects": {
+      "morale": 10,
+      "stress": 10,
+      "fatigue": 10,
+      "readiness": 5
+     }
+    }
+   ]
+  },
+  {
+   "id": "engineer",
+   "role": "Chief Engineer",
+   "ocean": {
+    "openness": 20,
+    "conscientiousness": 85,
+    "extraversion": 25,
+    "agreeableness": 45,
+    "neuroticism": 30
+   },
+   "values": {
+    "reliability": 90,
+    "family": 70
+   },
+   "start": {
+    "fatigue": 35,
+    "stress": 55,
+    "morale": 55
+   },
+   "work": [
+    {
+     "id": "work_engineer",
+     "name": "Seal the drive for the first leg",
+     "purpose": "Run the final drive checks before the bubble closes; afterwards nothing physical can be fetched from home.",
+     "duration": 3,
+     "costs": [
+      {
+       "resource": "diagnostic_time",
+       "reserve": 1,
+       "consume": 0
+      },
+      {
+       "resource": "spare_parts",
+       "reserve": 1,
+       "consume": 1
+      }
+     ],
+     "effects": {
+      "readiness": 20,
+      "fatigue": 15,
+      "stress": 5
+     }
+    }
+   ]
+  },
+  {
+   "id": "analyst",
+   "role": "Analyst",
+   "ocean": {
+    "openness": 60,
+    "conscientiousness": 80,
+    "extraversion": 15,
+    "agreeableness": 40,
+    "neuroticism": 45
+   },
+   "values": {
+    "truth": 85,
+    "autonomy": 70
+   },
+   "start": {
+    "fatigue": 25,
+    "stress": 45,
+    "morale": 50
+   },
+   "work": [
+    {
+     "id": "work_analyst",
+     "name": "Compress the Archive's Earth snapshot",
+     "purpose": "Choose what the Archive keeps of Earth as it is today; the copy will never be updated by hand again.",
+     "duration": 3,
+     "costs": [
+      {
+       "resource": "relay_window",
+       "reserve": 1,
+       "consume": 0
+      },
+      {
+       "resource": "diagnostic_time",
+       "reserve": 1,
+       "consume": 0
+      }
+     ],
+     "effects": {
+      "observations": 20,
+      "fatigue": 15,
+      "stress": 10
+     }
+    }
+   ]
+  },
+  {
+   "id": "pilot",
+   "role": "Pilot",
+   "ocean": {
+    "openness": 35,
+    "conscientiousness": 30,
+    "extraversion": 80,
+    "agreeableness": 55,
+    "neuroticism": 25
+   },
+   "values": {
+    "safety": 75,
+    "adventure": 80
+   },
+   "start": {
+    "fatigue": 20,
+    "stress": 40,
+    "morale": 70
+   },
+   "work": [
+    {
+     "id": "work_pilot",
+     "name": "Plot the first leg",
+     "purpose": "Lay in the first leg; every light-year flown costs a year at home, and no leg can be taken back.",
+     "duration": 2,
+     "costs": [
+      {
+       "resource": "diagnostic_time",
+       "reserve": 1,
+       "consume": 0
+      }
+     ],
+     "effects": {
+      "readiness": 15,
+      "fatigue": 10,
+      "stress": 5
+     }
+    }
+   ]
+  },
+  {
+   "id": "counselor",
+   "role": "Counselor",
+   "ocean": {
+    "openness": 70,
+    "conscientiousness": 60,
+    "extraversion": 60,
+    "agreeableness": 90,
+    "neuroticism": 30
+   },
+   "values": {
+    "care": 90,
+    "cooperation": 80
+   },
+   "start": {
+    "fatigue": 25,
+    "stress": 50,
+    "morale": 65
+   },
+   "work": [
+    {
+     "id": "work_counselor",
+     "name": "Hold the founders' farewell",
+     "purpose": "Gather the crew in the Cathedral to say goodbye together; grief shared now is easier to carry later.",
+     "duration": 2,
+     "costs": [],
+     "effects": {
+      "morale": 15,
+      "fatigue": 10,
+      "stress": -5
+     }
+    }
+   ]
+  }
+ ],
+ "rest": {
+  "purpose": "Step back to rest and recover before another assignment.",
+  "duration": 2,
+  "effects": {
+   "fatigue": -20,
+   "stress": -15,
+   "morale": 5
+  }
+ },
+ "overextended": {
+  "indicator": "stress",
+  "threshold": 70,
+  "recovery": 45,
+  "duration": 2,
+  "cooldown": 3
+ },
+ "trust_in_captain": 55,
+ "resources": [
+  {
+   "id": "relay_window",
+   "name": "Outbound relay windows",
+   "initial": 2
+  },
+  {
+   "id": "diagnostic_time",
+   "name": "Diagnostic bay time",
+   "initial": 2
+  },
+  {
+   "id": "spare_parts",
+   "name": "Drive spare parts",
+   "initial": 3
+  }
+ ]
+}

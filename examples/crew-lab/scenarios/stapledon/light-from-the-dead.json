@@ -1,0 +1,261 @@
+{
+ "schema": "crew_scenario/1",
+ "id": "stapledon-light-from-the-dead",
+ "indicators": [
+  "fatigue",
+  "stress",
+  "morale",
+  "readiness",
+  "observations",
+  "trust"
+ ],
+ "indicator_defaults": {
+  "fatigue": 0,
+  "stress": 0,
+  "morale": 50,
+  "readiness": 50,
+  "observations": 0
+ },
+ "captain": {
+  "id": "captain",
+  "values": {
+   "mission": 80,
+   "curiosity": 75
+  },
+  "start": {
+   "fatigue": 20,
+   "stress": 45,
+   "morale": 60
+  }
+ },
+ "crew": [
+  {
+   "id": "analyst",
+   "role": "Analyst",
+   "ocean": {
+    "openness": 65,
+    "conscientiousness": 85,
+    "extraversion": 15,
+    "agreeableness": 35,
+    "neuroticism": 40
+   },
+   "values": {
+    "truth": 90,
+    "autonomy": 70
+   },
+   "start": {
+    "fatigue": 30,
+    "stress": 50,
+    "morale": 55
+   },
+   "work": [
+    {
+     "id": "work_analyst",
+     "name": "Decode the signal structure",
+     "purpose": "Work out what the repeating signal encodes; it was sent long before its makers died.",
+     "duration": 3,
+     "costs": [
+      {
+       "resource": "antenna_time",
+       "reserve": 1,
+       "consume": 0
+      },
+      {
+       "resource": "compute_slots",
+       "reserve": 2,
+       "consume": 0
+      }
+     ],
+     "effects": {
+      "observations": 25,
+      "fatigue": 20,
+      "stress": 10
+     }
+    }
+   ]
+  },
+  {
+   "id": "dreamer",
+   "role": "Dreamer",
+   "ocean": {
+    "openness": 90,
+    "conscientiousness": 35,
+    "extraversion": 55,
+    "agreeableness": 70,
+    "neuroticism": 60
+   },
+   "values": {
+    "meaning": 90,
+    "beauty": 80
+   },
+   "start": {
+    "fatigue": 25,
+    "stress": 45,
+    "morale": 65
+   },
+   "work": [
+    {
+     "id": "work_dreamer",
+     "name": "Translate the music in it",
+     "purpose": "Follow the patterns that seem to be art rather than data, knowing no one will ever answer.",
+     "duration": 2,
+     "costs": [
+      {
+       "resource": "compute_slots",
+       "reserve": 1,
+       "consume": 0
+      }
+     ],
+     "effects": {
+      "observations": 15,
+      "morale": 10,
+      "fatigue": 10
+     }
+    }
+   ]
+  },
+  {
+   "id": "scientist",
+   "role": "Scientist",
+   "ocean": {
+    "openness": 85,
+    "conscientiousness": 75,
+    "extraversion": 25,
+    "agreeableness": 55,
+    "neuroticism": 45
+   },
+   "values": {
+    "curiosity": 90,
+    "truth": 75
+   },
+   "start": {
+    "fatigue": 30,
+    "stress": 45,
+    "morale": 60
+   },
+   "work": [
+    {
+     "id": "work_scientist",
+     "name": "Survey the dead world's light",
+     "purpose": "Point the dome instruments at the planet; its light shows what happened to it, long after the fact.",
+     "duration": 3,
+     "costs": [
+      {
+       "resource": "antenna_time",
+       "reserve": 1,
+       "consume": 0
+      }
+     ],
+     "effects": {
+      "observations": 25,
+      "fatigue": 15,
+      "stress": 10
+     }
+    }
+   ]
+  },
+  {
+   "id": "diplomat",
+   "role": "Diplomat",
+   "ocean": {
+    "openness": 55,
+    "conscientiousness": 55,
+    "extraversion": 80,
+    "agreeableness": 80,
+    "neuroticism": 25
+   },
+   "values": {
+    "cooperation": 85,
+    "curiosity": 70
+   },
+   "start": {
+    "fatigue": 25,
+    "stress": 40,
+    "morale": 65
+   },
+   "work": [
+    {
+     "id": "work_diplomat",
+     "name": "Draft a reply no one will read",
+     "purpose": "Compose an answer anyway, for the crew and for whoever may come after.",
+     "duration": 2,
+     "costs": [
+      {
+       "resource": "antenna_time",
+       "reserve": 1,
+       "consume": 0
+      }
+     ],
+     "effects": {
+      "morale": 10,
+      "fatigue": 10,
+      "stress": 5
+     }
+    }
+   ]
+  },
+  {
+   "id": "counselor",
+   "role": "Counselor",
+   "ocean": {
+    "openness": 70,
+    "conscientiousness": 60,
+    "extraversion": 60,
+    "agreeableness": 90,
+    "neuroticism": 30
+   },
+   "values": {
+    "care": 90,
+    "cooperation": 80
+   },
+   "start": {
+    "fatigue": 25,
+    "stress": 45,
+    "morale": 60
+   },
+   "work": [
+    {
+     "id": "work_counselor",
+     "name": "Talk through what it means",
+     "purpose": "Help the crew with the weight of meeting another civilisation only after its end.",
+     "duration": 2,
+     "costs": [],
+     "effects": {
+      "morale": 15,
+      "fatigue": 10,
+      "stress": -5
+     }
+    }
+   ]
+  }
+ ],
+ "rest": {
+  "purpose": "Step back to rest and recover before another assignment.",
+  "duration": 2,
+  "effects": {
+   "fatigue": -20,
+   "stress": -15,
+   "morale": 5
+  }
+ },
+ "overextended": {
+  "indicator": "stress",
+  "threshold": 70,
+  "recovery": 45,
+  "duration": 2,
+  "cooldown": 3
+ },
+ "trust_in_captain": 55,
+ "resources": [
+  {
+   "id": "antenna_time",
+   "name": "Dome antenna time",
+   "initial": 2
+  },
+  {
+   "id": "compute_slots",
+   "name": "Archive compute slots",
+   "initial": 3
+  }
+ ]
+}
