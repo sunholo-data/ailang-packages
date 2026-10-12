@@ -1,0 +1,36 @@
+module sunholo/crew_lab/reply_worker
+import std/env (getArgs)
+import std/fs (readFileResult, writeFileResult, renameFileResult)
+import std/result (Result, Ok, Err)
+import std/string (length as size)
+import ./reply_codec (JobFile, Outcome, decodeJob, encodeOutcome)
+import ./store (Fetch, resolve)
+
+-- crew-reply-worker HOME JOBFILE: fetch the words for one already-decided reply
+-- into the shared dialogue library (locked, atomic, bounded as for the watch),
+-- then write JOBFILE.result atomically. It never reads the journal or session.
+pure func outcome(job:int, f:Fetch) -> Outcome = match f.outcome {
+ Ok(_) => {job:job, ok:true, source:f.source, calls:f.calls, inputTokens:f.inputTokens, outputTokens:f.outputTokens, error:""},
+ Err(e) => {job:job, ok:false, source:f.source, calls:f.calls, inputTokens:f.inputTokens, outputTokens:f.outputTokens, error:if size(e) > 512 then "worker error" else e}
+}
+
+export func publish(jobPath:string, o:Outcome) -> Result[(), string] ! {FS} =
+ match writeFileResult("${jobPath}.tmp", encodeOutcome(o)) {
+  Err(_) => Err("result write failed"),
+  Ok(_) => match renameFileResult("${jobPath}.tmp", "${jobPath}.result") {Err(_) => Err("result rename failed"), Ok(_) => Ok(())}
+ }
+
+export func work(home:string, jobPath:string) -> Result[(), string] ! {FS, AI @limit=1} =
+ match readFileResult(jobPath) {
+  Err(_) => Err("cannot read job"),
+  Ok(raw) => match decodeJob(raw) {
+   Err(e) => Err(e),
+   Ok(f) => publish(jobPath, outcome(f.job, resolve(home, f.signature, [f.label], f.model, "live", 1)))
+  }
+ }
+
+-- Exit code is the only other signal; the watch also times out silent workers.
+export func main() -> () ! {Env, FS, AI} = match getArgs() {
+ home :: jobPath :: [] => match work(home, jobPath) {Ok(_) => (), Err(_) => ()},
+ _ => ()
+}

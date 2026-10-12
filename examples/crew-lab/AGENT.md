@@ -175,8 +175,17 @@ are pure. native_watch is an internal CLI, outside the reusable export inventory
 play.Run/Applied and openWatch/applyWatch/closeWatch are trusted host adapter APIs;
 caller-manufactured records are not an application permission boundary. They reuse
 existing start/commit/respond/journal/library operations. applyWatch suppresses the
-old waiting renderer only; native_watch displays its honest synchronous waiting
-frame. Generated/cache quotes are selected and journalled before display.
+old waiting renderer only. Generated/cache quotes are selected and journalled before display.
+
+Background replies (0.6.0): play.respond commits a live library miss with the
+authored bundle (same command, rolls and seed as the saved path) and returns the
+job in `Run.deferred`. reply_jobs is the pure inbox (bounds, one live job per
+signature, results apply once, prefetch adoption); reply_codec the job/result
+files; reply_runner the effectful adapter (spawnProcess by name, poll, cancelProcess);
+reply_worker the `crew-reply-worker` bin (store.resolve, then an atomic result).
+native_watch polls keys every 100 ms while jobs are live and stops all workers on exit.
+play.predictOffer stages offer+ask on a copy of the pure state for prefetch.
+spawnProcess aborts the run on an unknown command, so the watch checks PATH first.
 
 Exactly one input branch owns each read: Native uses adapter.readInput inside
 adapter.run; Line/Plain uses readLineOpt and published lineEvent. Generic lineEvent

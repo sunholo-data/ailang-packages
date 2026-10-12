@@ -10,6 +10,7 @@ import pkg/sunholo/content_library/library (Bundle, cacheKey, decodeBundle, enco
 import pkg/sunholo/crew_core/codec (object, fields, integer)
 import pkg/sunholo/crew_core/policy (Policy, decodePolicy, defaultPolicyBody, watchPolicyBody)
 import ./dialogue (narrativeBundle, prompt, shortSignature, shortBundleOK)
+import ./reply_jobs (wording)
 
 export type PolicyFile = { policy: Policy, body: string }
 
@@ -180,6 +181,19 @@ ensures {result.calls>=0 && result.calls<=1} =
  else if mode=="offline" || fileExists("${home}/cache/${cacheKey(base)}.json") then resolve(home,base,legal,model,mode,remaining)
  else match shortSignature(base,label) {
   Err(e)=>failed(e,0,0,0,true),Ok(sig)=>resolve(home,sig,[label],model,mode,remaining)
+ }
+
+-- True when wording for this decided reaction is already saved (the complete
+-- library for the base request, or the short library for its label).
+export func cachedChosen(home:string,base:string,label:string)->bool ! {FS} =
+ fileExists("${home}/cache/${cacheKey(base)}.json") || match shortSignature(base,label) {
+  Err(_)=>false,Ok(sig)=>fileExists("${home}/cache/${cacheKey(sig)}.json")
+ }
+
+-- Saved words for a finished job, picked with the roll reserved at decision time.
+export func savedWording(home:string,signature:string,label:string,model:string,roll:float)->Result[string,string] ! {FS} =
+ match cacheRead("${home}/cache/${cacheKey(signature)}.json",signature,[label],model).outcome {
+  Err(e)=>Err(e),Ok(b)=>wording(b,label,roll)
  }
 
 export func openRun(home: string, owner: string, header: string) -> Result[string, string] ! {FS}

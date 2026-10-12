@@ -97,44 +97,61 @@ for kind in cached-long cached-disclosure cached-model; do
  probe "$kind" "$LABEL" live 1 "$TMP/empty.json" > "$TMP/$kind.json"
  jq -e '(.ok|not) and .calls==0' "$TMP/$kind.json" >/dev/null
 done
-# Generated [bin] fixture uses the actual live entrypoint, with an explicit stub
-# provider in its test-only copied manifest. No live credentials or fake keys.
+# Generated [bin] fixtures use the actual live entrypoints. Since 0.6.0 the watch
+# never calls a provider itself: its crew-reply-worker copy has an explicit stub
+# provider in this test-only manifest. No live credentials or fake keys.
 cp -R "$EX" "$TMP/app"
 python3 - "$TMP/app/ailang.toml" "$EX" "$TMP/valid.json" <<'PY'
 import pathlib,sys
 p=pathlib.Path(sys.argv[1]);s=p.read_text()
 for dep in ('terminal-ui','social-dynamics','content-library','crew-core'):
  s=s.replace(f'path = "../../packages/{dep}"',f'path = "{pathlib.Path(sys.argv[2]).parents[1]}/packages/{dep}"')
-s=s.replace('crew-watch = {module = "native_watch", entry = "main", caps = "IO,FS,Env,AI", run_flags = ["--ai", "z-ai/glm-5.3-flash", "--fs-max-bytes", "16MB"]}',f'crew-watch-fixture = {{module = "native_watch", entry = "main", caps = "IO,FS,Env,AI", run_flags = ["--ai-stub", "--ai-stub-fixtures", "{sys.argv[3]}", "--fs-max-bytes", "16MB"]}}')
+old='crew-reply-worker = {module = "reply_worker", entry = "main", caps = "FS,Env,AI", run_flags = ["--ai", "z-ai/glm-5.3-flash", "--fs-max-bytes", "16MB"]}'
+assert old in s
+s=s.replace(old,f'crew-reply-worker = {{module = "reply_worker", entry = "main", caps = "FS,Env,AI", run_flags = ["--ai-stub", "--ai-stub-fixtures", "{sys.argv[3]}", "--fs-max-bytes", "16MB"]}}')
 p.write_text(s)
 PY
 (cd "$TMP/app" && "$AILANG" lock >/dev/null)
 "$AILANG" install --path "$TMP/app" --bin-dir "$TMP/fixture-bin" >/dev/null
-for pass in 1 2; do
- printf '1\n1\n1\n2\n' | "$TMP/fixture-bin/crew-watch-fixture" --mode plain --home "$TMP/installed" --seed 42 > "$TMP/installed-$pass.out"
-done
+FIX_PATH="$TMP/fixture-bin:/usr/bin:/bin"
+# play HOME OUT: offer the scientist, wait for the background words, then Decide later.
+play() {
+ { printf '1\n1\n1\n'; n=0; until ls "$TMP/$1"/runs/*/replies/job-1.json.result >/dev/null 2>&1; do n=$((n+1)); [ $n -lt 600 ] || break; sleep 0.1; done; printf '\n2\n'; } | PATH="$FIX_PATH" "$TMP/fixture-bin/crew-watch" --mode plain --prefetch 0 --home "$TMP/$1" --seed 42 > "$2"
+}
+domain() { jq -sc '[.[].payload|select(.kind=="host")|{host_input,host_output,seed_before,seed_after}]' "$1"; }
+# Pass 1: the decision commits at once with the authored line (identical domain
+# records to the offline baseline); the selected-reaction words arrive in the
+# background as a transport-only wording record charged one attempt.
+play installed "$TMP/installed-1.out"
+first=("$TMP/installed"/runs/*/journal.jsonl)
+test "$(domain "${first[0]}")" = "$(domain "${journal[0]}")"
+jq -s -e '([.[]|select(.payload.host_input!=null)|.payload.host_input|fromjson|select(.command=="answer")]|length)==1 and any(.[];.payload.metadata.usage.source=="deferred") and ([.[].payload|select(.kind=="wording")] as $w | ($w|length)==1 and $w[0].usage.calls==1 and ($w[0].text|test("I can take that on|Agreed. I want us")))' "${first[0]}" >/dev/null
+rg -q 'Replies: 0 preparing, 1 new' "$TMP/installed-1.out"
+cp "${first[0]}" "$TMP/first.jsonl"
+# Pass 2: the saved short reply is used inline with no job and no call.
+printf '1\n1\n1\n2\n' | PATH="$FIX_PATH" "$TMP/fixture-bin/crew-watch" --mode plain --prefetch 0 --home "$TMP/installed" --seed 42 > "$TMP/installed-2.out"
 journals=("$TMP/installed"/runs/*/journal.jsonl)
 test "${#journals[@]}" = 2
 for j in "${journals[@]}"; do
- jq -s -e 'any(.[];.payload.metadata.selection.bundle.signature|fromjson?|.generationProfile=="crew-reply-short-v1") and all(.[]|select(.payload.metadata.selection!=null);.payload.metadata.selection.selected_label=="accept" and (.payload.metadata.selection.bundle.variants|length)==2) and ([.[]|select(.payload.host_input!=null)|.payload.host_input|fromjson|select(.command=="answer")]|length)==1' "$j" >/dev/null
+ test "$(domain "$j")" = "$(domain "${journal[0]}")"
  jq -r 'select(.payload.host_input!=null)|.payload.host_input' "$j" > "$TMP/commands.jsonl"
  for engine in interpreter vm; do AILANG="$AILANG" "$EX/run.sh" "$engine" "$TMP/commands.jsonl" > "$TMP/replay-$engine.jsonl"; done
  cmp "$TMP/replay-interpreter.jsonl" "$TMP/replay-vm.jsonl"
  jq -s -e 'last.state.tick==0 and all(last.state.tasks[];.status=="offered") and all(last.state.resources[];.reserved==0)' "$TMP/replay-interpreter.jsonl" >/dev/null
+ if ! cmp -s "$j" "$TMP/first.jsonl"; then
+  jq -s -e 'any(.[];.payload.metadata.selection.bundle.signature|fromjson?|.generationProfile=="crew-reply-short-v1") and all(.[]|select(.payload.metadata.selection!=null);.payload.metadata.selection.selected_label=="accept" and (.payload.metadata.selection.bundle.variants|length)==2) and ([.[].payload|select(.kind=="wording")]|length)==0' "$j" >/dev/null
+ fi
 done
-jq -s -e '[.[]|.payload.metadata.usage // empty|.calls]|add==1' "${journals[@]}" >/dev/null
-rg -q 'I can take that on|Agreed. I want us' "$TMP/installed-1.out"
-# A rejected personal reply leaves the pending host/seed intact, charges exactly
-# one attempt, and permits the ordinary authored continuation on that same offer.
+jq -s -e '[.[]|(.payload.metadata.usage // .payload.usage // empty)|.calls]|add==1' "${journals[@]}" >/dev/null
+rg -q 'I can take that on|Agreed. I want us' "$TMP/installed-2.out"
+# Rejected personal words: the decision (authored) and seed are unchanged, one
+# attempt is charged, nothing is cached and Replies explains.
 jq '.fixtures[0].response="not JSON"' "$TMP/valid.json" > "$TMP/rejected.json"
 cp "$TMP/rejected.json" "$TMP/valid.json"
-printf '1\n1\n1\n2\n2\n' | "$TMP/fixture-bin/crew-watch-fixture" --mode plain --home "$TMP/recovery" --seed 42 > "$TMP/recovery.out"
+play recovery "$TMP/recovery.out"
 recovery=("$TMP/recovery"/runs/*/journal.jsonl)
-jq -s -e '[.[]|select(.payload.kind=="library_error")] as $errors | ($errors|length)==1 and $errors[0].payload.seed==42 and $errors[0].payload.usage.calls==1 and $errors[0].payload.usage.usage_known and ([.[]|select(.payload.host_input!=null)|.payload.host_input|fromjson|select(.command=="answer")]|length)==1 and all(.[]|select(.payload.metadata.selection!=null);.payload.seed_before==42 and .payload.metadata.usage.calls==0 and .payload.metadata.usage.source=="explicit-authored" and .payload.metadata.selection.selected_label=="accept")' "${recovery[0]}" >/dev/null
-jq -s -e '[.[]|select(.payload.host_output!=null)|.payload.host_output|fromjson] as $hosts | ($hosts[-2].host.pending|length)==1 and ($hosts[-1].host.pending|length)==0' "${recovery[0]}" >/dev/null
-jq -s '[.[]|select(.payload.host_output!=null)]|last|{state:(.payload.host_output|fromjson|.state),seed:.payload.seed_after}' "${journal[0]}" > "$TMP/baseline-state.json"
-jq -s '[.[]|select(.payload.host_output!=null)]|last|{state:(.payload.host_output|fromjson|.state),seed:.payload.seed_after}' "${recovery[0]}" > "$TMP/recovery-state.json"
-cmp "$TMP/baseline-state.json" "$TMP/recovery-state.json"
+test "$(domain "${recovery[0]}")" = "$(domain "${journal[0]}")"
+jq -s -e '([.[]|select(.payload.kind=="library_error")]|length)==0 and ([.[].payload|select(.kind=="wording")] as $w | ($w|length)==1 and $w[0].usage.calls==1 and ($w[0].error|startswith("AI output rejected")) and $w[0].seed==$w[0].seed)' "${recovery[0]}" >/dev/null
 test ! -e "$TMP/recovery/cache/$KEY.json"
 jq -r 'select(.payload.host_input!=null)|.payload.host_input' "${recovery[0]}" > "$TMP/commands.jsonl"
 for engine in interpreter vm; do AILANG="$AILANG" "$EX/run.sh" "$engine" "$TMP/commands.jsonl" > "$TMP/recovery-$engine.jsonl"; done

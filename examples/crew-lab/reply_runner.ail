@@ -1,0 +1,59 @@
+module sunholo/crew_lab/reply_runner
+import std/process (ProcessHandle, spawnProcess, cancelProcess)
+import std/fs (fileExists, readFileResult, writeFileResult, renameFileResult, mkdirAllResult)
+import std/env (getEnvOr)
+import std/clock (now)
+import std/list (any, map)
+import std/string (split, length as size)
+import std/option (Option, Some, None)
+import std/result (Result, Ok, Err)
+import ./reply_jobs (Job)
+import ./reply_codec (Outcome, encodeJob, decodeOutcome)
+
+-- Effectful adapter for background replies: write a job file, start the worker,
+-- look for its result file, and stop workers. The watch owns every handle and
+-- stops each one it started (on result, timeout or quit).
+export type Running = {id:int, handle:ProcessHandle, started:int} deriving (Eq)
+
+-- spawnProcess aborts the whole run on an unknown command, so the watch looks
+-- for the worker on PATH first and keeps authored words when it is absent.
+export func workerAvailable(name:string) -> bool ! {Env, FS} =
+ size(name) > 0 && size(name) <= 128 && any(\d. size(d) > 0 && fileExists("${d}/${name}"), split(getEnvOr("PATH", ""), ":"))
+
+pure func jobPath(dir:string, id:int) -> string = "${dir}/job-${show(id)}.json"
+
+export func launch(dir:string, worker:string, home:string, model:string, j:Job) -> Result[Running, string] ! {FS, Process, Clock} =
+ match mkdirAllResult(dir) {
+  Err(_) => Err("cannot create reply folder"),
+  Ok(_) => {
+   let path = jobPath(dir, j.id);
+   match writeFileResult("${path}.tmp", encodeJob({job:j.id, signature:j.spec.signature, label:j.spec.label, model:model})) {
+    Err(_) => Err("cannot write reply job"),
+    Ok(_) => match renameFileResult("${path}.tmp", path) {
+     Err(_) => Err("cannot publish reply job"),
+     Ok(_) => Ok({id:j.id, handle:spawnProcess(worker, [home, path]), started:now()})
+    }
+   }
+  }
+ }
+
+-- Stop and reap. An already finished worker reports an invalid handle: also fine.
+export func stop(r:Running) -> () ! {Process} = match cancelProcess(r.handle) {_ => ()}
+
+export func stopAll(rs:[Running]) -> () ! {Process} = match rs {
+ [] => (),
+ r :: rest => {stop(r); stopAll(rest)}
+}
+
+-- None while the worker is still busy. A worker silent past the timeout is
+-- stopped and reported as one attempted call (a provider may have been reached).
+export func check(dir:string, r:Running, timeoutMs:int) -> Option[Result[Outcome, string]] ! {FS, Process, Clock} = {
+ let path = "${jobPath(dir, r.id)}.result";
+ if fileExists(path) then {
+  stop(r);
+  Some(match readFileResult(path) {Err(_) => Err("unreadable result"), Ok(raw) => decodeOutcome(raw, r.id)})
+ } else if now() - r.started > timeoutMs then {
+  stop(r);
+  Some(Ok({job:r.id, ok:false, source:"timeout", calls:1, inputTokens:0, outputTokens:0, error:"no reply within ${show(timeoutMs / 1000)} s"}))
+ } else None
+}

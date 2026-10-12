@@ -1,0 +1,92 @@
+{
+ "sprint_id": "S-CREW-REPLY-INBOX-2",
+ "status": "in_progress",
+ "created": "2026-10-12",
+ "design_doc": "design_docs/planned/crew-reply-inbox.md",
+ "sprint_plan": "design_docs/planned/crew-reply-inbox-sprint.md",
+ "authorization": "Mark 2026-10-12: do the next sprint for background",
+ "prompt_version": "v0.16.7",
+ "github_issues": [],
+ "velocity": {
+  "target_loc_per_day": 700,
+  "estimated_total_loc": 1100,
+  "estimated_days": 2
+ },
+ "features": [
+  {
+   "id": "M1",
+   "description": "Pure reply inbox reply_jobs.ail: bounded jobs, dedup, late/cancelled results ignored, reserved-roll wording",
+   "estimated_loc": 300,
+   "dependencies": [],
+   "acceptance_criteria": [
+    "make reply-test passes on interpreter and strict VM",
+    "complete() changes only a Preparing job; duplicates/late/cancelled ignored (tests)",
+    "At most 16 live jobs and one per signature (contracts + tests)"
+   ],
+   "passes": true,
+   "started": "2026-10-12",
+   "completed": "2026-10-12T21:45:00Z",
+   "notes": "reply_jobs.ail: Spec/Status/Job/Inbox; enqueue (bounds 16 live, one per signature, prefetch adoption), dispatchable (replies before prefetches, concurrency 1..5), started/complete (only Preparing jobs; late/duplicate/cancelled ignored), withdraw, cancelAll, markRead, known, wording (reserved text roll), statusLine, lines. 5 named/property tests pass on interpreter and strict VM (make reply-test). reply_codec.ail: crew_reply_job/1 and crew_reply_result/1 with bounds + round-trip test."
+  },
+  {
+   "id": "M2",
+   "description": "Background worker bin, deferred respond, process runner, polling native watch with status line and Replies view",
+   "estimated_loc": 500,
+   "dependencies": [
+    "M1"
+   ],
+   "acceptance_criteria": [
+    "make async-test: decision shows while a slow fixture worker runs; Crew readable; words arrive; wording journal records",
+    "Domain journal records equal a cached run",
+    "Quit leaves no worker processes",
+    "Allowance reserved per dispatch, refunded on zero-call results"
+   ],
+   "passes": true,
+   "started": "2026-10-12",
+   "completed": "2026-10-12T21:45:00Z",
+   "notes": "reply_worker.ail (bin crew-reply-worker: store.resolve then atomic result), reply_runner.ail (job file, spawnProcess by name, poll, cancelProcess, 120 s timeout), play.respond defers live misses with the authored bundle (same command/rolls/seed) via Run.deferred, noteWording journals transport-only wording records and refunds zero-call attempts, native_watch polls keys every 100 ms while jobs are live and stops all workers on exit; Replies view on r; status in the Choices row. make async-test scenarios 1-5, 8, 9 pass (immediate decision, readable while preparing, identical domain records vs saved words, quit leaves no workers, missing worker, refund/spent allowance, real worker under AI stub, native PTY idle redraw). test-short-reply.sh installed section rewritten for the background path: live domain records equal the offline baseline. Reported ailang#1784 (spawnProcess aborts on unknown command)."
+  },
+  {
+   "id": "M3",
+   "description": "Prefetch of idle crew offer wording from the pure session",
+   "estimated_loc": 200,
+   "dependencies": [
+    "M2"
+   ],
+   "acceptance_criteria": [
+    "make prefetch-test: prefetched offer shows generated words with zero new jobs",
+    "Prefetch bounded by allowance reserve and concurrency"
+   ],
+   "passes": true,
+   "started": "2026-10-12",
+   "completed": "2026-10-12T21:45:00Z",
+   "notes": "play.predictOffer stages offer+ask on a copy of the pure state (same ids, seed, request, reaction, signature); prefetchCandidates (bridge/chooser only, idle crew, --prefetch 0..5 default 2); native_watch prefetch keeps a reserve of 3 attempts, skips saved/known words, never shows prefetches as replies; an offer made mid-prefetch adopts the job. async-test scenarios 6-7 pass; prefetch leaves domain records unchanged."
+  },
+  {
+   "id": "M4",
+   "description": "Docs, Makefile validate, CI, independent evaluation, merge, reinstall",
+   "estimated_loc": 100,
+   "dependencies": [
+    "M3"
+   ],
+   "acceptance_criteria": [
+    "validate green locally and in CI",
+    "evaluation by a different agent >= 70"
+   ],
+   "passes": null,
+   "started": "2026-10-12",
+   "completed": null,
+   "notes": null
+  }
+ ],
+ "registry_reuse": [
+  {
+   "milestone": "M1-M3",
+   "decision": "depend",
+   "detail": "std/process spawnProcess/cancelProcess, std/terminal readEvent; content_library pickVariant; crew_core session for prediction. No registry async package exists; none justified until a second consumer."
+  }
+ ],
+ "completed": null,
+ "pull_requests": [],
+ "landing": null
+}

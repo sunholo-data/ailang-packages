@@ -1,0 +1,47 @@
+module sunholo/crew_lab/reply_fixture
+import std/env (getArgs, getEnvOr)
+import std/fs (readFileResult, writeFileResult, renameFileResult, mkdirAllResult)
+import std/clock (sleep)
+import std/result (Result, Ok, Err)
+import std/string (stringToInt)
+import std/option (Some, None)
+import pkg/sunholo/content_library/library (cacheKey, decodeGenerated, encodeBundle)
+import ./reply_codec (decodeJob)
+import ./reply_worker (publish)
+
+-- Test fixture only (never a bin): a slow, provider-free stand-in for
+-- crew-reply-worker. It sleeps CREW_FIXTURE_DELAY_MS, then stores two fixed
+-- variants for the job's signature exactly where a generated bundle would go.
+-- CREW_FIXTURE_CALLS (0 or 1, default 1) is the attempted-call count it reports.
+func store(home:string, signature:string, label:string, model:string) -> Result[(), string] ! {FS} = {
+ let raw = "{\"schema\":\"generated_dialogue/1\",\"variants\":[{\"id\":\"a\",\"label\":\"${label}\",\"text\":\"(fixture words, ${label}) I hear you, captain.\",\"weight\":1},{\"id\":\"b\",\"label\":\"${label}\",\"text\":\"(fixture words, ${label}) Understood.\",\"weight\":1}]}";
+ match decodeGenerated(raw, signature, [label], model, 0, 0) {
+  Err(e) => Err(e),
+  Ok(b) => match mkdirAllResult("${home}/cache") {
+   Err(_) => Err("cache dir"),
+   Ok(_) => {
+    let path = "${home}/cache/${cacheKey(signature)}.json";
+    match writeFileResult("${path}.fixture", encodeBundle(b)) {Err(_) => Err("write"), Ok(_) => match renameFileResult("${path}.fixture", path) {Err(_) => Err("rename"), Ok(_) => Ok(())}}
+   }
+  }
+ }
+}
+
+export func main() -> () ! {Env, FS, Clock} = match getArgs() {
+ home :: jobPath :: [] => {
+  sleep(match stringToInt(getEnvOr("CREW_FIXTURE_DELAY_MS", "1500")) {Some(n) => n, None => 1500});
+  match readFileResult(jobPath) {
+   Err(_) => (),
+   Ok(raw) => match decodeJob(raw) {
+    Err(_) => (),
+    Ok(f) => {
+     let r = store(home, f.signature, f.label, f.model);
+     let calls = if getEnvOr("CREW_FIXTURE_CALLS", "1") == "0" then 0 else 1;
+     let o = match r {Ok(_) => {job:f.job, ok:true, source:"generated", calls:calls, inputTokens:0, outputTokens:0, error:""}, Err(e) => {job:f.job, ok:false, source:"error", calls:1, inputTokens:0, outputTokens:0, error:e}};
+     match publish(jobPath, o) {_ => ()}
+    }
+   }
+  }
+ },
+ _ => ()
+}

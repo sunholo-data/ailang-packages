@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.6.0
+
+Local only; never published. Live crew words arrive in the background: a crew
+member's decision shows at once (it never depended on the model), an authored line
+stands in, and their own words are fetched by a separate `crew-reply-worker` process
+while the captain keeps playing. Status row `Replies: N preparing, M new (r)`; `r`
+opens a Replies view. Arrivals never move the menu, cursor, page or editor text.
+Up to three workers at once, at most 16 queued; quit stops them; a missing worker
+leaves the authored line. Each attempt is reserved from the run allowance and refunded
+when no call was made. Journals gain transport-only `wording` records; domain records
+are identical to a run with saved words.
+
+Prefetch (`--prefetch 0..5`, default 2): on the bridge, the words for offering idle
+crew their work are fetched ahead, predicted exactly from the pure session, so the
+offer shows them immediately. Prefetch keeps three attempts in reserve and is never
+shown as a reply; an offer made mid-prefetch adopts that job.
+
+New modules: reply_jobs (pure inbox), reply_codec (job/result files), reply_runner
+(process adapter), reply_worker (bin). New checks: `make ... reply-test` and
+`async-test` (eight installed scenarios with provider-free fixture and stub workers).
+
 ## 0.5.0
 
 Local only; never published. The captain/crew host moves to the new published

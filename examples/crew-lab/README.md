@@ -70,12 +70,35 @@ replenish by waiting; rest uses no supplies. Starting passes no time.
 
 Live uses the existing pinned OpenRouter `z-ai/glm-5.3-flash` setup and separate
 watch response policy (default6 attempts, maximum8). Saved wording uses no new
-call. A cache miss may block synchronously: the waiting screen offers no fake
-controls; the next choice follows the reply. Offline and exhausted allowances
+call. A cache miss never blocks: see "Background replies" below. Offline and exhausted allowances
 remain playable with labelled authored narrator continuations. Selected AI words
 remain exact in the journal/library; only display controls are sanitized and prose
 wrapped. `--debug` reveals real development state in Crew and diagnostic responses.
-No worker processes, asynchronous replies, alien negotiations or arrival are added.
+No alien negotiations or arrival are added.
+
+**Background replies (0.6.0)**
+
+A crew member's decision always shows at once. Their reaction, rolls and seed come
+from the authored policy, never from the model, so the watch commits the decision
+with an authored line and fetches their own words in the background. The status
+row reads `Replies: 1 preparing, 0 new (r)`; keep playing (read Crew, offer more
+work, advance) and press `r` to read the words when they arrive. Arrivals never move
+the menu, cursor, page or a half-typed reply; in line/plain modes they appear after
+your next input. Each fetch runs in a separate `crew-reply-worker` process (installed
+with the watch; up to three at once) that fills the same dialogue library, so the
+words are saved for next time. Quitting stops any still running.
+
+Prefetch: on the bridge the watch also fetches the words for offering up to two idle
+crew their work (`--prefetch 0..5`, default 2), so that offer shows the crew member's
+own words immediately. It is an exact prediction (the session is pure), never a
+guess about the outcome, and it only spends attempts above a reserve of three kept for
+replies you asked for. Prefetches are not shown as replies; if you make the offer
+while one is still running, it becomes that reply.
+
+The journal records each fetch as a `wording` record (job, request, source, calls,
+tokens, text or error). These are transport only: the host commands, traces and seeds
+are identical to a run whose words were already saved (`make ... async-test` checks
+this).
 
 **What a live dialogue call sends and receives**
 
@@ -98,8 +121,8 @@ pending request and seed, and offers authored continuation.
 
 In one paired GLM-5.3-Flash sample, the old request took83.7 seconds and6,502 output
 tokens for12 variants; the selected-reaction request took10.9 seconds and967
-tokens for two. Provider latency varies. This optimization remains synchronous;
-streaming and the background reply inbox are separate follow-up work.
+tokens for two. Provider latency varies; since 0.6.0 that latency is hidden by
+background replies and prefetch.
 
 For a repeatable developer objection/relief experiment, create an isolated home
 and strongly weight those legal labels through its authored policy. This never changes your
@@ -170,8 +193,8 @@ Limits worth knowing:
 - The host keeps at most 64 answered crew questions per session, about 12–15
   turns with five specialists. `crew-sim` defaults to 12 turns; longer runs show
   `completed retention` errors. Compaction is follow-up work in `crew_core`.
-- Live AI wording is still synchronous. AILANG 0.54.4/0.54.5 fixed background
-  worker cleanup, which unblocks the planned reply inbox (next sprint).
+- AI attempts per watch are the response policy's `callLimit` (default 6, at most
+  8); prefetch only uses attempts above a reserve of three.
 - Journals stop safely at 8 MiB; this is a watch-sized lab, not a whole voyage.
 
 ## The host protocol: crew-host
@@ -239,5 +262,4 @@ OCEAN drift. The normal view stays descriptive.
 For redirected input, `--mode plain` uses one complete line of draft text at a
 time, then a blank line to review; `/context` opens help and `/cancel` sends nothing.
 EOF during editing/review sends nothing. `--legacy` runs the previous watch-v2
-for archived parity experiments. Live dialogue is still synchronous; the reply
-inbox is the next sprint now that AILANG 0.54.4/0.54.5 clean up background workers.
+for archived parity experiments. Live words arrive in the background (0.6.0).
