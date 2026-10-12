@@ -40,12 +40,15 @@ for name, filename, edits in mutants:
                 raise SystemExit(f"{name}: expected one mutation site, found {changed.count(old)}")
             changed = changed.replace(old, new, 1)
         source.write_text(changed)
+        # crew_core holds the host invariants; the app's suite runs only if a mutant survives it.
+        outputs = []
         for target in (core, package):
             check = subprocess.run([ailang, "check", "--package", str(target)], capture_output=True, text=True)
             if check.returncode:
                 raise SystemExit(f"{name}: did not compile in {target.name}\n{check.stdout}\n{check.stderr}")
-        # The host invariants live in crew_core; the app's tests also exercise it.
-        outputs = [subprocess.run([ailang, "test", "--package", ".", "--allow-skips"], cwd=target, capture_output=True, text=True) for target in (core, package)]
+            outputs.append(subprocess.run([ailang, "test", "--package", ".", "--allow-skips"], cwd=target, capture_output=True, text=True))
+            if outputs[-1].returncode:
+                break
         if all(t.returncode == 0 for t in outputs):
             raise SystemExit(f"{name}: survived native behaviour controls")
         if not any(t.returncode and ("expected true, got false" in t.stdout or "contract violation" in t.stdout.lower()) for t in outputs):
