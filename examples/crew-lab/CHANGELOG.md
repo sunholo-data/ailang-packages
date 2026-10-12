@@ -11,7 +11,7 @@ Local only; never published. A verification loop for tuning:
 - Long runs: `crew_core` drops answers to expired requests when its bank fills, and
   its scenario limits rose, so `crew-sim --turns 60` runs are clean.
 - `crew-sample`: crew wording across varied moments, fetched as the watch would,
-  within `--max-calls`; `--report` for reading, `--offline` for authored words.
+  within `--max-calls`; `--report` for reading; `crew-sample-offline` for authored words without a provider key.
 - The watch policy allows up to 64 AI attempts (default 12 for new homes).
 
 New checks: `make ... claims-test`, `sample-test`.

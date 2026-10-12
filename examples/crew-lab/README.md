@@ -221,7 +221,7 @@ fetched exactly as the watch would (same prompts, checks and library):
 
 ```sh
 crew-sample --max-calls 6 --report words.txt > words.ndjson   # live: at most 6 new calls
-crew-sample --offline --report words.txt                     # authored words, no provider
+crew-sample-offline --report words.txt                       # authored words, no provider or key
 ```
 
 It plays the consent captain without AI, picks moments that differ by crew member,

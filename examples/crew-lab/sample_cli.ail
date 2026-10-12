@@ -87,8 +87,12 @@ func run(o:Options) -> () ! {IO, FS, Env, AI} =
   }
  }
 
-export func main() -> () ! {IO, FS, Env, AI} = match parse(getArgs(), {scenario:"", policy:"", first:1, last:3, turns:8, count:12, maxCalls:6, home:"${getEnvOr("HOME", ".")}/.ailang/crew-lab", offline:false, report:""}) {
+func launch(offline:bool) -> () ! {IO, FS, Env, AI} = match parse(getArgs(), {scenario:"", policy:"", first:1, last:3, turns:8, count:12, maxCalls:6, home:"${getEnvOr("HOME", ".")}/.ailang/crew-lab", offline:offline, report:""}) {
  Err("help") => println(usage()),
  Err(e) => {println("${e}\n\n${usage()}"); exit(2)},
  Ok(o) => run(o)
 }
+
+export func main() -> () ! {IO, FS, Env, AI} = launch(false)
+-- crew-sample-offline: authored words only; runs without any provider key.
+export func offline() -> () ! {IO, FS, Env, AI} = launch(true)

@@ -32,7 +32,7 @@ crew-sample --scenario $P/news-decades-late.json --home ~/.ailang/crew-lab-stapl
 
 The words sampled for this review were saved in `~/.ailang/crew-lab-stapledon` on the
 machine that ran them (not in the repo). With that home, the live watch and `crew-sample`
-reuse them; anywhere else, sampling makes new provider calls (or use `--offline`).
+reuse them; anywhere else, sampling makes new provider calls (or use `crew-sample-offline`).
 
 ## What the claims say today
 
