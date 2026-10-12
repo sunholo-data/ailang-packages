@@ -136,7 +136,9 @@ func noteFailure(r: Run, fetch: Fetch, error: string) -> Result[Run, string] ! {
     Ok(_) => Ok({ r | ui: { r.ui | seq: r.ui.seq + 1, phase: "response" }, remaining: r.remaining - fetch.calls })
   }
 
--- A live library miss commits the decision with the authored line at once; the
+-- The watch never calls a provider: saved words are read with no attempts left
+-- (so no generation can start), and a live library miss commits the decision with
+-- the authored line at once; the
 -- crew member's own words become a background job (same label and text roll).
 pure func deferJob(r:Run,request:Request,reply:Reply,sig:string)->[Spec] = match shortSignature(sig,reply.label) {
  Err(_)=>[],
@@ -154,7 +156,7 @@ func respond(r: Run, explicitAuthored: bool) -> Result[Applied, string] ! {IO, F
       waiting(r,request.actor)
       let fetch = if explicitAuthored then { outcome: starterBundle(sig, request.legal), source: "explicit-authored", calls: 0, inputTokens: 0, outputTokens: 0, usageKnown: true } else if isWatch(r.ui) && r.mode=="live" then match chooseReaction(r.policy,request,r.ui.seed) {
         Err(e)=>{outcome:Err(e),source:"error",calls:0,inputTokens:0,outputTokens:0,usageKnown:true},
-        Ok(label)=>if cachedChosen(r.home,sig,label) then resolveChosen(r.home,sig,request.legal,label,model(),r.mode,r.remaining) else match starterBundle(sig,request.legal) {
+        Ok(label)=>if cachedChosen(r.home,sig,label) then resolveChosen(r.home,sig,request.legal,label,model(),r.mode,0) else match starterBundle(sig,request.legal) {
           Err(e)=>{outcome:Err(e),source:"error",calls:0,inputTokens:0,outputTokens:0,usageKnown:true},
           Ok(b)=>{outcome:Ok(b),source:"deferred",calls:0,inputTokens:0,outputTokens:0,usageKnown:true}
         }

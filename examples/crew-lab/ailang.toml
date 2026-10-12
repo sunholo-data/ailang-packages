@@ -17,7 +17,7 @@ modules = ["sunholo/crew_lab/narrative", "sunholo/crew_lab/watch_presenter", "su
 max = ["IO", "FS", "Env", "AI", "Process", "Clock"]
 [bin]
 crew-host = {module = "main", entry = "main", caps = "IO"}
-crew-watch = {module = "native_watch", entry = "main", caps = "IO,FS,Env,AI,Process,Clock", run_flags = ["--ai", "z-ai/glm-5.3-flash", "--fs-max-bytes", "16MB", "--process-allowlist", "crew-reply-worker"]}
+crew-watch = {module = "native_watch", entry = "main", caps = "IO,FS,Env,Process,Clock", run_flags = ["--fs-max-bytes", "16MB", "--process-allowlist", "crew-reply-worker"]}
 crew-watch-offline = {module = "native_watch", entry = "offline", caps = "IO,FS,Env,AI,Process,Clock", run_flags = ["--ai-stub", "--fs-max-bytes", "16MB"]}
 crew-reply-worker = {module = "reply_worker", entry = "main", caps = "FS,Env,AI", run_flags = ["--ai", "z-ai/glm-5.3-flash", "--fs-max-bytes", "16MB"]}
 crew-sim = {module = "sim_cli", entry = "main", caps = "IO,FS,Env", run_flags = ["--bytecode", "--fs-max-bytes", "64MB"]}
