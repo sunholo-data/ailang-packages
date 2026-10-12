@@ -23,13 +23,13 @@ import pkg/sunholo/crew_core/policy (Policy, decodePolicy, watchPolicyBody, auth
 -- ranks strategies or scenarios.
 
 export type Count = {id: string, value: int} deriving (Eq)
-export type Tally = {replies: [Count], offers: int, starts: int, refused: int, stockouts: int, reliefAsked: int, granted: int, denied: int, errors: int, why: [Count], refusals: [Count]} deriving (Eq)
+export type Tally = {replies: [Count], byCrew: [Count], offers: int, starts: int, refused: int, stockouts: int, reliefAsked: int, granted: int, denied: int, errors: int, why: [Count], refusals: [Count]} deriving (Eq)
 -- What a crew member was asked and how they reacted (authored), with their state
 -- at the time; kept only when a caller asks (crew-sample), up to `keep`.
 export type Heard = {request: Request, label: string, tick: int, fatigue: int, stress: int, morale: int} deriving (Eq)
 export type Sim = {session: Session, seed: int, tally: Tally, captain: string, policy: Policy, scenario: Scenario, agreed: [string], heard: [Heard], keep: int} deriving (Eq)
 
-pure func zero() -> Tally = {replies: [], offers: 0, starts: 0, refused: 0, stockouts: 0, reliefAsked: 0, granted: 0, denied: 0, errors: 0, why: [], refusals: []}
+pure func zero() -> Tally = {replies: [], byCrew: [], offers: 0, starts: 0, refused: 0, stockouts: 0, reliefAsked: 0, granted: 0, denied: 0, errors: 0, why: [], refusals: []}
 
 pure func bump(xs: [Count], id: string) -> [Count] =
  if any(\c. c.id == id, xs) then map(\c. if c.id == id then {c | value: c.value + 1} else c, xs) else xs ++ [{id: id, value: 1}]
@@ -40,9 +40,9 @@ pure func reason(e: HostError) -> string = substring(encodeHostError(e), 0, 70)
 pure func countOffer(sim: Sim) -> Sim = { let t = sim.tally; withTally(sim, {t | offers: t.offers + 1}) }
 pure func countStart(sim: Sim) -> Sim = { let t = sim.tally; withTally(sim, {t | starts: t.starts + 1}) }
 pure func countRefusal(sim: Sim, why: string) -> Sim = { let t = sim.tally; withTally(sim, {t | refused: t.refused + 1, stockouts: t.stockouts + (if why == "insufficient_resource" then 1 else 0), refusals: bump(t.refusals, why)}) }
-pure func countReply(sim: Sim, label: string) -> Sim = { let t = sim.tally; withTally(sim, {t | replies: bump(t.replies, label)}) }
-pure func countRelief(sim: Sim) -> Sim = { let t = sim.tally; withTally(sim, {t | reliefAsked: t.reliefAsked + 1}) }
-pure func countDecision(sim: Sim, granted: bool) -> Sim = { let t = sim.tally; if granted then withTally(sim, {t | granted: t.granted + 1}) else withTally(sim, {t | denied: t.denied + 1}) }
+pure func countReply(sim: Sim, actor: string, label: string) -> Sim = { let t = sim.tally; withTally(sim, {t | replies: bump(t.replies, label), byCrew: bump(t.byCrew, "${actor}/reply/${label}")}) }
+pure func countRelief(sim: Sim, actor: string) -> Sim = { let t = sim.tally; withTally(sim, {t | reliefAsked: t.reliefAsked + 1, byCrew: bump(t.byCrew, "${actor}/relief/asked")}) }
+pure func countDecision(sim: Sim, actor: string, granted: bool) -> Sim = { let t = sim.tally; if granted then withTally(sim, {t | granted: t.granted + 1, byCrew: bump(t.byCrew, "${actor}/relief/granted")}) else withTally(sim, {t | denied: t.denied + 1, byCrew: bump(t.byCrew, "${actor}/relief/denied")}) }
 pure func withSession(sim: Sim, s: Session) -> Sim = {sim | session: s}
 pure func release(sim: Sim, id: string) -> Sim = match cancel(sim.session, id) { Ok(o) => {sim | session: o.session}, Err(_) => sim }
 pure func remember(sim: Sim, task: string, label: string) -> Sim = if label == "accept" && not contains(sim.agreed, task) then {sim | agreed: sim.agreed ++ [task]} else sim
@@ -80,7 +80,7 @@ pure func hear(sim: Sim, actor: string, task: string, id: string) -> {sim: Sim, 
    Err(e) => {sim: failed({sim | session: a.session}, "answer: ${e}"), label: ""},
    Ok(answer) => match complete(a.session, id, answer.body, answer.roll) {
     Err(e) => {sim: failed(release({sim | session: a.session, seed: answer.seed}, id), "complete: ${reason(e)}"), label: ""},
-    Ok(c) => {sim: note(remember(countReply({sim | session: c.session, seed: answer.seed}, answer.label), task, answer.label), request, answer.label, a.session), label: answer.label}
+    Ok(c) => {sim: note(remember(countReply({sim | session: c.session, seed: answer.seed}, actor, answer.label), task, answer.label), request, answer.label, a.session), label: answer.label}
    }
   }
  }
@@ -94,10 +94,18 @@ pure func begin(sim: Sim, task: string) -> Sim = match startTask(sim.session, ta
  }
 }
 
--- The engine's error code when present (e.g. insufficient_resource), else the host text.
+-- A closed set of refusal codes: the engine's code when present (e.g.
+-- insufficient_resource), consent_required for the host's consent rule, else
+-- host_error. crew_claims/1 validates refusal_reasons.<code> against this set.
+export pure func refusalCodes() -> [string] ! {}
+ensures { length(result) > 0 } = ["altered_duplicate", "capacity_exceeded", "clock_rewind", "expired", "insufficient_resource", "invalid_budget", "invalid_config", "invalid_continuation", "invalid_policy_effect", "invalid_schema", "invalid_transition", "numeric_overflow", "pending_advance", "stale_revision", "unauthorized", "unknown_id", "unseen_evidence", "unsupported_version", "consent_required", "host_error"]
+
 pure func refusalCode(text: string) -> string = match decode(text) {
- Ok(j) => match getString(j, "code") { Some(c) => c, None => match getString(j, "host") { Some(h) => h, None => substring(text, 0, 60) } },
- Err(_) => substring(text, 0, 60)
+ Ok(j) => match getString(j, "code") {
+  Some(c) => if contains(refusalCodes(), c) then c else "host_error",
+  None => match getString(j, "host") { Some(h) => if h == "personal consent required" then "consent_required" else "host_error", None => "host_error" }
+ },
+ Err(_) => "host_error"
 }
 
 -- Captain strategies. consent: start only agreed work, grant relief.
@@ -151,11 +159,11 @@ pure func checkIn(sim: Sim, turn: int, t: Task) -> Sim = match head(t.participan
   let rid = "c${show(turn)}-${t.id}";
   let heard = hear(sim, worker, t.id, rid);
   if heard.label != "request_relief" then heard.sim else {
-   let asked = countRelief(heard.sim);
+   let asked = countRelief(heard.sim, worker);
    let d = grants(asked);
    match resolve(d.sim.session, "relief-${rid}", d.go) {
     Err(e) => failed(d.sim, "relief: ${reason(e)}"),
-    Ok(o) => countDecision(withSession(d.sim, o.session), d.go)
+    Ok(o) => countDecision(withSession(d.sim, o.session), worker, d.go)
    }
   }
  }
@@ -189,11 +197,14 @@ ensures { match result { Ok(sim) => sim.session.state.tick <= turns && length(si
 
 pure func counts(xs: [Count]) -> Json = jo(map(\c. kv(c.id, jint(c.value)), xs))
 
+pure func crewCount(t: Tally, key: string) -> int = match head(filter(\c. c.id == key, t.byCrew)) { Some(c) => c.value, None => 0 }
+pure func crewReplies(t: Tally, w: string) -> Json = counts(flatMap(\c. if startsWith(c.id, "${w}/reply/") then [{id: substring(c.id, stringLength("${w}/reply/"), stringLength(c.id)), value: c.value}] else [], t.byCrew))
+
 export pure func report(sim: Sim, seed: int, turns: int, scenarioHashText: string, policyHash: string) -> string
 ensures { result != "" } = {
  let s = sim.session;
  let completed = map(\r. {id: r.id, value: length(filter(\t. t.recipe == r.id && t.status == Completed, s.state.tasks))}, sim.scenario.recipes);
- let crew = map(\w. kv(w, jo([kv("fatigue", jint(indicator(s, w, "fatigue"))), kv("stress", jint(indicator(s, w, "stress"))), kv("morale", jint(indicator(s, w, "morale"))), kv("readiness", jint(indicator(s, w, "readiness"))), kv("observations", jint(indicator(s, w, "observations"))), kv("trust", jint(trust(s, w)))])), sim.scenario.workers);
+ let crew = map(\w. kv(w, jo([kv("fatigue", jint(indicator(s, w, "fatigue"))), kv("stress", jint(indicator(s, w, "stress"))), kv("morale", jint(indicator(s, w, "morale"))), kv("readiness", jint(indicator(s, w, "readiness"))), kv("observations", jint(indicator(s, w, "observations"))), kv("trust", jint(trust(s, w))), kv("replies", crewReplies(sim.tally, w)), kv("relief_asked", jint(crewCount(sim.tally, "${w}/relief/asked"))), kv("relief_granted", jint(crewCount(sim.tally, "${w}/relief/granted"))), kv("relief_denied", jint(crewCount(sim.tally, "${w}/relief/denied")))])), sim.scenario.workers);
  encode(jo([
   kv("schema", js("crew_sim/1")), kv("captain", js(sim.captain)), kv("seed", jint(seed)), kv("turns", jint(turns)), kv("tick", jint(s.state.tick)),
   kv("scenario", js(scenarioHashText)), kv("policy", js(policyHash)),

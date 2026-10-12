@@ -6,6 +6,7 @@ import std/option (Option, Some, None)
 import std/result (Result, Ok, Err)
 import std/math (intToFloat, floatToInt, floor)
 import pkg/sunholo/crew_core/scenario (Scenario)
+import ./crew_sim (refusalCodes)
 
 -- crew_claims/1: what a designer expects the simulation to do, checked over
 -- crew-sim runs. A claim states a statistic of one crew_sim/1 measure for one
@@ -14,6 +15,8 @@ export type Claim = {id:string, captain:string, metric:string, stat:string, op:s
 export type Verdict = {claim:Claim, observed:float, runs:int, holds:bool} deriving (Eq)
 
 pure func str(j:Json, k:string) -> string = match getString(j, k) {Some(s) => s, None => ""}
+-- Text fields that are present must be strings (a numeric note is an error, not "").
+pure func textField(j:Json, k:string) -> bool = match get(j, k) {None => true, Some(_) => match getString(j, k) {Some(_) => true, None => false}}
 pure func ops() -> [string] = ["<", "<=", ">", ">=", "=="]
 pure func scalars() -> [string] = ["tick", "offers", "starts", "refused", "stockouts", "errors"]
 pure func crewFields() -> [string] = ["fatigue", "stress", "morale", "readiness", "observations", "trust"]
@@ -26,9 +29,10 @@ ensures { not result || size(path) > 0 } = match split(path, ".") {
  [x] => contains(scalars(), x),
  ["relief", x] => contains(["asked", "granted", "denied"], x),
  ["replies", x] => contains(replyLabels(), x),
- ["refusal_reasons", x] => size(x) > 0 && size(x) <= 64,
+ ["refusal_reasons", x] => contains(refusalCodes(), x),
  ["completed", x] => any(\r. r.id == x, sc.recipes),
- ["crew", w, f] => contains(sc.workers, w) && contains(crewFields(), f),
+ ["crew", w, f] => contains(sc.workers, w) && (contains(crewFields(), f) || contains(["relief_asked", "relief_granted", "relief_denied"], f)),
+ ["crew", w, "replies", x] => contains(sc.workers, w) && contains(replyLabels(), x),
  _ => false
 }
 
@@ -40,6 +44,7 @@ pure func decodeClaim(sc:Scenario, j:Json) -> Result[Claim, string] = {
  let id = str(j, "id");
  if size(id) == 0 || size(id) > 64 then Err("claim id must be 1..64 characters")
  else if any(\k. not contains(allowed, k), ks) || length(dedup(ks)) != length(ks) then Err("${id}: unknown field")
+ else if not textField(j, "note") || not textField(j, "captain") || not textField(j, "metric") || not textField(j, "stat") || not textField(j, "op") then Err("${id}: text fields must be strings")
  else if not contains(["consent", "orders", "random"], str(j, "captain")) then Err("${id}: captain must be consent, orders or random")
  else if not metricOK(sc, str(j, "metric")) then Err("${id}: unknown metric ${str(j, "metric")}")
  else if not contains(["median", "mean", "min", "max", "share"], str(j, "stat")) then Err("${id}: stat must be median, mean, min, max or share")

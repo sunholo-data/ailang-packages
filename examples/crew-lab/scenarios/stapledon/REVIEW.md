@@ -1,6 +1,6 @@
 # Review: Stapledon crew scenario pack (2026-10-12)
 
-Six draft scenarios, each checked by `crew-sim --check` (20 seeds, 12 turns, consent and orders captains) and given real crew words by `crew-sample` (GLM-5.3-Flash through the watch's prompts and checks; 62 provider calls in total, 10 moments per scenario). Reactions are authored and seeded; only the words come from the model. Full words: `review/<scenario>.words.txt`; claims: `review/<scenario>.claims.txt`.
+Six draft scenarios, each checked by `crew-sim --check` (20 seeds, 12 turns, consent and orders captains) and given real crew words by `crew-sample` (GLM-5.3-Flash through the watch's prompts and checks; 62 provider calls over two rounds: 48 in the first, then 14 after the id fix, when most words came from the saved library; the committed `review/*.samples.ndjson` are the second round, so their `calls` add up to 14; 10 moments per scenario). Reactions are authored and seeded; only the words come from the model. Full words: `review/<scenario>.words.txt`; claims: `review/<scenario>.claims.txt`.
 
 ## Findings
 

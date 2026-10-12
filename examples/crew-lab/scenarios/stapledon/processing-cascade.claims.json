@@ -1,55 +1,55 @@
 {
- "schema": "crew_claims/1",
- "claims": [
-  {
-   "id": "consent-runs-clean",
-   "captain": "consent",
-   "metric": "errors",
-   "stat": "max",
-   "op": "==",
-   "value": 0
-  },
-  {
-   "id": "orders-runs-clean",
-   "captain": "orders",
-   "metric": "errors",
-   "stat": "max",
-   "op": "==",
-   "value": 0
-  },
-  {
-   "id": "repair-stock-is-finite",
-   "captain": "consent",
-   "metric": "completed.work_engineer",
-   "stat": "max",
-   "op": "<=",
-   "value": 2,
-   "note": "four blocks of repair stock allow at most two rebuilds"
-  },
-  {
-   "id": "crisis-blocks-work",
-   "captain": "consent",
-   "metric": "stockouts",
-   "stat": "median",
-   "op": ">=",
-   "value": 1
-  },
-  {
-   "id": "engineer-under-strain",
-   "captain": "orders",
-   "metric": "crew.engineer.stress",
-   "stat": "median",
-   "op": ">=",
-   "value": 70,
-   "note": "the engineer carries the crisis"
-  },
-  {
-   "id": "engineer-gets-relief-with-consent",
-   "captain": "consent",
-   "metric": "relief.granted",
-   "stat": "median",
-   "op": ">=",
-   "value": 1
-  }
- ]
+  "schema": "crew_claims/1",
+  "claims": [
+    {
+      "id": "consent-runs-clean",
+      "captain": "consent",
+      "metric": "errors",
+      "stat": "max",
+      "op": "==",
+      "value": 0
+    },
+    {
+      "id": "orders-runs-clean",
+      "captain": "orders",
+      "metric": "errors",
+      "stat": "max",
+      "op": "==",
+      "value": 0
+    },
+    {
+      "id": "repair-stock-is-finite",
+      "captain": "consent",
+      "metric": "completed.work_engineer",
+      "stat": "max",
+      "op": "<=",
+      "value": 2,
+      "note": "four blocks of repair stock allow at most two rebuilds"
+    },
+    {
+      "id": "crisis-blocks-work",
+      "captain": "consent",
+      "metric": "stockouts",
+      "stat": "median",
+      "op": ">=",
+      "value": 1
+    },
+    {
+      "id": "engineer-under-strain",
+      "captain": "orders",
+      "metric": "crew.engineer.stress",
+      "stat": "median",
+      "op": ">=",
+      "value": 70,
+      "note": "the engineer carries the crisis"
+    },
+    {
+      "id": "engineer-gets-relief-with-consent",
+      "captain": "consent",
+      "metric": "crew.engineer.relief_granted",
+      "stat": "median",
+      "op": ">=",
+      "value": 1
+    }
+  ]
 }

@@ -27,6 +27,8 @@ bad crew '{"schema":"crew_claims/1","claims":[{"id":"t","captain":"orders","metr
 bad share '{"schema":"crew_claims/1","claims":[{"id":"t","captain":"orders","metric":"starts","stat":"share","op":">=","value":0.5}]}' 'share needs when'
 bad field '{"schema":"crew_claims/1","claims":[{"id":"t","captain":"orders","metric":"starts","stat":"max","op":">=","value":1,"weight":2}]}' 'unknown field'
 bad dup '{"schema":"crew_claims/1","claims":[{"id":"t","captain":"orders","metric":"starts","stat":"max","op":">=","value":1},{"id":"t","captain":"consent","metric":"starts","stat":"max","op":">=","value":1}]}' 'duplicate'
+bad reason '{"schema":"crew_claims/1","claims":[{"id":"t","captain":"orders","metric":"refusal_reasons.no_such_reasn","stat":"max","op":"==","value":0}]}' 'unknown metric'
+bad note '{"schema":"crew_claims/1","claims":[{"id":"t","captain":"orders","metric":"starts","stat":"max","op":">=","value":1,"note":7}]}' 'text fields must be strings'
 bad schema '{"schema":"crew_claims/2","claims":[]}' 'schema'
 # Long runs no longer stop at the old 64-answer limit.
 "$SIM" --turns 60 --seeds 1..3 > "$TMP/long.ndjson"

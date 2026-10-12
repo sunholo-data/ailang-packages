@@ -30,8 +30,9 @@ crew-watch --scenario $P/news-decades-late.json --home ~/.ailang/crew-lab-staple
 crew-sample --scenario $P/news-decades-late.json --home ~/.ailang/crew-lab-stapledon --report words.txt
 ```
 
-`~/.ailang/crew-lab-stapledon` holds the words already sampled for review, so the live
-watch with that home shows them without new calls when the same moments come up.
+The words sampled for this review were saved in `~/.ailang/crew-lab-stapledon` on the
+machine that ran them (not in the repo). With that home, the live watch and `crew-sample`
+reuse them; anywhere else, sampling makes new provider calls (or use `--offline`).
 
 ## What the claims say today
 

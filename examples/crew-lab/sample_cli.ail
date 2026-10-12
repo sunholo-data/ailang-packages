@@ -73,10 +73,16 @@ func run(o:Options) -> () ! {IO, FS, Env, AI} =
   (Ok(sb), Ok(pf)) => match decodeScenario(sb) {
    Err(e) => {println("invalid scenario: ${e}"); exit(1)},
    Ok(sc) => {
-    let moments = flatMap(\seed. match playKeeping(sc, pf.policy, "consent", seed, o.turns, 200) {Ok(sim) => map(\h. {seed:seed, heard:h}, sim.heard), Err(_) => []}, range(o.first, o.last + 1));
+    let played = map(\seed. match playKeeping(sc, pf.policy, "consent", seed, o.turns, 200) {Ok(sim) => Ok(map(\h. {seed:seed, heard:h}, sim.heard)), Err(e) => Err("seed ${show(seed)}: ${e}")}, range(o.first, o.last + 1));
+    match flatMap(\r. match r {Err(e) => [e], Ok(_) => []}, played) {
+     e :: _ => {println("run failed: ${e}"); exit(1)},
+     [] => {
+    let moments = flatMap(\r. match r {Ok(ms) => ms, Err(_) => []}, played);
     let done = foldlE(\acc m. fetch(sc, pf, o, acc, m), {used:0, out:[]}, choose(moments, o.count));
     forEachE(\s. println(encodeSample(sc, s)), done.out);
     if o.report == "" then () else match writeFileResult(o.report, "${report(sc, done.out)}\n") {Ok(_) => (), Err(e) => {println("cannot write report: ${e}"); exit(1)}}
+     }
+    }
    }
   }
  }
