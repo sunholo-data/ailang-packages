@@ -62,7 +62,7 @@ exact field sets, bounded integers, named errors.
 
 **Acceptance:** `ailang test` passes in `packages/crew-core`; the fixture-equivalence test passes.
 
-### M2: move the host into crew_core and make the session take a Scenario (~450 lines, mostly moves)
+### M2: move the host into crew_core and make the session take a Scenario (~450 lines, mostly moves) ✅ 2026-10-12
 
 Move `session`, `actor_policy`, `personality_host`, `conversations` and `codec`, plus the decoder
 and scoring half of `reactions` (renamed `policy`), with their tests. Remove the `scenario` and
@@ -77,7 +77,7 @@ it served only the retired front ends (D1).
 - `git grep -nE 'watch_scenario|modern\(' packages/crew-core` has no matches.
 - Record `ailang check --strict-bytecode` per module (for future Godot use; not a gate).
 
-### M3: crew-lab uses crew_core and JSON defaults (~300 lines)
+### M3: crew-lab uses crew_core and JSON defaults (~300 lines) ✅ 2026-10-12
 
 - `examples/crew-lab/ailang.toml` depends on `sunholo/crew_core` by path and drops the moved modules.
 - `data/watch-scenario.json` (the M1 fixture), `data/response-policy.json` (the current
@@ -92,7 +92,7 @@ it served only the retired front ends (D1).
 the new `test-scenario-errors.sh` rejects three malformed scenarios with named errors before the
 first turn.
 
-### M4: retire the older front ends; the watch stands alone (~350 lines, net negative)
+### M4: retire the older front ends; the watch stands alone (~350 lines, net negative) ✅ 2026-10-12
 
 - Move what `native_watch` uses from `play` (`Run`, `openWatch`, `openConversationWatch`,
   `applyWatch`, `closeWatch`) into `watch_run.ail`. Keep only the parts of `play_flow` that the
@@ -111,7 +111,7 @@ first turn.
 (`native-watch-pty-test`) passes; `git grep -nE 'crew-(journey|play|view)\b' examples/crew-lab`
 lists only `recordings/retired/` and the CHANGELOG.
 
-### M5: crew-sim batch tuning (~400 lines)
+### M5: crew-sim batch tuning (~400 lines) ✅ 2026-10-12
 
 `crew_sim.ail` + bin `crew-sim` (caps `IO,FS`, no AI). Strategies (pure, over `Session`) are
 `consent`, `orders` and `random` (seeded). They cover offer, start, relief, authority and advance.

@@ -59,10 +59,10 @@
         "test-scenario-errors.sh rejects three malformed scenarios before the first turn",
         "data/response-policy.json is byte-identical to the current watchPolicyBody()"
       ],
-      "passes": null,
-      "started": null,
-      "completed": null,
-      "notes": null
+      "passes": true,
+      "started": "2026-10-12",
+      "completed": "2026-10-12T23:30:00Z",
+      "notes": "crew-watch/crew-watch-offline take --scenario FILE and --policy FILE, read and validated before any terminal or journal opens (loadShip); sessions start on the given scenario (play_flow.beginWatchIn/beginConversationWatchIn, play.openWatch(sc, policyText, ...)); journal header records scenario_hash, policy_hash and canonical scenario; play_flow.recoveryRecordingIn(sc, ...) replays on a given ship. test-scenario-errors.sh: custom ship runs and is journaled by hash; 4 malformed scenarios and a malformed policy rejected before any journal. Existing recordings and conversation replays pass. Deviation: data/response-policy.json and data/conversations.json were not created: the response policy already lives as editable JSON in the watch home (seeded from watchPolicyBody) and --policy covers overrides; conversation wording moves with D2."
     },
     {
       "id": "M4",
@@ -77,9 +77,9 @@
         "git grep -nE 'crew-(journey|play|view)\\b' examples/crew-lab lists only recordings/retired and CHANGELOG",
         "ailang pkg bin list shows only the crew-watch, crew-watch-offline and crew-sim bins"
       ],
-      "passes": null,
+      "passes": true,
       "started": "2026-10-12",
-      "completed": null,
+      "completed": "2026-10-12T23:30:00Z",
       "notes": "Pulled forward into M2 (legacy scenario removal required it): deleted viewer/terminal/journey/journey_presenter, legacy scenario/watch_scenario, play.ail legacy launch loop (252 lines left), bins crew-lab/crew-view/crew-play*/crew-journey*; test-cli/journey/play/watch.sh retired (journey UI flows; domain assertions covered by crew_core session tests); play-*.menu moved to recordings/retired. main.ail kept as crew-host (NDJSON protocol for parity controls and future Godot use); host recordings regenerated for watch-v2. Remaining for M4: watch_run extraction from play is not needed for correctness; journey_flow/presenter still back the watch. Validate: all targets pass locally (rg shim for local only); mutations 8/8 killed."
     },
     {
@@ -116,7 +116,7 @@
       "passes": null,
       "started": null,
       "completed": null,
-      "notes": null
+      "notes": "Pending attended steps: independent evaluation (different agent/model), publish crew_core 0.1.0, land PR, reinstall ~/.ailang/bin crew-* from merged main. Dry run: no gates; check 203 MB / verify 184 MB."
     }
   ],
   "registry_reuse": [

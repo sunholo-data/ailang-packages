@@ -12,16 +12,17 @@ import pkg/sunholo/content_library/library (Bundle, encodeBundle, starterBundle,
 import pkg/sunholo/social_dynamics/model (Offered)
 import pkg/sunholo/terminal_ui/ui (Dimensions, dimensions, screen, safeText)
 import pkg/sunholo/crew_core/session (Request, lookupConversation, isConversation)
-import ./ship (start)
+import pkg/sunholo/crew_core/session (start as startWith)
 import ./watch_presenter (frame as watchFrame, recap as watchRecap)
 import ./narrative (stock as watchStock, consequences as watchConsequences)
-import pkg/sunholo/crew_core/scenario (Scenario, resourceName)
+import pkg/sunholo/crew_core/scenario (Scenario, resourceName, scenarioHash)
+import std/crypto (sha256Hex)
 import pkg/sunholo/crew_core/codec (object)
-import pkg/sunholo/crew_core/policy (Policy, weights, chooseReaction)
+import pkg/sunholo/crew_core/policy (Policy, weights, chooseReaction, decodePolicy)
 import ./dialogue (signature, watchSignature, watchSignatureIn, conversationStarter)
 import pkg/sunholo/crew_core/policy (fixtureBody)
 import ./store (Fetch, loadPolicy, loadWatchPolicy, resolve, resolveChosen, openRun, appendRun)
-import ./play_flow (PlayState, Stage, Intent, begin, beginWatch, beginConversationWatch, isWatch, seedNumber, parseArgs, menu, route, stage, publish, renderStatus, recover)
+import ./play_flow (PlayState, Stage, Intent, beginWatchIn, beginConversationWatchIn, isWatch, seedNumber, parseArgs, menu, route, stage, publish, renderStatus, recover)
 
 export type HeardReply = {actor:string,text:string} deriving (Eq)
 export type Run = { ui: PlayState, home: string, path: string, policy: Policy, policyBody: string, mode: string, remaining: int, lines: int, lastMessage: string, modern: bool, nav: Navigation, dimensions: Dimensions, ansi: bool, debug: bool, recent:[HeardReply] }
@@ -219,27 +220,27 @@ func act(r: Run, i: Intent) -> Result[Applied, string] ! {IO, FS, AI} = if i.kin
 
 -- Trusted app adapters only: these reuse the same start/commit/respond/store
 -- boundaries. UI-owned navigation never calls them. No second input owner.
-func openWatchScenario(home:string,seed:int,policyChoice:string,mode:string,debug:bool,conversation:bool)->Result[Run,string] ! {FS,Env}
+func openWatchScenario(sc:Scenario,policyText:string,home:string,seed:int,policyChoice:string,mode:string,debug:bool,conversation:bool)->Result[Run,string] ! {FS,Env}
 requires { stringLength(home)>0 && stringLength(home)<=4096 && seed>=1 && seed<=2147483646 && (mode=="live" || mode=="offline") }
 ensures { match result {Err(_)=>true,Ok(r)=>r.ui.seed==seed && r.ui.seq==0 && isWatch(r.ui) && r.remaining>=0 && r.remaining<=8} } =
- match (if conversation then beginConversationWatch(policyChoice,seed) else beginWatch(policyChoice,seed),loadWatchPolicy(home)) {
+ match (if conversation then beginConversationWatchIn(sc,policyChoice,seed) else beginWatchIn(sc,policyChoice,seed),if policyText=="" then loadWatchPolicy(home) else match decodePolicy(policyText) {Ok(p)=>Ok({policy:p,body:policyText}),Err(e)=>Err("Invalid --policy: ${e}")}) {
   (Err(e),_)=>Err(e),(_,Err(e))=>Err(e),
   (Ok(ui),Ok(config))=>{
    let c=command("start",[kv("policy",js(ui.session.policy)),kv("scenario",js(if conversation then "watch-v3" else "watch-v2"))]);
-   match start(c) {Err(_)=>Err("Startup failed"),Ok(host)=>{
-    let header=envelope(0,jo([kv("kind",js("start")),kv("host_input",js(c)),kv("host_output",js(host.trace)),kv("seed",jint(seed)),kv("policy_body",js(config.body)),kv("model",js(model())),kv("mode",js(mode))]));
+   match startWith(sc,c) {Err(_)=>Err("Startup failed"),Ok(host)=>{
+    let header=envelope(0,jo([kv("kind",js("start")),kv("host_input",js(c)),kv("host_output",js(host.trace)),kv("seed",jint(seed)),kv("policy_body",js(config.body)),kv("policy_hash",js(sha256Hex(config.body))),kv("scenario_hash",js(scenarioHash(sc))),kv("scenario",js(sc.canonical)),kv("model",js(model())),kv("mode",js(mode))]));
     match openRun(home,"${getPid()}-${seed}",header) {Err(e)=>Err("Run ownership/journal failed: ${e}"),Ok(path)=>Ok({ui:ui,home:home,path:path,policy:config.policy,policyBody:config.body,mode:mode,remaining:config.policy.callLimit,lines:0,lastMessage:"",modern:true,nav:initial(),dimensions:dimensions(80,24),ansi:false,debug:debug,recent:[]})}
    }}
   }
  }
 
-export func openWatch(home:string,seed:int,policyChoice:string,mode:string,debug:bool)->Result[Run,string] ! {FS,Env}
+export func openWatch(sc:Scenario,policyText:string,home:string,seed:int,policyChoice:string,mode:string,debug:bool)->Result[Run,string] ! {FS,Env}
 requires {stringLength(home)>0 && stringLength(home)<=4096 && seed>=1 && seed<=2147483646 && (mode=="live" || mode=="offline")}
-ensures {match result {Err(_)=>true,Ok(r)=>isWatch(r.ui) && not isConversation(r.ui.session)}} = openWatchScenario(home,seed,policyChoice,mode,debug,false)
+ensures {match result {Err(_)=>true,Ok(r)=>isWatch(r.ui) && not isConversation(r.ui.session)}} = openWatchScenario(sc,policyText,home,seed,policyChoice,mode,debug,false)
 
-export func openConversationWatch(home:string,seed:int,policyChoice:string,mode:string,debug:bool)->Result[Run,string] ! {FS,Env}
+export func openConversationWatch(sc:Scenario,policyText:string,home:string,seed:int,policyChoice:string,mode:string,debug:bool)->Result[Run,string] ! {FS,Env}
 requires {stringLength(home)>0 && stringLength(home)<=4096 && seed>=1 && seed<=2147483646 && (mode=="live" || mode=="offline")}
-ensures {match result {Err(_)=>true,Ok(r)=>isWatch(r.ui) && isConversation(r.ui.session)}} = openWatchScenario(home,seed,policyChoice,mode,debug,true)
+ensures {match result {Err(_)=>true,Ok(r)=>isWatch(r.ui) && isConversation(r.ui.session)}} = openWatchScenario(sc,policyText,home,seed,policyChoice,mode,debug,true)
 
 export func applyWatch(r:Run,i:Intent)->Result[Applied,string] ! {IO,FS,AI}
 requires { isWatch(r.ui) && r.remaining>=0 && r.remaining<=8 && (r.mode=="live" || r.mode=="offline") }

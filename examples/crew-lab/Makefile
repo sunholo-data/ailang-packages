@@ -5,7 +5,7 @@ AILANG ?= ailang
 INPUT ?= $(EX)/recordings/agreed-science.ndjson
 ENGINE ?= interpreter
 OUT := $(ROOT)/.ailang/state/crew-lab
-.PHONY: experiment deps fixtures tests core-tests library-tests terminal-tests store-test scenarios parity replay quality validate mutations native-ui-test native-watch-test native-watch-pty-test short-reply-test conversations-test sim-test
+.PHONY: experiment deps fixtures tests core-tests library-tests terminal-tests store-test scenarios parity replay quality validate mutations native-ui-test native-watch-test native-watch-pty-test short-reply-test conversations-test sim-test scenario-test
 
 # One NDJSON host run (crew-host protocol) over a saved recording.
 experiment:
@@ -84,6 +84,8 @@ native-watch-pty-test:
 	@AILANG="$(AILANG)" python3 "$(EX)/test-native-watch-pty.py"
 short-reply-test:
 	@AILANG="$(AILANG)" bash "$(EX)/test-short-reply.sh"
+scenario-test:
+	@AILANG="$(AILANG)" "$(EX)/test-scenario-errors.sh"
 sim-test:
 	@AILANG="$(AILANG)" "$(EX)/test-sim.sh"
 conversations-test:
@@ -92,4 +94,4 @@ conversations-test:
 	@AILANG="$(AILANG)" python3 "$(EX)/test-conversations.py"
 	@AILANG="$(AILANG)" "$(EX)/test-conversation-replay.sh"
 
-validate: deps core-tests library-tests terminal-tests tests scenarios replay parity store-test quality native-ui-test native-watch-test native-watch-pty-test short-reply-test conversations-test sim-test
+validate: deps core-tests library-tests terminal-tests tests scenarios replay parity store-test quality native-ui-test native-watch-test native-watch-pty-test short-reply-test conversations-test sim-test scenario-test
