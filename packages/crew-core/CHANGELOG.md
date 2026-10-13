@@ -45,6 +45,28 @@ only when cohorts exist.
 - **Scenario:** optional top-level `cohorts` section (1-15 groups plus
   children), validated with the field named.
 
+Measured (v0.54.8 strict VM, Apple silicon, lab founders pack: 1,000 aboard
+in 10 departments plus children, five featured crew; 10-year skip at
+cadence 30 with keep 30, seed 1):
+
+| Run | Time |
+|---|---|
+| founders, no cohorts section | 19.6 s |
+| founders, 1,000 people | 20.1-20.2 s |
+| founders ×100, 100,000 people | 20.4 s |
+
+Cohorts cost about 0.6 s a decade, the same at 1,000 or 100,000 people.
+Pack claims (crew-lab, claims written before the runs; 18 of 18 hold over
+seeds 1..3): a calm year, the century (1,646 at year 100 under hold, the
+top of D-75's band), births stop when the beds go dark, restricting births
+escalates a cohort within ten years, a split cohort escalates and a
+uniformly uneasy one does not. Two findings on the way: the restrict claim
+first failed because the yearly grievance drifted away within weeks (fixed:
+the grievance holds while the policy does), and decade skips without
+archiving hit the 256-task cap (long claims run with keep 30, as the game
+does). Observation for scenario design: ten years of restrict brought
+births to zero in every run, because the grievance also sours moods.
+
 ## 0.3.0
 
 For Stapledon's crew integration (R2-CREW CI-0; ailang-packages#137).

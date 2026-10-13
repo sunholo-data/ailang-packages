@@ -56,13 +56,13 @@ A cohort is a group actor:
 
 | ID | What | Gate |
 |---|---|---|
-| P1 | Scenario `cohorts` section (1–16, separate from crew's 1–15); validation that every band list sums to headcount and that voices are featured crew; the response policy gains a `cohort` section | decode tests on both engines; bad packs rejected with the field named |
-| P2 | Band transitions: events and heard captain decisions move people by band through the cohort mix. Expected-value and seeded modes; readouts | property tests: sums preserved, never negative, same seed gives the same result, VM == interpreter |
-| P3 | Drift on quiet days toward the mood set by resources and recent events; `advance(n)` and the auto-captain cover cohorts; cohort escalation rules (`pressure`, `division` thresholds) in `crew_escalation/1` | `crew-sim --auto` claims; a split cohort escalates before a uniformly uneasy one |
-| P4 | Yearly population step: `birth_policy` command (`encourage`/`hold`/`restrict`, journalled, D-71(2)); births by policy, resources and parents' mood; deaths by age band plus `loss` events; ageing; children joining departments; the `crew.used` draw as a readout. The `hold` default gives about 0.4% net a year (D-75) | headcount over 100 years within ±10% of 1,500 under `hold` in good conditions; births stall when garden or water are short |
-| P5 | Promotion: a featured member who departs (dies, breaks permanently, or leaves the featured set) is replaced from their cohort. The new actor gets the cohort mix plus a seeded offset and the cohort's regard, then the `promoted` event fires. The featured cap of 15 holds; voices reassign | tests: cap holds; id deterministic; replay identical |
-| P6 | CP-1 lab content: a founders scenario with about 1,000 people in 10 department cohorts plus children, voices from the featured 11. Claims written first: split before uneasy; a death aboard moves founders more than ship-born after generation 2; births stall under shortage; the 100-year growth band | `crew-sim --check` over 20 seeds; claims recorded, failures kept as findings |
-| P7 | Scale and close: AC9 (a 10-year skip with 1,000 people and with 100,000 people within 10% of each other); parity (nine recordings); changelog; independent evaluation; PR; publish 0.4.0 | timing table in the CHANGELOG; evaluator score at least 70 |
+| ✅ P1 | Scenario `cohorts` section (1–16, separate from crew's 1–15); validation that every band list sums to headcount and that voices are featured crew; the response policy gains a `cohort` section | decode tests on both engines; bad packs rejected with the field named |
+| ✅ P2 | Band transitions: events and heard captain decisions move people by band through the cohort mix. Expected-value and seeded modes; readouts | property tests: sums preserved, never negative, same seed gives the same result, VM == interpreter |
+| ✅ P3 | Drift on quiet days toward the mood set by resources and recent events; `advance(n)` and the auto-captain cover cohorts; cohort escalation rules (`pressure`, `division` thresholds) in `crew_escalation/1` | `crew-sim --auto` claims; a split cohort escalates before a uniformly uneasy one |
+| ✅ P4 | Yearly population step: `birth_policy` command (`encourage`/`hold`/`restrict`, journalled, D-71(2)); births by policy, resources and parents' mood; deaths by age band plus `loss` events; ageing; children joining departments; the `crew.used` draw as a readout. The `hold` default gives about 0.4% net a year (D-75) | headcount over 100 years within ±10% of 1,500 under `hold` in good conditions; births stall when garden or water are short |
+| ✅ P5 | Promotion: a featured member who departs (dies, breaks permanently, or leaves the featured set) is replaced from their cohort. The new actor gets the cohort mix plus a seeded offset and the cohort's regard, then the `promoted` event fires. The featured cap of 15 holds; voices reassign | tests: cap holds; id deterministic; replay identical |
+| ✅ P6 | CP-1 lab content: a founders scenario with about 1,000 people in 10 department cohorts plus children, voices from the featured 11. Claims written first: split before uneasy; a death aboard moves founders more than ship-born after generation 2; births stall under shortage; the 100-year growth band | `crew-sim --check` over 20 seeds; claims recorded, failures kept as findings |
+| ✅ P7 | Scale and close: AC9 (a 10-year skip with 1,000 people and with 100,000 people within 10% of each other); parity (nine recordings); changelog; independent evaluation; PR; publish 0.4.0 | timing table in the CHANGELOG; evaluator score at least 70 |
 
 ## Risks
 
@@ -78,3 +78,24 @@ A cohort is a group actor:
 
 None are blocking. The design choices above (children cohort, 25% generation
 split, expected-value default) are mine; say if any should be different.
+
+## Outcome (2026-10-13)
+
+- **P1–P6 done.** 59 new crew_core tests on both engines; the six parity
+  recordings replay byte-identically; 18 of 18 founders claims hold.
+- **P7:** AC9 holds (20.1 s at 1,000 people, 20.4 s at 100,000, 10-year
+  skip). Evaluation, PR and publish follow.
+- **Changes during the sprint, all recorded in the CHANGELOG:**
+  - Birth-policy tension (Mark, 2026-10-13).
+  - Birth rates recalibrated: the first draft was below replacement.
+  - Grievance persists while the policy lasts (a claim failed first).
+  - Drift on calendar weeks, so batched and daily advances agree (raised by
+    the R2 integration agent).
+  - Shortage counts reserved units.
+  - Promotion keeps the role and replaces the person (the engine cannot add
+    actors).
+- **Not built:** generation mix offsets for the ship-born. The claim "a
+  death moves founders more than the ship-born" was not written, because the
+  model gives the ship-born the founders' mix, so it would fail by
+  construction. Which households get permits under restrict is the
+  integration agent's open follow-up for CP-3/R3.
