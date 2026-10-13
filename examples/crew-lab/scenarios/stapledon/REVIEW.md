@@ -132,6 +132,25 @@ pack's `policy.json` (strain on); claims are over 20 seeds.
   half) and `compute-is-contested-under-orders` (the claim's arithmetic was
   wrong).
 
+## Update 2026-10-13 (CI-0): the ergosphere's third heat user (D-70 OQ6)
+
+The medical bay now also reserves heat ("its scanners and cold stores run on
+the radiators too"). Over 20 seeds, 10 of 12 claims hold.
+- **The heat squeeze is now real.** `heat-blocks-work-under-orders` holds,
+  with a median of 4 heat stockouts under orders (previously 0).
+- **Arguments are still rare: 2 runs in 20** (`approach-forces-an-argument`
+  fails, and so does `halted-engineer-resents-navigator`).
+  - Under consent, the three heat users seldom work at the same time.
+    Replies of decline, defer and concern leave work unstarted, and jobs end
+    on turn boundaries, before the approach event fires.
+  - Moving the approach to turn 5 made it worse: 0 runs in 20.
+
+  This is now a finding for the scenario agent (task L2), not a tuning target.
+  Arguments need overlapping long work. Candidate authoring changes:
+  - longer modelling and bracing jobs (4–5 turns);
+  - a standing heat load from a resident system;
+  - an orders claim instead of a consent claim, since orders start everything.
+
 ## Scenarios
 
 ### Last messages home (`last-messages-home`)

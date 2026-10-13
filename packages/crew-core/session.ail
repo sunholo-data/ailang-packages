@@ -673,22 +673,33 @@ export pure func setCommand(s: Session, policy: string) -> Result[Output, HostEr
 ensures { match result { Ok(o) => o.session.command == policy && o.session.policy == s.policy, Err(_) => true } } =
  if not idle(s) || not identity(s) then Err(HostFailure("policy context")) else if policy != "consent" && policy != "orders" then Err(HostFailure("policy must be consent or orders")) else Ok(output({s | command: policy}, []))
 
--- A ship event now (the game raises these from physics): the same flow as a
--- scheduled event, at the current tick. Ids share the scheduled events'
--- namespace and fire once.
-export pure func raiseShipEvent(s: Session, event: ShipEvent) -> Result[Output, HostError] ! {}
-ensures { match result { Ok(o) => o.session.state.tick == s.state.tick, Err(_) => true } } =
- if not idle(s) || not identity(s) then Err(HostFailure("ship event context")) else if seen(s, "ev-${event.id}") then Err(HostFailure("ship event already raised")) else match eventFlows(s, [event], []) {
-  Err(e) => Err(e),
-  Ok(f) => Ok(output(f.session, f.events))
- }
+-- A ship event now (the game raises these from physics): it joins the
+-- session's event list at the current tick and fires through the same
+-- advance path as a scheduled event (an advance to the current tick). Ids
+-- share the scheduled events' namespace and fire once. Routing it through the
+-- existing path, not a second call into the flow code, keeps the compiler's
+-- memory where it was (ailang#1812: a second call site of the flow group cost
+-- about 12 GB more in a cold check).
+export pure func raiseShipEvent(s: Session, event: ShipEvent) -> Result[Output, HostError] ! {} =
+ input(s, encode(jo([kv("command", js("ship_event")), kv("event", jo([kv("id", js(event.id)), kv("text", js(event.text)), kv("transfers", ja(map(\t. jo([kv("resource", js(t.resource)), kv("delta", jint(t.delta))]), event.transfers)))] ++ (if event.major == "" then [] else [kv("major", js(event.major))])))])))
+
+-- Command bodies live in their own functions: inlined into dispatch's big
+-- match they multiplied the compiler's memory (ailang#1812).
+pure func policyCommand(s: Session, j: Json) -> Result[Output, HostError] =
+  if not fields(j, ["command", "policy"]) then Err(HostFailure("policy fields")) else match getString(j, "policy") { Some(p) => setCommand(s, p), None => Err(HostFailure("policy types")) }
+
+pure func shipEventCommand(s: Session, j: Json) -> Result[Output, HostError] =
+  if not fields(j, ["command", "event"]) then Err(HostFailure("ship event fields")) else match get(j, "event") {
+    None => Err(HostFailure("ship event types")),
+    Some(ev) => match decodeShipEvent(s.scenario, ev, s.state.tick) {
+      Err(e) => Err(HostFailure(e)),
+      Ok(e) => if not idle(s) then Err(HostFailure("ship event context")) else if seen(s, "ev-${e.id}") || any(\x. x.id == e.id, s.scenario.events) then Err(HostFailure("ship event already raised")) else dispatch({s | scenario: {s.scenario | events: s.scenario.events ++ [e]}}, jo([kv("command", js("advance")), kv("tick", jint(s.state.tick)), kv("budget", jint(64))]))
+    }
+  }
 
 pure func dispatch(s: Session, j: Json) -> Result[Output, HostError] = match getString(j, "command") {
-  Some("policy") => if not fields(j, ["command", "policy"]) then Err(HostFailure("policy fields")) else match getString(j, "policy") { Some(p) => setCommand(s, p), None => Err(HostFailure("policy types")) },
-  Some("ship_event") => if not fields(j, ["command", "event"]) then Err(HostFailure("ship event fields")) else match get(j, "event") {
-    None => Err(HostFailure("ship event types")),
-    Some(ev) => match decodeShipEvent(s.scenario, ev, s.state.tick) { Err(e) => Err(HostFailure(e)), Ok(e) => raiseShipEvent(s, e) }
-  },
+  Some("policy") => policyCommand(s, j),
+  Some("ship_event") => shipEventCommand(s, j),
   Some("lab_major")=>if not fields(j,["command","id","kind"]) then Err(HostFailure("lab report schema")) else match (text(j,"id"),text(j,"kind")){(Ok(id),Ok(kind))=>labMajor(s,id,kind),_=>Err(HostFailure("lab report types"))},
   Some("captain_reply") => if not fields(j,["command","id","issue","text","approach","tick","revision"]) then Err(HostFailure("captain reply schema")) else match (text(j,"id"),text(j,"issue"),text(j,"text"),text(j,"approach"),integer(j,"tick"),integer(j,"revision")) {
    (Ok(id),Ok(issue),Ok(words),Ok(approach),Ok(tick),Ok(revision))=>captainReply(s,id,issue,words,approach,tick,revision),
