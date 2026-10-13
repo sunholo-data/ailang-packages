@@ -1,0 +1,133 @@
+module sunholo/crew_core/flows_test
+import std/result (Result, Ok, Err)
+import std/option (Some, None)
+import std/list (head, filter, length, map, any)
+import std/string (replace, contains, length as stringLength)
+import pkg/sunholo/social_dynamics/model (Resource)
+import ./scenario (Scenario, decodeScenario, resourceKind, yieldsOf, scenarioHash)
+import ./session (Session, Output, HostError, HostFailure, start, input, offer, startTask)
+import ./flows (balanced)
+import pkg/sunholo/social_dynamics/personality (MajorReceived)
+
+-- A bakery that leaks: flour is a stock, the oven a capacity; baking returns
+-- water; a leak at tick 1 drains water, a delivery at tick 3 brings flour.
+pure func ship(events: string, kinds: bool) -> string =
+ "{\"schema\":\"crew_scenario/1\",\"id\":\"bakery\",\"indicators\":[\"fatigue\",\"stress\",\"trust\"],\"indicator_defaults\":{\"fatigue\":0,\"stress\":10},\"captain\":{\"id\":\"captain\",\"values\":{\"mission\":80},\"start\":{}},\"crew\":[{\"id\":\"cook\",\"role\":\"Cook\",\"ocean\":{\"openness\":50,\"conscientiousness\":50,\"extraversion\":50,\"agreeableness\":50,\"neuroticism\":50},\"values\":{\"care\":60},\"start\":{},\"work\":[{\"id\":\"work_cook\",\"name\":\"Bake\",\"purpose\":\"Feed everyone.\",\"duration\":2,\"costs\":[{\"resource\":\"flour\",\"reserve\":1,\"consume\":1},{\"resource\":\"oven\",\"reserve\":1,\"consume\":0}],\"effects\":{\"fatigue\":10}${if kinds then ",\"yields\":[{\"resource\":\"water\",\"amount\":2}]" else ""}}]}],\"rest\":{\"purpose\":\"Recover.\",\"duration\":1,\"effects\":{\"fatigue\":-10}},\"overextended\":{\"indicator\":\"stress\",\"threshold\":70,\"recovery\":40,\"duration\":2,\"cooldown\":3},\"trust_in_captain\":50,\"resources\":[{\"id\":\"flour\",\"name\":\"Flour\",\"initial\":2},{\"id\":\"oven\",\"name\":\"Oven\",\"initial\":1${if kinds then ",\"kind\":\"capacity\"" else ""}},{\"id\":\"water\",\"name\":\"Water\",\"initial\":1}]${events}}"
+
+pure func evs() -> string = ",\"events\":[{\"id\":\"leak\",\"at\":1,\"text\":\"A seal fails; water drains to the sump.\",\"transfers\":[{\"resource\":\"water\",\"delta\":-3}]},{\"id\":\"delivery\",\"at\":3,\"text\":\"The mill sends flour.\",\"transfers\":[{\"resource\":\"flour\",\"delta\":1}],\"major\":\"loss\"}]"
+
+pure func err(b: string) -> string = match decodeScenario(b) { Err(e) => e, Ok(_) => "" }
+
+test "kinds, yields and events decode; absent fields mean stock, none, none" {
+ match (decodeScenario(ship(evs(), true)), decodeScenario(ship("", false))) {
+  (Ok(s), Ok(old)) => resourceKind(s, "oven") == "capacity" && resourceKind(s, "flour") == "stock" && length(yieldsOf(s, "work_cook")) == 1 && map(\e. e.id, s.events) == ["leak", "delivery"] && resourceKind(old, "oven") == "stock" && length(old.events) == 0 && length(old.yields) == 0,
+  _ => false
+ }
+}
+
+test "invalid flows are rejected with the field named" {
+ contains(err(replace(ship("", true), "{\"resource\":\"oven\",\"reserve\":1,\"consume\":0}", "{\"resource\":\"oven\",\"reserve\":1,\"consume\":1}")), "capacity")
+ && contains(err(replace(ship("", true), "\"kind\":\"capacity\"", "\"kind\":\"gas\"")), "kind")
+ && contains(err(ship(replace(evs(), "\"delta\":-3", "\"delta\":0"), true)), "delta")
+ && contains(err(ship(replace(evs(), "\"resource\":\"water\",\"delta\"", "\"resource\":\"air\",\"delta\""), true)), "unknown resource")
+ && contains(err(ship(replace(evs(), "\"major\":\"loss\"", "\"major\":\"joy\""), true)), "major")
+ && contains(err(ship(replace(evs(), "\"at\":1", "\"at\":0"), true)), "at")
+ && contains(err(ship(replace(evs(), "\"id\":\"delivery\"", "\"id\":\"leak\""), true)), "unique")
+ && contains(err(replace(ship("", true), "{\"resource\":\"water\",\"amount\":2}", "{\"resource\":\"steam\",\"amount\":2}")), "unknown resource")
+}
+
+pure func adv(s: Session, t: int) -> Result[Output, HostError] = input(s, "{\"command\":\"advance\",\"tick\":${show(t)},\"budget\":64}")
+
+pure func res(s: Session, id: string) -> Resource = match head(filter(\r. r.id == id, s.state.resources)) {
+ Some(r) => r, None => {id: id, initial: 0 - 1, available: 0, reserved: 0, consumed: 0, transferredIn: 0, transferredOut: 0}
+}
+
+pure func baking() -> Result[Session, HostError] = match decodeScenario(ship(evs(), true)) {
+ Err(e) => Err(HostFailure(e)),
+ Ok(sc) => match start(sc, "{\"command\":\"start\",\"policy\":\"orders\",\"scenario\":\"watch-v2\"}") {
+  Err(e) => Err(e),
+  Ok(o) => match offer(o.session, "cook", "work_cook", "bake") {
+   Err(e) => Err(e),
+   Ok(p) => match startTask(p.session, "bake") { Err(e) => Err(e), Ok(q) => Ok(q.session) }
+  }
+ }
+}
+
+pure func at(t: int) -> Result[Session, HostError] = match baking() {
+ Err(e) => Err(e),
+ Ok(s) => match adv(s, 1) {
+  Err(e) => Err(e),
+  Ok(a) => if t == 1 then Ok(a.session) else match adv(a.session, 2) {
+   Err(e) => Err(e),
+   Ok(b) => if t == 2 then Ok(b.session) else match adv(b.session, 3) { Err(e) => Err(e), Ok(c) => Ok(c.session) }
+  }
+ }
+}
+
+pure func heard(s: Session, evidence: string) -> bool = any(\e. e.id == evidence, s.state.evidence) && any(\k. k.observer == "cook" && k.evidence == evidence, s.state.knowledge)
+
+test "a due event drains only what is available and the crew hear it" {
+ match at(1) {
+  Err(_) => false,
+  Ok(s) => res(s, "water").available == 0 && res(s, "water").transferredOut == 1 && heard(s, "ev-leak") && not heard(s, "ev-delivery") && res(s, "oven").reserved == 1
+ }
+}
+
+test "completed work yields, and later events fire once, in order" {
+ match (at(2), at(3)) {
+  (Ok(two), Ok(three)) => res(two, "water").available == 2 && res(two, "water").transferredIn == 2 && heard(two, "yd-bake") && res(two, "oven").reserved == 0
+   && res(three, "flour").available == 2 && res(three, "flour").transferredIn == 1 && heard(three, "ev-delivery")
+   && length(filter(\e. e.id == "ev-leak" || e.id == "yd-bake", three.state.evidence)) == 2
+   && not any(\r. not balanced(r), three.state.resources),
+  _ => false
+ }
+}
+
+test "advancing to the same tick again fires nothing new" {
+ match at(3) {
+  Err(_) => false,
+  Ok(s) => match adv(s, 3) { Err(_) => false, Ok(again) => again.session.state.evidence == s.state.evidence && again.session.state.resources == s.state.resources }
+ }
+}
+
+test "a major ship event reaches crew personalities in watch-v3" {
+ match decodeScenario(ship(evs(), true)) {
+  Err(_) => false,
+  Ok(sc) => match start(sc, "{\"command\":\"start\",\"policy\":\"orders\",\"scenario\":\"watch-v3\"}") {
+   Err(_) => false,
+   Ok(o) => match adv(o.session, 3) {
+    Err(_) => false,
+    Ok(a) => heard(a.session, "ev-delivery") && any(\p. any(\h. match h { MajorReceived(m) => m.receipt.evidence == "ev-delivery", _ => false }, p.history), a.session.personalities)
+   }
+  }
+ }
+}
+
+pure func longId() -> string = "t-01234567890123456789012345678901234567890123456789012345678901"
+
+pure func bakedAs(id: string) -> Result[Session, HostError] = match decodeScenario(ship(evs(), true)) {
+ Err(e) => Err(HostFailure(e)),
+ Ok(sc) => match start(sc, "{\"command\":\"start\",\"policy\":\"orders\",\"scenario\":\"watch-v2\"}") {
+  Err(e) => Err(e),
+  Ok(o) => match offer(o.session, "cook", "work_cook", id) {
+   Err(e) => Err(e),
+   Ok(p) => match startTask(p.session, id) { Err(e) => Err(e), Ok(q) => match adv(q.session, 2) { Err(e) => Err(e), Ok(a) => Ok(a.session) } }
+  }
+ }
+}
+
+test "ids reserved for ship flows are refused from callers" {
+ match (bakedAs("ev-fake"), bakedAs("yd-x"), bakedAs("hear-x"), bakedAs("ship-x")) { (Err(_), Err(_), Err(_), Err(_)) => true, _ => false }
+}
+
+test "a 64-character task id still yields: flow ids stay inside validId" {
+ match bakedAs(longId()) { Err(_) => false, Ok(s) => stringLength(longId()) == 64 && heard(s, "yd-${longId()}") && res(s, "water").transferredIn == 2 }
+}
+
+-- The captain authors flow evidence, so knows it too.
+test "yields are heard by the task's participants only; events by the whole crew" {
+ match bakedAs("bake") {
+  Err(_) => false,
+  Ok(s) => map(\k. k.observer, filter(\k. k.evidence == "yd-bake", s.state.knowledge)) == ["captain", "cook"] && length(filter(\k. k.evidence == "ev-leak", s.state.knowledge)) == length(s.scenario.workers) + 1
+ }
+}

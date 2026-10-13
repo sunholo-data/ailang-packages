@@ -58,6 +58,11 @@
        "resource": "signal",
        "reserve": 1,
        "consume": 0
+      },
+      {
+       "resource": "power",
+       "reserve": 1,
+       "consume": 0
       }
      ],
      "effects": {
@@ -147,6 +152,11 @@
       },
       {
        "resource": "signal",
+       "reserve": 1,
+       "consume": 0
+      },
+      {
+       "resource": "power",
        "reserve": 1,
        "consume": 0
       }
@@ -255,17 +265,39 @@
   {
    "id": "mass",
    "name": "Free mass (10 kg blocks)",
-   "initial": 3
+   "initial": 3,
+   "kind": "stock"
+  },
+  {
+   "id": "power",
+   "name": "Power headroom (50 kW)",
+   "initial": 3,
+   "kind": "capacity"
   },
   {
    "id": "compute",
    "name": "Archive compute slots",
-   "initial": 2
+   "initial": 2,
+   "kind": "capacity"
   },
   {
    "id": "signal",
    "name": "Antenna windows",
-   "initial": 2
+   "initial": 3,
+   "kind": "capacity"
+  }
+ ],
+ "events": [
+  {
+   "id": "earth_recedes",
+   "at": 3,
+   "text": "Departure: as the ship pulls away, Earth's link narrows to one antenna window.",
+   "transfers": [
+    {
+     "resource": "signal",
+     "delta": -2
+    }
+   ]
   }
  ]
 }

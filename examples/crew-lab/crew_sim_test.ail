@@ -1,5 +1,8 @@
 module sunholo/crew_lab/crew_sim_test
 import std/result (Result, Ok, Err)
+import std/option (Some, None)
+import std/json (Json, decode, get, getInt)
+import pkg/sunholo/crew_core/scenario (decodeScenario)
 import pkg/sunholo/crew_core/example (firstContact)
 import pkg/sunholo/crew_core/policy (decodePolicy, watchPolicyBody)
 import ./crew_sim (play, report)
@@ -19,3 +22,32 @@ test "unknown captain and turn bounds are refused" {
 test "same seed and inputs give the same report" { run("random", 7, 6) == run("random", 7, 6) }
 
 test "different seeds can differ" { run("random", 7, 6) != run("random", 8, 6) }
+
+-- A bakery that leaks (crew_core flows): flour is a stock, the oven a
+-- capacity; baking returns water; a leak drains it at turn 1.
+pure func bakery() -> string =
+ "{\"schema\":\"crew_scenario/1\",\"id\":\"bakery\",\"indicators\":[\"fatigue\",\"stress\",\"trust\"],\"indicator_defaults\":{\"fatigue\":0,\"stress\":10},\"captain\":{\"id\":\"captain\",\"values\":{\"mission\":80},\"start\":{}},\"crew\":[{\"id\":\"cook\",\"role\":\"Cook\",\"ocean\":{\"openness\":50,\"conscientiousness\":50,\"extraversion\":50,\"agreeableness\":50,\"neuroticism\":50},\"values\":{\"care\":60},\"start\":{},\"work\":[{\"id\":\"work_cook\",\"name\":\"Bake\",\"purpose\":\"Feed everyone.\",\"duration\":2,\"costs\":[{\"resource\":\"flour\",\"reserve\":1,\"consume\":1},{\"resource\":\"oven\",\"reserve\":1,\"consume\":0}],\"effects\":{\"fatigue\":10},\"yields\":[{\"resource\":\"water\",\"amount\":2}]}]}],\"rest\":{\"purpose\":\"Recover.\",\"duration\":1,\"effects\":{\"fatigue\":-10}},\"overextended\":{\"indicator\":\"stress\",\"threshold\":70,\"recovery\":40,\"duration\":2,\"cooldown\":3},\"trust_in_captain\":50,\"resources\":[{\"id\":\"flour\",\"name\":\"Flour\",\"initial\":2},{\"id\":\"oven\",\"name\":\"Oven\",\"initial\":1,\"kind\":\"capacity\"},{\"id\":\"water\",\"name\":\"Water\",\"initial\":1}],\"events\":[{\"id\":\"leak\",\"at\":1,\"text\":\"A seal fails.\",\"transfers\":[{\"resource\":\"water\",\"delta\":-3}]}]}"
+
+pure func bakeryRow(turns: int) -> string = match (decodeScenario(bakery()), decodePolicy(watchPolicyBody())) {
+ (Ok(sc), Ok(p)) => match play(sc, p, "orders", 1, turns) { Ok(sim) => report(sim, 1, turns, "s", "p"), Err(e) => "error: ${e}" },
+ (Err(e), _) => "error: ${e}",
+ _ => "error: fixture"
+}
+
+pure func num(row: string, path: [string]) -> int = match decode(row) {
+ Ok(j) => walkInt(j, path),
+ Err(_) => 0 - 999
+}
+
+pure func walkInt(j: Json, path: [string]) -> int = match path {
+ [k] => match getInt(j, k) { Some(n) => n, None => 0 - 999 },
+ k :: rest => match get(j, k) { Some(v) => walkInt(v, rest), None => 0 - 999 },
+ [] => 0 - 999
+}
+
+test "crew_sim/1 reports each resource's low point, empty turns, stockouts and flows" {
+ let row = bakeryRow(8);
+ num(row, ["resources", "water", "out"]) == 1 && num(row, ["resources", "water", "min"]) == 0 && num(row, ["resources", "water", "zero_ticks"]) >= 1
+ && num(row, ["resources", "water", "in"]) >= 2 && num(row, ["resources", "flour", "min"]) == 0 && num(row, ["resources", "flour", "stockouts"]) >= 1
+ && num(row, ["resources", "oven", "out"]) == 0
+}

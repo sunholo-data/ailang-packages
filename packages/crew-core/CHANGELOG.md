@@ -30,3 +30,18 @@ The public API is pure and deterministic. Known limits: the captain's id must be
 `captain`; finished tasks are never archived, so runs slow down as they grow (one
 seed: 12 turns about 1 s, 60 about 8 s, 120 about 40 s); conversation prompts are
 still keyed by role in code.
+
+Also in this first release:
+
+- **Resource flows (S-CREW-BUBBLE-RESOURCES).** Optional fields in
+  `crew_scenario/1`, so existing scenarios decode and replay unchanged:
+  - resource `kind` (stock or capacity; a capacity is never consumed);
+  - work `yields`;
+  - top-level ship `events`, which move units at a tick and are heard by the
+    whole crew.
+- `scenario`: `Transfer`, `ShipEvent`, `Yield`, `resourceKind` and `yieldsOf`.
+- `session`: applies due yields, then due events, after each completed advance.
+- New module `flows`: balanced transfers (`transfer`, `transferAll`,
+  `appliedDelta`, `balanced`). An outward transfer never takes reserved units.
+  `social_dynamics` is unchanged; transfers use its existing
+  `transferredIn` and `transferredOut` books.

@@ -58,6 +58,16 @@
        "resource": "compute",
        "reserve": 2,
        "consume": 0
+      },
+      {
+       "resource": "power",
+       "reserve": 1,
+       "consume": 0
+      },
+      {
+       "resource": "heat",
+       "reserve": 1,
+       "consume": 0
       }
      ],
      "effects": {
@@ -217,6 +227,16 @@
        "resource": "mass",
        "reserve": 2,
        "consume": 2
+      },
+      {
+       "resource": "power",
+       "reserve": 1,
+       "consume": 0
+      },
+      {
+       "resource": "heat",
+       "reserve": 1,
+       "consume": 0
       }
      ],
      "effects": {
@@ -249,12 +269,50 @@
   {
    "id": "mass",
    "name": "Free mass (10 kg blocks)",
-   "initial": 5
+   "initial": 5,
+   "kind": "stock"
+  },
+  {
+   "id": "power",
+   "name": "Power headroom (50 kW)",
+   "initial": 3,
+   "kind": "capacity"
+  },
+  {
+   "id": "heat",
+   "name": "Heat-rejection headroom (50 kW)",
+   "initial": 3,
+   "kind": "capacity"
   },
   {
    "id": "compute",
    "name": "Archive compute slots",
-   "initial": 3
+   "initial": 3,
+   "kind": "capacity"
+  }
+ ],
+ "events": [
+  {
+   "id": "forward_sky",
+   "at": 4,
+   "text": "On the approach the blueshifted forward sky loads the dome radiators; heat headroom falls.",
+   "transfers": [
+    {
+     "resource": "heat",
+     "delta": -2
+    }
+   ]
+  },
+  {
+   "id": "past_periapsis",
+   "at": 8,
+   "text": "Past periapsis the forward load eases and the radiators recover.",
+   "transfers": [
+    {
+     "resource": "heat",
+     "delta": 2
+    }
+   ]
   }
  ]
 }

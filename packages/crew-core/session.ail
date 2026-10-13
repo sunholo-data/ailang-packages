@@ -2,15 +2,16 @@ module sunholo/crew_core/session
 import std/result (Result, Ok, Err)
 import std/option (Option, Some, None)
 import std/list (length, map, filter, head, any)
-import std/string (join, length as stringLength)
+import std/string (join, startsWith, length as stringLength)
 import std/json (Json, encode, getString, getBool, js, jint, jnum, jo, kv, ja, asObject)
-import pkg/sunholo/social_dynamics/model (Config, State, Error, InvalidSchema, Step, Event, Operation, Source, Authored, ActorInput, ActorPrincipal, Host, OfferTask, OfferCommitment, AcceptCommitment, AcceptTask, RaiseConcern, RequestRelief, ResolveRelief, Offered, Working, Appraisal, validId, sorted, numericLimit, Applied, Done, Pending, Blocked)
+import pkg/sunholo/social_dynamics/model (Config, State, Error, InvalidSchema, Step, Event, Operation, Source, Authored, ActorInput, ActorPrincipal, Host, OfferTask, OfferCommitment, AcceptCommitment, AcceptTask, RaiseConcern, RequestRelief, ResolveRelief, Offered, Working, Completed, Task, Appraisal, validId, sorted, numericLimit, Applied, Done, Pending, Blocked)
 import pkg/sunholo/social_dynamics/engine (init, advance, continueAdvance, abortAdvance)
 import pkg/sunholo/social_dynamics/proposals (apply)
 import pkg/sunholo/social_dynamics/tasks (findTask)
 import pkg/sunholo/social_dynamics/relationships (appraisalContext, deliver)
 import pkg/sunholo/social_dynamics/wire (encodeState, encodeEvents, encodeError, encodeConfig)
-import ./scenario (Scenario, config as scenarioConfig, workerRecipe, projectName, resourceName, purpose)
+import ./scenario (Scenario, ShipEvent, Transfer, config as scenarioConfig, workerRecipe, projectName, resourceName, purpose, yieldsOf)
+import ./flows (Applied, transferAll)
 import ./host_policy (policies)
 import ./example (firstContact)
 import ./codec (object, fields, text, integer, number, CrewOutcome, AgreedStart, RefusedOrder, GrantedRelief, DeniedRelief, encodeOutcome)
@@ -60,7 +61,10 @@ pure func output(s: Session, events: [Event]) -> Output =
 export pure func untraced(s: Session) -> Session
 ensures { not result.traced && result.state == s.state } = {s | traced: false}
 
-pure func checkedId(id: string) -> bool = validId(id) && stringLength(id) <= 64
+-- Ids the host makes for ship flows ("ev-", "yd-" evidence, "hear-" and
+-- "ship-" deliveries and operations) are reserved, so no caller id collides.
+pure func reservedId(id: string) -> bool = any(\p. startsWith(id, p), ["ev-", "yd-", "hear-", "ship-"])
+pure func checkedId(id: string) -> bool = validId(id) && stringLength(id) <= 64 && not reservedId(id)
 
 pure func owned(s: Session, worker: string, recipe: string) -> bool = workerRecipe(s.scenario, worker, recipe)
 pure func identity(s: Session) -> bool = match scenarioConfig(s.scenario, s.policy) {
@@ -376,13 +380,89 @@ ensures {match result {Err(_)=>true,Ok(o)=>o.session.state.tick==s.state.tick &&
   }
  }
 
+-- ------------------------------------------------------------ ship flows
+-- After an advance completes (Done; a Pending advance waits for its Done), the
+-- host returns what finished work yields and then fires the ship events now
+-- due: all yields first (tasks in state order), then events (scenario order),
+-- not interleaved by tick. Yields are heard by the task's participants; events
+-- by the whole crew. Knowledge cost is bounded: at most 32 events x 15 crew
+-- (480 rows) plus one row per completed task with yields (tasks <= 256), well
+-- inside the 8,192 knowledge limit. Each flow moves resources (flows.transferAll) and is
+-- raised as captain evidence heard by the whole crew; its evidence id ("yd-"
+-- task, "ev-" event) marks it done, so a flow never fires twice. Scenarios
+-- without yields or events are untouched.
+
+type Flowed = {session: Session, events: [Event]}
+
+pure func seen(s: Session, id: string) -> bool = any(\e. e.id == id, s.state.evidence)
+
+pure func appliedJson(a: Applied) -> Json = jo([kv("resource", js(a.resource)), kv("requested", jint(a.requested)), kv("applied", jint(a.applied))])
+
+-- Delivery ids use the observer's position, not their id, so they stay short:
+-- "hear-" + evidence (at most "yd-" + a 64-character task id) + "-" + index
+-- is at most 76 characters, inside validId's 96.
+pure func hearAll(s: Session, observers: [string], at: int, evidence: string, events: [Event]) -> Result[Flowed, HostError] = match observers {
+ [] => Ok({session: s, events: events}),
+ who :: rest => match deliver(s.config, policies(), s.state, Host, {id: "hear-${evidence}-${show(at)}", observer: who, evidence: evidence, causes: [evidence], notBefore: s.state.tick, source: "ship-event-v1"}) {
+  Err(e) => Err(DomainFailure(e)),
+  Ok(step) => hearAll({s | state: step.state}, rest, at + 1, evidence, events ++ step.events)
+ }
+}
+
+pure func flow(s: Session, id: string, observers: [string], header: [{key: string, value: Json}], transfers: [Transfer], major: string, events: [Event]) -> Result[Flowed, HostError] = {
+ let moved = transferAll(s.state.resources, map(\t. {resource: t.resource, delta: t.delta}, transfers));
+ let body = encode(jo(header ++ [kv("transfers", ja(map(appliedJson, moved.applied)))]));
+ match domain({s | state: {s.state | resources: moved.resources}}, "ship-${id}", "captain", Authored, [RaiseConcern(id, [], observers, body)]) {
+  Err(e) => Err(e),
+  Ok(created) => match hearAll({s | state: created.state}, observers, 0, id, events ++ created.events) {
+   Err(e) => Err(e),
+   Ok(heard) => if major == "" || not isConversation(heard.session) then Ok(heard) else match majorKind(major) {
+    None => Ok(heard),
+    Some(kind) => match receiveMajor(heard.session.personalities, heard.session.state, id, kind, "ship-event-v1") {
+     Err(e) => Err(HostFailure("ship event receipt: ${e}")),
+     Ok(ps) => Ok({session: {heard.session | personalities: ps}, events: heard.events})
+    }
+   }
+  }
+ }
+}
+
+pure func yieldFlows(s: Session, tasks: [Task], events: [Event]) -> Result[Flowed, HostError] = match tasks {
+ [] => Ok({session: s, events: events}),
+ t :: rest => match flow(s, "yd-${t.id}", t.participants, [kv("schema", js("crew_yield/1")), kv("task", js(t.id)), kv("recipe", js(t.recipe))], map(\y. {resource: y.resource, delta: y.amount}, yieldsOf(s.scenario, t.recipe)), "", events) {
+  Err(e) => Err(e),
+  Ok(f) => yieldFlows(f.session, rest, f.events)
+ }
+}
+
+pure func eventFlows(s: Session, due: [ShipEvent], events: [Event]) -> Result[Flowed, HostError] = match due {
+ [] => Ok({session: s, events: events}),
+ e :: rest => match flow(s, "ev-${e.id}", s.scenario.workers, [kv("schema", js("crew_ship_event/1")), kv("event", js(e.id)), kv("at", jint(e.at)), kv("text", js(e.text))], e.transfers, e.major, events) {
+  Err(err) => Err(err),
+  Ok(f) => eventFlows(f.session, rest, f.events)
+ }
+}
+
+pure func flowsDue(o: Output, events: [Event]) -> Result[Output, HostError] = {
+ let s = o.session;
+ let finished = filter(\t. t.status == Completed && length(yieldsOf(s.scenario, t.recipe)) > 0 && not seen(s, "yd-${t.id}"), s.state.tasks);
+ let due = filter(\e. e.at <= s.state.tick && not seen(s, "ev-${e.id}"), s.scenario.events);
+ if length(finished) == 0 && length(due) == 0 then Ok(o) else match yieldFlows(s, finished, events) {
+  Err(e) => Err(e),
+  Ok(y) => match eventFlows(y.session, due, y.events) {
+   Err(e) => Err(e),
+   Ok(f) => Ok(output(f.session, f.events))
+  }
+ }
+}
+
 pure func advanced(s: Session, tick: int, budget: int) -> Result[Output, HostError] = {
   let result = match s.state.continuation {
     None => advance(s.config, policies(), s.state, tick, budget),
     Some(token) => if token.target != tick then Blocked(s.state, [], "target", s.state.tick, InvalidSchema("pending target mismatch")) else continueAdvance(s.config, policies(), s.state, token, budget)
   }
   match result {
-    Done(state, events) => advanceOutput(s,state,events),
+    Done(state, events) => match advanceOutput(s,state,events) { Err(e) => Err(e), Ok(o) => flowsDue(o, events) },
     Pending(state, events, _) => advanceOutput(s,state,events),
     Blocked(state, events, id, due, e) => {
       match advanceOutput(s,state,events) {
@@ -443,7 +523,7 @@ pure func dispatch(s: Session, j: Json) -> Result[Output, HostError] = match get
     _ => Err(HostFailure("resolve types"))
   },
   Some("deliver") => if not fields(j, ["command", "observer", "evidence", "id"]) then Err(HostFailure("delivery fields")) else match (getString(j, "observer"), getString(j, "evidence"), getString(j, "id")) {
-    (Some(observer), Some(evidence), Some(id)) => delivered(s, observer, evidence, id),
+    (Some(observer), Some(evidence), Some(id)) => if reservedId(id) then Err(HostFailure("delivery id is reserved for ship flows")) else delivered(s, observer, evidence, id),
     _ => Err(HostFailure("delivery types"))
   },
   Some("advance") => if not fields(j, ["command", "tick", "budget"]) then Err(HostFailure("advance fields")) else match (integer(j, "tick"), integer(j, "budget")) {

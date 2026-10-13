@@ -1,0 +1,60 @@
+module sunholo/crew_core/flows
+import std/list (map, filter, length, any, foldl)
+import pkg/sunholo/social_dynamics/model (Resource)
+
+-- Host transfers on resource accounts. social_dynamics keeps every account
+-- balanced: available + reserved + consumed == initial + transferredIn -
+-- transferredOut. A transfer in adds available units; a transfer out takes
+-- only available units, never reserved ones, and reports what it applied.
+export type Applied = {resource: string, requested: int, applied: int} deriving (Eq)
+
+export pure func balanced(r: Resource) -> bool ! {}
+ensures { not result || (r.available >= 0 && r.reserved >= 0) } =
+ r.available >= 0 && r.reserved >= 0 && r.consumed >= 0 && r.transferredIn >= 0 && r.transferredOut >= 0 &&
+ r.available + r.reserved + r.consumed == r.initial + r.transferredIn - r.transferredOut
+
+pure func moved(r: Resource, delta: int) -> Resource =
+ if delta >= 0 then {r | available: r.available + delta, transferredIn: r.transferredIn + delta}
+ else {
+  let take = if 0 - delta > r.available then r.available else 0 - delta;
+  {r | available: r.available - take, transferredOut: r.transferredOut + take}
+ }
+
+-- The units actually moved: delta in full when positive, at most what is
+-- available when negative, 0 for an unknown resource.
+export pure func appliedDelta(rs: [Resource], resource: string, delta: int) -> int ! {}
+ensures { (delta >= 0 && result >= 0 && result <= delta) || (delta < 0 && result <= 0 && result >= delta) } =
+ match filter(\r. r.id == resource, rs) {
+  [r, ..._] => if delta >= 0 then delta else if 0 - delta > r.available then 0 - r.available else delta,
+  [] => 0
+ }
+
+export pure func transfer(rs: [Resource], resource: string, delta: int) -> [Resource] ! {}
+requires { not any(\r. not balanced(r), rs) }
+ensures { length(result) == length(rs) && not any(\r. not balanced(r), result) } =
+ map(\r. if r.id == resource then moved(r, delta) else r, rs)
+
+-- Apply transfers in order; each reports requested and applied units.
+export pure func transferAll(rs: [Resource], ts: [{resource: string, delta: int}]) -> {resources: [Resource], applied: [Applied]} ! {}
+ensures { length(result.applied) == length(ts) && length(result.resources) == length(rs) } =
+ foldl(\acc t. {resources: transfer(acc.resources, t.resource, t.delta), applied: acc.applied ++ [{resource: t.resource, requested: t.delta, applied: appliedDelta(acc.resources, t.resource, t.delta)}]}, {resources: rs, applied: []}, ts)
+
+pure func ap(r: string, q: int, a: int) -> Applied = {resource: r, requested: q, applied: a}
+pure func water() -> Resource = {id: "water", initial: 4, available: 4, reserved: 0, consumed: 0, transferredIn: 0, transferredOut: 0}
+pure func held() -> Resource = {id: "water", initial: 4, available: 1, reserved: 2, consumed: 1, transferredIn: 0, transferredOut: 0}
+
+test "a transfer in adds available units and books them as transferred in" {
+ transfer([water()], "water", 3) == [{water() | available: 7, transferredIn: 3}]
+}
+test "a transfer out takes only available units, never reserved ones" {
+ let after = transferAll([held()], [{resource: "water", delta: 0 - 3}]);
+ after.resources == [{held() | available: 0, transferredOut: 1}] && after.applied == [ap("water", 0 - 3, 0 - 1)]
+}
+test "accounts stay balanced through a sequence of flows" {
+ let after = transferAll([water()], [{resource: "water", delta: 0 - 2}, {resource: "water", delta: 5}, {resource: "water", delta: 0 - 10}]);
+ not any(\r. not balanced(r), after.resources) && map(\a. a.applied, after.applied) == [0 - 2, 5, 0 - 7]
+}
+test "an unknown resource moves nothing" {
+ let after = transferAll([water()], [{resource: "air", delta: 2}]);
+ after.resources == [water()] && after.applied == [ap("air", 2, 0)]
+}

@@ -28,6 +28,27 @@ effects {indicator: change}}]}]`, `rest {purpose, duration, effects}`,
 rejected. Traits and indicators are 0..100; effects -100..100. Each crew
 member gets a `rest_<id>` recipe; work ids must not collide with it.
 
+Optional flows (absent fields keep the old behaviour, byte for byte):
+- **Resource `kind`:** `"stock"` (the default) or `"capacity"`. Work may
+  reserve a capacity but never consume it.
+- **Work `yields`:** `[{resource, amount}]`, up to 4. Transferred in when the
+  work completes; stopped work yields nothing.
+- **Top-level `events`:** up to 32 of `{id, at, text, transfers [{resource,
+  delta}], major?}`.
+  - After an advance reaches tick `at`, the host moves the units.
+  - A negative delta takes only available units, never reserved ones, and the
+    body records requested and applied units.
+  - Each event is raised as captain evidence `ev-<id>` and heard by every crew
+    member. `major` (loss, deep_time, first_contact, betrayal) also reaches
+    personalities in watch-v3.
+  - Yields are raised as `yd-<task>` and heard by the task's participants.
+  - Ordering: after a completed advance, all due yields fire first (tasks in
+    state order), then due events (scenario order).
+  - Caller ids may not start with `ev-`, `yd-`, `hear-` or `ship-`; those
+    prefixes are reserved for flows.
+  - Each flow fires once. Accounts stay balanced (`flows.balanced`):
+    available + reserved + consumed == initial + transferredIn − transferredOut.
+
 ## Driving a session
 
 ```ailang

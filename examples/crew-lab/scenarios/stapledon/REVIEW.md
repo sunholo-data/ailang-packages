@@ -36,6 +36,42 @@ up garden beds. The scenarios do not yet use `water`, `power` or `heat`; the
 next pass should, with the reclaimer failure draining `water` and the gardens
 competing for `power`.
 
+## Update 2026-10-13 (later): resources that flow
+
+The crew host can now move resources, not just spend them (S-CREW-BUBBLE-RESOURCES):
+- **ship events** move units in or out at a tick, and every crew member hears about them;
+- **completed work yields** units back;
+- **capacities are reserved, never consumed**;
+- `crew-sim` reports each resource's low point, turns spent at zero, stockouts, and units in and out.
+
+Four scenarios now tell physical stories:
+
+| Scenario | Flows |
+|---|---|
+| `processing-cascade` | Failures at turns 2, 4 and 6 move 4 t of water into brine. The rebuild uses 20 kg of mass and returns 3 t; water-light crops return 1 t. Power headroom (2 units) is shared by the rebuild, the inspection and the crops. |
+| `ergosphere-question` | On the approach (turn 4) the forward sky takes 2 of 3 units of heat headroom, and returns them past periapsis (turn 8). Bracing and modelling need power and heat. |
+| `last-messages-home` | At departure (turn 3) Earth's link narrows by two antenna windows. Recording and compressing need a window and power. |
+| `light-from-the-dead` | A second burst at turn 6 opens another antenna window. Decoding, translating and drafting need power. |
+
+Claims, written before running, over 20 seeds: **41 of 46 hold.** Three are the
+earlier findings (the stress ceiling twice, and the diplomat's trust, now 54).
+Three are new findings:
+
+1. **A capacity loss never touches work in progress.** The approach always
+   takes the heat headroom to 0 (in all 20 runs), but nothing is refused for
+   heat (median 0). Bracing and modelling already hold their reservation, and
+   their next jobs start after periapsis. Physically, losing radiator capacity
+   should throttle running work too. Should a capacity drop be able to pause
+   or stop tasks that hold it? That is a host rule to decide, not a tuning knob.
+2. **A prompt crew keeps the loop above half.** All 4 t leave in every run,
+   but the lowest point is 2 t in only 2 runs, 3 t in 8 and 4 t in 10: the
+   rebuild and the crops return water between failures. The claim expected
+   at most 2 t in every run.
+3. **Compute in `light-from-the-dead` saturates but is never contested.** It
+   reaches 0 in every run, but decoding (2) and translating (1) exactly fill 3
+   slots. The claim's own arithmetic was wrong. A fourth slot user would make it
+   contested.
+
 ## Scenarios
 
 ### Last messages home (`last-messages-home`)
