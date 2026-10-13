@@ -1,56 +1,74 @@
 {
- "schema": "crew_claims/1",
- "claims": [
-  {
-   "id": "consent-runs-clean",
-   "captain": "consent",
-   "metric": "errors",
-   "stat": "max",
-   "op": "==",
-   "value": 0
-  },
-  {
-   "id": "orders-runs-clean",
-   "captain": "orders",
-   "metric": "errors",
-   "stat": "max",
-   "op": "==",
-   "value": 0
-  },
-  {
-   "id": "relay-windows-run-short",
-   "captain": "consent",
-   "metric": "stockouts",
-   "stat": "median",
-   "op": ">=",
-   "value": 2,
-   "note": "two relay windows cannot carry every last message at once"
-  },
-  {
-   "id": "farewell-lifts-morale",
-   "captain": "consent",
-   "metric": "crew.counselor.morale",
-   "stat": "median",
-   "op": ">=",
-   "value": 65,
-   "note": "the shared farewell keeps the counselor going"
-  },
-  {
-   "id": "orders-cost-medic-trust",
-   "captain": "orders",
-   "metric": "crew.medic.trust",
-   "stat": "median",
-   "op": "<",
-   "value": 50,
-   "note": "an agreeable, anxious medic resents being ordered during goodbyes"
-  },
-  {
-   "id": "consent-keeps-medic-trust",
-   "captain": "consent",
-   "metric": "crew.medic.trust",
-   "stat": "median",
-   "op": ">=",
-   "value": 50
-  }
- ]
+  "schema": "crew_claims/1",
+  "claims": [
+    {
+      "id": "consent-runs-clean",
+      "captain": "consent",
+      "metric": "errors",
+      "stat": "max",
+      "op": "==",
+      "value": 0
+    },
+    {
+      "id": "orders-runs-clean",
+      "captain": "orders",
+      "metric": "errors",
+      "stat": "max",
+      "op": "==",
+      "value": 0
+    },
+    {
+      "id": "relay-windows-run-short",
+      "captain": "consent",
+      "metric": "stockouts",
+      "stat": "median",
+      "op": ">=",
+      "value": 2,
+      "note": "two relay windows cannot carry every last message at once"
+    },
+    {
+      "id": "farewell-lifts-morale",
+      "captain": "consent",
+      "metric": "crew.counselor.morale",
+      "stat": "median",
+      "op": ">=",
+      "value": 65,
+      "note": "the shared farewell keeps the counselor going"
+    },
+    {
+      "id": "orders-cost-medic-trust",
+      "captain": "orders",
+      "metric": "crew.medic.trust",
+      "stat": "median",
+      "op": "<",
+      "value": 50,
+      "note": "an agreeable, anxious medic resents being ordered during goodbyes"
+    },
+    {
+      "id": "consent-keeps-medic-trust",
+      "captain": "consent",
+      "metric": "crew.medic.trust",
+      "stat": "median",
+      "op": ">=",
+      "value": 50
+    },
+    {
+      "id": "earth-link-narrows",
+      "captain": "consent",
+      "metric": "resources.signal.out",
+      "stat": "min",
+      "op": ">=",
+      "value": 1,
+      "note": "departure always costs at least one window"
+    },
+    {
+      "id": "messages-compete-for-the-window",
+      "captain": "consent",
+      "metric": "resources.signal.stockouts",
+      "stat": "median",
+      "op": ">=",
+      "value": 1,
+      "note": "recording and compressing both need the last window"
+    }
+  ]
 }

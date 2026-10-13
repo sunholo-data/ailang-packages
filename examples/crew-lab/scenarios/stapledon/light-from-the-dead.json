@@ -64,6 +64,11 @@
        "resource": "signal",
        "reserve": 1,
        "consume": 0
+      },
+      {
+       "resource": "power",
+       "reserve": 1,
+       "consume": 0
       }
      ],
      "effects": {
@@ -102,6 +107,11 @@
      "costs": [
       {
        "resource": "compute",
+       "reserve": 1,
+       "consume": 0
+      },
+      {
+       "resource": "power",
        "reserve": 1,
        "consume": 0
       }
@@ -184,6 +194,11 @@
        "resource": "signal",
        "reserve": 1,
        "consume": 0
+      },
+      {
+       "resource": "power",
+       "reserve": 1,
+       "consume": 0
       }
      ],
      "effects": {
@@ -248,14 +263,35 @@
  "trust_in_captain": 55,
  "resources": [
   {
+   "id": "power",
+   "name": "Power headroom (50 kW)",
+   "initial": 3,
+   "kind": "capacity"
+  },
+  {
    "id": "compute",
    "name": "Archive compute slots",
-   "initial": 3
+   "initial": 3,
+   "kind": "capacity"
   },
   {
    "id": "signal",
    "name": "Antenna windows",
-   "initial": 2
+   "initial": 2,
+   "kind": "capacity"
+  }
+ ],
+ "events": [
+  {
+   "id": "second_burst",
+   "at": 6,
+   "text": "A second burst arrives: the dead world's last broadcast repeats on a new band.",
+   "transfers": [
+    {
+     "resource": "signal",
+     "delta": 1
+    }
+   ]
   }
  ]
 }
