@@ -637,7 +637,7 @@ ensures { length(result.state.tasks) <= length(s.state.tasks) && length(result.s
    {s | state: {s.state | tasks: filter(\t. not contains(ids, t.id), s.state.tasks), evidence: evidence, knowledge: knowledge, reliefs: filter(\r. not contains(ids, r.task), s.state.reliefs), commitments: filter(\c. not contains(agreements, c.id), s.state.commitments), accepted: accepted},
         bindings: filter(\b. not contains(ids, b.task), s.bindings), reports: filter(\r. not contains(ids, r.task), s.reports),
         chat: {s.chat | issues: filter(\i. not contains(ids, i.task), s.chat.issues), speech: filter(\x. not contains(ids, x.task), s.chat.speech)},
-        archive: {a | tasks: a.tasks + length(gone), evidence: a.evidence + length(goneE), knowledge: a.knowledge + length(s.state.knowledge) - length(knowledge), accepted: a.accepted + (n - length(accepted)), completed: foldl(\acc t. tallied(acc, t.recipe), a.completed, filter(\t. t.status == Completed, gone)), events: a.events ++ evIds}}
+        archive: {a | tasks: a.tasks + length(gone), evidence: a.evidence + length(goneE), knowledge: a.knowledge + length(s.state.knowledge) - length(knowledge), accepted: a.accepted + (n - length(accepted)), completed: foldl(\acc t. tallied(acc, t.recipe), a.completed, filter(\t. t.status == Completed, gone)), events: sorted(a.events ++ evIds)}}
   }
  }
 
@@ -719,12 +719,29 @@ pure func signals(s: Session, p: Population, state: State) -> [Signal] = flatMap
 -- the beds is not a shortage.
 pure func shortNow(state: State) -> [string] = flatMap(\r. if (r.available + r.reserved) * 5 < r.initial then [r.id] else [], state.resources)
 
--- Cohorts catch up with the ship: events due by now are heard once, the
--- years turn (365 ticks, one tick a ship-day, D-70 OQ1), and moods drift.
+-- Cohorts catch up with the ship tick by tick in calendar order, so one
+-- advance over many days ends where a day at a time would: at each tick
+-- that matters, events due by then are heard, then the year turns (every
+-- 365 ticks, one tick a ship-day, D-70 OQ1), then the week's drift (every 7).
+-- Voice signals and shortages are those at the end of the advance: hosts
+-- that batch days add multiples of 7 and 365 as flow points.
+pure func hearDue(s: Session, p: Population, tick: int) -> Population = foldl(\acc e. if e.at <= tick then hear(acc, e.id, e.major, any(\t. t.delta < 0, e.transfers)) else acc, p, s.scenario.events)
+pure func nextTick(s: Session, p: Population, target: int) -> int = {
+ let week = (p.day / 7 + 1) * 7;
+ let year = (p.day / 365 + 1) * 365;
+ let ev = foldl(\acc e. if e.at > p.day && e.at < acc && not contains(p.heard, e.id) then e.at else acc, target, s.scenario.events);
+ foldl(\a b. if b < a then b else a, target, [week, year, ev])
+}
+pure func catchUp(s: Session, p: Population, target: int, sig: [Signal], short: [string]) -> Population =
+ if p.day >= target then p else {
+  let t = nextTick(s, p, target);
+  let heard = hearDue(s, p, t);
+  catchUp(s, drift(yearsTo(heard, t / 365, short), t, sig, short), target, sig, short)
+ }
 pure func populationAt(s: Session, p: Population, state: State) -> Population = {
- let heard = foldl(\acc e. if e.at <= state.tick then hear(acc, e.id, e.major, any(\t. t.delta < 0, e.transfers)) else acc, p, s.scenario.events);
+ let now = hearDue(s, p, p.day);
  let short = shortNow(state);
- drift(yearsTo(heard, state.tick / 365, short), state.tick, signals(s, heard, state), short)
+ catchUp(s, now, state.tick, signals(s, now, state), short)
 }
 
 pure func birthPolicyCommand(s: Session, j: Json) -> Result[Output, HostError] =
@@ -766,7 +783,7 @@ pure func departCommand(s: Session, j: Json) -> Result[Output, HostError] =
     Ok(f) => {
      let s2 = {f.session | state: renewed(s, role, r.mix, r.trust, f.session.state), population: Some(r.population)};
      let o = output(s2, f.events);
-     Ok({o | trace: if s2.traced then "{\"state\":${encodeState(s2.state)},\"events\":${encodeEvents(f.events)},\"host\":${snapshot(s2)},\"promoted\":${encode(jo([kv("kind", js("promoted")), kv("role", js(role)), kv("person", js(r.person.person)), kv("cohort", js(r.person.cohort)), kv("reason", js(reason)), kv("at", jint(r.person.at))]))}}" else ""})
+     Ok({o | trace: if s2.traced then "{\"state\":${encodeState(s2.state)},\"events\":${encodeEvents(f.events)},\"host\":${snapshot(s2)},\"promoted\":${encode(jo([kv("kind", js("promoted")), kv("id", js(r.person.person)), kv("role", js(role)), kv("person", js(r.person.person)), kv("cohort", js(r.person.cohort)), kv("reason", js(reason)), kv("at", jint(r.person.at))]))}}" else ""})
     }
    }
   },

@@ -169,7 +169,8 @@ pure func readMix(j: Json, at: string) -> Result[[int], string] = match get(j, "
 
 pure func readGroup(j: Json, workers: [string]) -> Result[Cohort, string] = match getString(j, "id") {
  None => Err("cohorts: every group needs an id"),
- Some(id) => if not goodId(id) then Err("cohorts.${id}: id must be 1-48 of a-z, 0-9, - and _") else
+ Some(id) => if not goodId(id) || stringLength(id) > 39 then Err("cohorts.${id}: id must be 1-39 of a-z, 0-9, - and _") else
+  if endsWith9(id) then Err("cohorts.${id}: ids ending -shipborn are made by generation splits") else
   if not onlyKeys(j, ["id","department","ocean","mood","trust","ages"], ["voice"]) then Err("cohorts.${id}: fields must be id, department, ocean, mood, trust, ages, and optionally voice") else
   match (getString(j, "department"), readMix(j, "cohorts.${id}"), ints(j, "ages", 10, 0, 10000000, "cohorts.${id}"), ints(j, "mood", 4, 0, 10000000, "cohorts.${id}"), ints(j, "trust", 4, 0, 10000000, "cohorts.${id}")) {
    (None, _, _, _, _) => Err("cohorts.${id}: department is required"),
@@ -372,15 +373,18 @@ pure func born(c: Cohort, n: int) -> Cohort = if c.id != "children" || n <= 0 th
 
 pure func arrive(c: Cohort, ages: [int]) -> Cohort = { let n = sum(ages); if n <= 0 then c else {c | ages: plus(c.ages, ages), mood: addAt(c.mood, 0, n), trust: addAt(c.trust, 1, n)} }
 
--- Children reaching 18 join the departments in proportion to their size;
--- once a department has split, its ship-born join the ship-born group.
+-- Children reaching 18 join the departments in proportion to their whole
+-- adult strength (founders plus ship-born) plus one, so a department whose
+-- founders have all died still takes its share and nobody is lost; once a
+-- department has split, its ship-born join the ship-born group.
 pure func comeOfAge(cs: [Cohort], y: int) -> [Cohort] = match head(filter(\c. c.id == "children", cs)) {
  None => cs,
  Some(ch) => {
   let leaving = zeros(18) ++ drop(18, ch.ages);
   let k = sum(leaving);
   let deps = filter(primary, cs);
-  let shares = apportion(k, map(headcount, deps));
+  let strength = \d. 1 + headcount(d) + sum(map(\x. if x.id == "${d.id}-shipborn" then headcount(x) else 0, cs));
+  let shares = apportion(k, map(strength, deps));
   let given = map(\pr. match pr { (d, s) => {id: d.id, ages: apportion(s, leaving)} }, zip(deps, shares));
   let into = \c. if c.id == "children" then {c | ages: take(18, c.ages) ++ zeros(82), mood: lose(c.mood, k), trust: lose(c.trust, k)} else {
    let owner = if endsWith9(c.id) then substring(c.id, 0, stringLength(c.id) - 9) else c.id;

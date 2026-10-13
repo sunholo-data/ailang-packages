@@ -26,7 +26,7 @@ pure func ok(s: Result[Session, HostError]) -> bool = match s { Ok(_) => true, E
 pure func failsWith(o: Result[Output, HostError], m: string) -> bool = match o { Err(HostFailure(e)) => contains(e, m), _ => false }
 
 -- Outside the test body: ailang test miscounts braces inside strings there.
-pure func promotedCook() -> string = "\"promoted\":{\"kind\":\"promoted\",\"role\":\"cook\",\"person\":\"kitchens-p1\""
+pure func promotedCook() -> string = "\"promoted\":{\"kind\":\"promoted\",\"id\":\"kitchens-p1\",\"role\":\"cook\",\"person\":\"kitchens-p1\""
 
 test "a scenario without cohorts has no population and no new snapshot key" {
  match begin(false) { Ok(s) => s.population == None && not contains(snapshot(s), "\"population\""), Err(_) => false }
@@ -98,4 +98,20 @@ test "cohort rules are checked" {
 test "cohorts end the same whether days are batched or advanced one at a time" {
  let daily = foldl(\acc t. to(acc, t), begin(true), range(1, 10));
  pop(to(begin(true), 9)) == pop(daily) && pop(to(to(begin(true), 4), 9)) == pop(daily)
+}
+
+test "batching matches a day at a time across an event inside the skip" {
+ let daily = foldl(\acc t. to(acc, t), begin(true), range(1, 21));
+ pop(to(begin(true), 20)) == pop(daily)
+}
+
+test "batching matches across a year boundary" {
+ pop(to(begin(true), 380)) == pop(to(to(begin(true), 363), 380)) && pop(to(begin(true), 380)) == pop(to(to(to(begin(true), 364), 365), 380))
+}
+
+test "promotion never adds an actor: the featured cast stays within its cap" {
+ match (begin(true), after(run(after(run(begin(true), "{\"command\":\"depart\",\"crew\":\"cook\",\"reason\":\"death\"}")), "{\"command\":\"depart\",\"crew\":\"cook\",\"reason\":\"left\"}"))) {
+  (Ok(a), Ok(b)) => length(b.state.actors) == length(a.state.actors) && length(b.scenario.workers) <= 15 && (match b.population { Some(p) => personOf(p, "cook") == "kitchens-p2", None => false }),
+  _ => false
+ }
 }

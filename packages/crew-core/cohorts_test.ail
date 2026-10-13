@@ -200,3 +200,13 @@ test "drift is the same in one step or a day at a time (calendar weeks)" {
  let daily = foldl(\acc d. drift(acc, d, [], []), shocked, range(1, 61));
  drift(shocked, 60, [], []) == daily && drift(drift(shocked, 25, [], []), 60, [], []) == daily
 }
+
+test "nobody is lost after the founders die out" {
+ let p = after(policy("encourage"), 160);
+ total(p) == total(pop()) + p.births - p.deaths && not any(\c. sum(c.mood) != headcount(c) || sum(c.trust) != headcount(c), p.cohorts)
+}
+
+test "group ids leave room for -shipborn and may not use it" {
+ says(replace(pack(), "\"id\":\"gardens\"", "\"id\":\"gardens-shipborn\""), "made by generation splits")
+ && says(replace(pack(), "\"id\":\"gardens\"", "\"id\":\"a-very-long-department-name-of-forty-chars\""), "1-39")
+}
