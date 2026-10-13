@@ -1,0 +1,30 @@
+module sunholo/crew_lab/recording_cli
+import std/io (println, exit)
+import std/fs (readFileResult)
+import std/env (getArgs)
+import std/string (split, length as size)
+import std/list (filter)
+import std/result (Ok, Err)
+import pkg/sunholo/crew_core/scenario (decodeScenario)
+import pkg/sunholo/crew_core/example (firstContactJson)
+import pkg/sunholo/crew_core/session (recording)
+
+-- Parity tool: play a crew_core command recording (one NDJSON command per
+-- line, the first a start line) against a scenario and print the journal
+-- exactly as crew_core.session.recording returns it. The game's
+-- crew_parity tool compares its own journal with this output.
+-- Usage: recording_cli [--scenario FILE] RECORDING.ndjson
+export func main() -> () ! {IO, FS, Env} = match getArgs() {
+ ["--scenario", sc, rec] => play(sc, rec),
+ [rec] => play("", rec),
+ _ => { println("usage: recording_cli [--scenario FILE] RECORDING.ndjson"); exit(2) }
+}
+
+func play(sc: string, rec: string) -> () ! {IO, FS} = match (if sc == "" then Ok(firstContactJson()) else readFileResult(sc), readFileResult(rec)) {
+ (Err(e), _) => { println("cannot read scenario: ${e}"); exit(1) },
+ (_, Err(e)) => { println("cannot read recording: ${e}"); exit(1) },
+ (Ok(body), Ok(lines)) => match decodeScenario(body) {
+  Err(e) => { println("invalid scenario: ${e}"); exit(1) },
+  Ok(s) => println(recording(s, filter(\l. size(l) > 0, split(lines, "\n"))))
+ }
+}

@@ -1,0 +1,74 @@
+module sunholo/crew_core/runtime_test
+import std/result (Result, Ok, Err)
+import std/option (Some, None)
+import std/list (head, filter, length, any)
+import std/string (contains)
+import ./scenario (decodeScenario)
+import ./session (Session, Output, HostError, HostFailure, start, input, offer, startTask, snapshot)
+
+-- One cook on a ship with water; no scheduled events.
+pure func ship() -> string =
+ "{\"schema\":\"crew_scenario/1\",\"id\":\"galley\",\"indicators\":[\"fatigue\",\"stress\",\"trust\"],\"indicator_defaults\":{\"fatigue\":0,\"stress\":20},\"captain\":{\"id\":\"captain\",\"values\":{\"mission\":80},\"start\":{}},\"crew\":[{\"id\":\"cook\",\"role\":\"Cook\",\"ocean\":{\"openness\":50,\"conscientiousness\":50,\"extraversion\":50,\"agreeableness\":50,\"neuroticism\":50},\"values\":{\"care\":60},\"start\":{},\"work\":[{\"id\":\"work_cook\",\"name\":\"Bake\",\"purpose\":\"Feed everyone.\",\"duration\":2,\"costs\":[{\"resource\":\"water\",\"reserve\":1,\"consume\":0}],\"effects\":{\"fatigue\":10}}]}],\"rest\":{\"purpose\":\"Recover.\",\"duration\":1,\"effects\":{\"fatigue\":-10}},\"overextended\":{\"indicator\":\"stress\",\"threshold\":70,\"recovery\":40,\"duration\":2,\"cooldown\":3},\"trust_in_captain\":50,\"resources\":[{\"id\":\"water\",\"name\":\"Water\",\"initial\":3}]}"
+
+pure func begin(policy: string) -> Result[Session, HostError] = match decodeScenario(ship()) {
+ Err(e) => Err(HostFailure(e)),
+ Ok(sc) => match start(sc, "{\"command\":\"start\",\"policy\":\"${policy}\",\"scenario\":\"watch-v2\"}") { Err(e) => Err(e), Ok(o) => Ok(o.session) }
+}
+
+pure func run(s: Session, line: string) -> Result[Session, HostError] = match input(s, line) { Err(e) => Err(e), Ok(o) => if o.failed then Err(HostFailure("failed")) else Ok(o.session) }
+
+pure func water(s: Session) -> int = match head(filter(\r. r.id == "water", s.state.resources)) { Some(r) => r.available, None => 0 - 1 }
+
+pure func leak() -> string = "{\"command\":\"ship_event\",\"event\":{\"id\":\"leak\",\"text\":\"A seal fails.\",\"transfers\":[{\"resource\":\"water\",\"delta\":-2}]}}"
+
+test "switching to orders lets the captain start unagreed work; switching back requires consent again" {
+ match begin("consent") {
+  Err(_) => false,
+  Ok(s) => match (offer(s, "cook", "work_cook", "b1"), run(s, "{\"command\":\"policy\",\"policy\":\"orders\"}")) {
+   (Ok(o), Ok(ordered)) => match (startTask(o.session, "b1"), offer(ordered, "cook", "work_cook", "b1")) {
+    (Err(_), Ok(o2)) => match startTask(o2.session, "b1") {
+     Ok(started) => match run(started.session, "{\"command\":\"policy\",\"policy\":\"consent\"}") {
+      Ok(back) => back.command == "consent" && back.policy == "consent" && ordered.command == "orders" && ordered.policy == "consent",
+      Err(_) => false
+     },
+     Err(_) => false
+    },
+    _ => false
+   },
+   _ => false
+  }
+ }
+}
+
+test "the snapshot names the current captaincy only once it differs" {
+ match begin("consent") {
+  Err(_) => false,
+  Ok(s) => match run(s, "{\"command\":\"policy\",\"policy\":\"orders\"}") {
+   Ok(t) => not contains(snapshot(s), "\"command\"") && contains(snapshot(t), "\"command\":\"orders\""),
+   Err(_) => false
+  }
+ }
+}
+
+test "an invalid policy is refused" {
+ match begin("consent") { Err(_) => false, Ok(s) => match run(s, "{\"command\":\"policy\",\"policy\":\"mutiny\"}") { Err(_) => true, Ok(_) => false } }
+}
+
+test "a run-time ship event moves resources now, is heard, and fires once" {
+ match begin("orders") {
+  Err(_) => false,
+  Ok(s) => match run(s, leak()) {
+   Err(_) => false,
+   Ok(t) => water(t) == 1 && any(\e. e.id == "ev-leak", t.state.evidence) && any(\k. k.observer == "cook" && k.evidence == "ev-leak", t.state.knowledge)
+    && (match run(t, leak()) { Err(_) => true, Ok(_) => false })
+  }
+ }
+}
+
+test "a run-time ship event with an unknown resource or no transfers list is refused" {
+ match begin("orders") {
+  Err(_) => false,
+  Ok(s) => (match run(s, "{\"command\":\"ship_event\",\"event\":{\"id\":\"x\",\"text\":\"T.\",\"transfers\":[{\"resource\":\"air\",\"delta\":-1}]}}") { Err(_) => true, Ok(_) => false })
+   && (match run(s, "{\"command\":\"ship_event\",\"event\":{\"id\":\"x\",\"text\":\"T.\"}}") { Err(_) => true, Ok(_) => false })
+ }
+}

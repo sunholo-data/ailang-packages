@@ -3,7 +3,7 @@ import std/result (Result, Ok, Err)
 import std/option (Option, Some, None)
 import std/list (length, map, filter, head, any, sortBy, foldl, contains, flatMap)
 import std/string (join, startsWith, length as stringLength)
-import std/json (Json, encode, getString, getBool, js, jint, jnum, jo, kv, ja, asObject)
+import std/json (Json, encode, get, getString, getBool, js, jint, jnum, jo, kv, ja, asObject)
 import pkg/sunholo/social_dynamics/model (Config, State, Error, InvalidSchema, Step, Event, Operation, Source, Authored, ActorInput, ActorPrincipal, Host, OfferTask, OfferCommitment, AcceptCommitment, AcceptTask, RaiseConcern, RequestRelief, ResolveRelief, Offered, Working, Completed, Task, Appraisal, Effect, BoundedIndicatorDelta, RelationshipDelta, Value, validId, sorted, numericLimit, Applied, Done, Pending, Blocked)
 import pkg/sunholo/social_dynamics/engine (init, advance, continueAdvance, abortAdvance)
 import pkg/sunholo/social_dynamics/proposals (apply)
@@ -11,7 +11,7 @@ import pkg/sunholo/social_dynamics/tasks (findTask, halt)
 import pkg/sunholo/social_dynamics/indicators (applyEffects)
 import pkg/sunholo/social_dynamics/relationships (appraisalContext, deliver)
 import pkg/sunholo/social_dynamics/wire (encodeState, encodeEvents, encodeError, encodeConfig)
-import ./scenario (Scenario, ShipEvent, Transfer, config as scenarioConfig, workerRecipe, projectName, resourceName, purpose, yieldsOf)
+import ./scenario (Scenario, ShipEvent, Transfer, decodeShipEvent, config as scenarioConfig, workerRecipe, projectName, resourceName, purpose, yieldsOf)
 import ./flows (Applied, transferAll)
 import ./host_policy (policies)
 import ./example (firstContact)
@@ -31,7 +31,7 @@ export type Bank = { request: Request, status: string, body: string, roll: float
 
 export type Report = { id: string, task: string, agreement: string, worker: string, code: CrewOutcome } deriving (Eq)
 
-export type Session = { scenario: Scenario, policy: string, config: Config, state: State, bindings: [TaskAgreement], pending: [Request], bank: [Bank], reports: [Report], chat: ConversationStore, personalities: [Personality], traced: bool } deriving (Eq)
+export type Session = { scenario: Scenario, policy: string, command: string, config: Config, state: State, bindings: [TaskAgreement], pending: [Request], bank: [Bank], reports: [Report], chat: ConversationStore, personalities: [Personality], traced: bool } deriving (Eq)
 
 export type Output = { session: Session, trace: string, failed: bool } deriving (Eq)
 
@@ -52,7 +52,7 @@ pure func reportJson(r: Report) -> Json =
 
 export pure func snapshot(s: Session) -> string
 ensures { stringLength(result) > 0 } =
-  encode(jo([kv("state", js(encodeState(s.state))), kv("policy", js(s.policy)), kv("bindings", ja(map(\b. jo([kv("task", js(b.task)), kv("agreement", js(b.agreement)), kv("captain", js(b.captain)), kv("worker", js(b.worker)), kv("recipe", js(b.recipe))]), s.bindings))), kv("pending", ja(map(requestJson, s.pending))), kv("bank", ja(map(bankJson, s.bank))), kv("reports", ja(map(reportJson, s.reports)))] ++ (if s.chat.version == 1 then [kv("conversations", conversationJson(s.chat)),kv("personalities",personalitiesJson(s.personalities))] else [])))
+  encode(jo([kv("state", js(encodeState(s.state))), kv("policy", js(s.policy))] ++ (if s.command != s.policy then [kv("command", js(s.command))] else []) ++ [kv("bindings", ja(map(\b. jo([kv("task", js(b.task)), kv("agreement", js(b.agreement)), kv("captain", js(b.captain)), kv("worker", js(b.worker)), kv("recipe", js(b.recipe))]), s.bindings))), kv("pending", ja(map(requestJson, s.pending))), kv("bank", ja(map(bankJson, s.bank))), kv("reports", ja(map(reportJson, s.reports)))] ++ (if s.chat.version == 1 then [kv("conversations", conversationJson(s.chat)),kv("personalities",personalitiesJson(s.personalities))] else [])))
 
 -- Untraced sessions (batch runs) skip the per-call state encoding; their
 -- outputs carry an empty trace. Journals require traced sessions.
@@ -314,9 +314,9 @@ ensures { match result {
   Err(e) => Err(e),
   Ok(b) => {
     let agreed = consent(s, b)
-    if s.policy == "consent" && not agreed then Err(HostFailure("personal consent required")) else match domain(s, "start-${id}", "captain", Authored, [AcceptTask(id)]) {
+    if s.command == "consent" && not agreed then Err(HostFailure("personal consent required")) else match domain(s, "start-${id}", "captain", Authored, [AcceptTask(id)]) {
       Err(e) => Err(e),
-      Ok(step) => report({ s | state: step.state }, b, if not agreed then RefusedOrder else if s.policy != "orders" then AgreedStart else if overextended(s, b.worker) then StrainedStart else CompliedStart, "report-${id}", step.events)
+      Ok(step) => report({ s | state: step.state }, b, if not agreed then RefusedOrder else if s.command != "orders" then AgreedStart else if overextended(s, b.worker) then StrainedStart else CompliedStart, "report-${id}", step.events)
     }
   }
 }
@@ -360,7 +360,7 @@ pure func advanceOutput(s:Session,state:State,events:[Event])->Result[Output,Hos
 @allow_empty_ok("Legacy hosts intentionally have no personality sidecar; only watch-v3 initializes profiles")
 pure func initialized(scenario:Scenario,policy:string,c:Config,state:State,version:int)->Result[Output,HostError] =
  match (if version==1 then initializeShip(state) else Ok([])) {
-  Err(e)=>Err(HostFailure("personality initialization: ${e}")),Ok(ps)=>Ok(output({scenario:scenario,policy:policy,config:c,state:state,bindings:[],pending:[],bank:[],reports:[],chat:emptyConversation(version),personalities:ps,traced:true},[]))
+  Err(e)=>Err(HostFailure("personality initialization: ${e}")),Ok(ps)=>Ok(output({scenario:scenario,policy:policy,command:policy,config:c,state:state,bindings:[],pending:[],bank:[],reports:[],chat:emptyConversation(version),personalities:ps,traced:true},[]))
  }
 
 pure func majorDeliveries(s:Session,observers:[string],evidence:string,events:[Event])->Result[{session:Session,events:[Event]},HostError] = match observers {
@@ -603,7 +603,30 @@ ensures { match result {
   }
 }
 
+-- Switch captaincy mid-session (D-70 OQ5): applies from the next start on;
+-- agreements already reported keep their terms. The engine configuration
+-- (and its identity) stays the session's founding policy; the snapshot shows
+-- `command` once it differs.
+export pure func setCommand(s: Session, policy: string) -> Result[Output, HostError] ! {}
+ensures { match result { Ok(o) => o.session.command == policy && o.session.policy == s.policy, Err(_) => true } } =
+ if not idle(s) || not identity(s) then Err(HostFailure("policy context")) else if policy != "consent" && policy != "orders" then Err(HostFailure("policy must be consent or orders")) else Ok(output({s | command: policy}, []))
+
+-- A ship event now (the game raises these from physics): the same flow as a
+-- scheduled event, at the current tick. Ids share the scheduled events'
+-- namespace and fire once.
+export pure func raiseShipEvent(s: Session, event: ShipEvent) -> Result[Output, HostError] ! {}
+ensures { match result { Ok(o) => o.session.state.tick == s.state.tick, Err(_) => true } } =
+ if not idle(s) || not identity(s) then Err(HostFailure("ship event context")) else if seen(s, "ev-${event.id}") then Err(HostFailure("ship event already raised")) else match eventFlows(s, [event], []) {
+  Err(e) => Err(e),
+  Ok(f) => Ok(output(f.session, f.events))
+ }
+
 pure func dispatch(s: Session, j: Json) -> Result[Output, HostError] = match getString(j, "command") {
+  Some("policy") => if not fields(j, ["command", "policy"]) then Err(HostFailure("policy fields")) else match getString(j, "policy") { Some(p) => setCommand(s, p), None => Err(HostFailure("policy types")) },
+  Some("ship_event") => if not fields(j, ["command", "event"]) then Err(HostFailure("ship event fields")) else match get(j, "event") {
+    None => Err(HostFailure("ship event types")),
+    Some(ev) => match decodeShipEvent(s.scenario, ev, s.state.tick) { Err(e) => Err(HostFailure(e)), Ok(e) => raiseShipEvent(s, e) }
+  },
   Some("lab_major")=>if not fields(j,["command","id","kind"]) then Err(HostFailure("lab report schema")) else match (text(j,"id"),text(j,"kind")){(Ok(id),Ok(kind))=>labMajor(s,id,kind),_=>Err(HostFailure("lab report types"))},
   Some("captain_reply") => if not fields(j,["command","id","issue","text","approach","tick","revision"]) then Err(HostFailure("captain reply schema")) else match (text(j,"id"),text(j,"issue"),text(j,"text"),text(j,"approach"),integer(j,"tick"),integer(j,"revision")) {
    (Ok(id),Ok(issue),Ok(words),Ok(approach),Ok(tick),Ok(revision))=>captainReply(s,id,issue,words,approach,tick,revision),
