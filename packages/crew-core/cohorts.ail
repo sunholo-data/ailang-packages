@@ -1,0 +1,314 @@
+module sunholo/crew_core/cohorts
+import std/result (Result, Ok, Err)
+import std/option (Option, Some, None)
+import std/list (map, length, filter, any, contains, head, flatMap, foldl, take, drop, range, zip, nth_or, reverse)
+import std/string (substring, charCode, startsWith, length as stringLength)
+import std/json (Json, decode, keys, asObject, asArray, asNumber, asString, getString, getInt, get, jo, kv, jint, js, ja)
+import std/crypto (sha256Hex)
+
+-- Cohorts (crew_core 0.4.0): the people aboard who are not featured crew,
+-- held as groups. A cohort keeps counts, never individuals: people per mood
+-- band (content, uneasy, strained, breaking), per band of trust in the
+-- captain (high, fair, low, none) and per year of age (0..99, 99 meaning
+-- 99 and over). Every step costs the same whatever the headcount: one draw
+-- per band, never one per person. All arithmetic is on integers, so the VM
+-- and the interpreter agree bit for bit and a seed replays exactly.
+--
+-- Experimental tuning, like the rest of crew_core: these rates do not assert
+-- a model of real populations.
+
+export type Cohort = {id: string, department: string, mix: [int], mood: [int], trust: [int], ages: [int], voice: string, shock: int, carry: int} deriving (Eq)
+
+-- A promoted person: the featured role they now fill, and their person id
+-- `<cohort>-p<n>`. The host names them (D-74); crew_core carries no names.
+export type Person = {role: string, person: string, cohort: string, at: int} deriving (Eq)
+
+export type Population = {cohorts: [Cohort], mode: string, seed: int, birthPolicy: string, rates: [int], mortality: [int], needs: [string], split: int, year: int, day: int, carry: int, heard: [string], persons: [Person], births: int, deaths: int} deriving (Eq)
+
+-- What a cohort hears from the featured crew each day: its voice's stress
+-- and trust in the captain (-1 when it has no voice).
+export type Signal = {cohort: string, stress: int, trust: int} deriving (Eq)
+
+pure func oceanIds() -> [string] = ["openness","conscientiousness","extraversion","agreeableness","neuroticism"]
+pure func policies() -> [string] = ["encourage","hold","restrict"]
+
+-- ------------------------------------------------------------ small maths
+
+pure func all[a](f: a -> bool, xs: [a]) -> bool = not any(\x. not f(x), xs)
+pure func sum(xs: [int]) -> int = foldl(\a x. a + x, 0, xs)
+pure func clamp(lo: int, hi: int, x: int) -> int = if x < lo then lo else if x > hi then hi else x
+pure func at(xs: [int], i: int) -> int = nth_or(xs, i, 0)
+pure func setAt(xs: [int], i: int, v: int) -> [int] = take(i, xs) ++ [v] ++ drop(i + 1, xs)
+pure func addAt(xs: [int], i: int, d: int) -> [int] = setAt(xs, i, at(xs, i) + d)
+pure func plus(xs: [int], ys: [int]) -> [int] = map(\p. match p { (a, b) => a + b }, zip(xs, ys))
+pure func minus(xs: [int], ys: [int]) -> [int] = map(\p. match p { (a, b) => a - b }, zip(xs, ys))
+pure func span(xs: [int], lo: int, hi: int) -> int = sum(take(hi - lo, drop(lo, xs)))
+
+-- Integer square root (floor), Newton's method.
+pure func isqrtFrom(n: int, x: int) -> int = { let y = (x + n / x) / 2; if y >= x then x else isqrtFrom(n, y) }
+export pure func isqrt(n: int) -> int
+ensures { result >= 0 && result * result <= (if n < 0 then 0 else n) } = if n <= 0 then 0 else isqrtFrom(n, n)
+
+-- Split k whole people over weights by largest remainder (ties: lowest
+-- index). The parts sum to k when the weights sum to at least 1, and no part
+-- exceeds its weight when k is at most the weights' sum.
+pure func remainders(k: int, ws: [int], total: int) -> [int] = {
+ let base = map(\w. k * w / total, ws);
+ let left = k - sum(base);
+ let order = rankBy(map(\w. (k * w) % total, ws));
+ map(\p. match p { (b, r) => if r < left then b + 1 else b }, zip(base, order))
+}
+-- rank of each element when sorted by descending value, ties by index
+pure func rankBy(xs: [int]) -> [int] = map(\p. match p { (i, x) => length(filter(\q. match q { (j, y) => y > x || (y == x && j < i) }, zip(range(0, length(xs)), xs))) }, zip(range(0, length(xs)), xs))
+export pure func apportion(k: int, ws: [int]) -> [int]
+ensures { length(result) == length(ws) } = { let total = sum(ws); if total <= 0 || k <= 0 then map(\w. 0, ws) else remainders(k, ws, total) }
+
+-- ------------------------------------------------------------ randomness
+
+pure func hexDigit(c: string) -> int = { let n = charCode(c); if n >= 97 then n - 87 else n - 48 }
+pure func chunk(h: string, i: int) -> int = foldl(\a j. a * 16 + hexDigit(substring(h, i * 4 + j, i * 4 + j + 1)), 0, [0, 1, 2, 3])
+-- Sixteen uniform draws, 0..65535, from one hash of the seed and a key.
+export pure func draws(seed: int, key: string) -> [int]
+ensures { length(result) == 16 } = { let h = sha256Hex("${seed}:${key}"); map(\i. chunk(h, i), range(0, 16)) }
+
+-- How many of n people move, at p per mille. Expected mode rounds n·p half
+-- up. Seeded mode draws: one Bernoulli per person when n <= 12, else a
+-- normal approximation from four draws (Irwin–Hall), clamped to 0..n.
+export pure func binom(n: int, p: int, mode: string, seed: int, key: string) -> int
+ensures { result >= 0 && result <= (if n < 0 then 0 else n) } =
+ if n <= 0 || p <= 0 then 0 else if p >= 1000 then n else
+ if mode != "seeded" then clamp(0, n, (n * p + 500) / 1000) else {
+  let us = draws(seed, key);
+  if n <= 12 then length(filter(\u. u * 1000 < p * 65536, take(n, us))) else {
+   let s = sum(take(4, us));
+   let zMilli = (s * 1000 / 65535 - 2000) * 1732 / 1000;
+   let sdMilli = isqrt(n * p * (1000 - p));
+   clamp(0, n, (n * p + zMilli * sdMilli / 1000 + 500) / 1000)
+  }
+ }
+
+-- ------------------------------------------------------------ bands
+
+-- Move people between four ordered bands. `down` (per mille) moves people
+-- one band toward the last (worse); `up` one band toward the first. Each
+-- band draws once for each direction. Sums are preserved.
+export pure func shift(bands: [int], down: [int], up: [int], mode: string, seed: int, key: string) -> [int]
+ensures { length(result) == length(bands) && sum(result) == sum(bands) } = {
+ let n = length(bands);
+ let downs = map(\i. if i == n - 1 then 0 else binom(at(bands, i), at(down, i), mode, seed, "${key}:d${i}"), range(0, n));
+ let ups = map(\i. if i == 0 then 0 else binom(at(bands, i) - at(downs, i), at(up, i), mode, seed, "${key}:u${i}"), range(0, n));
+ map(\i. at(bands, i) - at(downs, i) - at(ups, i) + (if i > 0 then at(downs, i - 1) else 0) + (if i < n - 1 then at(ups, i + 1) else 0), range(0, n))
+}
+
+-- Rates that pull every band one step toward `target` at r per mille.
+pure func toward(target: int, r: int) -> {down: [int], up: [int]} =
+ {down: map(\i. if i < target then r else 0, range(0, 4)), up: map(\i. if i > target then r else 0, range(0, 4))}
+
+-- ------------------------------------------------------------ readouts
+
+export pure func headcount(c: Cohort) -> int ensures { result >= 0 || true } = sum(c.ages)
+
+-- Mean band × 100: 0 (all content or all high trust) .. 300.
+export pure func meanBand(bands: [int]) -> int
+ensures { result >= 0 && result <= 300 } = { let h = sum(bands); if h <= 0 then 0 else clamp(0, 300, (at(bands, 1) + 2 * at(bands, 2) + 3 * at(bands, 3)) * 100 / h) }
+
+-- How split the bands are, 0..100: 100 when half are at each end, 0 when
+-- everyone shares one band. Weighted by how far apart the bands are.
+export pure func division(bands: [int]) -> int
+ensures { result >= 0 && result <= 100 } = {
+ let h = sum(bands);
+ let d = sum(flatMap(\i. map(\j. at(bands, i) * at(bands, j) * (j - i), range(i + 1, 4)), range(0, 4)));
+ if h <= 0 then 0 else clamp(0, 100, d * 400 / (3 * h * h))
+}
+
+-- The strained and breaking share (breaking counts double), raised by low
+-- trust: 0..100.
+export pure func pressure(c: Cohort) -> int
+ensures { result >= 0 && result <= 100 } = {
+ let h = sum(c.mood);
+ let stress = if h <= 0 then 0 else (at(c.mood, 2) + 2 * at(c.mood, 3)) * 100 / (2 * h);
+ let low = if h <= 0 then 0 else (at(c.trust, 2) + at(c.trust, 3)) * 100 / h;
+ clamp(0, 100, stress * (50 + low / 2) / 100)
+}
+
+pure func trait(c: Cohort, i: int) -> int = at(c.mix, i)
+
+-- ------------------------------------------------------------ JSON
+
+pure func asInts(j: Json) -> Option[[int]] = match asArray(j) {
+ None => None,
+ Some(xs) => { let ns = flatMap(\x. match asNumber(x) { Some(f) => if f == intToFloat(floatToInt(f)) then [floatToInt(f)] else [], None => [] }, xs); if length(ns) == length(xs) then Some(ns) else None }
+}
+pure func ints(j: Json, key: string, n: int, lo: int, hi: int, at: string) -> Result[[int], string] = match get(j, key) {
+ None => Err("${at}: ${key} is required"),
+ Some(v) => match asInts(v) {
+  Some(xs) => if length(xs) != n then Err("${at}: ${key} needs ${n} whole numbers") else if any(\x. x < lo || x > hi, xs) then Err("${at}: ${key} values must be ${lo}..${hi}") else Ok(xs),
+  None => Err("${at}: ${key} needs ${n} whole numbers")
+ }
+}
+pure func intsOr(j: Json, key: string, n: int, lo: int, hi: int, at: string, d: [int]) -> Result[[int], string] = match get(j, key) { None => Ok(d), Some(_) => ints(j, key, n, lo, hi, at) }
+pure func onlyKeys(j: Json, required: [string], optional: [string]) -> bool = match asObject(j) {
+ None => false,
+ Some(_) => { let ks = keys(j); all(\k. contains(ks, k), required) && all(\k. contains(required, k) || contains(optional, k), ks) && all(\k. length(filter(\x. x == k, ks)) == 1, ks) }
+}
+pure func goodId(id: string) -> bool = stringLength(id) > 0 && stringLength(id) <= 48 && all(\i. { let c = charCode(substring(id, i, i + 1)); (c >= 97 && c <= 122) || (c >= 48 && c <= 57) || c == 45 || c == 95 }, range(0, stringLength(id)))
+
+-- Ten decade counts spread over a hundred single years, remainders to the
+-- youngest years of each decade.
+export pure func years(decades: [int]) -> [int]
+ensures { length(result) == 100 && sum(result) == sum(decades) } = flatMap(\d. map(\y. d / 10 + (if y < d % 10 then 1 else 0), range(0, 10)), take(10, decades ++ [0,0,0,0,0,0,0,0,0,0]))
+export pure func decades(ys: [int]) -> [int] ensures { length(result) == 10 } = map(\d. span(ys, d * 10, d * 10 + 10), range(0, 10))
+
+pure func readMix(j: Json, at: string) -> Result[[int], string] = match get(j, "ocean") {
+ None => Err("${at}: ocean is required"),
+ Some(o) => if not onlyKeys(o, oceanIds(), []) then Err("${at}: ocean needs exactly ${oceanIds()}") else {
+  let vs = map(\k. match getInt(o, k) { Some(v) => v, None => 0 - 1 }, oceanIds());
+  if any(\v. v < 0 || v > 100, vs) then Err("${at}: ocean values must be 0..100") else Ok(vs)
+ }
+}
+
+pure func readGroup(j: Json, workers: [string]) -> Result[Cohort, string] = match getString(j, "id") {
+ None => Err("cohorts: every group needs an id"),
+ Some(id) => if not goodId(id) then Err("cohorts.${id}: id must be 1-48 of a-z, 0-9, - and _") else
+  if not onlyKeys(j, ["id","department","ocean","mood","trust","ages"], ["voice"]) then Err("cohorts.${id}: fields must be id, department, ocean, mood, trust, ages, and optionally voice") else
+  match (getString(j, "department"), readMix(j, "cohorts.${id}"), ints(j, "ages", 10, 0, 10000000, "cohorts.${id}"), ints(j, "mood", 4, 0, 10000000, "cohorts.${id}"), ints(j, "trust", 4, 0, 10000000, "cohorts.${id}")) {
+   (None, _, _, _, _) => Err("cohorts.${id}: department is required"),
+   (_, Err(e), _, _, _) => Err(e), (_, _, Err(e), _, _) => Err(e), (_, _, _, Err(e), _) => Err(e), (_, _, _, _, Err(e)) => Err(e),
+   (Some(dep), Ok(mix), Ok(ds), Ok(mood), Ok(trust)) => {
+    let voice = match getString(j, "voice") { Some(v) => v, None => "" };
+    let h = sum(ds);
+    if not goodId(dep) then Err("cohorts.${id}: department must be an id") else
+    if sum(mood) != h then Err("cohorts.${id}: mood must sum to the headcount ${h}") else
+    if sum(trust) != h then Err("cohorts.${id}: trust must sum to the headcount ${h}") else
+    if voice != "" && not contains(workers, voice) then Err("cohorts.${id}: voice ${voice} is not a featured crew member") else
+    if id == "children" && span(ds, 2, 10) > 0 then Err("cohorts.children: children are under 20") else
+    if id != "children" && h == 0 then Err("cohorts.${id}: headcount must be at least 1") else
+    Ok({id: id, department: dep, mix: mix, mood: mood, trust: trust, ages: years(ds), voice: voice, shock: 0, carry: 0})
+   }
+  }
+}
+
+@allow_empty_ok("an empty group list is reported by the caller as a size error")
+pure func collect(xs: [Json], f: Json -> Result[Cohort, string]) -> Result[[Cohort], string] = match xs {
+ [] => Ok([]),
+ x :: rest => match f(x) { Err(e) => Err(e), Ok(c) => match collect(rest, f) { Err(e) => Err(e), Ok(cs) => Ok(c :: cs) } }
+}
+
+pure func emptyChildren(mix: [int]) -> Cohort = {id: "children", department: "children", mix: mix, mood: [0,0,0,0], trust: [0,0,0,0], ages: years([]), voice: "", shock: 0, carry: 0}
+
+pure func rateOf(j: Json, key: string, d: int) -> int = match getInt(j, key) { Some(v) => v, None => d }
+
+pure func readRates(j: Json) -> Result[[int], string] = match get(j, "birth_rates") {
+ None => Ok([60, 30, 8]),
+ Some(r) => if not onlyKeys(r, policies(), []) then Err("cohorts: birth_rates needs encourage, hold and restrict") else {
+  let rs = map(\k. rateOf(r, k, 0 - 1), policies());
+  if any(\v. v < 0 || v > 1000, rs) then Err("cohorts: birth_rates are per mille, 0..1000") else Ok(rs)
+ }
+}
+
+pure func populationFrom(j: Json, workers: [string], resources: [string]) -> Result[Population, string] =
+ if not onlyKeys(j, ["groups"], ["mode","seed","birth_policy","birth_rates","mortality","birth_needs","split"]) then Err("cohorts: fields must be groups, and optionally mode, seed, birth_policy, birth_rates, mortality, birth_needs, split") else {
+  let mode = match getString(j, "mode") { Some(m) => m, None => "expected" };
+  let policy = match getString(j, "birth_policy") { Some(p) => p, None => "hold" };
+  let needIds = match get(j, "birth_needs") { None => [], Some(v) => match asArray(v) { Some(xs) => map(\x. match asString(x) { Some(n) => n, None => "" }, xs), None => [""] } };
+  match (get(j, "groups"), readRates(j), intsOr(j, "mortality", 10, 0, 100000, "cohorts", [200, 20, 60, 100, 200, 400, 1000, 2500, 6000, 15000])) {
+   (_, Err(e), _) => Err(e), (_, _, Err(e)) => Err(e),
+   (None, _, _) => Err("cohorts: groups is required"),
+   (Some(g), Ok(rates), Ok(mort)) => match asArray(g) {
+    None => Err("cohorts: groups must be a list"),
+    Some(gs) => match collect(gs, \x. readGroup(x, workers)) {
+     Err(e) => Err(e),
+     Ok(cs) => {
+      let ids = map(\c. c.id, cs);
+      let all1 = if contains(ids, "children") then cs else cs ++ [emptyChildren(meanMix(cs))];
+      if mode != "expected" && mode != "seeded" then Err("cohorts: mode must be expected or seeded") else
+      if not contains(policies(), policy) then Err("cohorts: birth_policy must be encourage, hold or restrict") else
+      if any(\n. not contains(resources, n), needIds) then Err("cohorts: birth_needs must list scenario resources") else
+      if length(all1) < 2 || length(all1) > 16 then Err("cohorts: 1-15 groups plus children (16 in all)") else
+      if any(\i. length(filter(\x. x == i, ids)) != 1, ids) then Err("cohorts: group ids must be unique") else
+      if any(\c. startsWith(c.id, "children") && c.id != "children", cs) then Err("cohorts: only the children group may use the id children") else
+      Ok({cohorts: all1, mode: mode, seed: rateOf(j, "seed", 1), birthPolicy: policy, rates: rates, mortality: mort, needs: needIds, split: clamp(1, 100, rateOf(j, "split", 25)), year: 0, day: 0, carry: 0, heard: [], persons: [], births: 0, deaths: 0})
+     }
+    }
+   }
+  }
+ }
+
+pure func meanMix(cs: [Cohort]) -> [int] = { let h = sum(map(headcount, cs)); if h <= 0 then [50,50,50,50,50] else map(\i. sum(map(\c. trait(c, i) * headcount(c), cs)) / h, range(0, 5)) }
+
+-- The scenario's optional `cohorts` section. `None` when the scenario has
+-- none: a session without cohorts behaves exactly as in crew_core 0.3.0.
+export pure func decodePopulation(canonical: string, workers: [string], resources: [string]) -> Result[Option[Population], string]
+ensures { match result { Ok(Some(p)) => length(p.cohorts) >= 2 && length(p.cohorts) <= 16, _ => true } } = match decode(canonical) {
+ Err(e) => Err("scenario JSON: ${e}"),
+ Ok(j) => match get(j, "cohorts") {
+  None => Ok(None),
+  Some(c) => match populationFrom(c, workers, resources) { Ok(p) => Ok(Some(p)), Err(e) => Err(e) }
+ }
+}
+
+export pure func total(p: Population) -> int ensures { result >= 0 || true } = sum(map(headcount, p.cohorts))
+
+pure func cohortJson(c: Cohort) -> Json = jo([kv("id", js(c.id)), kv("department", js(c.department)), kv("headcount", jint(headcount(c))), kv("mood", ja(map(jint, c.mood))), kv("trust", ja(map(jint, c.trust))), kv("ages", ja(map(jint, decades(c.ages)))), kv("division", jint(division(c.mood))), kv("pressure", jint(pressure(c))), kv("voice", js(c.voice))])
+pure func personJson(p: Person) -> Json = jo([kv("role", js(p.role)), kv("person", js(p.person)), kv("cohort", js(p.cohort)), kv("at", jint(p.at))])
+
+-- The snapshot section: per cohort the headcount, bands, decade ages,
+-- division, pressure and voice; the population's year and policy.
+export pure func populationJson(p: Population) -> Json ensures { true } = jo([kv("total", jint(total(p))), kv("year", jint(p.year)), kv("birth_policy", js(p.birthPolicy)), kv("births", jint(p.births)), kv("deaths", jint(p.deaths)), kv("cohorts", ja(map(cohortJson, p.cohorts))), kv("persons", ja(map(personJson, p.persons)))])
+
+-- ------------------------------------------------------------ hearing events
+
+-- A ship event reaches every cohort once. Major events shake moods by kind,
+-- scaled by the cohort's neuroticism; first contact also lifts open cohorts.
+-- An event that takes resources away unsettles without a major kind.
+pure func shockOf(major: string, losing: bool) -> int =
+ if major == "loss" then 300 else if major == "betrayal" then 250 else if major == "deep_time" then 150 else if major == "first_contact" then 100 else if losing then 80 else 0
+
+pure func hearOne(p: Population, c: Cohort, id: string, major: string, losing: bool) -> Cohort = {
+ let base = shockOf(major, losing);
+ let n = trait(c, 4);
+ let down = base * (500 + n * 5) / 1000;
+ let up = if major == "first_contact" then 2 * trait(c, 0) else 0;
+ let mood = shift(c.mood, [down, down, down, 0], [0, up, up, up], p.mode, p.seed, "hear:${id}:${c.id}");
+ {c | mood: mood, shock: clamp(0, 1000, c.shock + base)}
+}
+
+export pure func hear(p: Population, id: string, major: string, losing: bool) -> Population
+ensures { total(result) == total(p) } =
+ if contains(p.heard, id) then p else {p | cohorts: map(\c. hearOne(p, c, id, major, losing), p.cohorts), heard: p.heard ++ [id]}
+
+-- ------------------------------------------------------------ daily drift
+
+-- The share of a per-mille daily rate left after n days: 1000·(1 - r/1000)^n.
+pure func keptAfter(r: int, n: int, acc: int) -> int = if n <= 0 || acc <= 0 then acc else keptAfter(r, n - 1, acc * (1000 - r) / 1000)
+export pure func decay(r: int, n: int) -> int ensures { result >= 0 && result <= 1000 } = clamp(0, 1000, keptAfter(clamp(0, 1000, r), clamp(0, 400, n), 1000))
+
+pure func band(v: int) -> int = if v >= 75 then 0 else if v >= 50 then 1 else if v >= 25 then 2 else 3
+
+-- Where a cohort's mood settles: recent shocks, a stressed voice and a
+-- shortage of the cohort's needs each push it down.
+pure func moodTarget(c: Cohort, stress: int, short: bool) -> int =
+ clamp(0, 3, c.shock / 250 + (if stress >= 70 then 1 else 0) + (if short then 1 else 0))
+
+pure func driftOne(p: Population, c: Cohort, sig: Option[Signal], short: bool, days: int) -> Cohort = {
+ let moved = 1000 - decay(20, days);
+ let stress = match sig { Some(s) => s.stress, None => 0 - 1 };
+ let trustT = match sig { Some(s) => if s.trust < 0 then 1 else band(s.trust), None => 1 };
+ let m = toward(moodTarget(c, stress, short), moved);
+ let t = toward(trustT, moved / 2);
+ {c | mood: shift(c.mood, m.down, m.up, p.mode, p.seed, "drift:${p.day}:${c.id}"), trust: shift(c.trust, t.down, t.up, p.mode, p.seed, "trust:${p.day}:${c.id}"), shock: c.shock * decay(20, days) / 1000}
+}
+
+-- Advance the cohorts' moods to tick `day`. Long gaps run in steps of at
+-- most a week, so people can travel several bands during a skip; the cost
+-- grows with weeks skipped, never with headcount. `signals` come from each
+-- cohort's voice; `short` lists the resources below a fifth of their
+-- opening amount.
+pure func driftStep(p: Population, day: int, signals: [Signal], short: [string]) -> Population =
+ if day <= p.day then p else {
+  let days = if day - p.day > 7 then 7 else day - p.day;
+  let q = {p | day: p.day + days, cohorts: map(\c. driftOne(p, c, head(filter(\s. s.cohort == c.id, signals)), any(\n. contains(short, n), p.needs), days), p.cohorts)};
+  driftStep(q, day, signals, short)
+ }
+export pure func drift(p: Population, day: int, signals: [Signal], short: [string]) -> Population
+ensures { total(result) == total(p) && (result.day == p.day || result.day == day) } = driftStep(p, day, signals, short)

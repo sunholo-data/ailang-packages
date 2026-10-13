@@ -1,0 +1,106 @@
+module sunholo/crew_core/cohorts_test
+import std/result (Result, Ok, Err)
+import std/option (Option, Some, None)
+import std/list (map, length, foldl, range, any)
+import std/string (replace, find)
+import ./cohorts (Cohort, Population, Signal, decodePopulation, apportion, binom, shift, division, pressure, meanBand, years, decades, isqrt, hear, drift, total, headcount, decay)
+
+pure func sum(xs: [int]) -> int = foldl(\a x. a + x, 0, xs)
+
+-- Two departments and the voice of one; no children group (one is added).
+pure func pack() -> string =
+ "{\"cohorts\":{\"groups\":[{\"id\":\"engineering\",\"department\":\"engineering\",\"ocean\":{\"openness\":40,\"conscientiousness\":70,\"extraversion\":40,\"agreeableness\":50,\"neuroticism\":30},\"mood\":[60,30,8,2],\"trust\":[30,50,15,5],\"ages\":[0,0,20,30,30,10,10,0,0,0],\"voice\":\"engineer\"},{\"id\":\"gardens\",\"department\":\"gardens\",\"ocean\":{\"openness\":60,\"conscientiousness\":50,\"extraversion\":50,\"agreeableness\":70,\"neuroticism\":60},\"mood\":[40,40,10,10],\"trust\":[20,40,30,10],\"ages\":[0,0,25,25,25,25,0,0,0,0]}],\"birth_needs\":[\"garden\"]}}"
+
+pure func decoded(b: string) -> Result[Option[Population], string] = decodePopulation(b, ["engineer", "medic"], ["garden", "water"])
+pure func pop() -> Population = match decoded(pack()) { Ok(Some(p)) => p, _ => {cohorts: [], mode: "", seed: 0, birthPolicy: "", rates: [], mortality: [], needs: [], split: 0, year: 0, day: 0, carry: 0, heard: [], persons: [], births: 0, deaths: 0} }
+pure func errorOf(b: string) -> string = match decoded(b) { Err(e) => e, Ok(_) => "" }
+pure func says(b: string, part: string) -> bool = find(errorOf(b), part) >= 0
+
+-- P1: the scenario section
+
+test "a scenario without cohorts decodes to none" { decoded("{\"id\":\"x\"}") == Ok(None) }
+
+test "decodes groups and adds an empty children group" {
+ let p = pop();
+ map(\c. c.id, p.cohorts) == ["engineering", "gardens", "children"] && total(p) == 200 && p.mode == "expected" && p.birthPolicy == "hold" && p.needs == ["garden"]
+}
+
+test "decade ages spread over single years and back" { decades(years([25, 3, 0, 0, 0, 0, 0, 0, 0, 7])) == [25, 3, 0, 0, 0, 0, 0, 0, 0, 7] && sum(years([25])) == 25 }
+
+test "mood that does not sum to the headcount is rejected, naming the field" { says(replace(pack(), "[60,30,8,2]", "[60,30,8,3]"), "cohorts.engineering: mood must sum") }
+test "trust that does not sum is rejected" { says(replace(pack(), "[30,50,15,5]", "[30,50,15,6]"), "cohorts.engineering: trust must sum") }
+test "a voice must be a featured crew member" { says(replace(pack(), "\"engineer\"", "\"stranger\""), "voice stranger") }
+test "unknown group fields are rejected" { says(replace(pack(), "\"voice\":\"engineer\"", "\"vote\":\"engineer\""), "fields must be") }
+test "birth needs must be scenario resources" { says(replace(pack(), "[\"garden\"]", "[\"sunlight\"]"), "birth_needs") }
+test "repeated group ids are rejected" { says(replace(pack(), "\"id\":\"gardens\"", "\"id\":\"engineering\""), "unique") }
+test "an unknown mode is rejected" { says(replace(pack(), "\"birth_needs\"", "\"mode\":\"chaos\",\"birth_needs\""), "mode") }
+test "an unknown birth policy is rejected" { says(replace(pack(), "\"birth_needs\"", "\"birth_policy\":\"ban\",\"birth_needs\""), "birth_policy") }
+
+-- P2: bands, draws and readouts
+
+test "apportion gives whole people by largest remainder" { apportion(5, [1, 1, 1]) == [2, 2, 1] && apportion(0, [3, 4]) == [0, 0] && sum(apportion(7, [10, 20, 30])) == 7 }
+
+test "integer square root" { isqrt(0) == 0 && isqrt(15) == 3 && isqrt(16) == 4 && isqrt(1000000) == 1000 }
+
+test "expected draws round n·p" { binom(100, 250, "expected", 1, "k") == 25 && binom(3, 500, "expected", 1, "k") == 2 && binom(0, 500, "expected", 1, "k") == 0 }
+
+test "seeded draws stay in range and replay" {
+ let a = map(\i. binom(1000, 300, "seeded", 7, "k${i}"), range(0, 20));
+ let b = map(\i. binom(1000, 300, "seeded", 7, "k${i}"), range(0, 20));
+ a == b && not any(\x. x < 0 || x > 1000, a) && sum(a) > 20 * 250 && sum(a) < 20 * 350
+}
+
+test "seeded draws vary with the key" { map(\i. binom(1000, 300, "seeded", 7, "k${i}"), range(0, 5)) != map(\i. 300, range(0, 5)) }
+
+test "small seeded draws are per person" { not any(\i. binom(5, 500, "seeded", 3, "s${i}") > 5, range(0, 30)) }
+
+test "shift preserves people and never goes negative" {
+ let cases = [[100, 0, 0, 0], [0, 0, 0, 100], [25, 25, 25, 25], [1, 0, 0, 1]];
+ not any(\b. { let r = shift(b, [300, 300, 300, 0], [0, 200, 200, 200], "seeded", 1, "x"); sum(r) != sum(b) || any(\x. x < 0, r) }, cases)
+}
+
+test "shift moves one band at a time" { shift([100, 0, 0, 0], [500, 0, 0, 0], [0, 0, 0, 0], "expected", 1, "x") == [50, 50, 0, 0] }
+
+test "division separates a split cohort from a uniformly uneasy one" { division([40, 5, 5, 50]) > 80 && division([0, 100, 0, 0]) == 0 && division([50, 0, 0, 50]) == 100 }
+
+test "mean band" { meanBand([0, 100, 0, 0]) == 100 && meanBand([100, 0, 0, 0]) == 0 && meanBand([0, 0, 0, 7]) == 300 }
+
+test "pressure rises with breaking and low trust" {
+ let c = {id: "a", department: "a", mix: [50,50,50,50,50], mood: [0, 0, 50, 50], trust: [100, 0, 0, 0], ages: years([0, 0, 100]), voice: "", shock: 0, carry: 0};
+ pressure(c) > 0 && pressure({c | trust: [0, 0, 0, 100]}) > pressure(c) && pressure({c | mood: [100, 0, 0, 0]}) == 0
+}
+
+-- Hearing and drift
+
+test "a loss is heard once, keeps the headcount, and unsettles" {
+ let p = hear(pop(), "ev-1", "loss", false);
+ total(p) == total(pop()) && hear(p, "ev-1", "loss", false) == p && map(\c. meanBand(c.mood), p.cohorts) != map(\c. meanBand(c.mood), pop().cohorts)
+}
+
+test "the more neurotic cohort is moved more by a loss" {
+ let before = pop();
+ let after = hear(before, "ev-1", "loss", false);
+ let rise = \i. meanBand(match (after.cohorts, i) { (e :: g :: _, 0) => e.mood, (e :: g :: _, _) => g.mood, _ => [] }) - meanBand(match (before.cohorts, i) { (e :: g :: _, 0) => e.mood, (e :: g :: _, _) => g.mood, _ => [] });
+ rise(1) > rise(0)
+}
+
+test "drift settles a shocked cohort back over quiet weeks" {
+ let shocked = hear(pop(), "ev-1", "loss", false);
+ let later = drift(shocked, 120, [], []);
+ total(later) == total(pop()) && sum(map(\c. meanBand(c.mood), later.cohorts)) < sum(map(\c. meanBand(c.mood), shocked.cohorts))
+}
+
+test "a shortage of birth needs pulls moods down" {
+ let calm = drift(pop(), 200, [], []);
+ let short = drift(pop(), 200, [], ["garden"]);
+ sum(map(\c. meanBand(c.mood), short.cohorts)) > sum(map(\c. meanBand(c.mood), calm.cohorts))
+}
+
+test "trust follows the voice" {
+ let low = drift(pop(), 300, [{cohort: "engineering", stress: 10, trust: 10}], []);
+ match low.cohorts { e :: _ => meanBand(e.trust) > 200, _ => false }
+}
+
+test "decay" { decay(20, 0) == 1000 && decay(20, 1) == 980 && decay(1000, 3) == 0 }
+
+test "drift is the same in one step or never backwards" { drift(pop(), 0, [], []) == pop() }

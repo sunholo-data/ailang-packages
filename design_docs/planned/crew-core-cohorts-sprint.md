@@ -5,7 +5,7 @@
 R2; department axis first, generation splits later; featured cap 15 with
 promotion; unrest shown as bands) and the headcount by D-75 (about 1,000
 aboard, growing to about 1,500).
-**Authorization:** pending Mark's approval of this plan.
+**Authorization:** Mark, attended 2026-10-13: "yep sounds good continue".
 **AILANG prompt version loaded:** v0.16.7 (runtime v0.54.8).
 **Registry reuse:** none. This extends crew_core, which is already the host;
 the bucket and binomial maths are new and small.
