@@ -188,3 +188,9 @@ test "encouraging births while food is short costs trust with the conscientious"
 }
 
 test "holding births adds no tension" { (tension(pop(), match pop().cohorts { c :: _ => c, [] => match pop().cohorts { _ => {id: "x", department: "x", mix: [], mood: [], trust: [], ages: [], voice: "", shock: 0, carry: 0} } }, true)).trust == 0 }
+
+test "a resented birth policy keeps trust down while it lasts, not just for a week" {
+ let r = drift(policy("restrict"), 200, [], []);
+ let h = drift(policy("hold"), 200, [], []);
+ sum(map(\c. meanBand(c.trust), r.cohorts)) > sum(map(\c. meanBand(c.trust), h.cohorts)) + 100
+}

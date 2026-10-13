@@ -290,11 +290,20 @@ pure func band(v: int) -> int = if v >= 75 then 0 else if v >= 50 then 1 else if
 pure func moodTarget(c: Cohort, stress: int, short: bool) -> int =
  clamp(0, 3, c.shock / 250 + (if stress >= 70 then 1 else 0) + (if short then 1 else 0))
 
+-- A birth policy a cohort resents keeps pulling it down for as long as the
+-- policy lasts (the yearly hit alone would drift away within weeks): trust
+-- settles one band lower at tension 40 and two at 100, mood one lower at 80.
+pure func grievance(p: Population, c: Cohort, short: bool) -> {trust: int, mood: int} = {
+ let g = (tension(p, c, short)).trust;
+ {trust: (if g >= 100 then 2 else if g >= 40 then 1 else 0), mood: (if g >= 80 then 1 else 0)}
+}
+
 pure func driftOne(p: Population, c: Cohort, sig: Option[Signal], short: bool, days: int) -> Cohort = {
  let moved = 1000 - decay(20, days);
  let stress = match sig { Some(s) => s.stress, None => 0 - 1 };
- let trustT = match sig { Some(s) => if s.trust < 0 then 1 else band(s.trust), None => 1 };
- let m = toward(moodTarget(c, stress, short), moved);
+ let gr = if c.id == "children" then {trust: 0, mood: 0} else grievance(p, c, short);
+ let trustT = clamp(0, 3, gr.trust + (match sig { Some(s) => if s.trust < 0 then 1 else band(s.trust), None => 1 }));
+ let m = toward(clamp(0, 3, moodTarget(c, stress, short) + gr.mood), moved);
  let t = toward(trustT, moved / 2);
  {c | mood: shift(c.mood, m.down, m.up, p.mode, p.seed, "drift:${p.day}:${c.id}"), trust: shift(c.trust, t.down, t.up, p.mode, p.seed, "trust:${p.day}:${c.id}"), shock: c.shock * decay(20, days) / 1000}
 }
