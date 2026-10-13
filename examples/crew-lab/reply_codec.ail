@@ -1,0 +1,63 @@
+module sunholo/crew_lab/reply_codec
+import std/json (Json, decode, encode, get, getString, getInt, getBool, jo, kv, js, jint, jb)
+import std/option (Some, None)
+import std/result (Result, Ok, Err)
+import std/string (length as size)
+import pkg/sunholo/crew_core/codec (fields)
+
+-- File protocol between the watch and crew-reply-worker. A job names only the
+-- words to fetch; the worker never sees the journal, the session or the seed.
+export type JobFile = {job:int, signature:string, label:string, model:string} deriving (Eq)
+export type Outcome = {job:int, ok:bool, source:string, calls:int, inputTokens:int, outputTokens:int, error:string} deriving (Eq)
+
+pure func str(j:Json, k:string) -> string = match getString(j, k) {Some(s) => s, None => ""}
+pure func int(j:Json, k:string) -> int = match getInt(j, k) {Some(n) => n, None => 0 - 1}
+
+export pure func encodeJob(f:JobFile) -> string ! {}
+ensures { size(result) > 0 } =
+ encode(jo([kv("schema", js("crew_reply_job/1")), kv("job", jint(f.job)), kv("signature", js(f.signature)), kv("label", js(f.label)), kv("model", js(f.model))]))
+
+export pure func decodeJob(raw:string) -> Result[JobFile, string] ! {}
+ensures { match result {Err(_) => true, Ok(f) => f.job >= 1 && size(f.signature) > 0 && size(f.signature) <= 32768 && size(f.label) > 0 && size(f.label) <= 64} } =
+ if size(raw) > 65536 then Err("job_size") else match decode(raw) {
+  Err(_) => Err("job_json"),
+  Ok(j) => if not fields(j, ["schema", "job", "signature", "label", "model"]) || str(j, "schema") != "crew_reply_job/1" then Err("job_schema")
+   else {
+    let f = {job:int(j, "job"), signature:str(j, "signature"), label:str(j, "label"), model:str(j, "model")};
+    if f.job < 1 || f.job > 1000000 then Err("job_id")
+    else if size(f.signature) == 0 || size(f.signature) > 32768 then Err("job_signature")
+    else if size(f.label) == 0 || size(f.label) > 64 then Err("job_label")
+    else if size(f.model) == 0 || size(f.model) > 128 then Err("job_model")
+    else Ok(f)
+   }
+ }
+
+export pure func encodeOutcome(o:Outcome) -> string ! {}
+ensures { size(result) > 0 } =
+ encode(jo([kv("schema", js("crew_reply_result/1")), kv("job", jint(o.job)), kv("ok", jb(o.ok)), kv("source", js(o.source)), kv("calls", jint(o.calls)), kv("input_tokens", jint(o.inputTokens)), kv("output_tokens", jint(o.outputTokens)), kv("error", js(o.error))]))
+
+export pure func decodeOutcome(raw:string, job:int) -> Result[Outcome, string] ! {}
+ensures { match result {Err(_) => true, Ok(o) => o.job == job && o.calls >= 0 && o.calls <= 1} } =
+ if size(raw) > 8192 then Err("result_size") else match decode(raw) {
+  Err(_) => Err("result_json"),
+  Ok(j) => if not fields(j, ["schema", "job", "ok", "source", "calls", "input_tokens", "output_tokens", "error"]) || str(j, "schema") != "crew_reply_result/1" then Err("result_schema")
+   else match getBool(j, "ok") {
+    None => Err("result_ok"),
+    Some(ok) => {
+     let o = {job:int(j, "job"), ok:ok, source:str(j, "source"), calls:int(j, "calls"), inputTokens:int(j, "input_tokens"), outputTokens:int(j, "output_tokens"), error:str(j, "error")};
+     if o.job != job then Err("result_job")
+     else if o.calls < 0 || o.calls > 1 then Err("result_calls")
+     else if o.inputTokens < 0 || o.outputTokens < 0 then Err("result_tokens")
+     else if size(o.source) > 32 || size(o.error) > 512 then Err("result_text")
+     else Ok(o)
+    }
+   }
+ }
+
+test "job and result round trip and reject mismatches" {
+ let f = {job:3, signature:"{\"x\":1}", label:"accept", model:"m"};
+ let o = {job:3, ok:true, source:"generated", calls:1, inputTokens:10, outputTokens:20, error:""};
+ decodeJob(encodeJob(f)) == Ok(f) && decodeOutcome(encodeOutcome(o), 3) == Ok(o) &&
+ decodeOutcome(encodeOutcome(o), 4) == Err("result_job") && decodeJob("{}") == Err("job_schema") &&
+ decodeOutcome(encodeOutcome({o | calls:2}), 3) == Err("result_calls")
+}

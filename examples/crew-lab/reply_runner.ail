@@ -1,0 +1,85 @@
+module sunholo/crew_lab/reply_runner
+import std/process (ProcessHandle, spawnProcess, cancelProcess)
+import std/fs (fileExists, readFileResult, writeFileResult, renameFileResult, mkdirAllResult, removeFileResult)
+import std/env (getEnvOr)
+import std/clock (now)
+import std/list (any, map)
+import std/string (split, length as size)
+import std/option (Option, Some, None)
+import std/result (Result, Ok, Err)
+import pkg/sunholo/content_library/library (cacheKey)
+import ./reply_jobs (Job)
+import ./reply_codec (Outcome, encodeJob, encodeOutcome, decodeOutcome)
+
+-- Effectful adapter for background replies: write a job file, start the worker,
+-- look for its result file, and stop workers. The watch owns every handle and
+-- stops each one it started (on result, timeout or quit).
+export type Running = {id:int, handle:ProcessHandle, started:int, signature:string} deriving (Eq)
+
+-- spawnProcess aborts the whole run on an unknown command (ailang#1784), so the
+-- watch looks for the worker on PATH first and keeps authored words without it.
+export func workerAvailable(name:string) -> bool ! {Env, FS}
+ensures { not result || size(name) > 0 && size(name) <= 128 } =
+ size(name) > 0 && size(name) <= 128 && any(\d. size(d) > 0 && fileExists("${d}/${name}"), split(getEnvOr("PATH", ""), ":"))
+
+pure func jobPath(dir:string, id:int) -> string = "${dir}/job-${show(id)}.json"
+
+export func launch(dir:string, worker:string, home:string, model:string, j:Job) -> Result[Running, string] ! {FS, Process, Clock}
+ensures { match result {Err(_) => true, Ok(r) => r.id == j.id && r.signature == j.spec.signature} } =
+ match mkdirAllResult(dir) {
+  Err(_) => Err("cannot create reply folder"),
+  Ok(_) => {
+   let path = jobPath(dir, j.id);
+   match writeFileResult("${path}.tmp", encodeJob({job:j.id, signature:j.spec.signature, label:j.spec.label, model:model})) {
+    Err(_) => Err("cannot write reply job"),
+    Ok(_) => match renameFileResult("${path}.tmp", path) {
+     Err(_) => Err("cannot publish reply job"),
+     Ok(_) => Ok({id:j.id, handle:spawnProcess(worker, [home, path]), started:now(), signature:j.spec.signature})
+    }
+   }
+  }
+ }
+
+-- The worker's own last step: its result, written atomically beside the job.
+export func publishOutcome(jobPath:string, o:Outcome) -> Result[(), string] ! {FS}
+ensures { match result {Ok(v) => v == (), Err(_) => true} } =
+ match writeFileResult("${jobPath}.tmp", encodeOutcome(o)) {
+  Err(_) => Err("result write failed"),
+  Ok(_) => match renameFileResult("${jobPath}.tmp", "${jobPath}.result") {Err(_) => Err("result rename failed"), Ok(_) => Ok(())}
+ }
+
+-- Reap a worker that has written its result (it already released its lock).
+-- An already finished worker reports an invalid handle: also fine.
+export func reap(r:Running) -> Result[(), string] ! {Process}
+ensures { match result {Ok(v) => v == (), Err(_) => true} } = match cancelProcess(r.handle) {_ => Ok(())}
+
+-- Force-stop a worker that may be inside the dialogue store, then release the
+-- cache lock it may hold for its signature (store.resolve takes it with mkdir
+-- and removes it on every normal path), so later fetches are not "busy" forever.
+export func abort(home:string, r:Running) -> Result[(), string] ! {Process, FS}
+ensures { match result {Ok(v) => v == (), Err(_) => true} } = {
+ match cancelProcess(r.handle) {_ => ()};
+ let lock = "${home}/cache/${cacheKey(r.signature)}.lock";
+ match removeFileResult("${lock}/bundle.tmp") {_ => ()};
+ if fileExists(lock) then match removeFileResult(lock) {Err(_) => Err("cannot release ${lock}"), Ok(_) => Ok(())} else Ok(())
+}
+
+export func abortAll(home:string, rs:[Running]) -> Result[(), string] ! {Process, FS}
+ensures { match result {Ok(v) => v == (), Err(_) => true} } = match rs {
+ [] => Ok(()),
+ r :: rest => match abort(home, r) {Err(e) => {match abortAll(home, rest) {_ => Err(e)}}, Ok(_) => abortAll(home, rest)}
+}
+
+-- None while the worker is still busy. A worker silent past the timeout is
+-- stopped and reported as one attempted call (a provider may have been reached).
+export func check(home:string, dir:string, r:Running, timeoutMs:int) -> Option[Result[Outcome, string]] ! {FS, Process, Clock}
+ensures { match result {None => true, Some(Err(_)) => true, Some(Ok(o)) => o.job == r.id && o.calls >= 0 && o.calls <= 1} } = {
+ let path = "${jobPath(dir, r.id)}.result";
+ if fileExists(path) then {
+  match reap(r) {_ => ()};
+  Some(match readFileResult(path) {Err(_) => Err("unreadable result"), Ok(raw) => decodeOutcome(raw, r.id)})
+ } else if now() - r.started > timeoutMs then {
+  match abort(home, r) {_ => ()};
+  Some(Ok({job:r.id, ok:false, source:"timeout", calls:1, inputTokens:0, outputTokens:0, error:"no reply within ${show(timeoutMs / 1000)} s"}))
+ } else None
+}

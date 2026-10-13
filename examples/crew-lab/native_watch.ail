@@ -1,56 +1,163 @@
 module sunholo/crew_lab/native_watch
 import std/io (println,exit,readLineOpt)
 import std/env (getArgs,getEnvOr)
-import std/list (any,head,filter,length,take,drop)
+import std/list (any,head,filter,length,take,drop,map)
 import std/string (length as size,trim)
 import std/option (Option,Some,None)
 import std/result (Result,Ok,Err)
-import std/terminal (TerminalSession)
+import std/terminal (TerminalSession,readEvent)
+import std/string (endsWith,substring)
 import pkg/sunholo/terminal_ui/events (Event,Input,Character,Cancelled,NoInput,Accept,Cancel,FocusNext,lineEvent)
-import pkg/sunholo/terminal_ui/adapter (Resolved,Native,choose,run,readInput,writeFrame)
+import pkg/sunholo/terminal_ui/adapter (Resolved,Native,choose,run,readInput,writeFrame,normalize)
 import pkg/sunholo/terminal_ui/ui (safeText)
 import ./native_watch_args (Options,parse)
-import ./native_watch_ui (UI,initial,decision,update,Decision,Guide,Editor)
-import ./native_watch_presenter (frame,waiting)
+import ./native_watch_ui (UI,initial,decision,update,Decision,Guide,Editor,Replies)
+import ./native_watch_presenter (frameWith,waiting)
 import ./watch_presenter (recap)
 import ./play_flow (route)
-import ./play (Run,openWatch,openConversationWatch,applyWatch,closeWatch)
+import ./play (Run,Prediction,openWatch,openConversationWatch,applyWatch,closeWatch,noteWording,model,prefetchCandidates)
+import ./reply_jobs (Inbox,Job,Spec,empty,enqueue,dispatchable,started,complete,withdraw,markRead,statusLine,lines,liveCount,find,known,retire)
+import ./reply_runner (Running,workerAvailable,launch as startWorker,check,abortAll)
+import ./reply_codec (Outcome)
+import ./store (savedWording,cachedChosen)
 import std/fs (readFileResult)
 import pkg/sunholo/crew_core/scenario (Scenario,decodeScenario)
 import pkg/sunholo/crew_core/example (firstContactJson)
 import pkg/sunholo/crew_core/policy (decodePolicy)
 
 type Ship={scenario:Scenario,policy:string}
-type State={host:Option[Run],ui:UI,message:string,history:[string],inputs:int,ship:Ship}
+-- Background words: the inbox (pure), the workers this watch started, and
+-- whether crew-reply-worker is installed. Only live mode creates jobs.
+type Background={inbox:Inbox,running:[Running],available:bool}
+type State={host:Option[Run],ui:UI,message:string,history:[string],inputs:int,ship:Ship,bg:Background}
+type Exit={host:Option[Run],error:string,running:[Running],inbox:Inbox}
+type Pump={run:Run,inbox:Inbox,running:[Running],changed:bool,error:string}
+pure func worker()->string = "crew-reply-worker"
+pure func replyTimeoutMs()->int = 120000
+-- Prefetch never spends the attempts kept for replies the captain has asked for.
+pure func prefetchReserve()->int = 3
 pure func history(xs:[string],message:string)->[string] = if message=="" then xs else {let ys=xs++[message];if length(ys)>64 then drop(length(ys)-64,ys) else ys}
 -- Exactly one reader is selected. Published lineEvent treats0 like q; retain
 -- literal0 here because the app displays its existing Back meaning in proposals.
-func read(terminal:Option[TerminalSession],resolved:Resolved,u:UI)->Result[Event,string] ! {IO} =
- if resolved.mode==Native then match readInput(terminal){Err(_)=>Err("Terminal input failed; previous journal retained."),Ok(e)=>Ok(e)} else {
+-- Native mode waits at most waitMs for a key while words are being prepared
+-- (-1 blocks); Idle is NoInput, which never changes the UI.
+func read(terminal:Option[TerminalSession],resolved:Resolved,u:UI,waitMs:int)->Result[Event,string] ! {IO} =
+ if resolved.mode==Native then match terminal {
+  Some(t)=>match readEvent(t,waitMs){Err(_)=>Err("Terminal input failed; previous journal retained."),Ok(ev)=>Ok(normalize(ev))},
+  None=>match readInput(terminal){Err(_)=>Err("Terminal input failed; previous journal retained."),Ok(e)=>Ok(e)}
+ } else {
   let line=readLineOpt();
   Ok(match line {Some(text)=>if u.view==Editor then if text=="/cancel" then Input(Cancel) else if text=="/context" then Input(FocusNext) else if text=="" then Input(Accept) else Input(Character(text)) else if trim(text)=="0" then Input(Character("0")) else if trim(text)=="q" then Input(Character("q")) else lineEvent(line),None=>lineEvent(line)})
  }
 pure func playState(s:State) = match s.host {None=>None,Some(h)=>Some(h.ui)}
 
-func loop(s:State,o:Options,resolved:Resolved,terminal:Option[TerminalSession],dialogueMode:string,redraw:bool)->Result[Option[Run],string] ! {IO,FS,Env,AI} {
- let f=frame(playState(s),s.ui,s.message,s.history,dialogueMode,match s.host{None=>0,Some(h)=>h.remaining},match s.host{None=>"",Some(h)=>h.path},o.debug,resolved.ansi);
+pure func replyDir(path:string)->string =
+ if endsWith(path,"/journal.jsonl") then "${substring(path,0,size(path)-14)}/replies" else "${path}.replies"
+
+-- New decisions with deferred words join the inbox. A full or duplicate queue
+-- keeps the authored line; the decision itself is already committed.
+pure func absorb(inbox:Inbox,specs:[Spec])->Inbox = match specs {
+ []=>inbox,
+ x::rest=>absorb(match enqueue(inbox,x){Ok(n)=>n,Err(_)=>inbox},rest)
+}
+
+func record(p:Pump,j:Job,o:Outcome,text:string,error:string)->Pump ! {FS} =
+ match noteWording(p.run,j.id,j.spec.request,o.source,o.calls,o.inputTokens,o.outputTokens,text,error) {
+  Err(e)=>{p|error:e},
+  Ok(r)=>{p|run:r,inbox:complete(p.inbox,j.id,if error=="" then Ok(text) else Err(error),o.calls),changed:p.changed || not j.spec.prefetch}
+ }
+
+func finish(p:Pump,j:Job,res:Result[Outcome,string])->Pump ! {FS} = match res {
+ Err(e)=>record(p,j,{job:j.id,ok:false,source:"error",calls:1,inputTokens:0,outputTokens:0,error:e},"",e),
+ Ok(o)=>if not o.ok then record(p,j,o,"",if o.error=="" then "worker failed" else o.error) else match savedWording(p.run.home,j.spec.signature,j.spec.label,model(),j.spec.textRoll) {
+  Err(e)=>record(p,j,o,"","saved words unusable: ${e}"),
+  Ok(text)=>record(p,j,o,text,"")
+ }
+}
+
+-- Look at every running worker once; keep the busy ones.
+func collect(p:Pump,rs:[Running])->Pump ! {FS,Process,Clock} = match rs {
+ []=>p,
+ r::rest=>if p.error!="" then p else match check(p.run.home,replyDir(p.run.path),r,replyTimeoutMs()) {
+  None=>collect({p|running:p.running++[r]},rest),
+  Some(res)=>match find(p.inbox,r.id) {
+   None=>collect(p,rest),
+   Some(j)=>collect(finish(p,j,res),rest)
+  }
+ }
+}
+
+-- Start queued jobs up to the concurrency. Each start reserves one AI attempt;
+-- a result that made no call is refunded when it is journalled.
+func dispatch(p:Pump,js:[Job],available:bool)->Pump ! {FS,Process,Clock} = match js {
+ []=>p,
+ j::rest=>if not available then dispatch({p|inbox:withdraw(p.inbox,j.id,"crew-reply-worker is not installed"),changed:true},rest,available)
+  else if p.run.remaining<=0 then dispatch({p|inbox:withdraw(p.inbox,j.id,"no AI attempts remain"),changed:true},rest,available)
+  else match startWorker(replyDir(p.run.path),worker(),p.run.home,model(),j) {
+   Err(e)=>dispatch({p|inbox:withdraw(p.inbox,j.id,e),changed:true},rest,available),
+   Ok(r)=>{
+    let run=p.run;
+    dispatch({p|run:{run|remaining:run.remaining-1},inbox:started(p.inbox,j.id),running:p.running++[r],changed:p.changed || not j.spec.prefetch},rest,available)
+   }
+  }
+}
+
+-- Queue wording for offers the captain has not made yet: skipped when the words
+-- are saved, were already tried, or the allowance is down to the reserve.
+func prefetch(p:Pump,ps:[Prediction])->Pump ! {FS} = match ps {
+ []=>p,
+ x::rest=>if known(p.inbox,x.spec.signature) || p.run.remaining-liveCount(p.inbox)<=prefetchReserve() || cachedChosen(p.run.home,x.base,x.spec.label) then prefetch(p,rest)
+  else prefetch({p|inbox:match enqueue(p.inbox,x.spec){Ok(n)=>n,Err(_)=>p.inbox}},rest)
+}
+
+func pump(s:State,ahead:int)->Result[{state:State,changed:bool},string] ! {FS,Process,Clock} = match s.host {
+ None=>Ok({state:s,changed:false}),
+ Some(h)=>{
+  let queued=absorb(s.bg.inbox,h.deferred);
+  let start={run:{h|deferred:[]},inbox:queued,running:[],changed:queued!=s.bg.inbox,error:""};
+  let collected=collect(start,s.bg.running);
+  if collected.error!="" then Err(collected.error) else {
+   let first=dispatch(collected,dispatchable(collected.inbox),s.bg.available);
+   let preds=if s.bg.available then prefetchCandidates(first.run,ahead) else [];
+   let pruned={first|inbox:retire(first.inbox,map(\x. x.spec.signature,preds))};
+   let queued2=if s.bg.available && length(dispatchable(pruned.inbox))==0 then prefetch(pruned,preds) else pruned;
+   let p=dispatch(queued2,dispatchable(queued2.inbox),s.bg.available);
+   let bg=s.bg;
+   if p.error!="" then Err(p.error) else Ok({state:{s|host:Some(p.run),bg:{bg|inbox:p.inbox,running:p.running}},changed:p.changed})
+  }
+ }
+}
+
+pure func leave(s:State,error:string)->Exit = {host:s.host,error:error,running:s.bg.running,inbox:s.bg.inbox}
+
+func loop(s0:State,o:Options,resolved:Resolved,terminal:Option[TerminalSession],dialogueMode:string,redraw0:bool)->Exit ! {IO,FS,Env,AI,Process,Clock} = match pump(s0,o.prefetch) {
+ Err(e)=>leave(s0,e),
+ Ok(pumped)=>{
+ let p=pumped.state;
+ let pbg=p.bg;
+ -- Words that arrive while Replies is open are read as they appear.
+ let s=if p.ui.view==Replies then {p|bg:{pbg|inbox:markRead(pbg.inbox)}} else p;
+ let redraw=redraw0 || pumped.changed;
+ let f=frameWith(playState(s),s.ui,s.message,s.history,dialogueMode,match s.host{None=>0,Some(h)=>h.remaining},match s.host{None=>"",Some(h)=>h.path},o.debug,resolved.ansi,lines(s.bg.inbox),statusLine(s.bg.inbox));
  if redraw then writeFrame(resolved,f) else ();
- match read(terminal,resolved,s.ui) {
-  Err(_)=>Err("Terminal input failed; previous journal retained."),
+ match read(terminal,resolved,s.ui,if liveCount(s.bg.inbox)>0 then 100 else 0-1) {
+  Err(e)=>leave(s,e),
   Ok(raw)=>{
    if resolved.mode!=Native && raw!=NoInput then println("") else ();
    let e=raw;
    if e==NoInput then loop(s,o,resolved,terminal,dialogueMode,false)
-   else if s.inputs>=10000 then Err("Input limit reached; previous committed journal retained.")
+   else if s.inputs>=10000 then leave(s,"Input limit reached; previous committed journal retained.")
    else {
     let bounded=match e{Input(Character(text))=>size(text)<=65536,_=>true};
-    if not bounded then Err("Input exceeds65536 characters; previous committed journal retained.") else {
+    if not bounded then leave(s,"Input exceeds65536 characters; previous committed journal retained.") else {
      let t=update(playState(s),{s.ui|page:f.page},e);
-     if t.quit then Ok(s.host) else match t.command {
-      None=>loop({s|ui:t.ui,inputs:s.inputs+1},o,resolved,terminal,dialogueMode,t.ui!=s.ui),
+     let bg=s.bg;
+     let seen=if t.ui.view==Replies then {bg|inbox:markRead(bg.inbox)} else bg;
+     if t.quit then leave(s,"") else match t.command {
+      None=>loop({s|ui:t.ui,inputs:s.inputs+1,bg:seen},o,resolved,terminal,dialogueMode,t.ui!=s.ui),
       Some(key)=>match s.host {
        None=>match (if o.legacy then openWatch(s.ship.scenario,s.ship.policy,o.home,o.seed,key,dialogueMode,o.debug) else openConversationWatch(s.ship.scenario,s.ship.policy,o.home,o.seed,key,dialogueMode,o.debug)) {
-        Err(error)=>Err(error),Ok(h)=>loop({ship:s.ship,host:Some(h),ui:decision(h.ui,s.ui.dimensions.columns,s.ui.dimensions.rows,o.ascii),message:"Choose work or rest. Offer first; hear your crew before starting. Concerns can be discussed on the same offer.",history:[],inputs:s.inputs+1},o,resolved,terminal,dialogueMode,true)
+        Err(error)=>leave(s,error),Ok(h)=>loop({ship:s.ship,host:Some(h),ui:decision(h.ui,s.ui.dimensions.columns,s.ui.dimensions.rows,o.ascii),message:"Choose work or rest. Offer first; hear your crew before starting. Concerns can be discussed on the same offer.",history:[],inputs:s.inputs+1,bg:seen},o,resolved,terminal,dialogueMode,true)
        },
        Some(h)=>match route(h.ui,key) {
         Err(error)=>loop({s|message:error,ui:{s.ui|view:Decision,page:0},inputs:s.inputs+1},o,resolved,terminal,dialogueMode,true),
@@ -62,10 +169,10 @@ func loop(s:State,o:Options,resolved:Resolved,terminal:Option[TerminalSession],d
          let who=if intent.worker!="" then intent.worker else if intent.kind=="ask" || intent.kind=="captain_reply" then match head(filter(\b. b.task==(if intent.kind=="captain_reply" then h.ui.target else intent.target),h.ui.session.bindings)){None=>"crew member",Some(b)=>b.worker} else match head(filter(\p. p.id==h.ui.target,h.ui.session.pending)){None=>"crew member",Some(p)=>p.actor};
          if hears then writeFrame(resolved,waiting(s.ui,who,dialogueMode,resolved.ansi)) else ();
          match applyWatch(h,intent) {
-          Err(error)=>Err(error),Ok(a)=>{
+          Err(error)=>leave(s,error),Ok(a)=>{
            let message=if a.message=="" then s.message else a.message;
            let remembered=if a.run.ui.seq>h.ui.seq then history(s.history,a.message) else s.history;
-           loop({ship:s.ship,host:Some(a.run),ui:decision(a.run.ui,s.ui.dimensions.columns,s.ui.dimensions.rows,o.ascii),message:message,history:remembered,inputs:s.inputs+1},o,resolved,terminal,dialogueMode,true)
+           loop({ship:s.ship,host:Some(a.run),ui:decision(a.run.ui,s.ui.dimensions.columns,s.ui.dimensions.rows,o.ascii),message:message,history:remembered,inputs:s.inputs+1,bg:s.bg},o,resolved,terminal,dialogueMode,true)
           }
          }
         }
@@ -76,7 +183,18 @@ func loop(s:State,o:Options,resolved:Resolved,terminal:Option[TerminalSession],d
    }
   }
  }
+ }
 }
+-- Workers still running at quit may already have reached a provider: each gets
+-- a wording record charged one attempt, before the quit record.
+func journalStopped(h:Run,inbox:Inbox,rs:[Running])->Result[Run,string] ! {FS} = match rs {
+ []=>Ok(h),
+ r::rest=>match find(inbox,r.id) {
+  None=>journalStopped(h,inbox,rest),
+  Some(j)=>match noteWording(h,j.id,j.spec.request,"stopped",1,0,0,"","stopped when the watch ended") {Err(e)=>Err(e),Ok(n)=>journalStopped(n,inbox,rest)}
+ }
+}
+
 -- The ship is read and validated before any terminal or journal is opened, so a
 -- malformed scenario or policy fails before the first turn.
 @allow_empty_ok("No --policy means the home response policy; an empty text selects it")
@@ -90,9 +208,9 @@ func loadShip(scenarioPath:string,policyPath:string)->Result[Ship,string] ! {FS}
   }
  }
 
-func launch(mode:string)->() ! {IO,Env,FS,AI} {
+func launch(mode:string)->() ! {IO,Env,FS,AI,Process,Clock} {
  let args=getArgs();
- if any(\a. a=="--help",args) then println("crew-watch / Before first hello\nA five-specialist preparation watch. Arrows choose, Enter selects; h explains. Offer work, hear its worker, then Start or Decide later. Advance moves everyone one turn.\n--scenario FILE / --policy FILE: run another ship or response policy (validated before the watch opens).\n--mode auto|native|line|plain; --ascii; --debug; --legacy (previous watch-v2); --seed N (default42); --home PATH; --columns N --rows N (line/plain).\nOffline uses saved/stock wording without providers. Live misses may wait for synchronous AI. Existing crew-journey/play commands remain available.")
+ if any(\a. a=="--help",args) then println("crew-watch / Before first hello\nA five-specialist preparation watch. Arrows choose, Enter selects; h explains. Offer work, hear its worker, then Start or Decide later. Advance moves everyone one turn.\n--scenario FILE / --policy FILE: run another ship or response policy (validated before the watch opens).\n--mode auto|native|line|plain; --ascii; --debug; --legacy (previous watch-v2); --seed N (default42); --home PATH; --columns N --rows N (line/plain).\nOffline uses saved/stock wording without providers. Live: decisions show at once; unsaved words are prepared in the background by crew-reply-worker (r opens Replies). Existing crew-journey/play commands remain available.")
  else match parse(args,"${getEnvOr("HOME",".")}/.ailang/crew-lab") {
   Err(e)=>{println(safeText(e));exit(1)},
   Ok(o)=>match loadShip(o.scenario,o.policy) {
@@ -100,18 +218,22 @@ func launch(mode:string)->() ! {IO,Env,FS,AI} {
   Ok(ship)=>match choose(o.mode,Some(o.dimensions)) {
    Err(_)=>{println("Native terminal unavailable or dimensions invalid. Use --mode plain or --mode line.");exit(1)},
    Ok(resolved)=>{
-    let state={host:None,ui:initial(resolved.dimensions.columns,resolved.dimensions.rows,o.ascii),message:"",history:[],inputs:0,ship:ship};
+    let state={host:None,ui:initial(resolved.dimensions.columns,resolved.dimensions.rows,o.ascii),message:"",history:[],inputs:0,ship:ship,bg:{inbox:empty(3),running:[],available:mode=="live" && workerAvailable(worker())}};
     let result=run(resolved,\terminal. loop(state,o,resolved,terminal,mode,true));
     match result {
      Err(_)=>{println("Terminal scope failed; controls and cursor have been restored.");exit(1)},
-     Ok(Err(e))=>{println(safeText(e));exit(1)},
-     Ok(Ok(None))=>println("Watch not started. No crew decisions were recorded."),
-     Ok(Ok(Some(h)))=>match closeWatch(h){Err(e)=>{println(safeText("Journal failed: ${e}"));exit(1)},Ok(_)=>println(recap(h.ui,h.path,o.debug))}
+     Ok(x)=>{
+      let stopped=match x.host {None=>Ok(()),Some(h)=>abortAll(h.home,x.running)};
+      if x.error!="" then {println(safeText(x.error));exit(1)} else match x.host {
+       None=>println("Watch not started. No crew decisions were recorded."),
+       Some(h0)=>match journalStopped(h0,x.inbox,x.running) {Err(e)=>{println(safeText("Journal failed: ${e}"));exit(1)},Ok(h)=>match closeWatch(h){Err(e)=>{println(safeText("Journal failed: ${e}"));exit(1)},Ok(_)=>println("${recap(h.ui,h.path,o.debug)}${if length(x.running)>0 then "\nStopped ${length(x.running)} background repl${if length(x.running)==1 then "y" else "ies"} still being prepared; the authored lines stand." else ""}${match stopped {Ok(_)=>"",Err(e)=>"\n${e}"}}")}}
+      }
+     }
     }
    }
   }
   }
  }
 }
-export func main()->() ! {IO,Env,FS,AI} = launch("live")
-export func offline()->() ! {IO,Env,FS,AI} = launch("offline")
+export func main()->() ! {IO,Env,FS,AI,Process,Clock} = launch("live")
+export func offline()->() ! {IO,Env,FS,AI,Process,Clock} = launch("offline")

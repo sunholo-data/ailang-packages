@@ -5,7 +5,7 @@ import ./journey_flow (Navigation, initial, options as journeyOptions, styleDefa
 import std/env (getArgs, getEnvOr, getPid, hasEnv)
 import std/result (Result, Ok, Err)
 import std/option (Some, None)
-import std/list (head, filter, map, length, contains, take)
+import std/list (head, filter, map, length, contains, take, any, foldl)
 import std/string (length as stringLength, stringToInt)
 import std/json (Json, encode, decode, get, getString, jo, ja, kv, js, jint, jnum, jb)
 import pkg/sunholo/content_library/library (Bundle, encodeBundle, starterBundle, nextRoll, pickLabel, pickVariant)
@@ -21,15 +21,19 @@ import pkg/sunholo/crew_core/codec (object)
 import pkg/sunholo/crew_core/policy (Policy, weights, chooseReaction, decodePolicy)
 import ./dialogue (signature, watchSignature, watchSignatureIn, conversationStarter)
 import pkg/sunholo/crew_core/policy (fixtureBody)
-import ./store (Fetch, loadPolicy, loadWatchPolicy, resolve, resolveChosen, openRun, appendRun)
+import ./store (Fetch, loadPolicy, loadWatchPolicy, resolve, resolveChosen, openRun, appendRun, cachedChosen)
+import ./reply_jobs (Spec)
+import ./dialogue (shortSignature)
+import pkg/sunholo/crew_core/scenario (projectName, workerRecipe)
+import pkg/sunholo/social_dynamics/model (Working)
 import ./play_flow (PlayState, Stage, Intent, beginWatchIn, beginConversationWatchIn, isWatch, seedNumber, parseArgs, menu, route, stage, publish, renderStatus, recover)
 
 export type HeardReply = {actor:string,text:string} deriving (Eq)
-export type Run = { ui: PlayState, home: string, path: string, policy: Policy, policyBody: string, mode: string, remaining: int, lines: int, lastMessage: string, modern: bool, nav: Navigation, dimensions: Dimensions, ansi: bool, debug: bool, recent:[HeardReply] }
+export type Run = { ui: PlayState, home: string, path: string, policy: Policy, policyBody: string, mode: string, remaining: int, lines: int, lastMessage: string, modern: bool, nav: Navigation, dimensions: Dimensions, ansi: bool, debug: bool, recent:[HeardReply], deferred:[Spec] }
 
 export type Applied = { run: Run, failed: bool, message: string }
 
-export type Reply = { command: string, seed: int, label: string, text: string, metadata: Json }
+export type Reply = { command: string, seed: int, label: string, text: string, textRoll: float, metadata: Json }
 
 pure func command(name: string, fields: [{ key: string, value: Json }]) -> string =
   encode(jo([kv("command", js(name))] ++ fields))
@@ -43,7 +47,8 @@ func waiting(r: Run,actor: string) -> () ! {IO} = if not r.modern then () else {
   flush()
 }
 
-pure func model() -> string = "z-ai/glm-5.3-flash"
+export pure func model() -> string ! {}
+ensures { stringLength(result) > 0 } = "z-ai/glm-5.3-flash"
 
 export pure func selectReply(r: Request, policy: Policy, bundle: Bundle, seed: int) -> Result[Reply, string]
 ensures { match result {
@@ -55,7 +60,7 @@ ensures { match result {
       Err(e) => Err(e),
       Ok(v) => match decode(encodeBundle(bundle)) {
         Err(e) => Err(e),
-        Ok(encoded) => Ok({ command: command("answer", [kv("request", js(r.id)), kv("body", js(fixtureBody(r, label))), kv("roll", jnum(responseRoll.roll))]), seed: textRoll.seed, label: label, text: v.text, metadata: jo([kv("weights", ja(map(\w. jo([kv("label", js(w.label)), kv("weight", jint(w.weight))]), ws))), kv("response_roll", jnum(responseRoll.roll)), kv("text_roll", jnum(textRoll.roll)), kv("selected_label", js(label)), kv("variant_id", js(v.id)), kv("bundle", encoded), kv("dialogue", js(v.text))]) })
+        Ok(encoded) => Ok({ command: command("answer", [kv("request", js(r.id)), kv("body", js(fixtureBody(r, label))), kv("roll", jnum(responseRoll.roll))]), seed: textRoll.seed, label: label, text: v.text, textRoll: textRoll.roll, metadata: jo([kv("weights", ja(map(\w. jo([kv("label", js(w.label)), kv("weight", jint(w.weight))]), ws))), kv("response_roll", jnum(responseRoll.roll)), kv("text_roll", jnum(textRoll.roll)), kv("selected_label", js(label)), kv("variant_id", js(v.id)), kv("bundle", encoded), kv("dialogue", js(v.text))]) })
       }
     },
     (Err(e), _) => Err(e),
@@ -79,7 +84,7 @@ ensures {match result {Err(_)=>true,Ok(p)=>p.seed>=1 && p.seed<=2147483646 && st
      let exhausted=length(unseen)==0;
      match (if exhausted then Ok(original) else pickVariant(filtered,label,textRoll.roll)) {
       Err(e)=>Err(e),Ok(v)=>match decode(encodeBundle(bundle)) {
-       Err(e)=>Err(e),Ok(encoded)=>Ok({command:command("answer",[kv("request",js(r.id)),kv("body",js(fixtureBody(r,label))),kv("roll",jnum(responseRoll.roll))]),seed:textRoll.seed,label:label,text:v.text,metadata:jo([kv("weights",ja(map(\w. jo([kv("label",js(w.label)),kv("weight",jint(w.weight))]),ws))),kv("response_roll",jnum(responseRoll.roll)),kv("text_roll",jnum(textRoll.roll)),kv("selected_label",js(label)),kv("variant_id",js(v.id)),kv("bundle",encoded),kv("dialogue",js(v.text)),kv("recent_wording",jo([kv("policy",js("same-actor-same-label-v1")),kv("recent_text",ja(map(js,recent))),kv("unseen_variants",jint(length(unseen))),kv("exhausted_fallback",jb(exhausted)),kv("original_variant_id",js(original.id))]))])})
+       Err(e)=>Err(e),Ok(encoded)=>Ok({command:command("answer",[kv("request",js(r.id)),kv("body",js(fixtureBody(r,label))),kv("roll",jnum(responseRoll.roll))]),seed:textRoll.seed,label:label,text:v.text,textRoll:textRoll.roll,metadata:jo([kv("weights",ja(map(\w. jo([kv("label",js(w.label)),kv("weight",jint(w.weight))]),ws))),kv("response_roll",jnum(responseRoll.roll)),kv("text_roll",jnum(textRoll.roll)),kv("selected_label",js(label)),kv("variant_id",js(v.id)),kv("bundle",encoded),kv("dialogue",js(v.text)),kv("recent_wording",jo([kv("policy",js("same-actor-same-label-v1")),kv("recent_text",ja(map(js,recent))),kv("unseen_variants",jint(length(unseen))),kv("exhausted_fallback",jb(exhausted)),kv("original_variant_id",js(original.id))]))])})
       }
      }
     }
@@ -131,6 +136,18 @@ func noteFailure(r: Run, fetch: Fetch, error: string) -> Result[Run, string] ! {
     Ok(_) => Ok({ r | ui: { r.ui | seq: r.ui.seq + 1, phase: "response" }, remaining: r.remaining - fetch.calls })
   }
 
+-- The watch never calls a provider: saved words are read with no attempts left
+-- (so no generation can start), and a live library miss commits the decision with
+-- the authored line at once; the
+-- crew member's own words become a background job (same label and text roll).
+pure func deferJob(r:Run,request:Request,reply:Reply,sig:string)->[Spec] = match shortSignature(sig,reply.label) {
+ Err(_)=>[],
+ Ok(short)=>[{request:request.id,actor:request.actor,about:match head(filter(\t. t.id==request.task,r.ui.session.state.tasks)) {None=>"their work",Some(t)=>projectName(r.ui.session.scenario,t.recipe)},label:reply.label,signature:short,textRoll:reply.textRoll,prefetch:false}]
+}
+
+pure func noted(source:string,a:Applied)->Applied =
+ if source=="deferred" && not a.failed then {a|message:"${a.message}\n(Their own words are queued; r opens Replies.)"} else a
+
 func respond(r: Run, explicitAuthored: bool) -> Result[Applied, string] ! {IO, FS, AI} =
   match head(filter(\q. q.id == r.ui.target, r.ui.session.pending)) {
     None => Err("No pending response"),
@@ -139,7 +156,10 @@ func respond(r: Run, explicitAuthored: bool) -> Result[Applied, string] ! {IO, F
       waiting(r,request.actor)
       let fetch = if explicitAuthored then { outcome: starterBundle(sig, request.legal), source: "explicit-authored", calls: 0, inputTokens: 0, outputTokens: 0, usageKnown: true } else if isWatch(r.ui) && r.mode=="live" then match chooseReaction(r.policy,request,r.ui.seed) {
         Err(e)=>{outcome:Err(e),source:"error",calls:0,inputTokens:0,outputTokens:0,usageKnown:true},
-        Ok(label)=>resolveChosen(r.home,sig,request.legal,label,model(),r.mode,r.remaining)
+        Ok(label)=>if cachedChosen(r.home,sig,label) then resolveChosen(r.home,sig,request.legal,label,model(),r.mode,0) else match starterBundle(sig,request.legal) {
+          Err(e)=>{outcome:Err(e),source:"error",calls:0,inputTokens:0,outputTokens:0,usageKnown:true},
+          Ok(b)=>{outcome:Ok(b),source:"deferred",calls:0,inputTokens:0,outputTokens:0,usageKnown:true}
+        }
       } else resolve(r.home, sig, request.legal, model(), r.mode, r.remaining)
       match fetch.outcome {
         Err(e) => match noteFailure(r, fetch, e) {
@@ -158,7 +178,7 @@ func respond(r: Run, explicitAuthored: bool) -> Result[Applied, string] ! {IO, F
             let nextPhase = if hasConcern then "conversation" else if offered then "start" else "main"
             match commit(r, reply.command, reply.seed, nextPhase, if offered then request.task else "", r.ui.nextId, jo([kv("selection", reply.metadata), kv("usage", usage(fetch))]), fetch.calls) {
               Err(e) => Err(e),
-              Ok(applied) => Ok({ applied | run:{applied.run|recent:if isConversation(r.ui.session) then rememberReply(r.recent,request.actor,reply.text,not applied.failed) else r.recent}, message: if applied.failed then applied.message else if isWatch(r.ui) && not r.debug then if bundle.origin == "authored" && not isConversation(r.ui.session) then watchStock(r.ui.session.scenario,request,reply.label) else "${request.actor}: ${reply.text}" else "${dialogue(request.actor, reply.label, reply.text, fetch.source, bundle.origin)}${if isWatch(r.ui) && r.debug then "\nDevelopment selection: ${encode(reply.metadata)}" else ""}" })
+              Ok(applied) => Ok(noted(fetch.source,{ applied | run:{applied.run|recent:if isConversation(r.ui.session) then rememberReply(r.recent,request.actor,reply.text,not applied.failed) else r.recent,deferred:if fetch.source=="deferred" && not applied.failed then deferJob(r,request,reply,sig) else []}, message: if applied.failed then applied.message else if isWatch(r.ui) && not r.debug then if bundle.origin == "authored" && not isConversation(r.ui.session) then watchStock(r.ui.session.scenario,request,reply.label) else "${request.actor}: ${reply.text}" else "${dialogue(request.actor, reply.label, reply.text, fetch.source, bundle.origin)}${if isWatch(r.ui) && r.debug then "\nDevelopment selection: ${encode(reply.metadata)}" else ""}" }))
             }
           }
         }
@@ -229,7 +249,7 @@ ensures { match result {Err(_)=>true,Ok(r)=>r.ui.seed==seed && r.ui.seq==0 && is
    let c=command("start",[kv("policy",js(ui.session.policy)),kv("scenario",js(if conversation then "watch-v3" else "watch-v2"))]);
    match startWith(sc,c) {Err(_)=>Err("Startup failed"),Ok(host)=>{
     let header=envelope(0,jo([kv("kind",js("start")),kv("host_input",js(c)),kv("host_output",js(host.trace)),kv("seed",jint(seed)),kv("policy_body",js(config.body)),kv("policy_hash",js(sha256Hex(config.body))),kv("scenario_hash",js(scenarioHash(sc))),kv("scenario",js(sc.canonical)),kv("model",js(model())),kv("mode",js(mode))]));
-    match openRun(home,"${getPid()}-${seed}",header) {Err(e)=>Err("Run ownership/journal failed: ${e}"),Ok(path)=>Ok({ui:ui,home:home,path:path,policy:config.policy,policyBody:config.body,mode:mode,remaining:config.policy.callLimit,lines:0,lastMessage:"",modern:true,nav:initial(),dimensions:dimensions(80,24),ansi:false,debug:debug,recent:[]})}
+    match openRun(home,"${getPid()}-${seed}",header) {Err(e)=>Err("Run ownership/journal failed: ${e}"),Ok(path)=>Ok({ui:ui,home:home,path:path,policy:config.policy,policyBody:config.body,mode:mode,remaining:config.policy.callLimit,lines:0,lastMessage:"",modern:true,nav:initial(),dimensions:dimensions(80,24),ansi:false,debug:debug,recent:[],deferred:[]})}
    }}
   }
  }
@@ -251,3 +271,52 @@ export func closeWatch(r:Run)->Result[(),string] ! {FS}
 requires { isWatch(r.ui) && r.ui.seq>=0 && r.ui.seq<=10000 }
 ensures { match result {Ok(v)=>v==(),Err(_)=>true} } =
  appendRun(r.path,envelope(r.ui.seq+1,jo([kv("kind",js("quit")),kv("seed",jint(r.ui.seed))])))
+
+-- Transport record for background words: never a host command, never replayed.
+-- The allowance is settled here: a job that made no provider call is refunded.
+export func noteWording(r:Run,job:int,request:string,source:string,calls:int,inputTokens:int,outputTokens:int,text:string,error:string)->Result[Run,string] ! {FS}
+requires { isWatch(r.ui) && calls>=0 && calls<=1 }
+ensures { match result {Err(_)=>true,Ok(n)=>n.ui.session==r.ui.session && n.ui.seed==r.ui.seed && n.ui.phase==r.ui.phase && n.remaining>=r.remaining} } =
+ if r.ui.seq>=10000 then Err("Journal command limit") else match appendRun(r.path,envelope(r.ui.seq+1,jo([kv("kind",js("wording")),kv("job",jint(job)),kv("request",js(request)),kv("source",js(source)),kv("usage",jo([kv("calls",jint(calls)),kv("input_tokens",jint(inputTokens)),kv("output_tokens",jint(outputTokens))])),kv("text",js(text)),kv("error",js(error)),kv("seed",jint(r.ui.seed))]))) {
+  Err(e)=>Err("Journal failed while recording background words: ${e}"),
+  Ok(_)=>Ok({r|ui:{r.ui|seq:r.ui.seq+1},remaining:if calls==0 && r.remaining<r.policy.callLimit then r.remaining+1 else r.remaining})
+ }
+
+-- Prefetch. The session is pure, so offering a crew member their work and asking
+-- them can be staged on a copy of the state exactly as act/askProject would:
+-- same ids, seed and frozen request, hence the same reaction and signature.
+-- Nothing is committed or journalled. base is the full-library signature.
+export type Prediction = {spec:Spec, base:string} deriving (Eq)
+
+pure func idle(r:Run,worker:string)->bool =
+ not any(\t. (t.status==Working || t.status==Offered) && contains(t.participants,worker),r.ui.session.state.tasks)
+
+export pure func predictOffer(r:Run,worker:string)->Result[Prediction,string] ! {}
+ensures { match result {Err(_)=>true,Ok(p)=>p.spec.prefetch && p.spec.actor==worker} } = {
+ let recipe="work_${worker}";
+ let task="project-${r.ui.nextId}";
+ if not workerRecipe(r.ui.session.scenario,worker,recipe) then Err("no work recipe") else match stage(r.ui,command("offer",[kv("worker",js(worker)),kv("recipe",js(recipe)),kv("id",js(task))]),r.ui.seed,"main","",r.ui.nextId+1) {
+  Err(e)=>Err(e),Ok(offered)=>if offered.failed then Err("offer would fail") else {
+   let s1=offered.state;
+   let id="reply-${s1.nextId}";
+   match stage(s1,command("ask",[kv("actor",js(worker)),kv("task",js(task)),kv("id",js(id))]),s1.seed,"response",id,s1.nextId+1) {
+    Err(e)=>Err(e),Ok(asked)=>if asked.failed then Err("ask would fail") else match head(filter(\q. q.id==id,asked.state.session.pending)) {
+     None=>Err("no request"),Some(request)=>{
+      let base=watchSignatureIn(r.ui.session.scenario,request,r.policyBody,model());
+      match chooseReaction(r.policy,request,asked.state.seed) {
+       Err(e)=>Err(e),Ok(label)=>match shortSignature(base,label) {
+        Err(e)=>Err(e),Ok(short)=>Ok({spec:{request:id,actor:worker,about:projectName(r.ui.session.scenario,recipe),label:label,signature:short,textRoll:0.0,prefetch:true},base:base})
+       }
+      }
+     }
+    }
+   }
+  }
+ }
+}
+
+-- Up to n idle crew, in scenario order, while on the bridge or the work chooser.
+export pure func prefetchCandidates(r:Run,n:int)->[Prediction] ! {}
+ensures { length(result)<=5 } =
+ if n<=0 || not isWatch(r.ui) || r.mode!="live" || (r.ui.phase!="main" && r.ui.phase!="assignments") || r.ui.session.state.continuation!=None then []
+ else take(if n>5 then 5 else n,foldl(\acc w. if not idle(r,w) then acc else match predictOffer(r,w) {Ok(p)=>acc++[p],Err(_)=>acc},[],r.ui.session.scenario.workers))

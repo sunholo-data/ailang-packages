@@ -13,7 +13,7 @@ import ./play_flow (PlayState)
 import pkg/sunholo/crew_core/scenario (projectName)
 
 -- Presentation state owns no Session, RNG, journal or AI allowance.
-export type View = Briefing | Decision | Crew | Work | Log | Guide | Ship | Quit | Editor | ReplyReview deriving(Eq)
+export type View = Briefing | Decision | Crew | Work | Log | Guide | Ship | Quit | Editor | ReplyReview | Replies deriving(Eq)
 export type Draft = {issue:string,field:Field,approach:string,tick:int,revision:int} deriving(Eq)
 export type UI = {view:View,previous:View,cursor:int,page:int,dimensions:Dimensions,ascii:bool,previousCursor:int,previousPage:int,draft:Option[Draft]} deriving(Eq)
 export type Choice = {key:string,label:string,preview:string} deriving(Eq)
@@ -66,7 +66,7 @@ ensures { match result {None=>true,Some(c)=>c.label!=""} } =
 pure func rootView(s:Option[PlayState]) -> View = match s {None=>Briefing,Some(_)=>Decision}
 pure func openQuit(u:UI) -> UI = {u | previous:u.view,previousCursor:u.cursor,previousPage:u.page,view:Quit,cursor:0,page:0}
 pure func restore(u:UI)->UI = {u|view:u.previous,cursor:u.previousCursor,page:u.previousPage}
-pure func reading(v:View) -> bool = v == Crew || v == Work || v == Log || v == Guide || v == Ship
+pure func reading(v:View) -> bool = v == Crew || v == Work || v == Log || v == Guide || v == Ship || v == Replies
 pure func page(n:int) -> int = if n < 0 then 0 else if n > 1000000 then 1000000 else n
 pure func unchanged(u:UI) -> Transition = {ui:u,command:None,quit:false}
 pure func chooseNumber(s:Option[PlayState],u:UI,key:string) -> Transition =
@@ -131,6 +131,7 @@ ensures { result.ui.dimensions.columns >= 1 && result.ui.dimensions.rows >= 1 &&
   else if k == Character("w") then unchanged({u|view:Work,page:0})
   else if k == Character("j") then unchanged({u|view:Log,page:0})
   else if k == Character("s") then unchanged({u|view:Ship,page:0})
+  else if k == Character("r") then unchanged({u|view:Replies,page:0})
   else if k == PriorPage || k == FollowingPage || (reading(u.view) && (k == Next || k == Previous)) then unchanged({u|page:page(u.page + (if k == PriorPage || k == Previous then 0-1 else 1))})
   else if k == Next || k == Previous || k == First || k == Last then unchanged({u|cursor:cursor(if k == First then 0 else if k == Last then count-1 else u.cursor + (if k == Previous then 0-1 else 1),count)})
   else if k == Accept then if reading(u.view) then unchanged(u) else if u.view == Quit then if u.cursor == 1 then {ui:u,command:None,quit:true} else unchanged({u|view:u.previous,cursor:0,page:0}) else match selected(s,u) {None=>unchanged(u),Some(c)=>if isConversation(s) then chooseNumber(s,u,c.key) else {ui:u,command:Some(c.key),quit:false}}

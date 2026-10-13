@@ -93,5 +93,11 @@ conversations-test:
 	@cd "$(ROOT)/packages/social-dynamics" && "$(AILANG)" test --allow-skips personality.ail
 	@AILANG="$(AILANG)" python3 "$(EX)/test-conversations.py"
 	@AILANG="$(AILANG)" "$(EX)/test-conversation-replay.sh"
+# Background crew words: the pure inbox and file protocol on both engines, then
+# the installed live watch with provider-free fixture and stubbed workers.
+reply-test:
+	@cd "$(EX)" && for m in reply_jobs reply_codec; do "$(AILANG)" test --allow-skips $$m.ail || exit; "$(AILANG)" test --allow-skips --bytecode --strict-bytecode $$m.ail || exit; done
+async-test:
+	@AILANG="$(AILANG)" "$(EX)/test-async.sh"
 
-validate: deps core-tests library-tests terminal-tests tests scenarios replay parity store-test quality native-ui-test native-watch-test native-watch-pty-test short-reply-test conversations-test sim-test scenario-test
+validate: deps core-tests library-tests terminal-tests tests scenarios replay parity store-test quality native-ui-test native-watch-test native-watch-pty-test short-reply-test conversations-test sim-test scenario-test reply-test async-test
