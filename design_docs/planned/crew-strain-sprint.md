@@ -14,7 +14,7 @@ is published.
 | ✅ S2 | crew_core: crew argue over lost capacity (hold score, halts, stress, regard), `regard` relationships for scenarios with events, `sf-` reserved | `strain_test.ail` (4 tests) on both engines; `make core-tests` |
 | ✅ S3 | crew_core: trust by personality (`complied_start`, `strained_start`, `traitDelta`) and the optional policy `strain` block | `codec_test` table; `policy.ail` strain tests |
 | ✅ S4 | crew-lab: orders captain stops resting people unprompted; peak, overextended, halted, regard and shortfall measures; claim metrics; pack `policy.json`; claims written first; 20-seed results in REVIEW.md | `make tests replay parity claims-test scenario-pack-test`; `crew-sim --check` |
-| ✅ S5 | Close: changelogs, notes, independent evaluation, PR; publish `crew_core` after merge | `make validate` (keyless) |
+| ✅ S5 | Close: changelogs, notes, independent evaluation (80/100, all findings fixed), PR #136; publish `crew_core` after merge | `make validate` (keyless) |
 
 ## Module checklist
 
