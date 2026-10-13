@@ -194,3 +194,9 @@ test "a resented birth policy keeps trust down while it lasts, not just for a we
  let h = drift(policy("hold"), 200, [], []);
  sum(map(\c. meanBand(c.trust), r.cohorts)) > sum(map(\c. meanBand(c.trust), h.cohorts)) + 100
 }
+
+test "drift is the same in one step or a day at a time (calendar weeks)" {
+ let shocked = hear(pop(), "ev-1", "loss", false);
+ let daily = foldl(\acc d. drift(acc, d, [], []), shocked, range(1, 61));
+ drift(shocked, 60, [], []) == daily && drift(drift(shocked, 25, [], []), 60, [], []) == daily
+}

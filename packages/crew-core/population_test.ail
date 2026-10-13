@@ -1,7 +1,7 @@
 module sunholo/crew_core/population_test
 import std/result (Result, Ok, Err)
 import std/option (Option, Some, None)
-import std/list (head, filter, length, any, map)
+import std/list (head, filter, length, any, map, foldl, range)
 import std/string (contains, replace)
 import ./scenario (decodeScenario)
 import ./session (Session, Output, HostError, HostFailure, start, input, snapshot)
@@ -93,4 +93,9 @@ test "a cohort crossing its pressure threshold stops auto-play" {
 test "cohort rules are checked" {
  (match decodeEscalation(replace(cohortRules(), "pressure", "anger")) { Err(e) => contains(e, "cohort needs"), Ok(_) => false })
  && (match decodeEscalation(replace(cohortRules(), "\"threshold\":1", "\"threshold\":101")) { Err(_) => true, Ok(_) => false })
+}
+
+test "cohorts end the same whether days are batched or advanced one at a time" {
+ let daily = foldl(\acc t. to(acc, t), begin(true), range(1, 10));
+ pop(to(begin(true), 9)) == pop(daily) && pop(to(to(begin(true), 4), 9)) == pop(daily)
 }

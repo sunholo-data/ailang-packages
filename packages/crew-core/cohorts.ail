@@ -308,19 +308,23 @@ pure func driftOne(p: Population, c: Cohort, sig: Option[Signal], short: bool, d
  {c | mood: shift(c.mood, m.down, m.up, p.mode, p.seed, "drift:${p.day}:${c.id}"), trust: shift(c.trust, t.down, t.up, p.mode, p.seed, "trust:${p.day}:${c.id}"), shock: c.shock * decay(20, days) / 1000}
 }
 
--- Advance the cohorts' moods to tick `day`. Long gaps run in steps of at
--- most a week, so people can travel several bands during a skip; the cost
--- grows with weeks skipped, never with headcount. `signals` come from each
--- cohort's voice; `short` lists the resources below a fifth of their
--- opening amount.
-pure func driftStep(p: Population, day: int, signals: [Signal], short: [string]) -> Population =
- if day <= p.day then p else {
-  let days = if day - p.day > 7 then 7 else day - p.day;
-  let q = {p | day: p.day + days, cohorts: map(\c. driftOne(p, c, head(filter(\s. s.cohort == c.id, signals)), any(\n. contains(short, n), p.needs), days), p.cohorts)};
+-- Advance the cohorts' moods to tick `day`. Drift happens on calendar
+-- weeks: one week's step at every tick that is a multiple of 7, whatever
+-- the advances in between, so a skip batched into one advance and a day
+-- at a time give the same cohorts (provided the host's signals and
+-- shortages are those at each week boundary: hosts that batch days treat
+-- multiples of 7 and of 365 as flow points). Cost grows with weeks
+-- skipped, never with headcount. `signals` come from each cohort's voice;
+-- `short` lists the resources below a fifth of their opening amount.
+pure func driftStep(p: Population, day: int, signals: [Signal], short: [string]) -> Population = {
+ let next = (p.day / 7 + 1) * 7;
+ if next > day then {p | day: if day > p.day then day else p.day} else {
+  let q = {p | day: next, cohorts: map(\c. driftOne({p | day: next}, c, head(filter(\s. s.cohort == c.id, signals)), any(\n. contains(short, n), p.needs), 7), p.cohorts)};
   driftStep(q, day, signals, short)
  }
+}
 export pure func drift(p: Population, day: int, signals: [Signal], short: [string]) -> Population
-ensures { total(result) == total(p) && (result.day == p.day || result.day == day) } = driftStep(p, day, signals, short)
+ensures { total(result) == total(p) && result.day >= p.day } = driftStep(p, day, signals, short)
 
 -- ------------------------------------------------------------ years
 
