@@ -57,7 +57,7 @@ cadence 30 with keep 30, seed 1):
 
 Cohorts cost about 0.6 s a decade, the same at 1,000 or 100,000 people.
 Pack claims (crew-lab, claims written before the runs; 18 of 18 hold over
-seeds 1..3): a calm year, the century (1,646 at year 100 under hold, the
+seeds 1..3, split over 1..20): a calm year, the century (1,643 at year 100 under hold, the
 top of D-75's band), births stop when the beds go dark, restricting births
 escalates a cohort within ten years, a split cohort escalates and a
 uniformly uneasy one does not. Two findings on the way: the restrict claim
