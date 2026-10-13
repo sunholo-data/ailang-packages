@@ -2,7 +2,7 @@ module sunholo/crew_core/flows_test
 import std/result (Result, Ok, Err)
 import std/option (Some, None)
 import std/list (head, filter, length, map, any)
-import std/string (replace, contains)
+import std/string (replace, contains, length as stringLength)
 import pkg/sunholo/social_dynamics/model (Resource)
 import ./scenario (Scenario, decodeScenario, resourceKind, yieldsOf, scenarioHash)
 import ./session (Session, Output, HostError, HostFailure, start, input, offer, startTask)
@@ -100,5 +100,34 @@ test "a major ship event reaches crew personalities in watch-v3" {
     Ok(a) => heard(a.session, "ev-delivery") && any(\p. any(\h. match h { MajorReceived(m) => m.receipt.evidence == "ev-delivery", _ => false }, p.history), a.session.personalities)
    }
   }
+ }
+}
+
+pure func longId() -> string = "t-01234567890123456789012345678901234567890123456789012345678901"
+
+pure func bakedAs(id: string) -> Result[Session, HostError] = match decodeScenario(ship(evs(), true)) {
+ Err(e) => Err(HostFailure(e)),
+ Ok(sc) => match start(sc, "{\"command\":\"start\",\"policy\":\"orders\",\"scenario\":\"watch-v2\"}") {
+  Err(e) => Err(e),
+  Ok(o) => match offer(o.session, "cook", "work_cook", id) {
+   Err(e) => Err(e),
+   Ok(p) => match startTask(p.session, id) { Err(e) => Err(e), Ok(q) => match adv(q.session, 2) { Err(e) => Err(e), Ok(a) => Ok(a.session) } }
+  }
+ }
+}
+
+test "ids reserved for ship flows are refused from callers" {
+ match (bakedAs("ev-fake"), bakedAs("yd-x"), bakedAs("hear-x"), bakedAs("ship-x")) { (Err(_), Err(_), Err(_), Err(_)) => true, _ => false }
+}
+
+test "a 64-character task id still yields: flow ids stay inside validId" {
+ match bakedAs(longId()) { Err(_) => false, Ok(s) => stringLength(longId()) == 64 && heard(s, "yd-${longId()}") && res(s, "water").transferredIn == 2 }
+}
+
+-- The captain authors flow evidence, so knows it too.
+test "yields are heard by the task's participants only; events by the whole crew" {
+ match bakedAs("bake") {
+  Err(_) => false,
+  Ok(s) => map(\k. k.observer, filter(\k. k.evidence == "yd-bake", s.state.knowledge)) == ["captain", "cook"] && length(filter(\k. k.evidence == "ev-leak", s.state.knowledge)) == length(s.scenario.workers) + 1
  }
 }

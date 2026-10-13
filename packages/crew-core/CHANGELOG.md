@@ -1,5 +1,20 @@
 # Changelog
 
+## Unreleased
+
+- **Resource flows (S-CREW-BUBBLE-RESOURCES).** Optional fields in
+  `crew_scenario/1`, so existing scenarios decode and replay unchanged:
+  - resource `kind` (stock or capacity; a capacity is never consumed);
+  - work `yields`;
+  - top-level ship `events`, which move units at a tick and are heard by the
+    whole crew.
+- `scenario`: `Transfer`, `ShipEvent`, `Yield`, `resourceKind` and `yieldsOf`.
+- `session`: applies due yields, then due events, after each completed advance.
+- New module `flows`: balanced transfers (`transfer`, `transferAll`,
+  `appliedDelta`, `balanced`). An outward transfer never takes reserved units.
+  `social_dynamics` is unchanged; transfers use its existing
+  `transferredIn` and `transferredOut` books.
+
 ## 0.1.0
 
 First release, split out of the local crew-lab example (S-CREW-CORE-SPLIT). A pure

@@ -9,6 +9,14 @@ Local only; never published.
   `compute`, `signal`; stapledons-design `bubble-resources.md`). Stocks are
   used up; capacities are only reserved. All claims are unchanged: 33 of 36
   hold.
+- **Resources that flow (S-CREW-BUBBLE-RESOURCES).**
+  - `crew_sim/1` reports `resources.<id>` (`min`, `zero_ticks`, `stockouts`,
+    `in`, `out`), and claims can name these.
+  - `bubble.ail` holds the eight bubble resources, `allocate` (ship ledger to
+    crew units) and `lintPack`.
+  - `crew-sim --bubble` lints a scenario, and `scenario-pack-test` runs it.
+  - Four pack scenarios gained ship events and yields. 41 of 46 claims hold;
+    the findings are in `REVIEW.md`.
 - **Crew memory spike.**
   - `memory.ail` (pure, exported) provides recall, the variety check
     (`echoes`), `margin` and the Archive's near-miss `pick`.

@@ -1,0 +1,34 @@
+{
+  "sprint_id": "S-CREW-BUBBLE-RESOURCES",
+  "round": 1,
+  "evaluator": "claude-sonnet-5-5 (independent sprint-evaluator, generator != judge)",
+  "branch": "sprint/crew-bubble-resources",
+  "base": "5a420dd",
+  "commits": ["06407da", "42efd06", "a526aee"],
+  "score": 80,
+  "pass": true,
+  "breakdown": {
+    "acceptance_criteria": {"score": 33, "max": 40, "notes": "crew-core: 110 passed, 0 failed, 59 skipped on the interpreter and on --bytecode --strict-bytecode. crew_sim_test.ail passes. Decoding covers kind (stock/capacity, default stock), events (id <= 32 chars, at 1..10000, <= 8 transfers, <= 32 events, unique ids, major kind set, unknown resource, delta != 0) and yields (<= 4, unique resource, amount 1..1000). A capacity cannot be consumed. Transfers keep the books balanced; outward transfers cap at available, so reserved units are never taken. Yields fire only for Completed tasks. Flows are idempotent through the yd-/ev- evidence id. Old scenarios are unaffected: scenarios without events or yields make flowsDue a no-op. Re-ran --check seeds 1..5 on processing-cascade (7 of 9) and ergosphere-question (8 of 9): the FAIL lines match the failures REVIEW.md records as findings, not tuned away. Deductions: flows for events that pass during a Pending continuation fire only on Done, at the end tick; there is no test of flows across Pending or Blocked; no test of an id collision; no test at the 32-event x 15-crew limit."},
+    "correctness_robustness": {"score": 24, "max": 30, "notes": "No outright logic bug found. The main defects are edge limits and one measurement gap. hear ids are built as hear-<evidence>-<observer>: with a 32-char event id and a 64-char worker id that is 105 chars, over validId's 96, and a 64-char task id gives hear-yd-<64>-<64>=137. Such a scenario fails every advance with a domain error, not at decode time. Event ids (ev-) and yield ids (yd-) share the evidence namespace with user ids: a captain concern or task named ev-X or yd-X either blocks the flow (seen() is true) or makes RaiseConcern fail with InvalidTransition. Each flow adds 1 evidence plus one knowledge row per crew member, so 32 events x 15 crew = 480 knowledge rows, which can hit limits.knowledge and fail the advance mid-run; decode does not check this. crew_sim observe runs only after advance, and assign/start run before the advance, so a reservation that begins and completes within one advance (a duration-1 task) never shows in resources.<r>.min or zero_ticks; the metric understates contention. bubble.allocate integer division is guarded for negative values and unknown ids; fine."},
+    "test_quality": {"score": 12, "max": 15, "notes": "flows_test.ail covers in, out capped by reserved, the sequence invariant and an unknown resource. crew_sim_test and claims.ail test resource metrics and the bubble resource set. Gaps: no test for yields-only-on-completion or events firing exactly once and in order across several advances at the session level (as opposed to by pack run); nothing covers a Pending continuation, an id collision or the evidence/knowledge limit."},
+    "docs_bookkeeping": {"score": 11, "max": 15, "notes": "CHANGELOGs, AGENT.md and REVIEW.md are specific, and the claims were reported honestly (41 of 46 hold, three new findings recorded as host rules to decide). Deduction: uncommitted lockfile and doc edits remain in the tree (CHANGELOG/AGENT.md/ailang.lock) and the design says the sprint is done only once they are committed."}
+  },
+  "defects": [
+    {"id": 1, "severity": "medium", "file": "packages/crew-core/session.ail:396", "issue": "hear id 'hear-${evidence}-${who}' can exceed validId's 96 characters (event id 32 + 'ev-' + worker 64 = 105; yield task id up to 64 gives 137), so advance fails with a domain error at run time for legal scenarios.", "suggestion": "Use a short fixed id (hash or index) or cap event/task and worker ids at decode time."},
+    {"id": 2, "severity": "medium", "file": "packages/crew-core/session.ail:390,421", "issue": "seen() and the ev-/yd- ids share the evidence namespace with user ids; a host-supplied concern or task id such as 'ev-x'/'yd-t' suppresses or breaks the flow. Not tested.", "suggestion": "Reserve the prefixes in checkedId or use a distinct author/kind check in seen()."},
+    {"id": 3, "severity": "medium", "file": "packages/crew-core/scenario.ail (readEvents) / session.ail:flow", "issue": "32 events x 15 crew gives 480 knowledge rows plus 32 evidence; limits.knowledge can be hit mid-run, failing the advance. Decode does not check event count x crew against the limits, and there is no limit test.", "suggestion": "Reject at decode when events x crew + baseline exceeds the configured limits, and add a test."},
+    {"id": 4, "severity": "low", "file": "examples/crew-lab/crew_sim.ail:194-200", "issue": "observe runs only after advanceTo, which comes after assign; a task that reserves and completes within one advance never lowers low/zero_ticks, so contention metrics can understate.", "suggestion": "Observe after assign as well, or document that min is end-of-turn."},
+    {"id": 5, "severity": "low", "file": "packages/crew-core/session.ail:455-457", "issue": "Events due during a Pending continuation fire only at Done, after tasks finishing later in the same advance; order within an advance is yield-then-event, not by tick. Not tested.", "suggestion": "Document the ordering and add a session test spanning a Pending."},
+    {"id": 6, "severity": "low", "file": "packages/crew-core/flows_test.ail", "issue": "No test of yields-only-on-completion, once-only firing and order at session level.", "suggestion": "Add a session test: advance twice past an event tick and assert one ev- evidence."},
+    {"id": 7, "severity": "low", "file": "working tree", "issue": "Uncommitted doc and lockfile edits remain.", "suggestion": "Commit them (lockfile generated_at churn aside)."}
+  ],
+  "commands_run": [
+    "cd packages/crew-core && ailang test --allow-skips . -> 169 tests: 110 passed, 0 failed, 59 skipped",
+    "cd packages/crew-core && ailang test --allow-skips --bytecode --strict-bytecode . -> 110 passed, 0 failed",
+    "cd examples/crew-lab && ailang test --allow-skips crew_sim_test.ail -> pass",
+    "sim_cli.ail --check processing-cascade.claims.json seeds 1..5 -> 7 of 9 hold",
+    "sim_cli.ail --check ergosphere-question.claims.json seeds 1..5 -> 8 of 9 hold",
+    "make targets not run (validate in progress)"
+  ],
+  "summary": "PASS, 80/100. Transfers, kinds, events and yields are decoded and validated; the books balance; reserved units are never taken; flows are idempotent; old scenarios are untouched; claims results are reported honestly, with failures recorded as findings. Risks: hear/evidence id length and namespace collisions, unchecked knowledge limits at 32 events x 15 crew, observe timing that can miss intra-turn reservation dips, and missing session-level flow tests."
+}

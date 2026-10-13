@@ -1,6 +1,6 @@
 {
   "sprint_id": "S-CREW-BUBBLE-RESOURCES",
-  "status": "in_progress",
+  "status": "completed",
   "created": "2026-10-13",
   "design_doc": "design_docs/planned/crew-bubble-resources.md",
   "sprint_plan": "design_docs/planned/crew-bubble-resources-sprint.md",
@@ -78,10 +78,10 @@
         "pkg quality --strict no gates (crew_core, crew_lab)",
         "evaluation by a different agent >= 70"
       ],
-      "passes": null,
-      "started": null,
-      "completed": null,
-      "notes": null
+      "passes": true,
+      "started": "2026-10-13",
+      "completed": "2026-10-13",
+      "notes": "Changelogs (crew_core Unreleased, crew-lab), AGENT notes; eval round 1 Sonnet 80/100 pass, all 7 findings addressed; make validate keyless pass (local rg shim: rg is a shell function in this environment; CI has rg); quality no gates."
     }
   ],
   "registry_reuse": [
@@ -91,8 +91,16 @@
       "detail": "no registry package models resource flows; social_dynamics 0.3.0 reused unchanged (its transferredIn/Out fields)"
     }
   ],
-  "evaluations": [],
-  "completed": null,
+  "evaluations": [
+    {
+      "round": 1,
+      "score": 80,
+      "pass": true,
+      "report": ".ailang/state/evaluations/eval_S-CREW-BUBBLE-RESOURCES_round_1.json",
+      "fixed": "F1 short delivery ids (worker index, <=76 chars) + 64-char task id test; F2 reserved prefixes ev-/yd-/hear-/ship- refused from callers (offer/ask/deliver/...) + test; F3 yields heard by participants only, knowledge bound documented (<=480 event rows + 1 per yielding task); F4 crew_sim observes low after assignment too (claims unchanged over 20 seeds); F5 ordering documented in session.ail and AGENT.md; F6 tests for participants-only yields and once-only firing; F7 docs committed"
+    }
+  ],
+  "completed": "2026-10-13",
   "pull_requests": [],
   "landing": null
 }

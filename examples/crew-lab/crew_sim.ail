@@ -30,10 +30,20 @@ export type Heard = {request: Request, label: string, tick: int, fatigue: int, s
 export type Sim = {session: Session, seed: int, tally: Tally, captain: string, policy: Policy, scenario: Scenario, agreed: [string], heard: [Heard], keep: int} deriving (Eq)
 
 -- Resources: `low` starts at each account's opening balance and keeps the
--- lowest available seen after any turn; `zero` counts turns ending with none
+-- lowest available seen after work is assigned or after an advance; `zero` counts turns ending with none
 -- available; `short` counts stockout refusals by resource.
 pure func zero(sc: Scenario) -> Tally = {replies: [], byCrew: [], offers: 0, starts: 0, refused: 0, stockouts: 0, reliefAsked: 0, granted: 0, denied: 0, errors: 0, why: [], refusals: [], short: [], low: map(\r. {id: r.id, value: r.available}, sc.resources), zero: map(\r. {id: r.id, value: 0}, sc.resources)}
 
+-- After work is assigned (before the advance): lowers `low` only, so work
+-- that reserves and completes within one advance still shows its draw.
+pure func observeLow(sim: Sim) -> Sim = {
+ let t = sim.tally;
+ let rs = sim.session.state.resources;
+ let avail = \id. match head(filter(\r. r.id == id, rs)) { Some(r) => r.available, None => 0 };
+ withTally(sim, {t | low: map(\c. {id: c.id, value: if avail(c.id) < c.value then avail(c.id) else c.value}, t.low)})
+}
+
+-- After each advance: lowers `low` and counts a turn ending with none available.
 pure func observe(sim: Sim) -> Sim = {
  let t = sim.tally;
  let rs = sim.session.state.resources;
@@ -197,7 +207,7 @@ pure func turnOf(sim: Sim, turn: int) -> Sim = {
  let working = filter(\t. t.status == Working, s1.session.state.tasks);
  let s2 = foldl(\acc t. checkIn(acc, turn, t), s1, working);
  let s3 = foldl(\acc w. assign(acc, turn, w), s2, s2.scenario.workers);
- advanceTo(s3, turn)
+ advanceTo(observeLow(s3), turn)
 }
 
 export pure func play(sc: Scenario, policy: Policy, captain: string, seed: int, turns: int) -> Result[Sim, string]
