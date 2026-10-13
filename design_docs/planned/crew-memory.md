@@ -3,7 +3,7 @@
 **Status:** Spike done (2026-10-13); design proposed, not planned.
 **Package:** `sunholo/crew_lab` (local only; never published). The pure part
 may later move to `sunholo/crew_core`.
-**Game design:** stapledons-design `features/next/inner-shapes-outer.md` §5.
+**Game design:** stapledons-design `features/next/semantic-memory.md` (#19), stage S2 (crew recall), which owns the memory design; this is the lab prototype and its measurements. Also `inner-shapes-outer.md` §5 (#20).
 
 ## Problem
 
