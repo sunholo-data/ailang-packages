@@ -1,5 +1,7 @@
 module sunholo/crew_core/codec_test
-import ./codec (fields, text, integer, number, object, CrewOutcome, AgreedStart, RefusedOrder, GrantedRelief, DeniedRelief, encodeOutcome, decodeOutcome, outcomeDelta)
+import std/list (map)
+import pkg/sunholo/social_dynamics/model (Value)
+import ./codec (fields, text, integer, number, object, CrewOutcome, AgreedStart, RefusedOrder, GrantedRelief, DeniedRelief, CompliedStart, StrainedStart, traitDelta, encodeOutcome, decodeOutcome, outcomeDelta)
 import std/json (Json, JArray, ja, jo, kv, js, jint, jnum)
 import std/result (Result, Ok, Err)
 import std/math (sqrt, pow)
@@ -92,3 +94,19 @@ test "outcome decoder rejects narrative substrings whitespace and unknown codes"
     _ => false
   }
 }
+
+pure func ocean(o: int, c: int, e: int, a: int, n: int) -> [Value] = [{id: "openness", value: o}, {id: "conscientiousness", value: c}, {id: "extraversion", value: e}, {id: "agreeableness", value: a}, {id: "neuroticism", value: n}]
+
+test "trust by personality: the crew-strain design table" {
+ let diplomat = ocean(55, 55, 80, 80, 25);
+ let engineer = ocean(20, 90, 25, 45, 35);
+ let skeptic = ocean(55, 60, 40, 30, 45);
+ map(\o. traitDelta(CompliedStart, o), [diplomat, engineer, skeptic]) == [1, 2, 1]
+ && map(\o. traitDelta(StrainedStart, o), [diplomat, engineer, skeptic]) == [0 - 1, 0 - 2, 0 - 4]
+ && map(\o. traitDelta(RefusedOrder, o), [diplomat, engineer, skeptic]) == [0 - 6, 0 - 8, 0 - 10]
+ && traitDelta(RefusedOrder, ocean(50, 50, 50, 100, 50)) == 0 - 4 && traitDelta(RefusedOrder, ocean(50, 50, 50, 0, 50)) == 0 - 12
+ && traitDelta(DeniedRelief, diplomat) == 0 - 3 && traitDelta(DeniedRelief, ocean(50, 50, 50, 50, 100)) == 0 - 6
+ && traitDelta(AgreedStart, skeptic) == 2 && traitDelta(GrantedRelief, skeptic) == 4 && traitDelta(CompliedStart, []) == 2
+}
+
+test "complied and strained starts round-trip" { decodeOutcome(encodeOutcome(CompliedStart)) == Ok(CompliedStart) && decodeOutcome(encodeOutcome(StrainedStart)) == Ok(StrainedStart) }

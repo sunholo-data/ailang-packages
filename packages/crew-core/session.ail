@@ -1,20 +1,21 @@
 module sunholo/crew_core/session
 import std/result (Result, Ok, Err)
 import std/option (Option, Some, None)
-import std/list (length, map, filter, head, any)
+import std/list (length, map, filter, head, any, sortBy, foldl, contains, flatMap)
 import std/string (join, startsWith, length as stringLength)
 import std/json (Json, encode, getString, getBool, js, jint, jnum, jo, kv, ja, asObject)
-import pkg/sunholo/social_dynamics/model (Config, State, Error, InvalidSchema, Step, Event, Operation, Source, Authored, ActorInput, ActorPrincipal, Host, OfferTask, OfferCommitment, AcceptCommitment, AcceptTask, RaiseConcern, RequestRelief, ResolveRelief, Offered, Working, Completed, Task, Appraisal, validId, sorted, numericLimit, Applied, Done, Pending, Blocked)
+import pkg/sunholo/social_dynamics/model (Config, State, Error, InvalidSchema, Step, Event, Operation, Source, Authored, ActorInput, ActorPrincipal, Host, OfferTask, OfferCommitment, AcceptCommitment, AcceptTask, RaiseConcern, RequestRelief, ResolveRelief, Offered, Working, Completed, Task, Appraisal, Effect, BoundedIndicatorDelta, RelationshipDelta, Value, validId, sorted, numericLimit, Applied, Done, Pending, Blocked)
 import pkg/sunholo/social_dynamics/engine (init, advance, continueAdvance, abortAdvance)
 import pkg/sunholo/social_dynamics/proposals (apply)
-import pkg/sunholo/social_dynamics/tasks (findTask)
+import pkg/sunholo/social_dynamics/tasks (findTask, halt)
+import pkg/sunholo/social_dynamics/indicators (applyEffects)
 import pkg/sunholo/social_dynamics/relationships (appraisalContext, deliver)
 import pkg/sunholo/social_dynamics/wire (encodeState, encodeEvents, encodeError, encodeConfig)
 import ./scenario (Scenario, ShipEvent, Transfer, config as scenarioConfig, workerRecipe, projectName, resourceName, purpose, yieldsOf)
 import ./flows (Applied, transferAll)
 import ./host_policy (policies)
 import ./example (firstContact)
-import ./codec (object, fields, text, integer, number, CrewOutcome, AgreedStart, RefusedOrder, GrantedRelief, DeniedRelief, encodeOutcome)
+import ./codec (object, fields, text, integer, number, CrewOutcome, AgreedStart, CompliedStart, StrainedStart, RefusedOrder, GrantedRelief, DeniedRelief, encodeOutcome)
 import ./actor_policy (evaluate, requestBody, encodeChoice)
 import pkg/sunholo/social_dynamics/personality (Personality,MajorReceived)
 import ./personality_host (initializeShip, advanceShip, project as projectPersonalities, json as personalitiesJson, receiveSpeech, receiveMajor, majorKind)
@@ -63,7 +64,7 @@ ensures { not result.traced && result.state == s.state } = {s | traced: false}
 
 -- Ids the host makes for ship flows ("ev-", "yd-" evidence, "hear-" and
 -- "ship-" deliveries and operations) are reserved, so no caller id collides.
-pure func reservedId(id: string) -> bool = any(\p. startsWith(id, p), ["ev-", "yd-", "hear-", "ship-"])
+pure func reservedId(id: string) -> bool = any(\p. startsWith(id, p), ["ev-", "yd-", "sf-", "hear-", "ship-"])
 pure func checkedId(id: string) -> bool = validId(id) && stringLength(id) <= 64 && not reservedId(id)
 
 pure func owned(s: Session, worker: string, recipe: string) -> bool = workerRecipe(s.scenario, worker, recipe)
@@ -296,6 +297,15 @@ pure func report(s: Session, b: TaskAgreement, outcome: CrewOutcome, id: string,
 
 -- CrewOutcome deliberately avoids decisions.Outcome's unqualified type name:
 -- pinned VM registries collide across packages; reported upstream: inbox_1791551800555_38e0d9dc.
+-- At or over the scenario's overextension threshold (rule overextended_<worker>).
+pure func overextended(s: Session, worker: string) -> bool = match head(filter(\r. r.id == "overextended_${worker}", s.scenario.rules)) {
+  None => false,
+  Some(r) => match head(filter(\a. a.id == worker, s.state.actors)) {
+    None => false,
+    Some(a) => any(\v. v.id == r.indicator && (if r.above then v.value >= r.threshold else v.value <= r.threshold), a.indicators)
+  }
+}
+
 export pure func startTask(s: Session, id: string) -> Result[Output, HostError]
 ensures { match result {
   Ok(o) => o.session.state.tick == s.state.tick,
@@ -306,7 +316,7 @@ ensures { match result {
     let agreed = consent(s, b)
     if s.policy == "consent" && not agreed then Err(HostFailure("personal consent required")) else match domain(s, "start-${id}", "captain", Authored, [AcceptTask(id)]) {
       Err(e) => Err(e),
-      Ok(step) => report({ s | state: step.state }, b, if agreed then AgreedStart else RefusedOrder, "report-${id}", step.events)
+      Ok(step) => report({ s | state: step.state }, b, if not agreed then RefusedOrder else if s.policy != "orders" then AgreedStart else if overextended(s, b.worker) then StrainedStart else CompliedStart, "report-${id}", step.events)
     }
   }
 }
@@ -386,8 +396,9 @@ ensures {match result {Err(_)=>true,Ok(o)=>o.session.state.tick==s.state.tick &&
 -- due: all yields first (tasks in state order), then events (scenario order),
 -- not interleaved by tick. Yields are heard by the task's participants; events
 -- by the whole crew. Knowledge cost is bounded: at most 32 events x 15 crew
--- (480 rows) plus one row per completed task with yields (tasks <= 256), well
--- inside the 8,192 knowledge limit. Each flow moves resources (flows.transferAll) and is
+-- (480 rows), plus one argument per event and resource (at most 8 x 32 x
+-- 15 = 3,840 rows), plus one row per completed task with yields (tasks <=
+-- 256): at most about 4,600 rows, inside the 8,192 knowledge limit. Each flow moves resources (flows.transferAll) and is
 -- raised as captain evidence heard by the whole crew; its evidence id ("yd-"
 -- task, "ev-" event) marks it done, so a flow never fires twice. Scenarios
 -- without yields or events are untouched.
@@ -435,12 +446,112 @@ pure func yieldFlows(s: Session, tasks: [Task], events: [Event]) -> Result[Flowe
  }
 }
 
+-- --------------------------------------------- crew argue over lost capacity
+-- When an event takes more of a resource than is available and running work
+-- holds the rest, the holders argue (crew-strain design, Mark 2026-10-13).
+-- Each takes a stance from traits and state: hold score = (100 - A) + E/2 +
+-- C/2 + 15 if overextended; 100 or more holds, less yields. The lowest scores
+-- are halted first until the shortfall is covered; on equal scores the later
+-- start is halted first, so whoever started earlier keeps their work. A
+-- halted crew member gains stress 5 + N/10; one who held loses
+-- regard (N/10 + 2) for each colleague whose work kept running; one who
+-- yielded is regarded +1 by those colleagues. The argument is evidence
+-- "sf-<event>-<transfer index>" heard by the whole crew.
+
+-- One holder per running task, argued by its first participant (crew work is
+-- single-participant today); a crew member halted on two tasks takes the
+-- stress twice.
+type Holder = {task: Task, worker: string, score: int} deriving (Eq)
+
+pure func traitOf(s: Session, worker: string, id: string) -> int = match head(filter(\a. a.id == worker, s.state.actors)) {
+ Some(a) => match head(filter(\v. v.id == id, a.attributes)) { Some(v) => v.value, None => 50 },
+ None => 50
+}
+
+pure func holdScore(s: Session, worker: string) -> int =
+ (100 - traitOf(s, worker, "agreeableness")) + traitOf(s, worker, "extraversion") / 2 + traitOf(s, worker, "conscientiousness") / 2 + (if overextended(s, worker) then 15 else 0)
+
+pure func reserves(s: Session, t: Task, resource: string) -> int = match head(filter(\r. r.id == t.recipe, s.config.recipes)) {
+ Some(r) => foldl(\acc c. if c.resource == resource then acc + c.reserve else acc, 0, r.costs),
+ None => 0
+}
+
+pure func available(s: Session, resource: string) -> int = match head(filter(\r. r.id == resource, s.state.resources)) { Some(r) => r.available, None => 0 }
+
+pure func holders(s: Session, resource: string) -> [Holder] =
+ sortBy(\a b. if a.score < b.score then 0 - 1 else if a.score > b.score then 1 else if a.task.started > b.task.started then 0 - 1 else if a.task.started < b.task.started then 1 else if a.task.id < b.task.id then 0 - 1 else 1,
+  flatMap(\t. match head(t.participants) { Some(w) => if t.status == Working && reserves(s, t, resource) > 0 then [{task: t, worker: w, score: holdScore(s, w)}] else [], None => [] }, s.state.tasks))
+
+-- Choose who stops: walk the sorted holders until their reservations cover the gap.
+pure func chosen(s: Session, hs: [Holder], resource: string, gap: int) -> [Holder] = match hs {
+ [] => [],
+ h :: rest => if gap <= 0 then [] else h :: chosen(s, rest, resource, gap - reserves(s, h.task, resource))
+}
+
+pure func bounded(s: Session, from: string, to: string, delta: int) -> [Effect] = match head(filter(\r. r.from == from && r.to == to && r.dimension == "regard", s.state.relationships)) {
+ Some(r) => { let d = if r.value + delta < 0 then 0 - r.value else if r.value + delta > 100 then 100 - r.value else delta; if d == 0 then [] else [RelationshipDelta(from, to, "regard", d)] },
+ None => []
+}
+
+pure func consequences(s: Session, halted: [Holder], kept: [Holder]) -> [Effect] = flatMap(\h. {
+ let n = traitOf(s, h.worker, "neuroticism");
+ let stress = if any(\i. i == "stress", s.scenario.indicators) then [BoundedIndicatorDelta(h.worker, "stress", 5 + n / 10)] else [];
+ let regard = if h.score >= 100 then flatMap(\k. bounded(s, h.worker, k.worker, 0 - (n / 10 + 2)), kept) else flatMap(\k. bounded(s, k.worker, h.worker, 1), kept);
+ stress ++ regard
+}, halted)
+
+pure func haltAll(s: Session, hs: [Holder], events: [Event]) -> Result[Flowed, HostError] = match hs {
+ [] => Ok({session: s, events: events}),
+ h :: rest => match halt(s.config, s.state, Host, h.task.id, "capacity_lost") {
+  Err(e) => Err(DomainFailure(e)),
+  Ok(step) => haltAll({s | state: step.state}, rest, events ++ step.events)
+ }
+}
+
+pure func argueOne(s: Session, e: ShipEvent, t: Transfer, at: int, events: [Event]) -> Result[Flowed, HostError] = {
+ let gap = (0 - t.delta) - available(s, t.resource);
+ let hs = holders(s, t.resource);
+ if t.delta >= 0 || gap <= 0 || length(hs) == 0 then Ok({session: s, events: events}) else {
+  let stop = chosen(s, hs, t.resource, gap);
+  let kept = filter(\h. not contains(map(\x. x.task.id, stop), h.task.id), hs);
+  match haltAll(s, stop, events) {
+   Err(err) => Err(err),
+   Ok(h) => match applyEffects(h.session.config, h.session.state, consequences(s, stop, kept)) {
+    Err(err) => Err(DomainFailure(err)),
+    Ok(state) => {
+     let id = "sf-${e.id}-${show(at)}";
+     let body = encode(jo([kv("schema", js("crew_shortfall/1")), kv("event", js(e.id)), kv("resource", js(t.resource)), kv("shortfall", jint(gap)), kv("stances", jo(map(\x. kv(x.worker, js(if x.score >= 100 then "hold" else "yield")), hs))), kv("halted", ja(map(\x. js(x.worker), stop))), kv("kept", ja(map(\x. js(x.worker), kept)))]));
+     let after = {h.session | state: state};
+     match domain(after, "ship-${id}", "captain", Authored, [RaiseConcern(id, [], after.scenario.workers, body)]) {
+      Err(err) => Err(err),
+      Ok(created) => hearAll({after | state: created.state}, after.scenario.workers, 0, id, h.events ++ created.events)
+     }
+    }
+   }
+  }
+ }
+}
+
+-- An event's outward transfers, summed per resource (first-seen order), so
+-- one argument covers everything the event takes of that resource.
+pure func outward(ts: [Transfer]) -> [Transfer] = foldl(\acc t. if t.delta >= 0 then acc else if any(\a. a.resource == t.resource, acc) then map(\a. if a.resource == t.resource then {a | delta: a.delta + t.delta} else a, acc) else acc ++ [t], [], ts)
+
+pure func argue(s: Session, e: ShipEvent, ts: [Transfer], at: int, events: [Event]) -> Result[Flowed, HostError] = match ts {
+ [] => Ok({session: s, events: events}),
+ t :: rest => match argueOne(s, e, t, at, events) { Err(err) => Err(err), Ok(f) => argue(f.session, e, rest, at + 1, f.events) }
+}
+
 pure func eventFlows(s: Session, due: [ShipEvent], events: [Event]) -> Result[Flowed, HostError] = match due {
  [] => Ok({session: s, events: events}),
- e :: rest => match flow(s, "ev-${e.id}", s.scenario.workers, [kv("schema", js("crew_ship_event/1")), kv("event", js(e.id)), kv("at", jint(e.at)), kv("text", js(e.text))], e.transfers, e.major, events) {
+ e :: rest => match argue(s, e, outward(e.transfers), 0, events) {
   Err(err) => Err(err),
-  Ok(f) => eventFlows(f.session, rest, f.events)
+  Ok(argued) => eventFlows2(argued.session, e, rest, argued.events)
  }
+}
+
+pure func eventFlows2(s: Session, e: ShipEvent, rest: [ShipEvent], events: [Event]) -> Result[Flowed, HostError] = match flow(s, "ev-${e.id}", s.scenario.workers, [kv("schema", js("crew_ship_event/1")), kv("event", js(e.id)), kv("at", jint(e.at)), kv("text", js(e.text))], e.transfers, e.major, events) {
+ Err(err) => Err(err),
+ Ok(f) => eventFlows(f.session, rest, f.events)
 }
 
 pure func flowsDue(o: Output, events: [Event]) -> Result[Output, HostError] = {

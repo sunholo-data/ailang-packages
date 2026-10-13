@@ -24,7 +24,7 @@ model only writes words, through the same prompts and checks as the watch.
 
 ```sh
 P=examples/crew-lab/scenarios/stapledon
-crew-sim --check $P/news-decades-late.claims.json --scenario $P/news-decades-late.json
+crew-sim --check $P/news-decades-late.claims.json --scenario $P/news-decades-late.json --policy $P/policy.json
 crew-watch-offline --scenario $P/news-decades-late.json          # play it, no provider
 crew-watch --scenario $P/news-decades-late.json --home ~/.ailang/crew-lab-stapledon
 crew-sample --scenario $P/news-decades-late.json --home ~/.ailang/crew-lab-stapledon --report words.txt
@@ -33,6 +33,13 @@ crew-sample --scenario $P/news-decades-late.json --home ~/.ailang/crew-lab-stapl
 The words sampled for this review were saved in `~/.ailang/crew-lab-stapledon` on the
 machine that ran them (not in the repo). With that home, the live watch and `crew-sample`
 reuse them; anywhere else, sampling makes new provider calls (or use `crew-sample-offline`).
+
+## The pack's response policy
+
+`policy.json` is the watch policy plus `strain` (stress 70, shift 50). While a crew
+member is overextended, accept and continue lose weight to decline and
+request_relief, scaled by neuroticism. Pass it with `--policy` so that breakdown is
+possible; the default ship's policy has no strain.
 
 ## What the claims say today
 

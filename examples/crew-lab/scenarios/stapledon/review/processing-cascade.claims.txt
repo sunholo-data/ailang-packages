@@ -1,10 +1,11 @@
 PASS consent-runs-clean: consent captain, max errors over 20 runs = 0.0 (expected == 0.0)
 PASS orders-runs-clean: orders captain, max errors over 20 runs = 0.0 (expected == 0.0)
 PASS repair-stock-is-finite: consent captain, max completed.work_engineer over 20 runs = 2.0 (expected <= 2.0) — four 10 kg blocks of free mass allow at most two rebuilds
-PASS crisis-blocks-work: consent captain, median stockouts over 20 runs = 2.0 (expected >= 1.0)
-FAIL engineer-under-strain: orders captain, median crew.engineer.stress over 20 runs = 65.0 (expected >= 70.0) — the engineer carries the crisis
+PASS crisis-blocks-work: consent captain, median stockouts over 20 runs = 1.0 (expected >= 1.0)
+PASS engineer-under-strain: orders captain, median crew.engineer.peak_stress over 20 runs = 95.0 (expected >= 70.0) — the engineer carries the crisis
 PASS engineer-gets-relief-with-consent: consent captain, median crew.engineer.relief_granted over 20 runs = 1.0 (expected >= 1.0)
 FAIL leak-drains-the-loop: consent captain, max resources.water.min over 20 runs = 4.0 (expected <= 2.0) — three failures move four tonnes into brine before any rebuild returns it
-PASS rebuild-recovers-water: consent captain, median resources.water.in over 20 runs = 5.5 (expected >= 3.0) — a finished rebuild and the water-light crops bring brine back into the loop
-PASS power-is-contested-under-orders: orders captain, median resources.power.stockouts over 20 runs = 5.0 (expected >= 1.0) — two units of power headroom for three hungry jobs
-7 of 9 claims hold (seeds 1..20, 12 turns).
+PASS rebuild-recovers-water: consent captain, median resources.water.in over 20 runs = 6.0 (expected >= 3.0) — a finished rebuild and the water-light crops bring brine back into the loop
+PASS power-is-contested-under-orders: orders captain, median resources.power.stockouts over 20 runs = 8.0 (expected >= 1.0) — two units of power headroom for three hungry jobs
+PASS strained-skeptic-loses-trust-under-orders: orders captain, median crew.skeptic.trust over 20 runs = 14.0 (expected < 50.0) — a disagreeable, anxious skeptic told to work while overextended stops trusting the captain
+9 of 10 claims hold (seeds 1..20, 12 turns).

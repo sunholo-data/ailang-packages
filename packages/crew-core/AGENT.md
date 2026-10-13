@@ -44,8 +44,18 @@ Optional flows (absent fields keep the old behaviour, byte for byte):
   - Yields are raised as `yd-<task>` and heard by the task's participants.
   - Ordering: after a completed advance, all due yields fire first (tasks in
     state order), then due events (scenario order).
-  - Caller ids may not start with `ev-`, `yd-`, `hear-` or `ship-`; those
-    prefixes are reserved for flows.
+  - Caller ids may not start with `ev-`, `yd-`, `sf-`, `hear-` or `ship-`;
+    those prefixes are reserved for flows.
+  - **Arguments.** When an event takes more than is available and running
+    work holds the rest, the holders argue (hold score from traits; the least
+    assertive are halted first; see CHANGELOG 0.2.0).
+  - Scenarios with events add a crew-to-crew `regard` relationship and a
+    `regard` indicator to the engine config.
+
+Trust: `codec.traitDelta(outcome, ocean)` turns each reported outcome into a
+trust change based on the observer's traits. Under orders, a "yes" is
+`complied_start`, or `strained_start` when the crew member is overextended.
+The response policy may carry `strain {indicator, threshold, shift}`.
   - Each flow fires once. Accounts stay balanced (`flows.balanced`):
     available + reserved + consumed == initial + transferredIn − transferredOut.
 

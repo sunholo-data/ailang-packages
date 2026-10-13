@@ -72,6 +72,66 @@ Three are new findings:
    slots. The claim's own arithmetic was wrong. A fourth slot user would make it
    contested.
 
+## Update 2026-10-13 (strain): arguments, breakdown and personal trust
+
+Mark asked for the misses to be fixed, for lost capacity to hit running work as
+a source of conflict ("crew argue it out"), and for trust to depend on
+personality. Design: `design_docs/planned/crew-strain.md`. Runs below use the
+pack's `policy.json` (strain on); claims are over 20 seeds.
+
+**What was actually wrong** (this corrects finding 2 above):
+- **There was no stress ceiling in the model.** crew-sim's *orders* captain
+  rested anyone at stress ≥ 75, the same as the consent captain. The claims
+  read the last turn, which caught the dip after rest. The overextension rule
+  recorded a condition that nothing read, so breakdown had no consequence.
+- **Trust ignored personality.** Every "yes" gave +2, even under orders. A
+  refusal that was overridden cost −8 and a denied relief −4, whoever the
+  crew member was.
+
+**Now:**
+- The orders captain never rests anyone on its own initiative.
+- Claims test *peak* stress.
+- While a crew member is overextended, their reactions shift towards decline
+  and relief requests, scaled by neuroticism.
+- Trust follows traits. Examples (a "yes" under orders while calm / while
+  strained / when overridden):
+
+  | Crew member | Calm yes | Strained yes | Overridden |
+  |---|---|---|---|
+  | Diplomat | +1 | −1 | −6 |
+  | Engineer | +2 | −2 | −8 |
+  | Skeptic | +1 | −4 | −10 |
+
+- When capacity is lost, the crew who hold it argue. The least assertive are
+  halted first; a halted crew member who held their ground resents the
+  colleagues who kept working.
+
+**Results: 44 of 50 claims hold.** One of those passes vacuously (`navigator-holds-the-heat`; see below).
+- **Breakdown is now possible.** Under orders, peak stress reaches 95 for the
+  engineer and 100 for the medic (median). The strained skeptic's trust falls
+  to 14.
+- **The diplomat still does not sour (median trust 52.5).** That is now a
+  property of their personality, not a bug: agreeable and calm (A80, N25),
+  they lose trust only when strained, and under these orders they rarely are.
+- **Arguments almost never happen in `ergosphere-question` (1 run in 20).**
+  The rule works: `crew_core`'s strain tests halt the least assertive holder,
+  then apply stress and regard exactly. The scenario rarely has both heat
+  users running at once. Bracing uses 20 kg of mass, so the engineer stops
+  after two braces, and the navigator alone leaves enough headroom.
+  - It does not help to move the approach to turn 5. Events fire after work
+    that finishes on the same tick, so an event on a shift boundary takes
+    nothing from running work. That ordering is deliberate and documented.
+  - So `approach-forces-an-argument` and `halted-engineer-resents-navigator`
+    fail, and `navigator-holds-the-heat` passes only vacuously (19 of 20 runs
+    have no argument). `heat-blocks-work-under-orders` (finding 1 above) still
+    fails too: the median of heat stockouts is 0.
+  - The fix is an authoring choice for Mark, not a tuning knob. Options: a
+    third heat user (the medical bay's cooling), less heat headroom (2 instead
+    of 3), or bracing that needs less mass.
+- **Unchanged:** `leak-drains-the-loop` (a prompt crew keeps the loop above
+  half) and `compute-is-contested-under-orders` (the claim's arithmetic was
+  wrong).
+
 ## Scenarios
 
 ### Last messages home (`last-messages-home`)

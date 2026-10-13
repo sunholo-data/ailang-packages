@@ -1,7 +1,7 @@
 module sunholo/social_dynamics/tasks_test
-import ./model (Config, Actor, Resource, Policies, State, Task, Offered, Allowed, Conditional, Refused, Host, emptyState, Done, Pending, Blocked, IndicatorDelta)
+import ./model (Config, Actor, Resource, Policies, State, Task, Offered, Allowed, Conditional, Refused, Host, ActorPrincipal, Stopped, TaskHalted, emptyState, Done, Pending, Blocked, IndicatorDelta)
 import ./engine (init, advance, continueAdvance, abortAdvance)
-import ./tasks (accept, complete, resolveRelief, progress)
+import ./tasks (accept, complete, resolveRelief, progress, halt)
 import ./conditions (reevaluate)
 import std/result (Ok, Err)
 import std/option (Some, None)
@@ -100,3 +100,19 @@ test "project progress caps at completion and freezes at cancellation" { let s=w
 
 test "all task mutators reject changed config and pending continuation" { let c={config() | timeUnit:"changed"} in let s=working() in let pending={s | continuation:Some({config:s.config,revision:s.revision,target:10,cursor:1})} in match accept(c,policies(),state(),Host,"t") { Ok(_)=>false,Err(_)=>match complete(c,{s | tick:3},"t") { Ok(_)=>false,Err(_)=>match resolveRelief(c,{s | reliefs:[{id:"r",task:"t",author:"a",resolved:false}]},Host,"r",true) { Ok(_)=>false,Err(_)=>match accept(config(),policies(),{state() | continuation:pending.continuation},Host,"t") { Ok(_)=>false,Err(_)=>match complete(config(),{pending | tick:3},"t") { Ok(_)=>false,Err(_)=>match resolveRelief(config(),{pending | reliefs:[{id:"r",task:"t",author:"a",resolved:false}]},Host,"r",true) { Ok(_)=>false,Err(_)=>true } } } } } } }
 test "unknown principal or changed policy ids never accept" { match accept(config(),policies(),state(),ActorPrincipal("missing"),"t") { Ok(_)=>false,Err(_)=>match accept(config(),{policies() | authorityId:"changed"},state(),Host,"t") { Ok(_)=>false,Err(_)=>true } } }
+
+test "the host halts running work: reservation released, nothing consumed, task stopped" {
+  let s = working() in match halt(config(), {s | tick: 1}, Host, "t", "capacity_lost") {
+    Err(_) => false,
+    Ok(step) => step.state.resources == resources() && (match step.state.tasks { [t] => t.status == Stopped && t.due == 1, _ => false }) && (match step.events { [e] => e.kind == TaskHalted("t", "capacity_lost"), _ => false })
+  }
+}
+
+test "only the host halts, only running work, only once" {
+  let s = working() in
+  (match halt(config(), s, ActorPrincipal("a"), "t", "x") { Err(_) => true, Ok(_) => false })
+  && (match halt(config(), state(), Host, "t", "x") { Err(_) => true, Ok(_) => false })
+  && (match halt(config(), s, Host, "missing", "x") { Err(_) => true, Ok(_) => false })
+  && (match halt(config(), s, Host, "t", "") { Err(_) => true, Ok(_) => false })
+  && (match halt(config(), s, Host, "t", "x") { Err(_) => false, Ok(step) => match halt(config(), step.state, Host, "t", "x") { Err(_) => true, Ok(_) => false } })
+}

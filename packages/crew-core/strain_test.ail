@@ -1,0 +1,99 @@
+module sunholo/crew_core/strain_test
+import std/result (Result, Ok, Err)
+import std/option (Some, None)
+import std/list (head, filter, length, map, any)
+import pkg/sunholo/social_dynamics/model (Stopped, Working)
+import ./scenario (decodeScenario)
+import ./session (Session, Output, HostError, HostFailure, start, input, offer, startTask)
+
+-- Two radiator crews hold heat; the forward sky takes some mid-work.
+-- crew(id, agreeableness, extraversion, conscientiousness, neuroticism)
+pure func crew(id: string, a: int, e: int, c: int, n: int) -> string =
+ "{\"id\":\"${id}\",\"role\":\"Crew ${id}\",\"ocean\":{\"openness\":50,\"conscientiousness\":${show(c)},\"extraversion\":${show(e)},\"agreeableness\":${show(a)},\"neuroticism\":${show(n)}},\"values\":{\"duty\":60},\"start\":{},\"work\":[{\"id\":\"work_${id}\",\"name\":\"Cool ${id}\",\"purpose\":\"Hold the line.\",\"duration\":6,\"costs\":[{\"resource\":\"heat\",\"reserve\":1,\"consume\":0}],\"effects\":{\"fatigue\":5}}]}"
+
+pure func ship(x: string, y: string, take: int) -> string =
+ "{\"schema\":\"crew_scenario/1\",\"id\":\"radiators\",\"indicators\":[\"fatigue\",\"stress\",\"trust\"],\"indicator_defaults\":{\"fatigue\":0,\"stress\":20},\"captain\":{\"id\":\"captain\",\"values\":{\"mission\":80},\"start\":{}},\"crew\":[${x},${y}],\"rest\":{\"purpose\":\"Recover.\",\"duration\":1,\"effects\":{\"fatigue\":-10}},\"overextended\":{\"indicator\":\"stress\",\"threshold\":70,\"recovery\":40,\"duration\":2,\"cooldown\":3},\"trust_in_captain\":50,\"resources\":[{\"id\":\"heat\",\"name\":\"Heat headroom\",\"initial\":2,\"kind\":\"capacity\"}],\"events\":[{\"id\":\"sky\",\"at\":1,\"text\":\"The forward sky loads the radiators.\",\"transfers\":[{\"resource\":\"heat\",\"delta\":${show(0 - take)}}]}]}"
+
+pure func run(body: string) -> Result[Session, HostError] = match decodeScenario(body) {
+ Err(e) => Err(HostFailure(e)),
+ Ok(sc) => match start(sc, "{\"command\":\"start\",\"policy\":\"orders\",\"scenario\":\"watch-v2\"}") {
+  Err(e) => Err(e),
+  Ok(o) => match offer(o.session, "x", "work_x", "tx") { Err(e) => Err(e), Ok(a) => match startTask(a.session, "tx") { Err(e) => Err(e), Ok(b) =>
+   match offer(b.session, "y", "work_y", "ty") { Err(e) => Err(e), Ok(c) => match startTask(c.session, "ty") { Err(e) => Err(e), Ok(d) =>
+    match input(d.session, "{\"command\":\"advance\",\"tick\":1,\"budget\":64}") { Err(e) => Err(e), Ok(f) => Ok(f.session) } } } } }
+ }
+}
+
+pure func status(s: Session, id: string) -> bool = any(\t. t.id == id && t.status == Stopped, s.state.tasks)
+pure func indicator(s: Session, who: string, id: string) -> int = match head(filter(\a. a.id == who, s.state.actors)) { Some(a) => match head(filter(\v. v.id == id, a.indicators)) { Some(v) => v.value, None => 0 - 1 }, None => 0 - 1 }
+pure func regard(s: Session, from: string, to: string) -> int = match head(filter(\r. r.from == from && r.to == to && r.dimension == "regard", s.state.relationships)) { Some(r) => r.value, None => 0 - 1 }
+pure func heat(s: Session) -> {available: int, reserved: int, out: int} = match head(filter(\r. r.id == "heat", s.state.resources)) { Some(r) => {available: r.available, reserved: r.reserved, out: r.transferredOut}, None => {available: 0 - 1, reserved: 0 - 1, out: 0 - 1} }
+
+-- x yields easily (A90 E10 C10: score 20); y holds (A10 E90 C90: score 180).
+test "the one who yields most easily is halted; the holder keeps working and regards them better" {
+ match run(ship(crew("x", 90, 10, 10, 40), crew("y", 10, 90, 90, 40), 1)) {
+  Err(_) => false,
+  Ok(s) => status(s, "tx") && not status(s, "ty") && heat(s).out == 1 && heat(s).reserved == 1 && heat(s).available == 0
+   && indicator(s, "x", "stress") == 20 + 5 + 4 && indicator(s, "y", "stress") == 20
+   && regard(s, "y", "x") == 51 && regard(s, "x", "y") == 50
+   && any(\e. e.id == "sf-sky-0", s.state.evidence) && any(\k. k.observer == "y" && k.evidence == "sf-sky-0", s.state.knowledge)
+ }
+}
+
+-- Both hold (scores 155 and 180): the lower is halted, and resents the one who kept working.
+test "a halted holder loses regard for the colleague who kept working" {
+ match run(ship(crew("x", 30, 60, 60, 60), crew("y", 10, 90, 90, 40), 1)) {
+  Err(_) => false,
+  Ok(s) => status(s, "tx") && not status(s, "ty") && regard(s, "x", "y") == 50 - 8 && regard(s, "y", "x") == 50
+ }
+}
+
+test "a big enough loss halts both, and the rest of the loss is taken" {
+ match run(ship(crew("x", 90, 10, 10, 40), crew("y", 10, 90, 90, 40), 2)) {
+  Err(_) => false,
+  Ok(s) => status(s, "tx") && status(s, "ty") && heat(s).out == 2 && heat(s).reserved == 0 && heat(s).available == 0
+ }
+}
+
+test "no argument while free units cover the loss" {
+ match decodeScenario(ship(crew("x", 90, 10, 10, 40), crew("y", 10, 90, 90, 40), 1)) {
+  Err(_) => false,
+  Ok(sc) => match start(sc, "{\"command\":\"start\",\"policy\":\"orders\",\"scenario\":\"watch-v2\"}") {
+   Err(_) => false,
+   Ok(o) => match input(o.session, "{\"command\":\"advance\",\"tick\":1,\"budget\":64}") { Err(_) => false, Ok(f) => not any(\e. e.id == "sf-sky-0", f.session.state.evidence) && heat(f.session).out == 1 }
+  }
+ }
+}
+
+pure func ship2(x: string, y: string, at: int, transfers: string) -> string =
+ "{\"schema\":\"crew_scenario/1\",\"id\":\"radiators\",\"indicators\":[\"fatigue\",\"stress\",\"trust\"],\"indicator_defaults\":{\"fatigue\":0,\"stress\":20},\"captain\":{\"id\":\"captain\",\"values\":{\"mission\":80},\"start\":{}},\"crew\":[${x},${y}],\"rest\":{\"purpose\":\"Recover.\",\"duration\":1,\"effects\":{\"fatigue\":-10}},\"overextended\":{\"indicator\":\"stress\",\"threshold\":70,\"recovery\":40,\"duration\":2,\"cooldown\":3},\"trust_in_captain\":50,\"resources\":[{\"id\":\"heat\",\"name\":\"Heat headroom\",\"initial\":2,\"kind\":\"capacity\"}],\"events\":[{\"id\":\"sky\",\"at\":${show(at)},\"text\":\"The forward sky loads the radiators.\",\"transfers\":${transfers}}]}"
+
+pure func adv(s: Session, t: int) -> Result[Session, HostError] = match input(s, "{\"command\":\"advance\",\"tick\":${show(t)},\"budget\":64}") { Err(e) => Err(e), Ok(o) => Ok(o.session) }
+pure func begin(s: Session, w: string) -> Result[Session, HostError] = match offer(s, w, "work_${w}", "t${w}") { Err(e) => Err(e), Ok(a) => match startTask(a.session, "t${w}") { Err(e) => Err(e), Ok(b) => Ok(b.session) } }
+
+-- x starts at tick 0, y at tick 1; equal traits, so equal hold scores.
+test "on equal hold scores the later start is halted; the earlier starter keeps their work" {
+ match decodeScenario(ship2(crew("x", 50, 50, 50, 40), crew("y", 50, 50, 50, 40), 2, "[{\"resource\":\"heat\",\"delta\":-1}]")) {
+  Err(_) => false,
+  Ok(sc) => match start(sc, "{\"command\":\"start\",\"policy\":\"orders\",\"scenario\":\"watch-v2\"}") {
+   Err(_) => false,
+   Ok(o) => match begin(o.session, "x") { Err(_) => false, Ok(a) => match adv(a, 1) { Err(_) => false, Ok(b) => match begin(b, "y") { Err(_) => false, Ok(c) => match adv(c, 2) {
+    Err(_) => false,
+    Ok(s) => status(s, "ty") && not status(s, "tx")
+   } } } }
+  }
+ }
+}
+
+test "two outward transfers of one resource are argued as one loss" {
+ match decodeScenario(ship2(crew("x", 90, 10, 10, 40), crew("y", 10, 90, 90, 40), 1, "[{\"resource\":\"heat\",\"delta\":-1},{\"resource\":\"heat\",\"delta\":-1}]")) {
+  Err(_) => false,
+  Ok(sc) => match start(sc, "{\"command\":\"start\",\"policy\":\"orders\",\"scenario\":\"watch-v2\"}") {
+   Err(_) => false,
+   Ok(o) => match begin(o.session, "x") { Err(_) => false, Ok(a) => match begin(a, "y") { Err(_) => false, Ok(b) => match adv(b, 1) {
+    Err(_) => false,
+    Ok(s) => status(s, "tx") && status(s, "ty") && heat(s).out == 2 && length(filter(\e. e.id == "sf-sky-0", s.state.evidence)) == 1
+   } } }
+  }
+ }
+}

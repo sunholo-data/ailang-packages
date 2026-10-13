@@ -6,7 +6,7 @@ import std/result (Result, Ok, Err)
 import std/option (Option, Some, None)
 import std/list (map, filter, foldl, length, head, any, contains, range, sortBy, nth, flatMap)
 import std/string (join, split, stringToInt, startsWith, substring, length as stringLength)
-import std/json (Json, JObject, JNumber, decode, encode, getString, jo, kv, js, jint, jnum, ja)
+import std/json (Json, JObject, JNumber, JString, decode, encode, getString, getArray, jo, kv, js, jint, jnum, ja)
 import std/math (intToFloat)
 import std/crypto (sha256Hex)
 import pkg/sunholo/social_dynamics/model (Task, Offered, Working, Completed)
@@ -23,7 +23,7 @@ import pkg/sunholo/crew_core/policy (Policy, decodePolicy, watchPolicyBody, auth
 -- ranks strategies or scenarios.
 
 export type Count = {id: string, value: int} deriving (Eq)
-export type Tally = {replies: [Count], byCrew: [Count], offers: int, starts: int, refused: int, stockouts: int, reliefAsked: int, granted: int, denied: int, errors: int, why: [Count], refusals: [Count], short: [Count], low: [Count], zero: [Count]} deriving (Eq)
+export type Tally = {replies: [Count], byCrew: [Count], offers: int, starts: int, refused: int, stockouts: int, reliefAsked: int, granted: int, denied: int, errors: int, why: [Count], refusals: [Count], short: [Count], low: [Count], zero: [Count], peaks: [Count], over: [Count]} deriving (Eq)
 -- What a crew member was asked and how they reacted (authored), with their state
 -- at the time; kept only when a caller asks (crew-sample), up to `keep`.
 export type Heard = {request: Request, label: string, tick: int, fatigue: int, stress: int, morale: int} deriving (Eq)
@@ -32,7 +32,7 @@ export type Sim = {session: Session, seed: int, tally: Tally, captain: string, p
 -- Resources: `low` starts at each account's opening balance and keeps the
 -- lowest available seen after work is assigned or after an advance; `zero` counts turns ending with none
 -- available; `short` counts stockout refusals by resource.
-pure func zero(sc: Scenario) -> Tally = {replies: [], byCrew: [], offers: 0, starts: 0, refused: 0, stockouts: 0, reliefAsked: 0, granted: 0, denied: 0, errors: 0, why: [], refusals: [], short: [], low: map(\r. {id: r.id, value: r.available}, sc.resources), zero: map(\r. {id: r.id, value: 0}, sc.resources)}
+pure func zero(sc: Scenario) -> Tally = {replies: [], byCrew: [], offers: 0, starts: 0, refused: 0, stockouts: 0, reliefAsked: 0, granted: 0, denied: 0, errors: 0, why: [], refusals: [], short: [], low: map(\r. {id: r.id, value: r.available}, sc.resources), zero: map(\r. {id: r.id, value: 0}, sc.resources), peaks: [], over: []}
 
 -- After work is assigned (before the advance): lowers `low` only, so work
 -- that reserves and completes within one advance still shows its draw.
@@ -44,7 +44,20 @@ pure func observeLow(sim: Sim) -> Sim = {
 }
 
 -- After each advance: lowers `low` and counts a turn ending with none available.
-pure func observe(sim: Sim) -> Sim = {
+-- Per crew member: the highest stress and fatigue reached ("w/stress",
+-- "w/fatigue") and turns ending at or over the overextension threshold.
+pure func raise(xs: [Count], id: string, v: int) -> [Count] = if any(\c. c.id == id, xs) then map(\c. if c.id == id && v > c.value then {c | value: v} else c, xs) else xs ++ [{id: id, value: v}]
+pure func peaked(sim: Sim) -> Sim = {
+ let t = sim.tally;
+ let s = sim.session;
+ let threshold = \w. match head(filter(\r. r.id == "overextended_${w}", sim.scenario.rules)) { Some(r) => r.threshold, None => 101 };
+ withTally(sim, {t | peaks: foldl(\acc w. raise(raise(acc, "${w}/stress", indicator(s, w, "stress")), "${w}/fatigue", indicator(s, w, "fatigue")), t.peaks, sim.scenario.workers),
+  over: foldl(\acc w. if indicator(s, w, "stress") >= threshold(w) then bump(acc, w) else acc, t.over, sim.scenario.workers)})
+}
+
+pure func observe(sim: Sim) -> Sim = peaked(observeTurn(sim))
+
+pure func observeTurn(sim: Sim) -> Sim = {
  let t = sim.tally;
  let rs = sim.session.state.resources;
  let avail = \id. match head(filter(\r. r.id == id, rs)) { Some(r) => r.available, None => 0 };
@@ -150,7 +163,7 @@ pure func grants(sim: Sim) -> {sim: Sim, go: bool} =
 pure func chooseRecipe(sim: Sim, worker: string) -> {sim: Sim, recipe: string} = {
  let tired = indicator(sim.session, worker, "fatigue") >= 70 || indicator(sim.session, worker, "stress") >= 75;
  if sim.captain == "random" then { let c = coin(sim); {sim: c.sim, recipe: if c.roll < 0.3 then "rest_${worker}" else workRecipe(sim.scenario, worker)} }
- else {sim: sim, recipe: if tired then "rest_${worker}" else workRecipe(sim.scenario, worker)}
+ else {sim: sim, recipe: if tired && sim.captain != "orders" then "rest_${worker}" else workRecipe(sim.scenario, worker)}
 }
 
 -- Offer each idle specialist work (or rest), hear them, decide whether to start.
@@ -224,6 +237,12 @@ ensures { match result { Ok(sim) => sim.session.state.tick <= turns && length(si
 
 pure func counts(xs: [Count]) -> Json = jo(map(\c. kv(c.id, jint(c.value)), xs))
 
+-- crew_shortfall/1 bodies (crew_core): who was halted in an argument.
+pure func haltedList(text: string) -> [string] = match decode(text) { Ok(j) => match getArray(j, "halted") { Some(xs) => flatMap(\x. match x { JString(w) => [w], _ => [] }, xs), None => [] }, Err(_) => [] }
+pure func halted(text: string, w: string) -> bool = contains(haltedList(text), w)
+pure func haltedCount(text: string) -> int = length(haltedList(text))
+pure func regardMin(s: Session, w: string) -> int = foldl(\acc r. if r.from == w && r.dimension == "regard" && r.value < acc then r.value else acc, 100, s.state.relationships)
+
 pure func countOf(xs: [Count], id: string) -> int = match head(filter(\c. c.id == id, xs)) { Some(c) => c.value, None => 0 }
 pure func crewCount(t: Tally, key: string) -> int = match head(filter(\c. c.id == key, t.byCrew)) { Some(c) => c.value, None => 0 }
 pure func crewReplies(t: Tally, w: string) -> Json = counts(flatMap(\c. if startsWith(c.id, "${w}/reply/") then [{id: substring(c.id, stringLength("${w}/reply/"), stringLength(c.id)), value: c.value}] else [], t.byCrew))
@@ -232,7 +251,7 @@ export pure func report(sim: Sim, seed: int, turns: int, scenarioHashText: strin
 ensures { result != "" } = {
  let s = sim.session;
  let completed = map(\r. {id: r.id, value: length(filter(\t. t.recipe == r.id && t.status == Completed, s.state.tasks))}, sim.scenario.recipes);
- let crew = map(\w. kv(w, jo([kv("fatigue", jint(indicator(s, w, "fatigue"))), kv("stress", jint(indicator(s, w, "stress"))), kv("morale", jint(indicator(s, w, "morale"))), kv("readiness", jint(indicator(s, w, "readiness"))), kv("observations", jint(indicator(s, w, "observations"))), kv("trust", jint(trust(s, w))), kv("replies", crewReplies(sim.tally, w)), kv("relief_asked", jint(crewCount(sim.tally, "${w}/relief/asked"))), kv("relief_granted", jint(crewCount(sim.tally, "${w}/relief/granted"))), kv("relief_denied", jint(crewCount(sim.tally, "${w}/relief/denied")))])), sim.scenario.workers);
+ let crew = map(\w. kv(w, jo([kv("fatigue", jint(indicator(s, w, "fatigue"))), kv("stress", jint(indicator(s, w, "stress"))), kv("morale", jint(indicator(s, w, "morale"))), kv("readiness", jint(indicator(s, w, "readiness"))), kv("observations", jint(indicator(s, w, "observations"))), kv("trust", jint(trust(s, w))), kv("replies", crewReplies(sim.tally, w)), kv("relief_asked", jint(crewCount(sim.tally, "${w}/relief/asked"))), kv("relief_granted", jint(crewCount(sim.tally, "${w}/relief/granted"))), kv("relief_denied", jint(crewCount(sim.tally, "${w}/relief/denied"))), kv("peak_stress", jint(countOf(sim.tally.peaks, "${w}/stress"))), kv("peak_fatigue", jint(countOf(sim.tally.peaks, "${w}/fatigue"))), kv("overextended_turns", jint(countOf(sim.tally.over, w))), kv("halted", jint(length(filter(\e. startsWith(e.id, "sf-") && halted(e.text, w), s.state.evidence)))), kv("regard_min", jint(regardMin(s, w)))])), sim.scenario.workers);
  encode(jo([
   kv("schema", js("crew_sim/1")), kv("captain", js(sim.captain)), kv("seed", jint(seed)), kv("turns", jint(turns)), kv("tick", jint(s.state.tick)),
   kv("scenario", js(scenarioHashText)), kv("policy", js(policyHash)),
@@ -242,6 +261,8 @@ ensures { result != "" } = {
   kv("completed", counts(filter(\c. c.value > 0, completed))),
   kv("crew", jo(crew)),
   kv("resources", jo(map(\r. kv(r.id, jo([kv("min", jint(countOf(sim.tally.low, r.id))), kv("zero_ticks", jint(countOf(sim.tally.zero, r.id))), kv("stockouts", jint(countOf(sim.tally.short, r.id))), kv("in", jint(r.transferredIn)), kv("out", jint(r.transferredOut))])), s.state.resources))),
+  kv("shortfalls", jint(length(filter(\e. startsWith(e.id, "sf-"), s.state.evidence)))),
+  kv("halts", jint(foldl(\acc e. acc + haltedCount(e.text), 0, filter(\e. startsWith(e.id, "sf-"), s.state.evidence)))),
   kv("errors", jint(sim.tally.errors)), kv("error_kinds", counts(sim.tally.why))
  ]))
 }

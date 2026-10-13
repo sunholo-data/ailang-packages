@@ -14,7 +14,9 @@ import pkg/sunholo/social_dynamics/model (Config, Actor, Resource, Recipe, Cost,
 
 export type Label = {id: string, text: string} deriving (Eq)
 
--- Ship flows (optional in crew_scenario/1). A resource is a "stock" (work may
+-- Ship flows (optional in crew_scenario/1). Scenarios with events also give
+-- every crew member a "regard" (0..100, from 50) for each colleague, which
+-- arguments over lost capacity move. A resource is a "stock" (work may
 -- use it up) or a "capacity" (work only reserves it). Ship events move units
 -- in or out at a tick and are heard by the whole crew; yields return units
 -- when work completes. Units never appear or vanish silently: each flow is
@@ -282,7 +284,7 @@ pure func assemble(id: string, indicators: [string], captain: Actor, crew: [Crew
   recipes: map(\w. w.recipe, work) ++ rests,
   owners: flatMap(\c. map(\w. {id: w.recipe.id, text: c.actor.id}, c.work) ++ [{id: "rest_${c.actor.id}", text: c.actor.id}], crew),
   rules: map(\w. {id: "overextended_${w}", actor: w, indicator: strain.indicator, above: true, threshold: strain.threshold, recovery: strain.recovery, duration: strain.duration, cooldown: strain.cooldown}, workers),
-  relationships: map(\w. {from: w, to: captain.id, dimension: "trust", value: trust}, workers),
+  relationships: map(\w. {from: w, to: captain.id, dimension: "trust", value: trust}, workers) ++ (if length(events) == 0 then [] else flatMap(\a. flatMap(\b. if a == b then [] else [{from: a, to: b, dimension: "regard", value: 50}], workers), workers)),
   projectNames: map(\w. {id: w.recipe.id, text: w.name}, work) ++ map(\c. {id: "rest_${c.actor.id}", text: "${c.role} rest"}, crew),
   purposes: map(\w. {id: w.recipe.id, text: w.purpose}, work),
   restPurpose: rest.purpose,
@@ -339,7 +341,7 @@ ensures { match result { Ok(c) => c.version == 1 && c.timeUnit == "turn" && c.li
   id: "${s.id}-${policy}", version: 1, session: "${s.id}-${policy}", timeUnit: "turn",
   authorityId: "captain-cooperation-v1", appraisalId: "received-outcome-v1",
   limits: {actors: length(s.actors), tasks: 256, commitments: 256, reliefs: 256, evidence: 2048, knowledge: 8192, accepted: 4096, operations: 16, effects: 16, text: 4096, wire: 65536},
-  indicators: map(\id. {id: id, minimum: 0, maximum: 100}, s.indicators),
+  indicators: map(\id. {id: id, minimum: 0, maximum: 100}, s.indicators ++ (if length(s.events) > 0 && not contains(s.indicators, "regard") then ["regard"] else [])),
   recipes: s.recipes, rules: s.rules, evidence: [], knowledge: [], relationships: s.relationships
  })
 

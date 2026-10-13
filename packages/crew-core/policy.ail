@@ -1,9 +1,9 @@
 module sunholo/crew_core/policy
 import std/result (Result, Ok, Err)
-import std/option (Some, None)
+import std/option (Option, Some, None)
 import std/json (Json, decode, encode, get, getArray, getString, getInt, getNumber, keys, jo, kv, js, jint, jnum, ja, asObject, allStrings)
 import std/list (map, filter, foldl, length, dedup, contains, any)
-import std/string (length as size, charCode, chars, toLower, contains as stringContains, find, substring, startsWith, trim)
+import std/string (replace, length as size, charCode, chars, toLower, contains as stringContains, find, substring, startsWith, trim)
 import ./session (Request)
 import std/crypto (sha256Hex)
 import ./codec (object)
@@ -17,7 +17,14 @@ export type Influence = { source: string, id: string, to: string, coefficient: i
 
 export type ResponseRule = { label: string, phase: string, recipe: string, base: int, influences: [Influence] } deriving (Eq)
 
-export type Policy = { callLimit: int, rules: [ResponseRule] } deriving (Eq)
+-- strain (optional in crew_response_policy/1; shift 0 = off): while the
+-- actor's `indicator` is at or over `threshold` (overextended), accept and
+-- continue lose shift% x N/100 of their weight and decline and request_relief
+-- gain the same, so strain shows up as refusals and relief requests.
+export type Strain = { indicator: string, threshold: int, shift: int } deriving (Eq)
+export type Policy = { callLimit: int, rules: [ResponseRule], strain: Strain } deriving (Eq)
+
+pure func noStrain() -> Strain = { indicator: "stress", threshold: 100, shift: 0 }
 
 pure func str(j: Json, k: string) -> string = match getString(j, k) {
   Some(s) => s,
@@ -99,15 +106,39 @@ ensures { match result {
   Err(_) => true
 } } = match object(body) {
   Err(e) => Err(e),
-  Ok(j) => if not fields(j, ["schema", "callLimit", "rules"]) || str(j, "schema") != "crew_response_policy/1" || not integer(j, "callLimit", 0, 64) then Err("policy_schema") else match getArray(j, "rules") {
+  Ok(j) => if not (fields(j, ["schema", "callLimit", "rules"]) || fields(j, ["schema", "callLimit", "rules", "strain"])) || str(j, "schema") != "crew_response_policy/1" || not integer(j, "callLimit", 0, 64) then Err("policy_schema") else match getArray(j, "rules") {
     None => Err("rules"),
     Some(xs) => if length(xs) > 32 then Err("rules_size") else match readRules(xs) {
       Err(e) => Err(e),
-      Ok(rs) => let p = { callLimit: num(j, "callLimit"), rules: rs } in
-      if policyOK(p) then Ok(p) else Err("policy_bounds")
+      Ok(rs) => match readStrain(j) {
+        Err(e) => Err(e),
+        Ok(st) => let p = { callLimit: num(j, "callLimit"), rules: rs, strain: st } in
+        if policyOK(p) then Ok(p) else Err("policy_bounds")
+      }
     }
   }
 }
+
+pure func readStrain(j: Json) -> Result[Strain, string] = match get(j, "strain") {
+  None => Ok(noStrain()),
+  Some(o) => if not fields(o, ["indicator", "threshold", "shift"]) || not integer(o, "threshold", 0, 100) || not integer(o, "shift", 0, 100) || not text(str(o, "indicator")) then Err("strain") else Ok({ indicator: str(o, "indicator"), threshold: num(o, "threshold"), shift: num(o, "shift") })
+}
+
+pure func perceived(c: Json, field: string, id: string) -> Option[int] = match getArray(c, field) {
+  None => None,
+  Some(xs) => match filter(\j. str(j, "id") == id, xs) { [j] => Some(num(j, "value")), _ => None }
+}
+
+-- Apply the policy's strain shift to computed weights (1..1000 kept).
+pure func strained(p: Policy, c: Json, ws: [WeightedLabel]) -> [WeightedLabel] =
+  if p.strain.shift == 0 then ws else match (perceived(c, "indicators", p.strain.indicator), perceived(c, "attributes", "neuroticism")) {
+    (Some(v), Some(n)) => if v < p.strain.threshold then ws else {
+      let f = p.strain.shift * n / 100;
+      let bound = \w. if w < 1 then 1 else if w > 1000 then 1000 else w;
+      map(\w. if w.label == "accept" || w.label == "continue" then { w | weight: bound(w.weight * (100 - f) / 100) } else if w.label == "decline" || w.label == "request_relief" then { w | weight: bound(w.weight * (100 + f) / 100) } else w, ws)
+    },
+    _ => ws
+  }
 
 pure func inf(source: string, id: string, to: string, n: int) -> Influence =
   { source: source, id: id, to: to, coefficient: n }
@@ -184,7 +215,7 @@ ensures { match result {
   if not policyOK(policy) || length(request.legal) == 0 || length(request.legal) > 8 || length(dedup(request.legal)) != length(request.legal) then Err("weight_inputs") else match object(request.context) {
     Err(e) => Err(e),
     Ok(c) => if not fields(c, ["actor", "task", "recipe", "attributes", "values", "indicators", "relationships", "visible"] ++ (if request.policyId == "crew-conversation-v1" then ["conversation"] else [])) || str(c, "actor") != request.actor || str(c, "task") != request.task || not text(str(c, "recipe")) then Err("perception_binding") else if contains(request.legal, "accept") && contains(request.legal, "continue") then Err("ambiguous_phase") else let phase = if contains(request.legal, "accept") then "offered" else "working" in
-    labels(request.legal, policy, c, phase, str(c, "recipe"))
+    match labels(request.legal, policy, c, phase, str(c, "recipe")) { Err(e) => Err(e), Ok(ws) => Ok(strained(policy, c, ws)) }
   }
 
 -- Preview the existing opinion draw; publication still commits both original
@@ -217,3 +248,21 @@ ensures { match result { Ok(a) => contains(request.legal, a.label), Err(_) => tr
   (Err(e), _) => Err(e),
   (_, Err(e)) => Err(e)
  }
+
+pure func strainCtx(stress: int, n: int) -> Json = match decode("{\"attributes\":[{\"id\":\"neuroticism\",\"value\":${show(n)}}],\"indicators\":[{\"id\":\"stress\",\"value\":${show(stress)}}]}") { Ok(j) => j, Err(_) => jo([]) }
+pure func strainWs() -> [WeightedLabel] = [{label: "accept", weight: 400}, {label: "decline", weight: 100}, {label: "concern", weight: 200}]
+pure func strainPolicy(shift: int) -> Policy = { callLimit: 2, rules: [], strain: { indicator: "stress", threshold: 70, shift: shift } }
+
+test "strain shifts weights from accept to decline only when overextended, scaled by neuroticism" {
+ strained(strainPolicy(50), strainCtx(80, 60), strainWs()) == [{label: "accept", weight: 280}, {label: "decline", weight: 130}, {label: "concern", weight: 200}]
+ && strained(strainPolicy(50), strainCtx(69, 60), strainWs()) == strainWs()
+ && strained(strainPolicy(0), strainCtx(90, 100), strainWs()) == strainWs()
+ && strained(strainPolicy(50), strainCtx(90, 0), strainWs()) == strainWs()
+}
+
+test "policies without strain decode as before; strain is validated" {
+ match (decodePolicy(watchPolicyBody()), decodePolicy(replace(watchPolicyBody(), "\"callLimit\":12", "\"callLimit\":12,\"strain\":{\"indicator\":\"stress\",\"threshold\":70,\"shift\":50}")), decodePolicy(replace(watchPolicyBody(), "\"callLimit\":12", "\"callLimit\":12,\"strain\":{\"indicator\":\"stress\",\"threshold\":170,\"shift\":50}"))) {
+  (Ok(p), Ok(q), Err(_)) => p.strain.shift == 0 && q.strain == { indicator: "stress", threshold: 70, shift: 50 },
+  _ => false
+ }
+}

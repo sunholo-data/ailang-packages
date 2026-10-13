@@ -3,11 +3,12 @@ import std/result (Ok, Err)
 import std/option (Some, None)
 import std/list (any, filter, head)
 import pkg/sunholo/social_dynamics/model (Policies, Principal, ActorPrincipal, State, Task, Authority, Allowed, Refused, Appraisal, Effect, RelationshipDelta)
-import ./codec (decodeOutcome, outcomeDelta)
+import ./codec (decodeOutcome, traitDelta)
 
 -- The captain may assign work while every participant's trust in the captain
 -- is at least 20. A crew member appraises only the captain's reported outcome
--- of an offer they saw, moving their own trust in the captain within 0..100.
+-- of an offer they saw, moving their own trust in the captain within 0..100,
+-- by an amount that depends on their OCEAN traits (codec.traitDelta).
 -- Experimental tuning: neither the floor nor the deltas assert a human model.
 
 pure func authority(s: State, p: Principal, t: Task) -> Authority = match p {
@@ -21,7 +22,7 @@ pure func appraisal(a: Appraisal) -> [Effect] =
     Ok(outcome) => match head(filter(\r. r.to == "captain" && r.dimension == "trust", a.relationships)) {
       None => [],
       Some(r) => {
-        let delta = outcomeDelta(outcome)
+        let delta = traitDelta(outcome, a.observer.attributes)
         let boundedDelta = if r.value + delta < 0 then 0 - r.value else if r.value + delta > 100 then 100 - r.value else delta;
         [RelationshipDelta(a.observer.id, "captain", "trust", boundedDelta)]
       }

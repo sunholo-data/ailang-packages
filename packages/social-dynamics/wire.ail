@@ -1,5 +1,5 @@
 module sunholo/social_dynamics/wire
-import ./model (Error, Principal, Source, Disposition, Value, Actor, Indicator, Relationship, Resource, Cost, Effect, Recipe, Requirement, Authority, TaskStatus, Task, Relief, Commitment, Evidence, Knowledge, Appraisal, Rule, Condition, Limits, Config, Policies, Accepted, Token, State, Operation, Proposal, Delivery, EventKind, Event, Step, AdvanceResult, InvalidConfig, InvalidSchema, UnsupportedVersion, UnknownId, Unauthorized, UnseenEvidence, StaleRevision, Expired, AlteredDuplicate, InsufficientResource, CapacityExceeded, InvalidPolicyEffect, InvalidTransition, ClockRewind, InvalidBudget, NumericOverflow, PendingAdvance, InvalidContinuation, Host, ActorPrincipal, AI, Authored, ActorInput, Applied, Duplicate, BoundedIndicatorDelta, IndicatorDelta, RelationshipDelta, Allowed, Conditional, Refused, Offered, Working, Completed, Stopped, OfferTask, RaiseConcern, RequestRelief, OfferCommitment, AcceptTask, ResolveRelief, AcceptCommitment, TaskOffered, TaskAccepted, ConcernRaised, ReliefRequested, ReliefResolved, CommitmentOffered, CommitmentAccepted, TaskCompleted, ConditionEntered, ConditionRecovered, ObservationDelivered, ReactionApplied, Done, Pending, Blocked, validId, unique, sorted, bounded)
+import ./model (Error, Principal, Source, Disposition, Value, Actor, Indicator, Relationship, Resource, Cost, Effect, Recipe, Requirement, Authority, TaskStatus, Task, Relief, Commitment, Evidence, Knowledge, Appraisal, Rule, Condition, Limits, Config, Policies, Accepted, Token, State, Operation, Proposal, Delivery, EventKind, Event, Step, AdvanceResult, InvalidConfig, InvalidSchema, UnsupportedVersion, UnknownId, Unauthorized, UnseenEvidence, StaleRevision, Expired, AlteredDuplicate, InsufficientResource, CapacityExceeded, InvalidPolicyEffect, InvalidTransition, ClockRewind, InvalidBudget, NumericOverflow, PendingAdvance, InvalidContinuation, Host, ActorPrincipal, AI, Authored, ActorInput, Applied, Duplicate, BoundedIndicatorDelta, IndicatorDelta, RelationshipDelta, Allowed, Conditional, Refused, Offered, Working, Completed, Stopped, OfferTask, RaiseConcern, RequestRelief, OfferCommitment, AcceptTask, ResolveRelief, AcceptCommitment, TaskOffered, TaskAccepted, ConcernRaised, ReliefRequested, ReliefResolved, CommitmentOffered, CommitmentAccepted, TaskCompleted, ConditionEntered, ConditionRecovered, ObservationDelivered, ReactionApplied, TaskHalted, Done, Pending, Blocked, validId, unique, sorted, bounded)
 import std/json (Json, JNull, JString, JNumber, JBool, JArray, JObject, encode, decode, js, jint, jb, ja, jo, kv, getString, getInt, getNumber, getBool, getStringArrayStrict, getArray, keys)
 import std/list (map, any, length, sortBy)
 import std/string (length as stringLength, contains, chars, trim, startsWith, endsWith)
@@ -108,6 +108,7 @@ ConditionEntered(_)=>"condition_entered"
 ConditionRecovered(_)=>"condition_recovered"
 ObservationDelivered(_,_)=>"observation_delivered"
 ReactionApplied(_,_,_)=>"reaction_applied"
+TaskHalted(_,_)=>"task_halted"
 }
 pure func kindPayload(k: EventKind) -> Json = match k {
 TaskOffered(x0)=>jo([kv("id",js(x0))])
@@ -122,6 +123,7 @@ ConditionEntered(x0)=>jo([kv("id",js(x0))])
 ConditionRecovered(x0)=>jo([kv("id",js(x0))])
 ObservationDelivered(x0,x1)=>jo([kv("evidence",js(x0)),kv("observer",js(x1))])
 ReactionApplied(x0,x1,x2)=>jo([kv("observer",js(x0)),kv("evidence",js(x1)),kv("effects",ja(map(effectJson,x2)))])
+TaskHalted(x0,x1)=>jo([kv("id",js(x0)),kv("reason",js(x1))])
 }
 pure func evidenceOption(e: Option[string]) -> Json = match e {None=>JNull,Some(id)=>js(id)}
 pure func eventJson(e: Event) -> Json = jo([kv("schema",js(e.schema)),kv("seq",jint(e.seq)),kv("revision",jint(e.revision)),kv("tick",jint(e.tick)),kv("kind",js(kindName(e.kind))),kv("causes",strings(e.causes)),kv("evidence",evidenceOption(e.evidence)),kv("payload",kindPayload(e.kind))])

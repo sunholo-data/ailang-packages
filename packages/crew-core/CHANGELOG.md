@@ -1,5 +1,39 @@
 # Changelog
 
+## 0.2.0
+
+Crew strain (design `design_docs/planned/crew-strain.md`). Requires
+`social_dynamics` 0.4.0.
+
+- **Crew argue over lost capacity.** A ship event can take more than is
+  available while running work holds the rest. The holders then take stances
+  from their traits: hold score = (100 − A) + E/2 + C/2, plus 15 when
+  overextended.
+  - The least assertive are halted first (`social_dynamics` `halt`).
+  - A halted crew member gains stress 5 + N/10.
+  - One who held their ground loses regard for the colleagues who kept
+    working. One who yielded gains +1 regard from them.
+  - The argument is crew evidence `sf-<event>-<n>`.
+  - Scenarios with events give crew a `regard` relationship (0..100, from 50).
+- **Trust by personality.** New outcomes `complied_start` (a yes under
+  orders) and `strained_start` (a yes while overextended). `traitDelta`
+  scales every outcome's trust change by OCEAN traits and stress. Examples:
+  - a strained yes: diplomat −1, engineer −2, skeptic −4;
+  - an overridden refusal: −4 at A100 down to −12 at A0.
+- **Strain in the response policy.** An optional `strain` block
+  (`{indicator, threshold, shift}`) moves weight from accept and continue to
+  decline and request_relief while the crew member is overextended, scaled by
+  neuroticism. Policies without it are unchanged.
+- The `sf-` id prefix is reserved for flows.
+- **Behaviour change for orders runs.** Crew with OCEAN traits now get
+  personal trust deltas, so orders sessions recorded on 0.1.0 replay to
+  different trust values:
+  - a "yes" under orders is `complied_start`, worth 2 − voice;
+  - an overridden refusal costs −4 to −12, not a flat −8;
+  - a denied relief costs −(2 + N/25), not −4.
+
+  Consent sessions are unchanged. `session_test` pins the new values.
+
 ## 0.1.0
 
 First release, split out of the local crew-lab example (S-CREW-CORE-SPLIT). A pure
