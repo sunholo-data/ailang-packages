@@ -3,7 +3,7 @@ import std/result (Result, Ok, Err)
 import std/option (Option, Some, None)
 import std/list (map, length, foldl, range, any)
 import std/string (replace, find)
-import ./cohorts (Cohort, Population, Signal, decodePopulation, apportion, binom, shift, division, pressure, meanBand, years, decades, isqrt, hear, drift, total, headcount, decay)
+import ./cohorts (Cohort, Population, Signal, Promotion, yearsTo, setBirthPolicy, promote, personOf, decodePopulation, apportion, binom, shift, division, pressure, meanBand, years, decades, isqrt, hear, drift, total, headcount, decay)
 
 pure func sum(xs: [int]) -> int = foldl(\a x. a + x, 0, xs)
 
@@ -104,3 +104,68 @@ test "trust follows the voice" {
 test "decay" { decay(20, 0) == 1000 && decay(20, 1) == 980 && decay(1000, 3) == 0 }
 
 test "drift is the same in one step or never backwards" { drift(pop(), 0, [], []) == pop() }
+
+-- P4: years
+
+pure func after(p: Population, y: int) -> Population = yearsTo(p, y, [])
+pure func policy(q: string) -> Population = match setBirthPolicy(pop(), q) { Ok(p) => p, Err(_) => pop() }
+pure func ids(p: Population) -> [string] = map(\c. c.id, p.cohorts)
+pure func headOf(p: Population, id: string) -> int = sum(map(\c. if c.id == id then headcount(c) else 0, p.cohorts))
+
+test "people change only by births and deaths" {
+ let p = after(pop(), 30);
+ p.year == 30 && total(p) == total(pop()) + p.births - p.deaths && p.births > 0 && p.deaths > 0
+}
+
+test "bands keep summing to the headcount every year" {
+ let p = after(pop(), 40);
+ not any(\c. sum(c.mood) != headcount(c) || sum(c.trust) != headcount(c) || any(\x. x < 0, c.ages ++ c.mood ++ c.trust), p.cohorts)
+}
+
+test "encourage, hold and restrict order the births" {
+ let e = after(policy("encourage"), 20); let h = after(policy("hold"), 20); let r = after(policy("restrict"), 20);
+ e.births > h.births && h.births > r.births
+}
+
+test "births stop while a birth need is short" { (yearsTo(pop(), 10, ["garden"])).births == 0 && (yearsTo(pop(), 10, ["water"])).births > 0 }
+
+test "children come of age into the departments" {
+ let p = after(pop(), 19);
+ headOf(p, "children") > 0 && (after(pop(), 25)).births > headOf(after(pop(), 25), "children")
+}
+
+test "ship-born adults split off once they are a quarter of a department" {
+ let p = after(policy("encourage"), 70);
+ any(\i. i == "engineering-shipborn" || i == "gardens-shipborn", ids(p)) && length(p.cohorts) <= 16
+}
+
+test "the year step replays" { after(pop(), 15) == after(pop(), 15) && yearsTo(after(pop(), 5), 15, []) == after(pop(), 15) }
+
+test "an unknown birth policy is refused" { setBirthPolicy(pop(), "ban") == Err("birth_policy must be encourage, hold or restrict") }
+
+-- P5: promotion
+
+test "promotion takes one adult from the voiced cohort" {
+ match promote(pop(), "engineer", 40) {
+  Err(_) => false,
+  Ok(r) => total(r.population) == total(pop()) - 1 && r.person.person == "engineering-p1" && r.person.cohort == "engineering" && headOf(r.population, "engineering") == headOf(pop(), "engineering") - 1 && personOf(r.population, "engineer") == "engineering-p1"
+ }
+}
+
+test "a role with no cohort draws from the largest department" {
+ match promote(pop(), "medic", 3) { Ok(r) => r.person.cohort == "engineering" || r.person.cohort == "gardens", Err(_) => false }
+}
+
+test "promotion ids count up and the mix stays near the cohort's" {
+ match promote(pop(), "engineer", 1) {
+  Err(_) => false,
+  Ok(a) => match promote(a.population, "engineer", 2) {
+   Err(_) => false,
+   Ok(b) => b.person.person == "engineering-p2" && personOf(b.population, "engineer") == "engineering-p2" && not any(\pr. match pr { (m, c) => m - c > 10 || c - m > 10 }, zip2(b.mix, [40,70,40,50,30]))
+  }
+ }
+}
+
+pure func zip2(xs: [int], ys: [int]) -> [(int, int)] = match (xs, ys) { (x :: a, y :: b) => (x, y) :: zip2(a, b), _ => [] }
+
+test "promotion replays" { promote(pop(), "engineer", 9) == promote(pop(), "engineer", 9) }

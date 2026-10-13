@@ -312,3 +312,137 @@ pure func driftStep(p: Population, day: int, signals: [Signal], short: [string])
  }
 export pure func drift(p: Population, day: int, signals: [Signal], short: [string]) -> Population
 ensures { total(result) == total(p) && (result.day == p.day || result.day == day) } = driftStep(p, day, signals, short)
+
+-- ------------------------------------------------------------ years
+
+pure func zeros(n: int) -> [int] = map(\i. 0, range(0, n))
+pure func older(ages: [int]) -> [int] = [0] ++ take(98, ages) ++ [at(ages, 98) + at(ages, 99)]
+pure func primary(c: Cohort) -> bool = c.id != "children" && not endsWith9(c.id)
+pure func endsWith9(id: string) -> bool = stringLength(id) > 9 && substring(id, stringLength(id) - 9, stringLength(id)) == "-shipborn"
+pure func lose(bands: [int], k: int) -> [int] = minus(bands, apportion(k, bands))
+pure func min2(a: int, b: int) -> int = if a < b then a else b
+
+-- A year's deaths in one cohort: expected deaths by age, with the
+-- fraction carried to next year, taken from the ages most at risk and from
+-- every mood and trust band in proportion.
+pure func dieOne(p: Population, c: Cohort) -> {cohort: Cohort, died: int} = {
+ let risk = map(\i. at(c.ages, i) * at(p.mortality, i / 10), range(0, 100));
+ let expect = sum(risk) + c.carry;
+ let k = min2(expect / 100000, headcount(c));
+ let gone = map(\pr. match pr { (g, a) => min2(g, a) }, zip(apportion(k, risk), c.ages));
+ let died = sum(gone);
+ {cohort: {c | ages: minus(c.ages, gone), mood: lose(c.mood, died), trust: lose(c.trust, died), carry: expect % 100000}, died: died}
+}
+
+pure func policyIndex(policy: string) -> int = if policy == "encourage" then 0 else if policy == "hold" then 1 else 2
+
+-- Births this year (thousandths carried): fertile adults (20-44) times the
+-- captain's policy rate (per mille a year) times the share of adults who
+-- are content or uneasy. None while a birth need is short.
+pure func birthsDue(p: Population, cs: [Cohort], short: bool) -> {births: int, carry: int} =
+ if short then {births: 0, carry: 0} else {
+  let adults = filter(\c. c.id != "children", cs);
+  let fertile = sum(map(\c. span(c.ages, 20, 45), adults));
+  let head1 = sum(map(headcount, adults));
+  let calm = if head1 <= 0 then 0 else sum(map(\c. at(c.mood, 0) + at(c.mood, 1), adults)) * 1000 / head1;
+  let milli = fertile * at(p.rates, policyIndex(p.birthPolicy)) * calm / 1000 + p.carry;
+  {births: milli / 1000, carry: milli % 1000}
+ }
+
+pure func born(c: Cohort, n: int) -> Cohort = if c.id != "children" || n <= 0 then c else {c | ages: addAt(c.ages, 0, n), mood: addAt(c.mood, 0, n), trust: addAt(c.trust, 1, n)}
+
+pure func arrive(c: Cohort, ages: [int]) -> Cohort = { let n = sum(ages); if n <= 0 then c else {c | ages: plus(c.ages, ages), mood: addAt(c.mood, 0, n), trust: addAt(c.trust, 1, n)} }
+
+-- Children reaching 18 join the departments in proportion to their size;
+-- once a department has split, its ship-born join the ship-born group.
+pure func comeOfAge(cs: [Cohort], y: int) -> [Cohort] = match head(filter(\c. c.id == "children", cs)) {
+ None => cs,
+ Some(ch) => {
+  let leaving = zeros(18) ++ drop(18, ch.ages);
+  let k = sum(leaving);
+  let deps = filter(primary, cs);
+  let shares = apportion(k, map(headcount, deps));
+  let given = map(\pr. match pr { (d, s) => {id: d.id, ages: apportion(s, leaving)} }, zip(deps, shares));
+  let into = \c. if c.id == "children" then {c | ages: take(18, c.ages) ++ zeros(82), mood: lose(c.mood, k), trust: lose(c.trust, k)} else {
+   let owner = if endsWith9(c.id) then substring(c.id, 0, stringLength(c.id) - 9) else c.id;
+   let split = any(\x. x.id == "${owner}-shipborn", cs);
+   let mine = endsWith9(c.id) || not split;
+   match head(filter(\g. g.id == owner, given)) { Some(g) => if mine then arrive(c, g.ages) else c, None => c }
+  };
+  if k <= 0 then cs else map(into, cs)
+ }
+}
+
+-- A department splits off its ship-born (younger than the voyage) once they
+-- are `split` per cent of it, while there is room for another group.
+pure func splitOne(p: Population, c: Cohort, y: int, room: bool) -> [Cohort] = {
+ let sb = span(c.ages, 0, min2(y, 100));
+ if not room || not primary(c) || sb <= 0 || sb * 100 < p.split * headcount(c) then [c] else {
+  let young = take(min2(y, 100), c.ages) ++ zeros(100 - min2(y, 100));
+  let moodS = apportion(sb, c.mood);
+  let trustS = apportion(sb, c.trust);
+  [{c | ages: minus(c.ages, young), mood: minus(c.mood, moodS), trust: minus(c.trust, trustS)},
+   {id: "${c.id}-shipborn", department: c.department, mix: c.mix, mood: moodS, trust: trustS, ages: young, voice: "", shock: c.shock, carry: 0}]
+ }
+}
+pure func splitAll(p: Population, cs: [Cohort], y: int) -> [Cohort] = {
+ let r = foldl(\st c. if any(\x. x.id == "${c.id}-shipborn", cs) then {acc: st.acc ++ [c], n: st.n} else { let parts = splitOne(p, c, y, st.n < 16); {acc: st.acc ++ parts, n: st.n + length(parts) - 1} }, {acc: [], n: length(cs)}, cs);
+ r.acc
+}
+
+pure func yearOne(p: Population, short: [string]) -> Population = {
+ let y = p.year + 1;
+ let aged = map(\c. {c | ages: older(c.ages)}, p.cohorts);
+ let dead = map(\c. dieOne(p, c), aged);
+ let died = sum(map(\d. d.died, dead));
+ let cs = map(\d. d.cohort, dead);
+ let b = birthsDue(p, cs, any(\n. contains(short, n), p.needs));
+ let withBirths = map(\c. born(c, b.births), cs);
+ {p | year: y, cohorts: splitAll(p, comeOfAge(withBirths, y), y), carry: b.carry, births: p.births + b.births, deaths: p.deaths + died}
+}
+
+-- Run the yearly population step up to `year` (births, deaths, ageing,
+-- coming of age, generation splits). `short` lists resources below a fifth
+-- of their opening amount; a short birth need stops births that year.
+export pure func yearsTo(p: Population, year: int, short: [string]) -> Population
+ensures { result.year >= p.year && length(result.cohorts) <= 16 } = if year <= p.year then p else yearsTo(yearOne(p, short), year, short)
+
+-- The captain's birth policy (D-71(2)).
+export pure func setBirthPolicy(p: Population, policy: string) -> Result[Population, string]
+ensures { match result { Ok(q) => q.birthPolicy == policy, Err(_) => true } } =
+ if contains(policies(), policy) then Ok({p | birthPolicy: policy}) else Err("birth_policy must be encourage, hold or restrict")
+
+-- ------------------------------------------------------------ promotion
+
+export type Promotion = {population: Population, person: Person, mix: [int], trust: int} deriving (Eq)
+
+pure func argmaxFrom(xs: [int], lo: int, hi: int) -> int = foldl(\best i. if at(xs, i) > at(xs, best) then i else best, lo, range(lo, hi))
+
+-- Someone from `role`'s cohort (the cohort it voices, else the largest
+-- department) steps into the role when its person departs. They bring the
+-- cohort's mix plus a seeded offset of up to 10 per trait, and the cohort's
+-- mean trust in the captain. The person id is `<cohort>-p<n>`.
+export pure func promote(p: Population, role: string, tick: int) -> Result[Promotion, string]
+ensures { match result { Ok(r) => total(r.population) == total(p) - 1 && length(r.mix) == 5, Err(_) => true } } = {
+ let voiced = filter(\c. c.voice == role && span(c.ages, 18, 100) > 0, p.cohorts);
+ let deps = filter(\c. primary(c) && span(c.ages, 18, 100) > 0, p.cohorts);
+ let largest = foldl(\best c. match best { None => Some(c), Some(b) => if headcount(c) > headcount(b) then Some(c) else best }, None, deps);
+ let source = match head(voiced) { Some(c) => Some(c), None => largest };
+ match source {
+  None => Err("no adult left to promote into ${role}"),
+  Some(c) => {
+   let age = if span(c.ages, 20, 60) > 0 then argmaxFrom(c.ages, 20, 60) else argmaxFrom(c.ages, 18, 100);
+   let n = length(filter(\x. x.cohort == c.id, p.persons)) + 1;
+   let person = {role: role, person: "${c.id}-p${n}", cohort: c.id, at: tick};
+   let us = draws(p.seed, "promote:${person.person}");
+   let mix = map(\i. clamp(0, 100, trait(c, i) + at(us, i) % 21 - 10), range(0, 5));
+   let h = sum(c.trust);
+   let trust = if h <= 0 then 50 else (at(c.trust, 0) * 87 + at(c.trust, 1) * 62 + at(c.trust, 2) * 37 + at(c.trust, 3) * 12) / h;
+   let c2 = {c | ages: addAt(c.ages, age, 0 - 1), mood: lose(c.mood, 1), trust: lose(c.trust, 1)};
+   Ok({population: {p | cohorts: map(\x. if x.id == c.id then c2 else x, p.cohorts), persons: p.persons ++ [person]}, person: person, mix: mix, trust: trust})
+  }
+ }
+}
+
+-- The person now filling a role, if anyone has been promoted into it.
+export pure func personOf(p: Population, role: string) -> string ensures { true } = foldl(\acc x. if x.role == role then x.person else acc, "", p.persons)
