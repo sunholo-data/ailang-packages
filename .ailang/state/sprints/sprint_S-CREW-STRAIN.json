@@ -1,0 +1,23 @@
+{
+  "sprint_id": "S-CREW-STRAIN",
+  "status": "in_progress",
+  "created": "2026-10-13",
+  "design_doc": "design_docs/planned/crew-strain.md",
+  "sprint_plan": "design_docs/planned/crew-strain-sprint.md",
+  "authorization": "Mark 2026-10-13: 'can you fix up the misses? losing capacity should impact already running work, its a source of conflict? ... fix the stress ceiling and trust'; halting: 'Crew argue it out'; trust: 'depend on ... OCEAN'; 'yep great continue'; 'you can publish and are always allowed to publish'",
+  "prompt_version": "v0.16.7",
+  "github_issues": [],
+  "velocity": {"target_loc_per_day": 900, "estimated_total_loc": 900, "estimated_days": 1},
+  "features": [
+    {"id": "S1", "description": "social_dynamics 0.4.0 host halt + TaskHalted", "estimated_loc": 80, "dependencies": [], "acceptance_criteria": ["halt releases reservation, consumes nothing, Stopped; host only, Working only, once", "145 tests both engines", "quality no gates", "published"], "passes": true, "started": "2026-10-13", "completed": "2026-10-13", "notes": "Published sunholo/social_dynamics@0.4.0 (content sha256:3ecabb4a...)."},
+    {"id": "S2", "description": "crew_core argue over lost capacity", "estimated_loc": 250, "dependencies": ["S1"], "acceptance_criteria": ["lowest hold score halted first; ties later start", "stress 5+N/10; regard -(N/10+2) for holders, +1 for yielders", "no argument while free units cover the loss", "both engines"], "passes": true, "started": "2026-10-13", "completed": "2026-10-13", "notes": "strain_test 4 tests exact numbers; regard indicator+relationships only when events exist (old configs unchanged)."},
+    {"id": "S3", "description": "trust by personality; policy strain", "estimated_loc": 150, "dependencies": [], "acceptance_criteria": ["traitDelta matches the design table", "strain shift only when overextended, scaled by N; policies without strain unchanged"], "passes": true, "started": "2026-10-13", "completed": "2026-10-13", "notes": "codec_test table (diplomat/engineer/skeptic), policy.ail strain tests."},
+    {"id": "S4", "description": "crew-lab measures, orders captain, pack policy, claims", "estimated_loc": 200, "dependencies": ["S2", "S3"], "acceptance_criteria": ["peak/overextended/halted/regard/shortfall measures", "claims written first; 20-seed results recorded including failures", "tests replay parity claims-test pass"], "passes": true, "started": "2026-10-13", "completed": "2026-10-13", "notes": "44/50 hold. Breakdown possible (engineer peak 95, medic 100 under orders; skeptic trust 14). Diplomat stays 52.5 (personality). Arguments rare in ergosphere-question (1/20): scenario overlap, not the rule; navigator-holds passes vacuously - recorded."},
+    {"id": "S5", "description": "close", "estimated_loc": 50, "dependencies": ["S4"], "acceptance_criteria": ["make validate keyless", "evaluation >= 70", "crew_core 0.2.0 published after merge"], "passes": null, "started": "2026-10-13", "completed": null, "notes": null}
+  ],
+  "registry_reuse": [{"milestone": "S1", "decision": "contribute", "detail": "social_dynamics 0.4.0 host halt (published)"}],
+  "evaluations": [],
+  "completed": null,
+  "pull_requests": [],
+  "landing": null
+}

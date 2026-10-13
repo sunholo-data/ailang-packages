@@ -1,5 +1,5 @@
 module sunholo/social_dynamics/tasks
-import ./model (Config, Policies, State, Principal, Host, ActorPrincipal, Task, Recipe, Cost, Resource, Requirement, Authority, Allowed, Conditional, Refused, TaskStatus, Offered, Working, Completed, Stopped, Step, Applied, Error, UnknownId, Unauthorized, InvalidTransition, InsufficientResource, CapacityExceeded, NumericOverflow, TaskAccepted, TaskCompleted, ReliefResolved, add, event, principalId, multiply, InvalidConfig, PendingAdvance)
+import ./model (Config, Policies, State, Principal, Host, ActorPrincipal, Task, Recipe, Cost, Resource, Requirement, Authority, Allowed, Conditional, Refused, TaskStatus, Offered, Working, Completed, Stopped, Step, Applied, Error, UnknownId, Unauthorized, InvalidTransition, InsufficientResource, CapacityExceeded, NumericOverflow, TaskAccepted, TaskCompleted, ReliefResolved, TaskHalted, add, event, principalId, multiply, InvalidConfig, PendingAdvance, validId)
 import ./wire (encodeConfig)
 import ./indicators (applyEffects, findActor)
 import std/result (Result, Ok, Err)
@@ -151,6 +151,30 @@ pure func resolveReady(c:Config,s:State,p:Principal,requestId:string,releaseRema
         Err(e) => Err(e),
         Ok(resources) => if s.seq >= 1000000000 || s.revision >= 1000000000 then Err(NumericOverflow("event")) else let e = event(s, ReliefResolved(requestId, releaseRemaining), []) in
         Ok({ state: { s | resources: resources, tasks: map(\x. if x.id == t.id && releaseRemaining then { x | status: Stopped, due: s.tick } else x, s.tasks), reliefs: map(\x. if x.id == requestId then { x | resolved: true } else x, s.reliefs), seq: e.seq, revision: e.revision }, disposition: Applied, events: [e] })
+      }
+    }
+  }
+}
+
+-- The host halts running work, for example when the ship loses capacity the
+-- work holds. Host only; Working tasks only. The reservation is released and
+-- nothing is consumed (as for released relief); the task is Stopped at this
+-- tick and a task_halted event names the reason.
+export pure func halt(c: Config, s: State, p: Principal, taskId: string, reason: string) -> Result[Step, Error]
+ensures { match result {
+  Ok(step) => step.state.tick == s.tick && length(step.state.tasks) == length(s.tasks),
+  Err(_) => true
+} } = match context(c,s) { Err(e)=>Err(e),Ok(_)=>haltReady(c,s,p,taskId,reason) }
+pure func haltReady(c:Config,s:State,p:Principal,taskId:string,reason:string)->Result[Step,Error] = match p {
+  ActorPrincipal(_) => Err(Unauthorized(taskId)),
+  Host => if not validId(reason) then Err(InvalidTransition(taskId)) else match findTask(s, taskId) {
+    None => Err(UnknownId(taskId)),
+    Some(t) => if t.status != Working then Err(InvalidTransition(taskId)) else match recipe(c, t.recipe) {
+      None => Err(UnknownId(t.recipe)),
+      Some(r) => match release(s.resources, r.costs, false) {
+        Err(e) => Err(e),
+        Ok(resources) => if s.seq >= 1000000000 || s.revision >= 1000000000 then Err(NumericOverflow("event")) else let e = event(s, TaskHalted(taskId, reason), t.causes) in
+        Ok({ state: { s | resources: resources, tasks: map(\x. if x.id == taskId then { x | status: Stopped, due: s.tick } else x, s.tasks), seq: e.seq, revision: e.revision }, disposition: Applied, events: [e] })
       }
     }
   }

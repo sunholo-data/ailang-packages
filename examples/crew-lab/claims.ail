@@ -18,8 +18,8 @@ pure func str(j:Json, k:string) -> string = match getString(j, k) {Some(s) => s,
 -- Text fields that are present must be strings (a numeric note is an error, not "").
 pure func textField(j:Json, k:string) -> bool = match get(j, k) {None => true, Some(_) => match getString(j, k) {Some(_) => true, None => false}}
 pure func ops() -> [string] = ["<", "<=", ">", ">=", "=="]
-pure func scalars() -> [string] = ["tick", "offers", "starts", "refused", "stockouts", "errors"]
-pure func crewFields() -> [string] = ["fatigue", "stress", "morale", "readiness", "observations", "trust"]
+pure func scalars() -> [string] = ["tick", "offers", "starts", "refused", "stockouts", "errors", "shortfalls", "halts"]
+pure func crewFields() -> [string] = ["fatigue", "stress", "morale", "readiness", "observations", "trust", "peak_stress", "peak_fatigue", "overextended_turns", "halted", "regard_min"]
 pure func replyLabels() -> [string] = ["accept", "decline", "concern", "defer", "continue", "request_relief"]
 
 -- Only measures crew_sim/1 can report, for crew and work in this scenario, so a

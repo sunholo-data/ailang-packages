@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.4.0
+
+The host can halt running work. `tasks.halt(config, state, Host, task, reason)`:
+- **Who and what:** host only, and only a Working task.
+- **Effect:** the task's reservation is released with nothing consumed, as
+  for released relief, and the task is Stopped at the current tick.
+- **Event:** a new `TaskHalted(task, reason)` event (`task_halted` on the
+  wire).
+
+Hosts use it when the world takes away capacity that running work holds; the
+crew host uses it when crew argue over lost ship capacity. Everything else is
+unchanged.
+
 ## 0.3.0
 
 Add a pure personality sidecar with receipt-bound major-event responses. OCEAN

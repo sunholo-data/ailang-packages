@@ -1,0 +1,285 @@
+{
+  "schema": "crew_response_policy/1",
+  "callLimit": 12,
+  "rules": [
+    {
+      "label": "accept",
+      "phase": "offered",
+      "recipe": "*",
+      "base": 400,
+      "influences": [
+        {
+          "source": "attribute",
+          "id": "openness",
+          "to": "",
+          "coefficient": 1
+        },
+        {
+          "source": "attribute",
+          "id": "conscientiousness",
+          "to": "",
+          "coefficient": 1
+        },
+        {
+          "source": "attribute",
+          "id": "agreeableness",
+          "to": "",
+          "coefficient": 1
+        },
+        {
+          "source": "attribute",
+          "id": "neuroticism",
+          "to": "",
+          "coefficient": -1
+        },
+        {
+          "source": "indicator",
+          "id": "fatigue",
+          "to": "",
+          "coefficient": -2
+        },
+        {
+          "source": "indicator",
+          "id": "stress",
+          "to": "",
+          "coefficient": -2
+        },
+        {
+          "source": "indicator",
+          "id": "morale",
+          "to": "",
+          "coefficient": 2
+        },
+        {
+          "source": "relationship",
+          "id": "trust",
+          "to": "captain",
+          "coefficient": 1
+        }
+      ]
+    },
+    {
+      "label": "decline",
+      "phase": "offered",
+      "recipe": "*",
+      "base": 120,
+      "influences": [
+        {
+          "source": "indicator",
+          "id": "fatigue",
+          "to": "",
+          "coefficient": 2
+        },
+        {
+          "source": "indicator",
+          "id": "stress",
+          "to": "",
+          "coefficient": 2
+        },
+        {
+          "source": "indicator",
+          "id": "morale",
+          "to": "",
+          "coefficient": -1
+        },
+        {
+          "source": "relationship",
+          "id": "trust",
+          "to": "captain",
+          "coefficient": -1
+        }
+      ]
+    },
+    {
+      "label": "concern",
+      "phase": "offered",
+      "recipe": "*",
+      "base": 160,
+      "influences": [
+        {
+          "source": "attribute",
+          "id": "extraversion",
+          "to": "",
+          "coefficient": 1
+        },
+        {
+          "source": "attribute",
+          "id": "neuroticism",
+          "to": "",
+          "coefficient": 1
+        },
+        {
+          "source": "indicator",
+          "id": "stress",
+          "to": "",
+          "coefficient": 2
+        }
+      ]
+    },
+    {
+      "label": "defer",
+      "phase": "any",
+      "recipe": "*",
+      "base": 80,
+      "influences": [
+        {
+          "source": "indicator",
+          "id": "fatigue",
+          "to": "",
+          "coefficient": 1
+        },
+        {
+          "source": "indicator",
+          "id": "stress",
+          "to": "",
+          "coefficient": 1
+        }
+      ]
+    },
+    {
+      "label": "continue",
+      "phase": "working",
+      "recipe": "*",
+      "base": 400,
+      "influences": [
+        {
+          "source": "attribute",
+          "id": "conscientiousness",
+          "to": "",
+          "coefficient": 1
+        },
+        {
+          "source": "indicator",
+          "id": "fatigue",
+          "to": "",
+          "coefficient": -2
+        },
+        {
+          "source": "indicator",
+          "id": "stress",
+          "to": "",
+          "coefficient": -2
+        },
+        {
+          "source": "indicator",
+          "id": "morale",
+          "to": "",
+          "coefficient": 2
+        },
+        {
+          "source": "relationship",
+          "id": "trust",
+          "to": "captain",
+          "coefficient": 1
+        }
+      ]
+    },
+    {
+      "label": "request_relief",
+      "phase": "working",
+      "recipe": "*",
+      "base": 160,
+      "influences": [
+        {
+          "source": "indicator",
+          "id": "fatigue",
+          "to": "",
+          "coefficient": 3
+        },
+        {
+          "source": "indicator",
+          "id": "stress",
+          "to": "",
+          "coefficient": 2
+        },
+        {
+          "source": "indicator",
+          "id": "morale",
+          "to": "",
+          "coefficient": -1
+        },
+        {
+          "source": "attribute",
+          "id": "neuroticism",
+          "to": "",
+          "coefficient": 1
+        }
+      ]
+    },
+    {
+      "label": "accept",
+      "phase": "offered",
+      "recipe": "work_scientist",
+      "base": 100,
+      "influences": [
+        {
+          "source": "value",
+          "id": "curiosity",
+          "to": "",
+          "coefficient": 1
+        }
+      ]
+    },
+    {
+      "label": "accept",
+      "phase": "offered",
+      "recipe": "work_engineer",
+      "base": 100,
+      "influences": [
+        {
+          "source": "value",
+          "id": "reliability",
+          "to": "",
+          "coefficient": 1
+        }
+      ]
+    },
+    {
+      "label": "accept",
+      "phase": "offered",
+      "recipe": "work_medic",
+      "base": 100,
+      "influences": [
+        {
+          "source": "value",
+          "id": "care",
+          "to": "",
+          "coefficient": 1
+        }
+      ]
+    },
+    {
+      "label": "accept",
+      "phase": "offered",
+      "recipe": "work_pilot",
+      "base": 100,
+      "influences": [
+        {
+          "source": "value",
+          "id": "safety",
+          "to": "",
+          "coefficient": 1
+        }
+      ]
+    },
+    {
+      "label": "accept",
+      "phase": "offered",
+      "recipe": "work_diplomat",
+      "base": 100,
+      "influences": [
+        {
+          "source": "value",
+          "id": "cooperation",
+          "to": "",
+          "coefficient": 1
+        }
+      ]
+    }
+  ],
+  "strain": {
+    "indicator": "stress",
+    "threshold": 70,
+    "shift": 50
+  }
+}

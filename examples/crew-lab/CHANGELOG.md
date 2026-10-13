@@ -9,6 +9,14 @@ Local only; never published.
   `compute`, `signal`; stapledons-design `bubble-resources.md`). Stocks are
   used up; capacities are only reserved. All claims are unchanged: 33 of 36
   hold.
+- **Crew strain (S-CREW-STRAIN).**
+  - crew-sim's orders captain no longer rests people on its own initiative.
+  - New per-crew measures: `peak_stress`, `peak_fatigue`,
+    `overextended_turns`, `halted` and `regard_min`. New run-level measures:
+    `shortfalls` and `halts`. Claims can name all of them.
+  - The Stapledon pack has `policy.json` (strain on), and the stress claims
+    use peak stress.
+  - Over 20 seeds, 44 of 50 claims hold; the findings are in `REVIEW.md`.
 - **Resources that flow (S-CREW-BUBBLE-RESOURCES).**
   - `crew_sim/1` reports `resources.<id>` (`min`, `zero_ticks`, `stockouts`,
     `in`, `out`), and claims can name these.
