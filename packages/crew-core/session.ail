@@ -714,8 +714,10 @@ pure func indicatorOf(state: State, actor: string, id: string) -> int = match he
 }
 pure func trustOf(state: State, actor: string, captain: string) -> int = match head(filter(\r. r.from == actor && r.to == captain && r.dimension == "trust", state.relationships)) { Some(r) => r.value, None => 0 - 1 }
 pure func signals(s: Session, p: Population, state: State) -> [Signal] = flatMap(\c. if c.voice == "" then [] else [{cohort: c.id, stress: indicatorOf(state, c.voice, "stress"), trust: trustOf(state, c.voice, s.scenario.captain)}], p.cohorts)
--- Resources below a fifth of their opening amount.
-pure func shortNow(state: State) -> [string] = flatMap(\r. if r.available * 5 < r.initial then [r.id] else [], state.resources)
+-- Resources the ship has lost below a fifth of their opening amount. Units
+-- reserved by work in progress still count as the ship's: a botanist working
+-- the beds is not a shortage.
+pure func shortNow(state: State) -> [string] = flatMap(\r. if (r.available + r.reserved) * 5 < r.initial then [r.id] else [], state.resources)
 
 -- Cohorts catch up with the ship: events due by now are heard once, the
 -- years turn (365 ticks, one tick a ship-day, D-70 OQ1), and moods drift.

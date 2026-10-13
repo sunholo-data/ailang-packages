@@ -199,7 +199,7 @@ pure func emptyChildren(mix: [int]) -> Cohort = {id: "children", department: "ch
 pure func rateOf(j: Json, key: string, d: int) -> int = match getInt(j, key) { Some(v) => v, None => d }
 
 pure func readRates(j: Json) -> Result[[int], string] = match get(j, "birth_rates") {
- None => Ok([60, 30, 8]),
+ None => Ok([70, 48, 20]),
  Some(r) => if not onlyKeys(r, policies(), []) then Err("cohorts: birth_rates needs encourage, hold and restrict") else {
   let rs = map(\k. rateOf(r, k, 0 - 1), policies());
   if any(\v. v < 0 || v > 1000, rs) then Err("cohorts: birth_rates are per mille, 0..1000") else Ok(rs)
@@ -336,6 +336,12 @@ pure func dieOne(p: Population, c: Cohort) -> {cohort: Cohort, died: int} = {
 
 pure func policyIndex(policy: string) -> int = if policy == "encourage" then 0 else if policy == "hold" then 1 else 2
 
+-- Default birth rates, per mille of fertile adults a year: encourage 70,
+-- hold 48, restrict 20. Calibrated on the Stapledon founders pack (1,000
+-- aboard, D-75): hold reaches about 1,540 at year 100, encourage grows 2-3 %
+-- a year early on (bubble-society's good-conditions band), restrict shrinks
+-- the ship. Replacement is near 47: 25 fertile years at r per mille is about
+-- r/20 children per woman.
 -- Births this year (thousandths carried): fertile adults (20-44) times the
 -- captain's policy rate (per mille a year) times the share of adults who
 -- are content or uneasy. None while a birth need is short.
@@ -390,6 +396,29 @@ pure func splitAll(p: Population, cs: [Cohort], y: int) -> [Cohort] = {
  r.acc
 }
 
+-- Who may have children is a source of tension (Mark, 2026-10-13). Each
+-- year under "restrict", a cohort loses trust in the captain in proportion
+-- to how many of its people are of child-bearing age (20-44) and how warm
+-- and family-minded it is (agreeableness and extraversion); its mood sours
+-- at half that rate. Under "encourage" while a birth need is short, the
+-- conscientious object instead. "hold" leaves them be.
+export pure func tension(p: Population, c: Cohort, short: bool) -> {trust: int, mood: int}
+ensures { result.trust >= 0 && result.trust <= 1000 && result.mood >= 0 && result.mood <= 1000 } = {
+ let h = headcount(c);
+ let fertile = if h <= 0 then 0 else span(c.ages, 20, 45) * 1000 / h;
+ let t = if p.birthPolicy == "restrict" then fertile * (trait(c, 3) + trait(c, 2)) / 200 / 3
+  else if p.birthPolicy == "encourage" && short then trait(c, 1) * 2
+  else 0;
+ {trust: clamp(0, 1000, t), mood: clamp(0, 1000, t / 2)}
+}
+
+pure func strained(p: Population, c: Cohort, short: bool) -> Cohort = {
+ let r = tension(p, c, short);
+ if r.trust <= 0 || c.id == "children" then c else {c |
+  trust: shift(c.trust, [r.trust, r.trust, r.trust, 0], [0, 0, 0, 0], p.mode, p.seed, "births:${p.year}:${c.id}:t"),
+  mood: shift(c.mood, [r.mood, r.mood, r.mood, 0], [0, 0, 0, 0], p.mode, p.seed, "births:${p.year}:${c.id}:m")}
+}
+
 pure func yearOne(p: Population, short: [string]) -> Population = {
  let y = p.year + 1;
  let aged = map(\c. {c | ages: older(c.ages)}, p.cohorts);
@@ -397,7 +426,8 @@ pure func yearOne(p: Population, short: [string]) -> Population = {
  let died = sum(map(\d. d.died, dead));
  let cs = map(\d. d.cohort, dead);
  let b = birthsDue(p, cs, any(\n. contains(short, n), p.needs));
- let withBirths = map(\c. born(c, b.births), cs);
+ let isShort = any(\n. contains(short, n), p.needs);
+ let withBirths = map(\c. strained(p, born(c, b.births), isShort), cs);
  {p | year: y, cohorts: splitAll(p, comeOfAge(withBirths, y), y), carry: b.carry, births: p.births + b.births, deaths: p.deaths + died}
 }
 

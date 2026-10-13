@@ -3,7 +3,7 @@ import std/result (Result, Ok, Err)
 import std/option (Option, Some, None)
 import std/list (map, length, foldl, range, any)
 import std/string (replace, find)
-import ./cohorts (Cohort, Population, Signal, Promotion, yearsTo, setBirthPolicy, promote, personOf, decodePopulation, apportion, binom, shift, division, pressure, meanBand, years, decades, isqrt, hear, drift, total, headcount, decay)
+import ./cohorts (Cohort, Population, Signal, Promotion, tension, yearsTo, setBirthPolicy, promote, personOf, decodePopulation, apportion, binom, shift, division, pressure, meanBand, years, decades, isqrt, hear, drift, total, headcount, decay)
 
 pure func sum(xs: [int]) -> int = foldl(\a x. a + x, 0, xs)
 
@@ -169,3 +169,22 @@ test "promotion ids count up and the mix stays near the cohort's" {
 pure func zip2(xs: [int], ys: [int]) -> [(int, int)] = match (xs, ys) { (x :: a, y :: b) => (x, y) :: zip2(a, b), _ => [] }
 
 test "promotion replays" { promote(pop(), "engineer", 9) == promote(pop(), "engineer", 9) }
+
+-- Births are a source of tension
+
+test "restricting births costs trust, most where people are of child-bearing age" {
+ let r = after(policy("restrict"), 5);
+ let h = after(policy("hold"), 5);
+ match (r.cohorts, h.cohorts) {
+  (re :: rg :: _, he :: hg :: _) => meanBand(re.trust) > meanBand(he.trust) && meanBand(rg.trust) > meanBand(hg.trust),
+  _ => false
+ }
+}
+
+test "encouraging births while food is short costs trust with the conscientious" {
+ let e = yearsTo(policy("encourage"), 5, ["garden"]);
+ let h = yearsTo(policy("hold"), 5, ["garden"]);
+ sum(map(\c. meanBand(c.trust), e.cohorts)) > sum(map(\c. meanBand(c.trust), h.cohorts))
+}
+
+test "holding births adds no tension" { (tension(pop(), match pop().cohorts { c :: _ => c, [] => match pop().cohorts { _ => {id: "x", department: "x", mix: [], mood: [], trust: [], ages: [], voice: "", shock: 0, carry: 0} } }, true)).trust == 0 }
