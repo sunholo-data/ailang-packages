@@ -94,6 +94,25 @@ split, expected-value default) are mine; say if any should be different.
   - Shortage counts reserved units.
   - Promotion keeps the role and replaces the person (the engine cannot add
     actors).
+- **Evaluation round 1** (Sonnet, 74/100, pass) found three real bugs,
+  all now fixed, each with a test that fails on the old code:
+  - people were lost once a department's founders died out;
+  - batched and daily advances disagreed across year boundaries and
+    mid-skip events;
+  - the `promoted` record lacked `id`.
+  Also fixed: `-shipborn` ids reserved and room left for them.
+- **Deviations from the plan:**
+  - The calm-year, century, restrict and famine claims ran over seeds 1..3,
+    and split over 1..20, not 20 seeds each. Expected mode makes cohorts
+    seed-independent; seeds vary only the crew.
+  - Ages are kept by single year (decades in the pack and the snapshot).
+  - `split-escalates` checks plumbing: the pack sets the split.
+  - Under restrict, births fell to zero, so `restrict-shrinks` is weak.
+- **Not built** (deferred, listed for CP-2 and the scenario library):
+  - deaths from `loss` events (ages and the yearly mortality profile only);
+  - the `crew.used` resource-draw readout;
+  - a cohort section in the response policy (cohort reactions are in
+    code, scaled by OCEAN mix).
 - **Not built:** generation mix offsets for the ship-born. The claim "a
   death moves founders more than the ship-born" was not written, because the
   model gives the ship-born the founders' mix, so it would fail by
