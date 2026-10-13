@@ -1,0 +1,48 @@
+module sunholo/crew_core/archive_test
+import std/result (Result, Ok, Err)
+import std/option (Some, None)
+import std/list (head, filter, length, any, range, foldl)
+import std/string (contains)
+import ./scenario (decodeScenario)
+import ./session (Session, Output, HostError, HostFailure, start, input, offer, startTask, snapshot, completedCount)
+
+pure func ship() -> string =
+ "{\"schema\":\"crew_scenario/1\",\"id\":\"galley\",\"indicators\":[\"fatigue\",\"stress\",\"trust\"],\"indicator_defaults\":{\"fatigue\":0,\"stress\":20},\"captain\":{\"id\":\"captain\",\"values\":{\"mission\":80},\"start\":{}},\"crew\":[{\"id\":\"cook\",\"role\":\"Cook\",\"ocean\":{\"openness\":50,\"conscientiousness\":50,\"extraversion\":50,\"agreeableness\":90,\"neuroticism\":50},\"values\":{\"care\":60},\"start\":{},\"work\":[{\"id\":\"work_cook\",\"name\":\"Bake\",\"purpose\":\"Feed everyone.\",\"duration\":1,\"costs\":[],\"effects\":{\"fatigue\":1}}]}],\"rest\":{\"purpose\":\"Recover.\",\"duration\":1,\"effects\":{\"fatigue\":-10}},\"overextended\":{\"indicator\":\"stress\",\"threshold\":70,\"recovery\":40,\"duration\":2,\"cooldown\":3},\"trust_in_captain\":100,\"resources\":[]}"
+
+pure func begin(keep: string) -> Result[Session, HostError] = match decodeScenario(ship()) {
+ Err(e) => Err(HostFailure(e)),
+ Ok(sc) => match start(sc, "{\"command\":\"start\",\"policy\":\"orders\",\"scenario\":\"watch-v2\"${keep}}") { Err(e) => Err(e), Ok(o) => Ok(o.session) }
+}
+
+-- One bake per tick for n ticks: offer, start (orders), advance. The cook is
+-- agreeable and trusts the captain fully, so ten overridden refusals (-5 each
+-- at A90) stay above the cooperation floor of 20.
+pure func bakes(s: Session, n: int) -> Result[Session, HostError] = foldl(\acc t. match acc {
+ Err(e) => Err(e),
+ Ok(x) => match offer(x, "cook", "work_cook", "b${show(t)}") { Err(e) => Err(e), Ok(o) => match startTask(o.session, "b${show(t)}") { Err(e) => Err(e), Ok(p) => match input(p.session, "{\"command\":\"advance\",\"tick\":${show(t)},\"budget\":64}") { Err(e) => Err(e), Ok(q) => Ok(q.session) } } }
+}, Ok(s), range(1, n + 1))
+
+test "with keep, finished work older than keep is folded away and still counted" {
+ match begin(",\"keep\":2") {
+  Err(_) => false,
+  Ok(s) => match bakes(s, 10) {
+   Err(_) => false,
+   Ok(t) => length(t.state.tasks) <= 3 && length(t.state.commitments) <= 3 && length(t.bindings) <= 3 && completedCount(t, "work_cook") == 10 && t.archive.tasks >= 7
+    && not any(\e. e.id == "b1", t.state.evidence) && not any(\k. k.evidence == "b1", t.state.knowledge) && contains(snapshot(t), "\"archived\"")
+  }
+ }
+}
+
+test "without keep nothing is archived and the snapshot is unchanged" {
+ match begin("") {
+  Err(_) => false,
+  Ok(s) => match bakes(s, 10) {
+   Err(_) => false,
+   Ok(t) => length(t.state.tasks) == 10 && completedCount(t, "work_cook") == 10 && t.archive.tasks == 0 && not contains(snapshot(t), "\"archived\"")
+  }
+ }
+}
+
+test "keep must be 1..10000" {
+ (match begin(",\"keep\":0") { Err(_) => true, Ok(_) => false }) && (match begin(",\"keep\":10001") { Err(_) => true, Ok(_) => false }) && (match begin(",\"keep\":\"x\"") { Err(_) => true, Ok(_) => false })
+}

@@ -1,9 +1,9 @@
 module sunholo/crew_core/session
 import std/result (Result, Ok, Err)
 import std/option (Option, Some, None)
-import std/list (length, map, filter, head, any, sortBy, foldl, contains, flatMap)
+import std/list (length, map, filter, head, any, sortBy, foldl, contains, flatMap, drop)
 import std/string (join, startsWith, length as stringLength)
-import std/json (Json, encode, get, getString, getBool, js, jint, jnum, jo, kv, ja, asObject)
+import std/json (Json, encode, get, getString, getInt, getBool, js, jint, jnum, jo, kv, ja, asObject)
 import pkg/sunholo/social_dynamics/model (Config, State, Error, InvalidSchema, Step, Event, Operation, Source, Authored, ActorInput, ActorPrincipal, Host, OfferTask, OfferCommitment, AcceptCommitment, AcceptTask, RaiseConcern, RequestRelief, ResolveRelief, Offered, Working, Completed, Task, Appraisal, Effect, BoundedIndicatorDelta, RelationshipDelta, Value, validId, sorted, numericLimit, Applied, Done, Pending, Blocked)
 import pkg/sunholo/social_dynamics/engine (init, advance, continueAdvance, abortAdvance)
 import pkg/sunholo/social_dynamics/proposals (apply)
@@ -31,7 +31,12 @@ export type Bank = { request: Request, status: string, body: string, roll: float
 
 export type Report = { id: string, task: string, agreement: string, worker: string, code: CrewOutcome } deriving (Eq)
 
-export type Session = { scenario: Scenario, policy: string, command: string, config: Config, state: State, bindings: [TaskAgreement], pending: [Request], bank: [Bank], reports: [Report], chat: ConversationStore, personalities: [Personality], traced: bool } deriving (Eq)
+-- Archive (crew_core 0.3.0): what archiving folded away, so measures stay
+-- exact. `keep` 0 means archiving is off (the default; old journals unchanged).
+export type Tally = { id: string, count: int } deriving (Eq)
+export type Archive = { keep: int, tasks: int, evidence: int, knowledge: int, accepted: int, completed: [Tally] } deriving (Eq)
+
+export type Session = { scenario: Scenario, policy: string, command: string, archive: Archive, config: Config, state: State, bindings: [TaskAgreement], pending: [Request], bank: [Bank], reports: [Report], chat: ConversationStore, personalities: [Personality], traced: bool } deriving (Eq)
 
 export type Output = { session: Session, trace: string, failed: bool } deriving (Eq)
 
@@ -52,7 +57,7 @@ pure func reportJson(r: Report) -> Json =
 
 export pure func snapshot(s: Session) -> string
 ensures { stringLength(result) > 0 } =
-  encode(jo([kv("state", js(encodeState(s.state))), kv("policy", js(s.policy))] ++ (if s.command != s.policy then [kv("command", js(s.command))] else []) ++ [kv("bindings", ja(map(\b. jo([kv("task", js(b.task)), kv("agreement", js(b.agreement)), kv("captain", js(b.captain)), kv("worker", js(b.worker)), kv("recipe", js(b.recipe))]), s.bindings))), kv("pending", ja(map(requestJson, s.pending))), kv("bank", ja(map(bankJson, s.bank))), kv("reports", ja(map(reportJson, s.reports)))] ++ (if s.chat.version == 1 then [kv("conversations", conversationJson(s.chat)),kv("personalities",personalitiesJson(s.personalities))] else [])))
+  encode(jo([kv("state", js(encodeState(s.state))), kv("policy", js(s.policy))] ++ (if s.command != s.policy then [kv("command", js(s.command))] else []) ++ (if s.archive.keep > 0 then [kv("archived", archiveJson(s.archive))] else []) ++ [kv("bindings", ja(map(\b. jo([kv("task", js(b.task)), kv("agreement", js(b.agreement)), kv("captain", js(b.captain)), kv("worker", js(b.worker)), kv("recipe", js(b.recipe))]), s.bindings))), kv("pending", ja(map(requestJson, s.pending))), kv("bank", ja(map(bankJson, s.bank))), kv("reports", ja(map(reportJson, s.reports)))] ++ (if s.chat.version == 1 then [kv("conversations", conversationJson(s.chat)),kv("personalities",personalitiesJson(s.personalities))] else [])))
 
 -- Untraced sessions (batch runs) skip the per-call state encoding; their
 -- outputs carry an empty trace. Journals require traced sessions.
@@ -358,9 +363,9 @@ pure func advanceOutput(s:Session,state:State,events:[Event])->Result[Output,Hos
  }
 
 @allow_empty_ok("Legacy hosts intentionally have no personality sidecar; only watch-v3 initializes profiles")
-pure func initialized(scenario:Scenario,policy:string,c:Config,state:State,version:int)->Result[Output,HostError] =
+pure func initialized(scenario:Scenario,policy:string,c:Config,state:State,version:int,keep:int)->Result[Output,HostError] =
  match (if version==1 then initializeShip(state) else Ok([])) {
-  Err(e)=>Err(HostFailure("personality initialization: ${e}")),Ok(ps)=>Ok(output({scenario:scenario,policy:policy,command:policy,config:c,state:state,bindings:[],pending:[],bank:[],reports:[],chat:emptyConversation(version),personalities:ps,traced:true},[]))
+  Err(e)=>Err(HostFailure("personality initialization: ${e}")),Ok(ps)=>Ok(output({scenario:scenario,policy:policy,command:policy,archive:{keep:keep,tasks:0,evidence:0,knowledge:0,accepted:0,completed:[]},config:c,state:state,bindings:[],pending:[],bank:[],reports:[],chat:emptyConversation(version),personalities:ps,traced:true},[]))
  }
 
 pure func majorDeliveries(s:Session,observers:[string],evidence:string,events:[Event])->Result[{session:Session,events:[Event]},HostError] = match observers {
@@ -558,14 +563,65 @@ pure func flowsDue(o: Output, events: [Event]) -> Result[Output, HostError] = {
  let s = o.session;
  let finished = filter(\t. t.status == Completed && length(yieldsOf(s.scenario, t.recipe)) > 0 && not seen(s, "yd-${t.id}"), s.state.tasks);
  let due = filter(\e. e.at <= s.state.tick && not seen(s, "ev-${e.id}"), s.scenario.events);
- if length(finished) == 0 && length(due) == 0 then Ok(o) else match yieldFlows(s, finished, events) {
+ if length(finished) == 0 && length(due) == 0 then (if s.archive.keep > 0 then Ok(output(archiveNow(s), events)) else Ok(o)) else match yieldFlows(s, finished, events) {
   Err(e) => Err(e),
   Ok(y) => match eventFlows(y.session, due, y.events) {
    Err(e) => Err(e),
-   Ok(f) => Ok(output(f.session, f.events))
+   Ok(f) => Ok(output(if f.session.archive.keep > 0 then archiveNow(f.session) else f.session, f.events))
   }
  }
 }
+
+-- ---------------------------------------------------------------- archiving
+-- With keep > 0, after each completed advance, finished work older than keep
+-- ticks is folded away: Completed or Stopped tasks due at or before
+-- tick - keep that no pending request, bank entry, unresolved relief or
+-- conversation issue refers to. With each task go its binding, agreement
+-- (commitment), reports,
+-- resolved reliefs, its evidence (offer, agreement, reports, reliefs,
+-- completion marker, yield, and anything caused by those, such as the
+-- crew's concerns) and the knowledge of it. Completed tasks are
+-- counted per recipe. The operation log keeps its newest 512 entries. Ship
+-- event and argument evidence stays (it is bounded by events). Measures read
+-- archived counts plus live state (completedCount).
+pure func keepOK(j: Json) -> bool = match getInt(j, "keep") { Some(k) => k >= 1 && k <= 10000, None => false }
+
+pure func archiveJson(a: Archive) -> Json = jo([kv("keep", jint(a.keep)), kv("tasks", jint(a.tasks)), kv("evidence", jint(a.evidence)), kv("knowledge", jint(a.knowledge)), kv("accepted", jint(a.accepted)), kv("completed", jo(map(\t. kv(t.id, jint(t.count)), a.completed)))])
+
+pure func tallied(xs: [Tally], id: string) -> [Tally] = if any(\t. t.id == id, xs) then map(\t. if t.id == id then {t | count: t.count + 1} else t, xs) else xs ++ [{id: id, count: 1}]
+
+pure func held(s: Session, t: Task) -> bool =
+ any(\r. r.task == t.id, s.pending) || any(\b. b.request.task == t.id, s.bank) || any(\r. r.task == t.id && not r.resolved, s.state.reliefs) || any(\i. i.task == t.id, s.chat.issues)
+
+pure func archivable(s: Session, t: Task) -> bool = (t.status == Completed || t.status == Stopped) && t.due <= s.state.tick - s.archive.keep && not held(s, t)
+
+export pure func archiveNow(s: Session) -> Session ! {}
+ensures { length(result.state.tasks) <= length(s.state.tasks) && length(result.state.evidence) <= length(s.state.evidence) } =
+ if s.archive.keep <= 0 then s else {
+  let gone = filter(\t. archivable(s, t), s.state.tasks);
+  if length(gone) == 0 && length(s.state.accepted) <= 512 then s else {
+   let ids = map(\t. t.id, gone);
+   let agreements = map(\b. b.agreement, filter(\b. contains(ids, b.task), s.bindings));
+   let reports = map(\r. r.id, filter(\r. contains(ids, r.task), s.reports));
+   let reliefs = map(\r. r.id, filter(\r. contains(ids, r.task), s.state.reliefs));
+   let marks = ids ++ agreements ++ reports ++ reliefs ++ map(\i. "yd-${i}", ids);
+   let dropE = \e. contains(marks, e.id) || (e.kind == "task_completed" && contains(ids, e.text)) || any(\c. contains(marks, c), e.causes);
+   let evidence = filter(\e. not dropE(e), s.state.evidence);
+   let goneE = map(\e. e.id, filter(dropE, s.state.evidence));
+   let knowledge = filter(\k. not contains(goneE, k.evidence), s.state.knowledge);
+   let n = length(s.state.accepted);
+   let accepted = if n > 512 then drop(n - 512, s.state.accepted) else s.state.accepted;
+   let a = s.archive;
+   {s | state: {s.state | tasks: filter(\t. not contains(ids, t.id), s.state.tasks), evidence: evidence, knowledge: knowledge, reliefs: filter(\r. not contains(ids, r.task), s.state.reliefs), commitments: filter(\c. not contains(agreements, c.id), s.state.commitments), accepted: accepted},
+        bindings: filter(\b. not contains(ids, b.task), s.bindings), reports: filter(\r. not contains(ids, r.task), s.reports),
+        archive: {a | tasks: a.tasks + length(gone), evidence: a.evidence + length(goneE), knowledge: a.knowledge + length(s.state.knowledge) - length(knowledge), accepted: a.accepted + (n - length(accepted)), completed: foldl(\acc t. tallied(acc, t.recipe), a.completed, filter(\t. t.status == Completed, gone))}}
+  }
+ }
+
+-- Completed tasks of a recipe: archived plus live.
+export pure func completedCount(s: Session, recipe: string) -> int ! {}
+ensures { result >= 0 } =
+ foldl(\acc t. if t.id == recipe then acc + t.count else acc, 0, s.archive.completed) + length(filter(\t. t.recipe == recipe && t.status == Completed, s.state.tasks))
 
 pure func advanced(s: Session, tick: int, budget: int) -> Result[Output, HostError] = {
   let result = match s.state.continuation {
@@ -591,12 +647,12 @@ ensures { match result {
   Err(_) => true
 } } = match object(line) {
   Err(e) => Err(HostFailure(e)),
-  Ok(j) => if not fields(j, ["command", "policy", "scenario"]) || not (getString(j, "scenario") == Some("watch-v2") || getString(j, "scenario") == Some("watch-v3")) then Err(HostFailure("start fields: command, policy, scenario (watch-v2 or watch-v3)")) else match (getString(j, "command"), getString(j, "policy")) {
+  Ok(j) => if not (fields(j, ["command", "policy", "scenario"]) || fields(j, ["command", "policy", "scenario", "keep"])) || not (getString(j, "scenario") == Some("watch-v2") || getString(j, "scenario") == Some("watch-v3")) || (fields(j, ["command", "policy", "scenario", "keep"]) && not keepOK(j)) then Err(HostFailure("start fields: command, policy, scenario (watch-v2 or watch-v3), optional keep 1..10000")) else match (getString(j, "command"), getString(j, "policy")) {
     (Some("start"), Some(policy)) => match scenarioConfig(scenario, policy) {
       Err(e) => Err(HostFailure(e)),
       Ok(c) => match init(c, scenario.actors, scenario.resources) {
         Err(e) => Err(DomainFailure(e)),
-        Ok(state) => initialized(scenario,policy,c,state,if getString(j, "scenario") == Some("watch-v3") then 1 else 0)
+        Ok(state) => initialized(scenario,policy,c,state,if getString(j, "scenario") == Some("watch-v3") then 1 else 0,match getInt(j, "keep") { Some(k) => k, None => 0 })
       }
     },
     _ => Err(HostFailure("start command required"))
