@@ -14,15 +14,25 @@ import pkg/sunholo/social_dynamics/model (Config, Actor, Resource, Recipe, Cost,
 
 export type Label = {id: string, text: string} deriving (Eq)
 
-export type Scenario = {id: string, captain: string, workers: [string], indicators: [string], actors: [Actor], resources: [Resource], recipes: [Recipe], owners: [Label], rules: [Rule], relationships: [Relationship], projectNames: [Label], purposes: [Label], restPurpose: string, resourceNames: [Label], canonical: string} deriving (Eq)
+-- Ship flows (optional in crew_scenario/1). A resource is a "stock" (work may
+-- use it up) or a "capacity" (work only reserves it). Ship events move units
+-- in or out at a tick and are heard by the whole crew; yields return units
+-- when work completes. Units never appear or vanish silently: each flow is
+-- host evidence, and the engine's transferredIn/transferredOut keep the books.
+export type Transfer = {resource: string, delta: int} deriving (Eq)
+export type ShipEvent = {id: string, at: int, text: string, transfers: [Transfer], major: string} deriving (Eq)
+export type Yield = {recipe: string, resource: string, amount: int} deriving (Eq)
 
-type Work = {recipe: Recipe, name: string, purpose: string} deriving (Eq)
+export type Scenario = {id: string, captain: string, workers: [string], indicators: [string], actors: [Actor], resources: [Resource], recipes: [Recipe], owners: [Label], rules: [Rule], relationships: [Relationship], projectNames: [Label], purposes: [Label], restPurpose: string, resourceNames: [Label], canonical: string, kinds: [Label], events: [ShipEvent], yields: [Yield]} deriving (Eq)
+
+type Work = {recipe: Recipe, name: string, purpose: string, yields: [Yield]} deriving (Eq)
 type Crew = {actor: Actor, role: string, work: [Work]} deriving (Eq)
 type Rest = {purpose: string, duration: int, effects: [Value]} deriving (Eq)
-type Supply = {resource: Resource, name: string} deriving (Eq)
+type Supply = {resource: Resource, name: string, kind: string} deriving (Eq)
 type Strain = {indicator: string, threshold: int, recovery: int, duration: int, cooldown: int} deriving (Eq)
 
 pure func topFields() -> [string] = ["schema","id","indicators","indicator_defaults","captain","crew","rest","overextended","trust_in_captain","resources"]
+pure func majorKinds() -> [string] = ["loss","deep_time","first_contact","betrayal"]
 pure func oceanIds() -> [string] = ["openness","conscientiousness","extraversion","agreeableness","neuroticism"]
 
 -- ------------------------------------------------------------ JSON helpers
@@ -32,6 +42,12 @@ pure func unique(xs: [string]) -> bool = not any(\x. length(filter(\y. y == x, x
 pure func exact(j: Json, required: [string]) -> bool = match asObject(j) {
  None => false,
  Some(_) => unique(keys(j)) && length(keys(j)) == length(required) && not any(\k. not contains(keys(j), k), required)
+}
+
+-- Required keys present, optional keys allowed, nothing else, no repeats.
+pure func exactOpt(j: Json, required: [string], optional: [string]) -> bool = match asObject(j) {
+ None => false,
+ Some(_) => unique(keys(j)) && not any(\k. not contains(keys(j), k), required) && not any(\k. not contains(required, k) && not contains(optional, k), keys(j))
 }
 
 pure func ident(j: Json, key: string, at: string) -> Result[string, string] = match getString(j, key) {
@@ -120,34 +136,53 @@ pure func readOcean(j: Json, at: string) -> Result[[Value], string] = match memb
  Ok(o) => if not exact(o, oceanIds()) then Err("${at}: ocean needs exactly openness, conscientiousness, extraversion, agreeableness, neuroticism") else oceanValues(o, oceanIds(), at)
 }
 
-pure func readCost(j: Json, supplies: [string], at: string) -> Result[Cost, string] =
+pure func readCost(j: Json, supplies: [string], capacities: [string], at: string) -> Result[Cost, string] =
  if not exact(j, ["resource","reserve","consume"]) then Err("${at}: a cost needs resource, reserve, consume") else
  match (ident(j, "resource", at), whole(j, "reserve", 0, 1000, at), whole(j, "consume", 0, 1000, at)) {
-  (Ok(r), Ok(reserve), Ok(consume)) => if not contains(supplies, r) then Err("${at}: unknown resource ${r}") else if consume > reserve then Err("${at}: consume ${show(consume)} exceeds reserve ${show(reserve)}") else Ok({resource: r, reserve: reserve, consume: consume}),
+  (Ok(r), Ok(reserve), Ok(consume)) => if not contains(supplies, r) then Err("${at}: unknown resource ${r}") else if consume > 0 && contains(capacities, r) then Err("${at}: ${r} is a capacity; work may reserve it but not consume it") else if consume > reserve then Err("${at}: consume ${show(consume)} exceeds reserve ${show(reserve)}") else Ok({resource: r, reserve: reserve, consume: consume}),
   (Err(e), _, _) => Err(e), (_, Err(e), _) => Err(e), (_, _, Err(e)) => Err(e)
  }
 
 pure func bounded(worker: string, changes: [Value]) -> [Effect] = map(\c. BoundedIndicatorDelta(worker, c.id, c.value), changes)
 
-pure func readWork(j: Json, worker: string, indicators: [string], supplies: [string]) -> Result[Work, string] =
- if not exact(j, ["id","name","purpose","duration","costs","effects"]) then Err("${worker}: work fields must be id, name, purpose, duration, costs, effects") else
+pure func readYield(j: Json, recipe: string, supplies: [string]) -> Result[Yield, string] =
+ if not exact(j, ["resource","amount"]) then Err("${recipe}: a yield needs resource, amount") else
+ match (ident(j, "resource", recipe), whole(j, "amount", 1, 1000, recipe)) {
+  (Ok(r), Ok(n)) => if contains(supplies, r) then Ok({recipe: recipe, resource: r, amount: n}) else Err("${recipe}: unknown resource ${r}"),
+  (Err(e), _) => Err(e), (_, Err(e)) => Err(e)
+ }
+
+@allow_empty_ok("Work without yields is the common case")
+pure func readYields(j: Json, recipe: string, supplies: [string]) -> Result[[Yield], string] = match get(j, "yields") {
+ None => Ok([]),
+ Some(_) => match items(j, "yields", recipe) {
+  Err(e) => Err(e),
+  Ok(ys) => if length(ys) > 4 then Err("${recipe}: at most 4 yields") else match collect(ys, \y. readYield(y, recipe, supplies)) {
+   Err(e) => Err(e),
+   Ok(out) => if unique(map(\y. y.resource, out)) then Ok(out) else Err("${recipe}: a resource yields once")
+  }
+ }
+}
+
+pure func readWork(j: Json, worker: string, indicators: [string], supplies: [string], capacities: [string]) -> Result[Work, string] =
+ if not exactOpt(j, ["id","name","purpose","duration","costs","effects"], ["yields"]) then Err("${worker}: work fields must be id, name, purpose, duration, costs, effects, and optionally yields") else
  match ident(j, "id", worker) {
   Err(e) => Err(e),
   Ok(id) => match (words(j, "name", id), words(j, "purpose", id), whole(j, "duration", 1, 64, id), items(j, "costs", id), numbers(j, "effects", indicators, 0 - 100, 100, id)) {
-   (Ok(name), Ok(purpose), Ok(duration), Ok(cs), Ok(changes)) => if length(changes) > 8 then Err("${id}: at most 8 effects") else match collect(cs, \c. readCost(c, supplies, id)) {
-    Err(e) => Err(e),
-    Ok(costs) => Ok({recipe: {id: id, duration: duration, allocation: 1, costs: costs, effects: bounded(worker, changes)}, name: name, purpose: purpose})
+   (Ok(name), Ok(purpose), Ok(duration), Ok(cs), Ok(changes)) => if length(changes) > 8 then Err("${id}: at most 8 effects") else match (collect(cs, \c. readCost(c, supplies, capacities, id)), readYields(j, id, supplies)) {
+    (Err(e), _) => Err(e), (_, Err(e)) => Err(e),
+    (Ok(costs), Ok(ys)) => Ok({recipe: {id: id, duration: duration, allocation: 1, costs: costs, effects: bounded(worker, changes)}, name: name, purpose: purpose, yields: ys})
    },
    (Err(e), _, _, _, _) => Err(e), (_, Err(e), _, _, _) => Err(e), (_, _, Err(e), _, _) => Err(e), (_, _, _, Err(e), _) => Err(e), (_, _, _, _, Err(e)) => Err(e)
   }
  }
 
-pure func readCrew(j: Json, indicators: [string], defaults: [Value], supplies: [string]) -> Result[Crew, string] =
+pure func readCrew(j: Json, indicators: [string], defaults: [Value], supplies: [string], capacities: [string]) -> Result[Crew, string] =
  if not exact(j, ["id","role","ocean","values","start","work"]) then Err("crew: fields must be id, role, ocean, values, start, work") else
  match ident(j, "id", "crew") {
   Err(e) => Err(e),
   Ok(id) => match (words(j, "role", id), readOcean(j, id), numbers(j, "values", [], 0, 100, id), numbers(j, "start", idsOf(defaults), 0, 100, id), items(j, "work", id)) {
-   (Ok(role), Ok(ocean), Ok(vs), Ok(start), Ok(ws)) => if length(ws) < 1 || length(ws) > 8 then Err("${id}: work needs 1-8 entries") else match collect(ws, \w. readWork(w, id, indicators, supplies)) {
+   (Ok(role), Ok(ocean), Ok(vs), Ok(start), Ok(ws)) => if length(ws) < 1 || length(ws) > 8 then Err("${id}: work needs 1-8 entries") else match collect(ws, \w. readWork(w, id, indicators, supplies, capacities)) {
     Err(e) => Err(e),
     Ok(work) => Ok({actor: {id: id, capacity: 1, attributes: ocean, values: vs, indicators: indicatorsFor(defaults, start)}, role: role, work: work})
    },
@@ -169,12 +204,54 @@ pure func readStrain(j: Json, indicators: [string]) -> Result[Strain, string] =
   (Err(e), _, _, _, _) => Err(e), (_, Err(e), _, _, _) => Err(e), (_, _, Err(e), _, _) => Err(e), (_, _, _, Err(e), _) => Err(e), (_, _, _, _, Err(e)) => Err(e)
  }
 
-pure func readSupply(j: Json) -> Result[Supply, string] =
- if not exact(j, ["id","name","initial"]) then Err("resources: fields must be id, name, initial") else
- match (ident(j, "id", "resources"), words(j, "name", "resources"), whole(j, "initial", 0, 1000, "resources")) {
-  (Ok(id), Ok(name), Ok(n)) => Ok({resource: {id: id, initial: n, available: n, reserved: 0, consumed: 0, transferredIn: 0, transferredOut: 0}, name: name}),
-  (Err(e), _, _) => Err(e), (_, Err(e), _) => Err(e), (_, _, Err(e)) => Err(e)
+pure func kindOf(j: Json) -> Result[string, string] = match get(j, "kind") {
+ None => Ok("stock"),
+ Some(_) => match getString(j, "kind") {
+  Some("stock") => Ok("stock"), Some("capacity") => Ok("capacity"),
+  _ => Err("resources: kind must be \"stock\" or \"capacity\"")
  }
+}
+
+pure func readSupply(j: Json) -> Result[Supply, string] =
+ if not exactOpt(j, ["id","name","initial"], ["kind"]) then Err("resources: fields must be id, name, initial, and optionally kind") else
+ match (ident(j, "id", "resources"), words(j, "name", "resources"), whole(j, "initial", 0, 1000, "resources"), kindOf(j)) {
+  (Ok(id), Ok(name), Ok(n), Ok(kind)) => Ok({resource: {id: id, initial: n, available: n, reserved: 0, consumed: 0, transferredIn: 0, transferredOut: 0}, name: name, kind: kind}),
+  (Err(e), _, _, _) => Err(e), (_, Err(e), _, _) => Err(e), (_, _, Err(e), _) => Err(e), (_, _, _, Err(e)) => Err(e)
+ }
+
+pure func readTransfer(j: Json, at: string, supplies: [string]) -> Result[Transfer, string] =
+ if not exact(j, ["resource","delta"]) then Err("${at}: a transfer needs resource, delta") else
+ match (ident(j, "resource", at), whole(j, "delta", 0 - 1000, 1000, at)) {
+  (Ok(r), Ok(d)) => if not contains(supplies, r) then Err("${at}: unknown resource ${r}") else if d == 0 then Err("${at}: delta must not be 0") else Ok({resource: r, delta: d}),
+  (Err(e), _) => Err(e), (_, Err(e)) => Err(e)
+ }
+
+@allow_empty_ok("An event without a major kind is the common case")
+pure func readEvent(j: Json, supplies: [string]) -> Result[ShipEvent, string] =
+ if not exactOpt(j, ["id","at","text","transfers"], ["major"]) then Err("events: fields must be id, at, text, transfers, and optionally major") else
+ match ident(j, "id", "events") {
+  Err(e) => Err(e),
+  Ok(id) => if stringLength(id) > 32 then Err("events: ${id}: id must be at most 32 characters") else match (whole(j, "at", 1, 10000, id), words(j, "text", id), items(j, "transfers", id), match get(j, "major") { None => Ok(""), Some(_) => match getString(j, "major") { Some(m) => if contains(majorKinds(), m) then Ok(m) else Err("${id}: major must be loss, deep_time, first_contact or betrayal"), None => Err("${id}: major must be a string") } }) {
+   (Ok(at), Ok(text), Ok(ts), Ok(major)) => if length(ts) > 8 then Err("${id}: at most 8 transfers") else match collect(ts, \t. readTransfer(t, id, supplies)) {
+    Err(e) => Err(e),
+    Ok(transfers) => Ok({id: id, at: at, text: text, transfers: transfers, major: major})
+   },
+   (Err(e), _, _, _) => Err(e), (_, Err(e), _, _) => Err(e), (_, _, Err(e), _) => Err(e), (_, _, _, Err(e)) => Err(e)
+  }
+ }
+
+@allow_empty_ok("A scenario without ship events is the common case")
+pure func readEvents(j: Json, supplies: [string]) -> Result[[ShipEvent], string] = match get(j, "events") {
+ None => Ok([]),
+ Some(_) => match items(j, "events", "scenario") {
+  Err(e) => Err(e),
+  Ok(es) => if length(es) > 32 then Err("events: at most 32") else match collect(es, \e. readEvent(e, supplies)) {
+   Err(e) => Err(e),
+   Ok(out) => if unique(map(\e. e.id, out)) then Ok(out) else Err("events: ids must be unique")
+  }
+ }
+}
+
 
 pure func names(j: Json, key: string) -> Result[[string], string] = match items(j, key, "scenario") {
  Err(e) => Err(e),
@@ -186,7 +263,7 @@ pure func names(j: Json, key: string) -> Result[[string], string] = match items(
 
 -- ---------------------------------------------------------------- assembly
 
-pure func assemble(id: string, indicators: [string], captain: Actor, crew: [Crew], rest: Rest, strain: Strain, trust: int, supplies: [Supply], canonical: string) -> Result[Scenario, string] = {
+pure func assemble(id: string, indicators: [string], captain: Actor, crew: [Crew], rest: Rest, strain: Strain, trust: int, supplies: [Supply], events: [ShipEvent], canonical: string) -> Result[Scenario, string] = {
  let workers = map(\c. c.actor.id, crew);
  let actorIds = captain.id :: workers;
  let work = flatMap(\c. c.work, crew);
@@ -210,12 +287,15 @@ pure func assemble(id: string, indicators: [string], captain: Actor, crew: [Crew
   purposes: map(\w. {id: w.recipe.id, text: w.purpose}, work),
   restPurpose: rest.purpose,
   resourceNames: map(\s. {id: s.resource.id, text: s.name}, supplies),
-  canonical: canonical
+  canonical: canonical,
+  kinds: map(\s. {id: s.resource.id, text: s.kind}, supplies),
+  events: events,
+  yields: flatMap(\w. w.yields, work)
  })
 }
 
 pure func fromJson(j: Json) -> Result[Scenario, string] =
- if not exact(j, topFields()) then Err("scenario: top-level fields must be schema, id, indicators, indicator_defaults, captain, crew, rest, overextended, trust_in_captain, resources") else
+ if not exactOpt(j, topFields(), ["events"]) then Err("scenario: top-level fields must be schema, id, indicators, indicator_defaults, captain, crew, rest, overextended, trust_in_captain, resources, and optionally events") else
  if getString(j, "schema") != Some("crew_scenario/1") then Err("scenario: schema must be crew_scenario/1") else
  match (ident(j, "id", "scenario"), names(j, "indicators")) {
   (Err(e), _) => Err(e), (_, Err(e)) => Err(e),
@@ -225,10 +305,11 @@ pure func fromJson(j: Json) -> Result[Scenario, string] =
     Err(e) => Err(e),
     Ok(supplies) => {
      let ids = map(\s. s.resource.id, supplies);
+     let capacities = map(\s. s.resource.id, filter(\s. s.kind == "capacity", supplies));
      match (member(j, "captain", "scenario"), items(j, "crew", "scenario"), member(j, "rest", "scenario"), member(j, "overextended", "scenario"), whole(j, "trust_in_captain", 0, 100, "scenario")) {
-      (Ok(cj), Ok(crewJ), Ok(rj), Ok(sj), Ok(trust)) => match (readCaptain(cj, defaults), collect(crewJ, \c. readCrew(c, indicators, defaults, ids)), readRest(rj, indicators), readStrain(sj, indicators)) {
-       (Ok(captain), Ok(crew), Ok(rest), Ok(strain)) => assemble(id, indicators, captain, crew, rest, strain, trust, supplies, encode(j)),
-       (Err(e), _, _, _) => Err(e), (_, Err(e), _, _) => Err(e), (_, _, Err(e), _) => Err(e), (_, _, _, Err(e)) => Err(e)
+      (Ok(cj), Ok(crewJ), Ok(rj), Ok(sj), Ok(trust)) => match (readCaptain(cj, defaults), collect(crewJ, \c. readCrew(c, indicators, defaults, ids, capacities)), readRest(rj, indicators), readStrain(sj, indicators), readEvents(j, ids)) {
+       (Ok(captain), Ok(crew), Ok(rest), Ok(strain), Ok(events)) => assemble(id, indicators, captain, crew, rest, strain, trust, supplies, events, encode(j)),
+       (Err(e), _, _, _, _) => Err(e), (_, Err(e), _, _, _) => Err(e), (_, _, Err(e), _, _) => Err(e), (_, _, _, Err(e), _) => Err(e), (_, _, _, _, Err(e)) => Err(e)
       },
       (Err(e), _, _, _, _) => Err(e), (_, Err(e), _, _, _) => Err(e), (_, _, Err(e), _, _) => Err(e), (_, _, _, Err(e), _) => Err(e), (_, _, _, _, Err(e)) => Err(e)
      }
@@ -277,3 +358,12 @@ ensures { result != "" } =
 export pure func resourceName(s: Scenario, id: string) -> string
 ensures { result != "" } =
  if id == "" then "Unknown supply" else match lookup(s.resourceNames, id) { Some(n) => n, None => id }
+
+-- "stock" or "capacity" ("stock" for an unknown id, as for a scenario without kinds).
+export pure func resourceKind(s: Scenario, id: string) -> string
+ensures { result == "stock" || result == "capacity" } =
+ match lookup(s.kinds, id) { Some("capacity") => "capacity", _ => "stock" }
+
+-- What completing a recipe returns (empty for most work).
+export pure func yieldsOf(s: Scenario, recipe: string) -> [Yield]
+ensures { length(result) <= 4 } = filter(\y. y.recipe == recipe, s.yields)
