@@ -13,7 +13,7 @@ root = Path(__file__).resolve().parents[2]
 ailang = os.environ.get("AILANG", "ailang")
 mutants = [
     ("confidence-bypass", "packages/crew-core/actor_policy.ail", [("gate(ChoiceA(c), threshold)", "gate(ChoiceA(c), 0.0)")]),
-    ("consent-guard-bypass", "packages/crew-core/session.ail", [('s.policy == "consent" && not agreed', 'false')]),
+    ("consent-guard-bypass", "packages/crew-core/session.ail", [('s.command == "consent" && not agreed', 'false')]),
     ("other-actor-delegation", "packages/crew-core/session.ail", [('b.worker != actor', 'false'), ('r.actor != b.worker', 'false')]),
     ("revision-rebase", "packages/crew-core/session.ail", [('r.revision != s.state.revision', 'false')]),
     ("clock-rebase", "packages/crew-core/session.ail", [('r.tick != s.state.tick', 'false'), ('s.state.tick >= r.expires', 'false')]),

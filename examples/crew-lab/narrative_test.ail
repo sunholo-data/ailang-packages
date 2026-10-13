@@ -18,7 +18,7 @@ pure func fixture() -> Result[Session, string] = match config("consent") {
   Err(e) => Err(e),
   Ok(c) => match init(c, actors(), resources()) {
     Err(_) => Err("init"),
-    Ok(state) => match scenario() { Err(e) => Err(e), Ok(sc) => Ok({ scenario: sc, policy: "consent", config: c, state: state, bindings: [], pending: [], bank: [], reports: [], chat: emptyConversation(0), personalities: [], traced: true }) }
+    Ok(state) => match scenario() { Err(e) => Err(e), Ok(sc) => Ok({ scenario: sc, policy: "consent", command: "consent", archive: { keep: 0, tasks: 0, evidence: 0, knowledge: 0, accepted: 0, completed: [], events: [] }, config: c, state: state, bindings: [], pending: [], bank: [], reports: [], chat: emptyConversation(0), personalities: [], traced: true }) }
   }
 }
 

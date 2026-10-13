@@ -1,5 +1,66 @@
 # Changelog
 
+## 0.3.0
+
+For Stapledon's crew integration (R2-CREW CI-0; ailang-packages#137).
+Existing commands, journal records and outcome codes are unchanged.
+- 0.2.0 recordings replay byte-identically.
+- The lab's consent and orders captains give byte-identical crew-sim output,
+  checked to 80 turns.
+- New features are opt-in.
+
+- **`policy` command:** switch consent and orders mid-session, journalled
+  (`Session.command`). The engine configuration keeps its founding policy,
+  and the snapshot shows `command` once it differs.
+- **`ship_event` command:** raise a ship event now. It joins the session's
+  event list at the current tick and fires through the same path as a
+  scheduled event, an advance to the current tick (see ailang#1812).
+- **Archiving** (opt-in: start line `"keep": 1..10000`).
+  - Folded away when older than keep: finished work and lapsed offers, with
+    their agreements, reports, reliefs, evidence (including evidence caused by
+    them), closed conversations and knowledge; and ship events, with their
+    evidence and arguments (their ids are kept, so they never refire).
+  - `completedCount` stays exact.
+  - Only open conversation issues hold work.
+  - The operation log keeps its newest 512 entries. Older operation ids
+    leave the duplicate check, which matters only for hand-written
+    recordings.
+  - Without archiving, a busy session hits the 256-commitment cap near
+    turn 290.
+- **New module `auto`, the auto-captain.** It is opt-in: `session` does not
+  import it.
+  - `crew_standing_orders/1`: start agreed|always, rest tired|never, relief
+    grant|deny|strained, a tired threshold, cadence 1..365.
+  - `crew_escalation/1` rules:
+    - refusal_under_orders;
+    - breakdown and trust_floor, each once per crossing and re-armed on
+      recovery;
+    - major, read from the event list;
+    - argument;
+    - uncovered: an open conversation issue only the captain can answer.
+  - `advanceAuto(session, AutoState, responses, orders, rules, n)` runs turns
+    with the same host commands as a player and stops at the first
+    escalation. From the second call on, `AutoState.calls` salts request ids,
+    so a resume never reuses one.
+  - At a cadence above 1, offers whose agreement fell due no longer occupy
+    the worker.
+  - `decideTurn` and `finishTurn` count escalations instead of stopping
+    (lab).
+- **Faster host identity check:** a structural comparison replaces three
+  config encodings per host call.
+
+Performance, measured on the crew lab's default ship, consent, no escalation
+rules, archive 30, one seed:
+- 500 turns take 28.5 s, linear.
+- A 10-year skip (3,650 ticks) takes 1.8 s at yearly cadence, 16.8 s monthly,
+  55 s weekly, and about 30 min daily.
+- Each decision costs roughly 25 ms, much of it VM list-tail copying
+  (ailang#1814).
+- With escalation rules, a skip stops at the first escalation, so its length
+  is not a fixed time.
+- A cold compile peaks around 10 GB for `session` and 14 GB for `auto`
+  (ailang#1812).
+
 ## 0.2.0
 
 Crew strain (design `design_docs/planned/crew-strain.md`). Requires

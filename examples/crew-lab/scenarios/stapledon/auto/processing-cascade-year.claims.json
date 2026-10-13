@@ -1,0 +1,11 @@
+{
+  "schema": "crew_claims/1",
+  "claims": [
+    {"id": "year-runs-clean-consent", "captain": "consent", "metric": "errors", "stat": "max", "op": "==", "value": 0, "note": "a year under consent standing orders runs without host errors"},
+    {"id": "year-runs-clean-orders", "captain": "orders", "metric": "errors", "stat": "max", "op": "==", "value": 0, "note": "a year under orders standing orders runs without host errors"},
+    {"id": "orders-break-someone-in-a-year", "captain": "orders", "metric": "escalations.breakdown", "stat": "median", "op": ">=", "value": 1, "note": "a year of orders with no rest breaks at least one crew member (stress 85)"},
+    {"id": "consent-never-overrides", "captain": "consent", "metric": "escalations.refusal_under_orders", "stat": "max", "op": "==", "value": 0, "note": "consent standing orders never start refused work"},
+    {"id": "consent-keeps-trust", "captain": "consent", "metric": "escalations.trust_floor", "stat": "max", "op": "==", "value": 0, "note": "consent standing orders never drive anyone's trust below 25"},
+    {"id": "orders-interrupt-at-most-weekly", "captain": "orders", "metric": "escalations.refusal_under_orders", "stat": "median", "op": "<=", "value": 52, "note": "skipping a year under orders is interrupted by refusals at most about once a week (playability)"}
+  ]
+}

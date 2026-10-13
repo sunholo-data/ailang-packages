@@ -1,0 +1,125 @@
+module sunholo/crew_core/auto_test
+import std/result (Result, Ok, Err)
+import std/option (Option, Some, None)
+import std/list (head, filter, length, any, contains)
+import pkg/sunholo/social_dynamics/model (Offered)
+import ./scenario (decodeScenario)
+import ./example (firstContact)
+import ./session (Session, HostError, HostFailure, start)
+import ./policy (Policy, decodePolicy, watchPolicyBody)
+import ./auto (Orders, Rule, AutoResult, advanceAuto, consentOrders, ordersOrders, decodeOrders, decodeEscalation)
+
+pure func ship(policy: string) -> Result[Session, HostError] = match firstContact() {
+ Err(e) => Err(HostFailure(e)),
+ Ok(sc) => match start(sc, "{\"command\":\"start\",\"policy\":\"${policy}\",\"scenario\":\"watch-v2\"}") { Err(e) => Err(e), Ok(o) => Ok(o.session) }
+}
+
+pure func responses() -> Result[Policy, string] = decodePolicy(watchPolicyBody())
+
+pure func run(policy: string, o: Orders, rules: [Rule], n: int) -> Result[AutoResult, HostError] = match (ship(policy), responses()) {
+ (Ok(s), Ok(p)) => advanceAuto(s, {seed: 7, agreed: [], raised: [], calls: 0}, p, o, rules, n),
+ (Err(e), _) => Err(e),
+ (_, Err(e)) => Err(HostFailure(e))
+}
+
+pure func rule(kind: string, indicator: string, threshold: int) -> Rule = {kind: kind, indicator: indicator, threshold: threshold, kinds: []}
+
+test "without rules auto-play runs every turn and never escalates" {
+ match run("consent", consentOrders(), [], 6) { Ok(a) => a.turns == 6 && a.session.state.tick == 6 && a.escalated == None && length(a.log) > 0, Err(_) => false }
+}
+
+test "a refusal under orders stops before the override and leaves the work offered" {
+ match run("orders", ordersOrders(), [rule("refusal_under_orders", "", 0)], 40) {
+  Ok(a) => match a.escalated {
+   Some(e) => e.rule == "refusal_under_orders" && e.detail != "accept" && any(\t. t.id == e.task && t.status == Offered, a.session.state.tasks) && a.turns < 40,
+   None => false
+  },
+  Err(_) => false
+ }
+}
+
+test "a breakdown threshold escalates once per crossing, not again while it lasts" {
+ match (run("orders", ordersOrders(), [rule("breakdown", "stress", 1)], 5), responses()) {
+  (Ok(a), Ok(p)) => match a.escalated {
+   Some(e) => e.rule == "breakdown" && a.turns == 1 && length(a.state.raised) >= 1 && (match advanceAuto(a.session, a.state, p, ordersOrders(), [rule("breakdown", "stress", 1)], 3) {
+     Ok(b) => b.escalated == None || (match b.escalated { Some(x) => not contains(a.state.raised, "breakdown:stress:1/${x.actor}"), None => true }),
+     Err(_) => false
+   }),
+   None => false
+  },
+  _ => false
+ }
+}
+
+test "a trust floor escalates when someone's trust falls below it" {
+ match run("orders", ordersOrders(), [rule("trust_floor", "", 50)], 60) {
+  Ok(a) => match a.escalated { Some(e) => e.rule == "trust_floor" && e.actor != "", None => false },
+  Err(_) => false
+ }
+}
+
+test "standing orders and escalation rules decode and validate" {
+ decodeOrders("{\"schema\":\"crew_standing_orders/1\",\"start\":\"always\",\"rest\":\"never\",\"relief\":\"strained\"}") == Ok({start: "always", rest: "never", relief: "strained", fatigue: 70, stress: 75, cadence: 1})
+ && (match decodeOrders("{\"schema\":\"crew_standing_orders/1\",\"start\":\"maybe\",\"rest\":\"never\",\"relief\":\"deny\"}") { Err(_) => true, Ok(_) => false })
+ && (match decodeEscalation("{\"schema\":\"crew_escalation/1\",\"rules\":[{\"kind\":\"breakdown\",\"indicator\":\"stress\",\"threshold\":85},{\"kind\":\"major\",\"kinds\":[\"loss\",\"deep_time\"]},{\"kind\":\"argument\"}]}") { Ok(rs) => length(rs) == 3, Err(_) => false })
+ && (match decodeEscalation("{\"schema\":\"crew_escalation/1\",\"rules\":[{\"kind\":\"breakdown\",\"threshold\":85}]}") { Err(_) => true, Ok(_) => false })
+ && (match decodeEscalation("{\"schema\":\"crew_escalation/1\",\"rules\":[{\"kind\":\"major\"}]}") { Err(_) => true, Ok(_) => false })
+}
+
+-- Two crew hold heat; the forward sky takes some at turn 1: they argue.
+pure func heatShip() -> string =
+ "{\"schema\":\"crew_scenario/1\",\"id\":\"radiators\",\"indicators\":[\"fatigue\",\"stress\",\"trust\"],\"indicator_defaults\":{\"fatigue\":0,\"stress\":20},\"captain\":{\"id\":\"captain\",\"values\":{\"mission\":80},\"start\":{}},\"crew\":[${crew("x")},${crew("y")}],\"rest\":{\"purpose\":\"Recover.\",\"duration\":1,\"effects\":{\"fatigue\":-10}},\"overextended\":{\"indicator\":\"stress\",\"threshold\":70,\"recovery\":40,\"duration\":2,\"cooldown\":3},\"trust_in_captain\":80,\"resources\":[{\"id\":\"heat\",\"name\":\"Heat headroom\",\"initial\":2,\"kind\":\"capacity\"}],\"events\":[{\"id\":\"sky\",\"at\":1,\"text\":\"The forward sky loads the radiators.\",\"transfers\":[{\"resource\":\"heat\",\"delta\":-1}],\"major\":\"deep_time\"}]}"
+pure func crew(id: string) -> string = "{\"id\":\"${id}\",\"role\":\"Crew ${id}\",\"ocean\":{\"openness\":50,\"conscientiousness\":50,\"extraversion\":50,\"agreeableness\":50,\"neuroticism\":40},\"values\":{\"duty\":60},\"start\":{},\"work\":[{\"id\":\"work_${id}\",\"name\":\"Cool ${id}\",\"purpose\":\"Hold the line.\",\"duration\":6,\"costs\":[{\"resource\":\"heat\",\"reserve\":1,\"consume\":0}],\"effects\":{\"fatigue\":5}}]}"
+
+pure func heatRun(rules: [Rule]) -> Result[AutoResult, HostError] = match (decodeScenario(heatShip()), responses()) {
+ (Ok(sc), Ok(p)) => match start(sc, "{\"command\":\"start\",\"policy\":\"orders\",\"scenario\":\"watch-v2\"}") { Err(e) => Err(e), Ok(o) => advanceAuto(o.session, {seed: 3, agreed: [], raised: [], calls: 0}, p, ordersOrders(), rules, 4) },
+ (Err(e), _) => Err(HostFailure(e)),
+ (_, Err(e)) => Err(HostFailure(e))
+}
+
+test "an argument over lost capacity escalates after the turn it happens" {
+ match heatRun([{kind: "argument", indicator: "", threshold: 0, kinds: []}]) {
+  Ok(a) => match a.escalated { Some(e) => e.rule == "argument" && e.detail == "sf-sky-0" && a.turns == 1, None => false },
+  Err(_) => false
+ }
+}
+
+test "a major ship event of a listed kind escalates" {
+ match (heatRun([{kind: "major", indicator: "", threshold: 0, kinds: ["deep_time"]}]), heatRun([{kind: "major", indicator: "", threshold: 0, kinds: ["loss"]}])) {
+  (Ok(a), Ok(b)) => (match a.escalated { Some(e) => e.rule == "major" && e.detail == "ev-sky", None => false }) && b.escalated == None,
+  _ => false
+ }
+}
+
+test "a weekly cadence covers the whole span with far fewer decisions" {
+ match (run("consent", {consentOrders() | cadence: 7}, [], 21), run("consent", consentOrders(), [], 21)) {
+  (Ok(weekly), Ok(daily)) => weekly.turns == 21 && weekly.session.state.tick == 21 && length(filter(\a. a.kind == "offer", weekly.log)) * 2 < length(filter(\a. a.kind == "offer", daily.log)),
+  _ => false
+ }
+}
+
+test "cadence must be 1..365" {
+ (match decodeOrders("{\"schema\":\"crew_standing_orders/1\",\"start\":\"agreed\",\"rest\":\"tired\",\"relief\":\"grant\",\"cadence\":0}") { Err(_) => true, Ok(_) => false })
+ && (match decodeOrders("{\"schema\":\"crew_standing_orders/1\",\"start\":\"agreed\",\"rest\":\"tired\",\"relief\":\"grant\",\"cadence\":7}") { Ok(o) => o.cadence == 7, Err(_) => false })
+}
+
+-- Resume after a refusal stop: the next call salts its ids, so nothing collides.
+pure func resumeTwice() -> Result[{first: AutoResult, second: AutoResult}, HostError] = match (ship("orders"), responses()) {
+ (Ok(s), Ok(p)) => match advanceAuto(s, {seed: 7, agreed: [], raised: [], calls: 0}, p, ordersOrders(), [rule("refusal_under_orders", "", 0)], 40) {
+  Err(e) => Err(e),
+  Ok(a) => match advanceAuto(a.session, a.state, p, ordersOrders(), [rule("refusal_under_orders", "", 0)], 40) { Err(e) => Err(e), Ok(b) => Ok({first: a, second: b}) }
+ },
+ (Err(e), _) => Err(e),
+ (_, Err(e)) => Err(HostFailure(e))
+}
+
+test "resuming after a refusal stop reuses no ids and logs no errors" {
+ match resumeTwice() {
+  Ok(x) => x.first.state.calls == 1 && x.second.state.calls == 2 && not any(\a. a.kind == "error", x.second.log) && any(\a. a.kind == "reply", x.second.log),
+  Err(_) => false
+ }
+}
+
+test "a partial last cadence block still covers the whole span" {
+ match run("consent", {consentOrders() | cadence: 4}, [], 10) { Ok(a) => a.turns == 10 && a.session.state.tick == 10, Err(_) => false }
+}

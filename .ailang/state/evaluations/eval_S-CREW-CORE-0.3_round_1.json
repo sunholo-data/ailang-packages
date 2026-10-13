@@ -1,0 +1,123 @@
+{
+ "sprint_id": "S-CREW-CORE-0.3",
+ "round": 1,
+ "evaluator": "claude-sonnet-5-5 (independent sprint-evaluator, generator != judge)",
+ "branch": "sprint/crew-core-0.3",
+ "base": "6dfc0fa",
+ "commits": [
+  "fd3333c",
+  "68f1ebb",
+  "27fe1c1",
+  "ff24d51",
+  "c9ceff9",
+  "759eabd",
+  "2e43419"
+ ],
+ "score": 74,
+ "pass": true,
+ "breakdown": {
+  "acceptance_criteria": {
+   "score": 29,
+   "max": 40,
+   "notes": "Policy, run-time ship_event, opt-in archiving, standing orders, five escalation kinds and cadence all exist and their tests pass on both engines (crew-core 212 tests: 145 passed, 0 failed, 67 skipped, interpreter and --bytecode --strict-bytecode). Brief item 5 lists six escalation triggers; 'a request no standing order covers' is not implemented and not declared as dropped. The compatibility promise (crew-sim loop reproduced exactly) holds to about 20 ticks only. K4 (3,650 turns in 2 s) is met only at yearly cadence and only with no escalation rules; the game's rule set stops the same skip at tick 0."
+  },
+  "correctness_robustness": {
+   "score": 21,
+   "max": 30,
+   "notes": "Archiving drops by direct id/cause match only and keeps ev-/sf- evidence; completedCount is exact for Completed tasks (tallied at fold, live count added). Held/pending/bank/unresolved-relief protection is sound by reading but untested. Auto-captain order and ids match the old loop for consent/orders captains under 20 ticks. Resume after a refusal escalation at the same tick reuses request ids (defect 2). Stale-offer handling changes behaviour past tick 20 (defect 1)."
+  },
+  "test_quality": {
+   "score": 11,
+   "max": 15,
+   "notes": "auto_test covers refusal stop, breakdown once, trust floor, argument, major, weekly cadence and decode. Missing: breakdown/trust re-arm, resume after escalation, stale offers, partial last cadence block, pending-advance continuation, archive protection of pending/bank/relief/issue, archive under watch-v3, a mid-session ship_event, policy switch with pending requests refused."
+  },
+  "docs_bookkeeping": {
+   "score": 13,
+   "max": 15,
+   "notes": "CHANGELOG, sprint plan and outcome are candid about K4 partial and the argument rarity (2/20). #1812 (second call site, 10.3 -> 24.6 GB) and #1814 (list tail copying, repro numbers) exist and say what the docs claim. Deductions: 'crew-sim output unchanged' and 'byte-identical' statements are false beyond 20 ticks and for the added escalations key; the missing sixth escalation rule is not mentioned; lab ailang.lock for crew_core was stale against the tree when run (warning 'content changed'); sprint JSON still in_progress (expected pre-landing)."
+  }
+ },
+ "defects": [
+  {
+   "id": 1,
+   "severity": "medium",
+   "file": "packages/crew-core/auto.ail:129-134 (stale), 285 (decisions), 134 (busy)",
+   "issue": "The auto-captain does not reproduce the previous crew-sim loop past tick ~20: offers are agreed at tick+20, and auto treats an Offered task whose agreement is due as stale (not busy, not re-asked), where the old loop kept the worker busy and re-asked. I ran the pre-sprint crew_sim.ail/sim_cli.ail (6dfc0fa) against HEAD crew_core, processing-cascade, orders, seeds 1..3: 20 turns identical except the new 'escalations':{} key in every row; 40 turns differ (offers 32 vs 37, starts 27 vs 28, refusal_reasons unauthorized 95 vs 92); 80 turns consent also differ (consent_required 39 vs 0). Sprint JSON K3 note 'crew-sim output byte-identical through auto' and the outcome text are therefore true only for the 12-turn claims runs. The new behaviour is arguably better, but it is an undeclared change.",
+   "suggestion": "State it in the CHANGELOG and sprint outcome (stale offers lapse after the agreement's 20 ticks; crew_sim/1 rows gain 'escalations'), or gate it behind an Orders field to keep the old loop; add a test at 25+ turns."
+  },
+  {
+   "id": 2,
+   "severity": "medium",
+   "file": "packages/crew-core/auto.ail:318-326 (advanceAuto) with 202, 212, 229",
+   "issue": "A refusal_under_orders escalation stops before the advance, so tick is unchanged; the next advanceAuto call starts with first = tick+1 = the same turn number and re-issues request ids p<turn>-<task> and c<turn>-<task> that are already in the bank. Probe (orders, firstContact, refusal rule, 6 resumes of 40): at tick 3 the resumed call logs 'ask: {host: request capacity/id/clock}' for scientist, diplomat and medic. In check-ins that is a noisy error act; in persuade the failed ask gives label '' and decide() then calls begin() under start=always, i.e. an unescalated override of a worker who had not been heard (inferred from the code, not reproduced).",
+   "suggestion": "Derive the turn number from a counter in AutoState (or include a call counter / seq in ids), or make the refusal stop also advance a half-turn marker; add a resume-after-refusal test asserting zero error acts."
+  },
+  {
+   "id": 3,
+   "severity": "medium",
+   "file": "packages/crew-core/auto.ail:38-45 (Rule kinds); brief #137 item 5",
+   "issue": "The brief's sixth escalation trigger, 'a request no standing order covers', is not implemented, and CHANGELOG/sprint do not say it was dropped. Orders have no 'uncovered request' notion (concern/defer replies are auto-handled).",
+   "suggestion": "Either implement a rule kind (e.g. 'uncovered', fired on a reply label outside the orders' vocabulary) or record the omission and its reason on #137."
+  },
+  {
+   "id": 4,
+   "severity": "medium",
+   "file": "packages/crew-core/session.ail:557 (eventFlows2)",
+   "issue": "Ship-event evidence text now includes a 'major' field when the event has one. Scheduled events with major set were valid in 0.2.0, so their evidence text, state and trace change; the 'recordings replay byte-identically' promise holds only because no parity fixture has a major event. The changelog mentions it as a feature, not as a state change. Needed so auto can detect majors by evidence text.",
+   "suggestion": "Say in the CHANGELOG that 0.2.0 scenarios with major events produce different evidence text, or keep the old text and detect majors from scenario.events by the new evidence id (ev-<id>)."
+  },
+  {
+   "id": 5,
+   "severity": "medium",
+   "file": "packages/crew-core/session.ail:~582-585 (held), conversations.ail:43",
+   "issue": "held() blocks archiving of any task that has a conversation issue, including closed and answered ones, and issues/speech are never removed. In watch-v3 sessions (start accepts keep with watch-v3) tasks that were ever discussed are never archived and the conversation store grows without bound. No test runs archiving with watch-v3.",
+   "suggestion": "Only hold on open issues, and fold closed issues and their speech with the task, or reject keep for watch-v3 and document it; add a test."
+  },
+  {
+   "id": 6,
+   "severity": "low",
+   "file": "examples/crew-lab/sim_cli.ail (skipMain), scenarios/stapledon/escalation.json",
+   "issue": "K4 timing is honest about cadence but the 1.9 s figure is for a skip with no escalation rules. With the shipped escalation.json the same --skip 3650 stops at tick 0 on the first declined offer (refusal_under_orders). I measured (orders, processing-cascade, archive 30, no rules): yearly cadence 3.3 s wall including startup (decisions 50), monthly 29.6 s (610 decisions, 587 refusals). The monthly figure is below the doc's 'about 60 s weekly or monthly', plausible for weekly. The game will rarely complete a 10-year skip in one call.",
+   "suggestion": "State in the changelog that the speed figures are without rules and that rules stop the skip; report a --skip run with the escalation rules and the number of resumes."
+  },
+  {
+   "id": 7,
+   "severity": "low",
+   "file": "packages/crew-core/auto.ail:258-277 (watch)",
+   "issue": "Counting mode (decideTurn/finishTurn) records at most one escalation per rule per turn: breakdown and trust_floor pick head(first uncrossed worker) and argument/major pick head(new evidence). Two workers crossing, or two events, in the same turn count once, so escalations-per-year claims undercount slightly; two breakdown rules on the same indicator share the 'indicator/worker' raised key and interfere. Re-arming only runs in the no-new-crossing branch, and not at all for later rules after an earlier rule escalates in the same turn.",
+   "suggestion": "Fold over all crossing workers / all new evidence ids; key raised by rule index."
+  },
+  {
+   "id": 8,
+   "severity": "low",
+   "file": "packages/crew-core/session.ail:~690-700 (shipEventCommand), scenario.ail decodeShipEvent",
+   "issue": "Run-time events are appended to s.scenario.events and their ev-/sf- evidence and per-crew knowledge are never archived (limits: evidence 2048, knowledge 8192, ~15 knowledge rows per event for 15 crew), so a long game raising many events will hit CapacityExceeded; scenario.events also grows without a cap and is re-scanned on each advance. decodeShipEvent at tick 0 (at forced to >=1, then overwritten with 0) works and is tested; mid-session events and the duplicate-id check against scenario.events are covered only for tick 0.",
+   "suggestion": "Add a documented ceiling and a test (e.g. 500 events), or archive ev-/sf- evidence beyond a window while keeping seen() true via a counter or id list."
+  },
+  {
+   "id": 9,
+   "severity": "low",
+   "file": "packages/crew-core/session.ail:archiveNow (accepted truncation)",
+   "issue": "Archiving truncates state.accepted to the newest 512, so an old operation id could be accepted again if a host replayed it; undocumented in the CHANGELOG beyond 'operation log keeps its newest 512'. Also protection of pending/bank/unresolved reliefs in held() is correct by reading but has no test.",
+   "suggestion": "Document the idempotency window and add tests for archive-skips-held cases."
+  },
+  {
+   "id": 10,
+   "severity": "low",
+   "file": "examples/crew-lab/ailang.lock, packages/crew-core/ailang.lock",
+   "issue": "At evaluation time both locks show as modified in the clone, and running the lab warns 'dependency sunholo/crew_core content changed (locked ... current ...)'. The committed lab lock does not match the committed crew_core tree.",
+   "suggestion": "Run ailang lock after the final crew_core edit and commit the result before the PR."
+  }
+ ],
+ "commands_run": [
+  "cd packages/crew-core && ailang test --allow-skips . -> 212 tests: 145 passed, 0 failed, 67 skipped",
+  "cd packages/crew-core && ailang test --allow-skips --bytecode --strict-bytecode . -> 145 passed, 0 failed, 67 skipped",
+  "sim_cli (HEAD) vs sim_cli/crew_sim at 6dfc0fa, processing-cascade, orders, seeds 1..3, turns 20/40 and consent+orders 80 -> identical at 20 except new 'escalations' key; differ at 40 and 80",
+  "sim_cli --skip 3650 --captain orders --archive 30 --cadence 365 -> 50 decisions, 3.3 s wall incl. startup; --cadence 30 -> 610 decisions, 29.6 s; with escalation.json -> stops at tick 0 (refusal_under_orders)",
+  "sim_cli --check ergosphere-question.claims.json --seeds 1..20 --turns 12 -> 10 of 12 hold (approach-forces-an-argument 0.1 vs 0.5, halted-engineer-resents-navigator fail), 54 s",
+  "scratch probe (copy of crew-core in scratchpad): advanceAuto resumed 6 times after refusal escalations -> 'request capacity/id/clock' ask errors at the repeated tick",
+  "gh issue view 137 (brief), gh issue view 1812 / 1814 -R sunholo-data/ailang (both exist; text matches the changelog claims)",
+  "make targets not run (validate in progress)"
+ ],
+ "summary": "PASS, 74/100. The additive surface (policy, ship_event, archive, auto, cadence) works, both engines pass, and the sprint is candid about K4 and the rare arguments. The promise 'crew-sim loop reproduced exactly' is only true to ~20 ticks (stale offers), the one-turn-resume after a refusal escalation reuses request ids, one of the six brief escalation triggers is missing without notice, and 0.2.0 scheduled major events change evidence text."
+}

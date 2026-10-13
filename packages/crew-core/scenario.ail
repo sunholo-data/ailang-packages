@@ -3,7 +3,7 @@ import std/result (Result, Ok, Err)
 import std/option (Option, Some, None)
 import std/list (map, length, filter, any, contains, head, flatMap)
 import std/string (length as stringLength)
-import std/json (Json, decode, encode, keys, asObject, asArray, getString, getInt, get, jo, kv)
+import std/json (Json, decode, encode, keys, asObject, asArray, getString, getInt, get, jo, kv, jint)
 import std/crypto (sha256Hex)
 import pkg/sunholo/social_dynamics/model (Config, Actor, Resource, Recipe, Cost, Value, Rule, Relationship, Effect, BoundedIndicatorDelta, validId)
 
@@ -369,3 +369,13 @@ ensures { result == "stock" || result == "capacity" } =
 -- What completing a recipe returns (empty for most work).
 export pure func yieldsOf(s: Scenario, recipe: string) -> [Yield]
 ensures { length(result) <= 4 } = filter(\y. y.recipe == recipe, s.yields)
+
+-- A ship event raised at run time (the `ship_event` command): the same shape
+-- and checks as a scheduled event, against this scenario's resources. `at`
+-- is the tick it is applied at.
+export pure func decodeShipEvent(s: Scenario, j: Json, at: int) -> Result[ShipEvent, string] ! {}
+ensures { match result { Ok(e) => e.at == at && length(e.transfers) <= 8, Err(_) => true } } =
+ if at < 0 then Err("events: at must not be negative") else match readEvent(jo(map(\k. kv(k, match get(j, k) { Some(v) => v, None => jo([]) }), filter(\k. k != "at", keys(j))) ++ [kv("at", jint(if at < 1 then 1 else at))]), map(\r. r.id, s.resources)) {
+  Err(e) => Err(e),
+  Ok(e) => Ok({e | at: at})
+ }
