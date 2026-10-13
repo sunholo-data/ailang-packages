@@ -6,6 +6,8 @@ import std/string (contains, replace)
 import ./scenario (decodeScenario)
 import ./session (Session, Output, HostError, HostFailure, start, input, snapshot)
 import ./cohorts (Population, total, headcount, meanBand, personOf)
+import ./policy (decodePolicy, watchPolicyBody)
+import ./auto (advanceAuto, ordersOrders, decodeEscalation)
 
 -- The galley ship with a cook who voices the kitchens, a loss at tick 10,
 -- and a population of 300 in two departments.
@@ -73,3 +75,22 @@ test "departures are checked" {
 }
 
 test "cohort sessions replay" { to(begin(true), 800) == to(begin(true), 800) }
+
+-- P3: cohorts in the auto-captain's escalation rules
+
+pure func cohortRules() -> string = "{\"schema\":\"crew_escalation/1\",\"rules\":[{\"kind\":\"cohort\",\"indicator\":\"pressure\",\"threshold\":1}]}"
+
+test "a cohort crossing its pressure threshold stops auto-play" {
+ match (begin(true), decodePolicy(watchPolicyBody()), decodeEscalation(cohortRules())) {
+  (Ok(s), Ok(p), Ok(rules)) => match advanceAuto(s, {seed: 7, agreed: [], raised: [], calls: 0}, p, ordersOrders(), rules, 60) {
+   Ok(a) => match a.escalated { Some(e) => e.rule == "cohort" && contains(e.detail, "cohort:") && a.session.state.tick >= 10 && a.session.state.tick < 60, None => false },
+   Err(_) => false
+  },
+  _ => false
+ }
+}
+
+test "cohort rules are checked" {
+ (match decodeEscalation(replace(cohortRules(), "pressure", "anger")) { Err(e) => contains(e, "cohort needs"), Ok(_) => false })
+ && (match decodeEscalation(replace(cohortRules(), "\"threshold\":1", "\"threshold\":101")) { Err(_) => true, Ok(_) => false })
+}

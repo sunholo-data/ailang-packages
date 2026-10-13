@@ -9,6 +9,7 @@ import ./scenario (Scenario)
 import ./session (Session, Output, Request, HostError, HostFailure, TaskAgreement, input, encodeHostError)
 import std/json (encode, jo, kv, js, jnum, jint, jb)
 import ./policy (Policy, authoredAnswer)
+import ./cohorts (Cohort, division, pressure)
 
 -- Auto-captain (crew_core 0.3.0, Stapledon R2-CREW CI-0). Standing orders say
 -- what the captain would decide; escalation rules say which moments must go
@@ -44,6 +45,10 @@ export type Orders = { start: string, rest: string, relief: string, fatigue: int
 --  "argument": crew argue over lost capacity
 --  "uncovered": a request no standing order covers: a crew member opens a
 --    conversation issue only the captain can answer (watch-v3)
+--  "cohort": a cohort's `indicator` ("pressure" or "division", 0..100)
+--    reaches threshold (each crossing once, until it falls back). The
+--    escalation's actor is the cohort's voice (may be empty) and its detail
+--    starts "cohort:<id>"
 export type Rule = { kind: string, indicator: string, threshold: int, kinds: [string] } deriving (Eq)
 
 -- What happened, for callers that tally (crew-sim) or show (the game).
@@ -92,11 +97,12 @@ pure func cadenceOf(j: Json) -> int = match getInt(j, "cadence") { Some(c) => c,
 
 pure func readRule(j: Json) -> Result[Rule, string] = {
  let kind = str(j, "kind");
- if not contains(["refusal_under_orders", "breakdown", "trust_floor", "major", "argument", "uncovered"], kind) then Err("escalation: unknown kind ${kind}")
+ if not contains(["refusal_under_orders", "breakdown", "trust_floor", "major", "argument", "uncovered", "cohort"], kind) then Err("escalation: unknown kind ${kind}")
  else {
   let threshold = match getInt(j, "threshold") { Some(n) => n, None => 0 - 1 };
   let kinds = getStringArrayOrEmpty(j, "kinds");
   if (kind == "breakdown" || kind == "trust_floor") && (threshold < 0 || threshold > 100) then Err("escalation: ${kind} needs threshold 0..100")
+  else if kind == "cohort" && (threshold < 0 || threshold > 100 || not contains(["pressure", "division"], str(j, "indicator"))) then Err("escalation: cohort needs indicator pressure or division and threshold 0..100")
   else if kind == "breakdown" && str(j, "indicator") == "" then Err("escalation: breakdown needs an indicator")
   else if kind == "major" && length(kinds) == 0 then Err("escalation: major needs kinds")
   else Ok({ kind: kind, indicator: str(j, "indicator"), threshold: threshold, kinds: kinds })
@@ -266,13 +272,21 @@ pure func key(rule: Rule, who: string) -> string = "${rule.kind}:${rule.indicato
 
 -- Raise every match of one crossing rule (a halting run stops at the first);
 -- re-arm those that are back across the line.
-pure func crossings(acc: Run, rule: Rule, over: string -> bool, detail: string -> string) -> Run = {
- let s = acc.session;
- let fresh = filter(\w. over(w) && not contains(acc.state.raised, key(rule, w)), s.scenario.workers);
+pure func crossings(acc: Run, rule: Rule, over: string -> bool, detail: string -> string) -> Run = crossingsOver(acc, rule, acc.session.scenario.workers, \w. w, over, detail)
+pure func crossingsOver(acc: Run, rule: Rule, whos: [string], actor: string -> string, over: string -> bool, detail: string -> string) -> Run = {
+ let fresh = filter(\w. over(w) && not contains(acc.state.raised, key(rule, w)), whos);
  let st = acc.state;
- let kept = filter(\k. not any(\w. k == key(rule, w) && not over(w), s.scenario.workers), st.raised);
- foldl(\a w. { let st2 = a.state; escalate({a | state: {st2 | raised: st2.raised ++ [key(rule, w)]}}, rule.kind, w, "", detail(w)) }, {acc | state: {st | raised: kept}}, fresh)
+ let kept = filter(\k. not any(\w. k == key(rule, w) && not over(w), whos), st.raised);
+ foldl(\a w. { let st2 = a.state; escalate({a | state: {st2 | raised: st2.raised ++ [key(rule, w)]}}, rule.kind, actor(w), "", detail(w)) }, {acc | state: {st | raised: kept}}, fresh)
 }
+
+-- Cohort readouts by id (0 when the cohort is gone or there are none).
+pure func cohortsOf(s: Session) -> [Cohort] = match s.population { Some(p) => p.cohorts, None => [] }
+pure func cohortValue(s: Session, id: string, indicator: string) -> int = match head(filter(\c. c.id == id, cohortsOf(s))) {
+ Some(c) => if indicator == "division" then division(c.mood) else pressure(c),
+ None => 0
+}
+pure func voiceOf(s: Session, id: string) -> string = match head(filter(\c. c.id == id, cohortsOf(s))) { Some(c) => c.voice, None => "" }
 
 pure func newEvidence(s: Session, before: Session, p: string -> bool) -> [string] = map(\e. e.id, filter(\e. p(e.id) && not any(\b. b.id == e.id, before.state.evidence), s.state.evidence))
 
@@ -288,6 +302,7 @@ pure func watch(r: Run, rules: [Rule], before: Session) -> Run = foldl(\acc rule
  else if rule.kind == "trust_floor" then crossings(acc, rule, \w. trustOf(s, w) < rule.threshold, \w. "trust ${show(trustOf(s, w))}")
  else if rule.kind == "argument" then foldl(\a id. escalate(a, "argument", "", "", id), acc, newEvidence(s, before, \id. startsWith(id, "sf-")))
  else if rule.kind == "major" then foldl(\a id. escalate(a, "major", "", "", id), acc, filter(\id. contains(rule.kinds, majorOf(s, id)), newEvidence(s, before, \id. startsWith(id, "ev-"))))
+ else if rule.kind == "cohort" then crossingsOver(acc, rule, map(\c. c.id, cohortsOf(s)), \c. voiceOf(s, c), \c. cohortValue(s, c, rule.indicator) >= rule.threshold, \c. "cohort:${c} ${rule.indicator} ${show(cohortValue(s, c, rule.indicator))}")
  else if rule.kind == "uncovered" then foldl(\a i. escalate(a, "uncovered", i.worker, i.task, i.id), acc, filter(\i. i.status == "open" && not any(\b. b.id == i.id && b.status == "open", before.chat.issues), s.chat.issues))
  else acc
 }, r, rules)
