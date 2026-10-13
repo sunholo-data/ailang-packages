@@ -1,0 +1,83 @@
+module sunholo/crew_lab/memory
+import std/list (map, filter, length, sortBy, take)
+import std/embedding (cosine)
+import std/math (floor, floatToInt)
+import std/string (length as size)
+
+-- Crew memory (spike, words layer only). Each entry is a line a crew member
+-- said, or a moment the ship lived through, with its embedding. Recall and the
+-- variety check rank by cosine similarity. Nothing here decides an outcome: the
+-- simulation stays pure and deterministic; memory only shapes what is said.
+-- Embeddings come from the caller (a local model through Ollama), so this
+-- module stays pure and testable with hand-made vectors.
+export type Entry = {id:int, actor:string, tick:int, text:string, vec:[float]} deriving (Eq)
+export type Hit = {entry:Entry, score:float} deriving (Eq)
+
+-- Highest score first; equal scores keep the older entry first (lower id), so
+-- the ranking never depends on list order.
+pure func byScore(a:Hit, b:Hit) -> int =
+ if a.score > b.score then -1 else if a.score < b.score then 1
+ else if a.entry.id < b.entry.id then -1 else if a.entry.id > b.entry.id then 1 else 0
+
+pure func ranked(es:[Entry], q:[float], k:int) -> [Hit] = take(k, sortBy(byScore, map(\e. {entry:e, score:cosine(e.vec, q)}, es)))
+
+-- recall: the k entries most like the query that happened before `before`,
+-- by `actor` (or anyone when actor is ""), at or above `floor`.
+export pure func recall(es:[Entry], q:[float], actor:string, before:int, k:int, minScore:float) -> [Hit] ! {}
+requires { k >= 0 }
+ensures { length(result) <= k } =
+ filter(\h. h.score >= minScore, ranked(filter(\e. e.tick < before && (actor == "" || e.actor == actor), es), q, k))
+
+-- echoes: recent lines by the same actor too close to a new line (variety
+-- check). Recent means within `window` ticks before `now`.
+export pure func echoes(es:[Entry], v:[float], actor:string, now:int, window:int, threshold:float) -> [Hit] ! {}
+requires { window >= 0 }
+ensures { length(result) <= length(es) } =
+ filter(\h. h.score >= threshold, ranked(filter(\e. e.actor == actor && e.tick <= now && now - e.tick <= window, es), v, length(es)))
+
+-- margin: how far the best match leads the runner-up (1.0 with fewer than two
+-- hits). A small margin is where an unreliable recaller, such as the Archive,
+-- can plausibly take the wrong record.
+export pure func margin(hs:[Hit]) -> float ! {}
+ensures { result >= 0.0 } = match hs {
+ [a, b, ..._] => if a.score - b.score < 0.0 then 0.0 else a.score - b.score,
+ _ => 1.0
+}
+
+-- pick: the record a recaller returns. A reliable one takes the best match; an
+-- unreliable one takes the runner-up when the margin is under `confusion` and
+-- the roll (0..99, from the caller's seeded stream) is under `chance`.
+export pure func pick(hs:[Hit], confusion:float, chance:int, roll:int) -> [Hit] ! {}
+requires { roll >= 0 && roll <= 99 }
+ensures { length(result) <= 1 } = match hs {
+ [a, b, ..._] => if margin(hs) < confusion && roll < chance then [b] else [a],
+ [a] => [a],
+ [] => []
+}
+
+-- Two decimals for reports (negative cosines keep their sign).
+export pure func fixed2(x:float) -> string ! {}
+ensures { size(result) >= 4 } = if x < 0.0 then "-${unsigned2(0.0 - x)}" else unsigned2(x)
+
+pure func unsigned2(x:float) -> string = {
+ let hundred = floor(x * 100.0 + 0.5);
+ let whole = floor(hundred / 100.0);
+ let cents = hundred - whole * 100.0;
+ let c = show(floatToInt(cents));
+ "${show(floatToInt(whole))}.${if cents < 10.0 then "0${c}" else c}"
+}
+
+pure func e(id:int, actor:string, tick:int, v:[float]) -> Entry = {id:id, actor:actor, tick:tick, text:"t${show(id)}", vec:v}
+pure func mem() -> [Entry] = [e(1, "medic", 1, [1.0, 0.0, 0.0]), e(2, "medic", 2, [0.8, 0.6, 0.0]), e(3, "pilot", 3, [1.0, 0.0, 0.0]), e(4, "medic", 9, [0.0, 0.0, 1.0])]
+pure func ids(hs:[Hit]) -> [int] = map(\h. h.entry.id, hs)
+
+test "recall ranks the closest earlier memory by the same actor first" { ids(recall(mem(), [1.0, 0.1, 0.0], "medic", 5, 2, 0.0)) == [1, 2] }
+test "recall ignores later memories and other actors" { ids(recall(mem(), [0.0, 0.0, 1.0], "medic", 5, 3, 0.5)) == [] }
+test "recall with no actor searches everyone; ties keep the older entry" { ids(recall(mem(), [1.0, 0.0, 0.0], "", 5, 2, 0.0)) == [1, 3] }
+test "echoes finds a near-repeat inside the window only" { ids(echoes(mem(), [1.0, 0.0, 0.0], "medic", 2, 5, 0.95)) == [1] && ids(echoes(mem(), [1.0, 0.0, 0.0], "medic", 20, 5, 0.95)) == [] }
+test "margin is the lead of the best match" { fixed2(margin(recall(mem(), [1.0, 0.0, 0.0], "medic", 5, 2, 0.0))) == "0.20" }
+test "a confused recaller takes the runner-up only under the margin and the roll" {
+ let hs = recall(mem(), [1.0, 0.0, 0.0], "medic", 5, 2, 0.0);
+ ids(pick(hs, 0.3, 50, 10)) == [2] && ids(pick(hs, 0.3, 50, 60)) == [1] && ids(pick(hs, 0.1, 50, 10)) == [1]
+}
+test "fixed2 rounds to two places" { fixed2(0.765) == "0.77" && fixed2(0.05) == "0.05" && fixed2(1.0) == "1.00" && fixed2(-0.3) == "-0.30" }
