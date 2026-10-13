@@ -1,0 +1,116 @@
+{
+  "sprint_id": "S-CREW-CORE-0.4",
+  "status": "awaiting_approval",
+  "plan": "design_docs/planned/crew-core-cohorts-sprint.md",
+  "design": "stapledons-godot design_docs/planned/r2/crew-population.md",
+  "ledger": [
+    "D-73",
+    "D-75"
+  ],
+  "features": [
+    {
+      "id": "P1",
+      "description": "Scenario cohorts section, validation, cohort response policy",
+      "dependencies": [],
+      "acceptance_criteria": [
+        "decode tests on both engines",
+        "bad packs rejected naming the field"
+      ],
+      "passes": null,
+      "started": null,
+      "completed": null,
+      "notes": null
+    },
+    {
+      "id": "P2",
+      "description": "Band transitions (expected-value and seeded) and readouts",
+      "dependencies": [
+        "P1"
+      ],
+      "acceptance_criteria": [
+        "sums preserved, never negative",
+        "same seed same result; VM == interpreter"
+      ],
+      "passes": null,
+      "started": null,
+      "completed": null,
+      "notes": null
+    },
+    {
+      "id": "P3",
+      "description": "Drift, advance(n) and auto cover cohorts; cohort escalation rules",
+      "dependencies": [
+        "P2"
+      ],
+      "acceptance_criteria": [
+        "split cohort escalates before uniformly uneasy one"
+      ],
+      "passes": null,
+      "started": null,
+      "completed": null,
+      "notes": null
+    },
+    {
+      "id": "P4",
+      "description": "Yearly population step with birth_policy command",
+      "dependencies": [
+        "P2"
+      ],
+      "acceptance_criteria": [
+        "hold default within +-10% of 1,500 at 100 years",
+        "births stall under garden/water shortage"
+      ],
+      "passes": null,
+      "started": null,
+      "completed": null,
+      "notes": null
+    },
+    {
+      "id": "P5",
+      "description": "Promotion with promoted event and deterministic id",
+      "dependencies": [
+        "P2"
+      ],
+      "acceptance_criteria": [
+        "featured cap 15 holds",
+        "id deterministic, replay identical"
+      ],
+      "passes": null,
+      "started": null,
+      "completed": null,
+      "notes": null
+    },
+    {
+      "id": "P6",
+      "description": "CP-1 founders pack (~1,000 in 10 departments + children) and claims",
+      "dependencies": [
+        "P3",
+        "P4",
+        "P5"
+      ],
+      "acceptance_criteria": [
+        "crew-sim --check over 20 seeds; claims recorded"
+      ],
+      "passes": null,
+      "started": null,
+      "completed": null,
+      "notes": null
+    },
+    {
+      "id": "P7",
+      "description": "Scale (AC9), parity, changelog, evaluation, PR, publish 0.4.0",
+      "dependencies": [
+        "P6"
+      ],
+      "acceptance_criteria": [
+        "1,000 vs 100,000 within 10%",
+        "nine parity recordings identical",
+        "evaluator >= 70"
+      ],
+      "passes": null,
+      "started": null,
+      "completed": null,
+      "notes": null
+    }
+  ]
+}

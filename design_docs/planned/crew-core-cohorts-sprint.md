@@ -1,0 +1,80 @@
+# Sprint S-CREW-CORE-0.4: cohort actors for the ship's population (CP-0 + CP-1)
+
+**Design:** stapledons-godot `design_docs/planned/r2/crew-population.md`
+§CP-0 and §CP-1, with the open questions settled by ledger D-73 (cohorts in
+R2; department axis first, generation splits later; featured cap 15 with
+promotion; unrest shown as bands) and the headcount by D-75 (about 1,000
+aboard, growing to about 1,500).
+**Authorization:** pending Mark's approval of this plan.
+**AILANG prompt version loaded:** v0.16.7 (runtime v0.54.8).
+**Registry reuse:** none. This extends crew_core, which is already the host;
+the bucket and binomial maths are new and small.
+
+**Compatibility promise** (to the integration agent, as for 0.3.0):
+- Cohorts are additive. A scenario without a `cohorts` section behaves
+  exactly as in 0.3.0.
+- The six parity recordings, plus the integration agent's three, replay
+  byte-identically.
+- Snapshot and journal records gain `cohorts`, `population` and `promoted`
+  only when cohorts exist.
+- `session` gains no import of `auto`, which stays opt-in.
+
+**Naming contract** (agreed with the integration agent, 2026-10-13):
+- crew_core never carries display names.
+- A promotion emits `{"kind":"promoted","id":"<cohort>-p<n>","cohort":…,"at":…}`
+  with a deterministic id.
+- The game names the new actor from its D-74 generator, keyed by that id.
+
+## The model
+
+A cohort is a group actor:
+
+| Field | Meaning |
+|---|---|
+| `id`, `department` | Grouping axis: department (D-73 OQ2) |
+| `headcount` | The people in it, which may be in the thousands; cost does not depend on it |
+| `mix` | Mean OCEAN traits, 0..100 |
+| `mood` | People per band: content, uneasy, strained, breaking. Sums to headcount |
+| `trust` | People per band of trust in the captain (4 bands). Sums to headcount |
+| `ages` | People per decade band, 0–9 … 90+. Sums to headcount |
+| `voice` | A featured crew id, or none |
+
+- **Readouts:**
+  - *mean*;
+  - *division*: how bimodal the bands are, 0..100;
+  - *pressure*: the strained and breaking share, weighted by low trust, 0..100.
+- **Moves between bands:** one seeded binomial draw per band, not per person.
+  The default is an exact-integer expected-value mode (largest-remainder
+  rounding); a seeded mode adds per-band noise. Both engines must agree bit
+  for bit.
+- **Children and departments:** births go to a `children` cohort. At 18 they
+  join departments in proportion to department headcounts. A department
+  splits off a ship-born sub-cohort once ship-born people are 25% of it (the
+  generation split; the threshold can be set per pack).
+
+## Milestones
+
+| ID | What | Gate |
+|---|---|---|
+| P1 | Scenario `cohorts` section (1–16, separate from crew's 1–15); validation that every band list sums to headcount and that voices are featured crew; the response policy gains a `cohort` section | decode tests on both engines; bad packs rejected with the field named |
+| P2 | Band transitions: events and heard captain decisions move people by band through the cohort mix. Expected-value and seeded modes; readouts | property tests: sums preserved, never negative, same seed gives the same result, VM == interpreter |
+| P3 | Drift on quiet days toward the mood set by resources and recent events; `advance(n)` and the auto-captain cover cohorts; cohort escalation rules (`pressure`, `division` thresholds) in `crew_escalation/1` | `crew-sim --auto` claims; a split cohort escalates before a uniformly uneasy one |
+| P4 | Yearly population step: `birth_policy` command (`encourage`/`hold`/`restrict`, journalled, D-71(2)); births by policy, resources and parents' mood; deaths by age band plus `loss` events; ageing; children joining departments; the `crew.used` draw as a readout. The `hold` default gives about 0.4% net a year (D-75) | headcount over 100 years within ±10% of 1,500 under `hold` in good conditions; births stall when garden or water are short |
+| P5 | Promotion: a featured member who departs (dies, breaks permanently, or leaves the featured set) is replaced from their cohort. The new actor gets the cohort mix plus a seeded offset and the cohort's regard, then the `promoted` event fires. The featured cap of 15 holds; voices reassign | tests: cap holds; id deterministic; replay identical |
+| P6 | CP-1 lab content: a founders scenario with about 1,000 people in 10 department cohorts plus children, voices from the featured 11. Claims written first: split before uneasy; a death aboard moves founders more than ship-born after generation 2; births stall under shortage; the 100-year growth band | `crew-sim --check` over 20 seeds; claims recorded, failures kept as findings |
+| P7 | Scale and close: AC9 (a 10-year skip with 1,000 people and with 100,000 people within 10% of each other); parity (nine recordings); changelog; independent evaluation; PR; publish 0.4.0 | timing table in the CHANGELOG; evaluator score at least 70 |
+
+## Risks
+
+- **Compile memory.** It was fixed in v0.54.8. The plan still keeps the
+  population step in its own module (`cohorts.ail`), with the session calling
+  it once, and re-measures cold compile at P2 and P7.
+- **ailang#1814 (VM list tails).** Fixed-size band lists, at most 10 long, so
+  the cost is not affected.
+- **Pack size.** Ten cohorts plus the existing 11 crew is 21 actors, so
+  regard holds about 440 pairs. That is measured at P3 and P7.
+
+## Questions for Mark
+
+None are blocking. The design choices above (children cohort, 25% generation
+split, expected-value default) are mine; say if any should be different.
