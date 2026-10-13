@@ -554,7 +554,7 @@ pure func eventFlows(s: Session, due: [ShipEvent], events: [Event]) -> Result[Fl
  }
 }
 
-pure func eventFlows2(s: Session, e: ShipEvent, rest: [ShipEvent], events: [Event]) -> Result[Flowed, HostError] = match flow(s, "ev-${e.id}", s.scenario.workers, [kv("schema", js("crew_ship_event/1")), kv("event", js(e.id)), kv("at", jint(e.at)), kv("text", js(e.text))], e.transfers, e.major, events) {
+pure func eventFlows2(s: Session, e: ShipEvent, rest: [ShipEvent], events: [Event]) -> Result[Flowed, HostError] = match flow(s, "ev-${e.id}", s.scenario.workers, [kv("schema", js("crew_ship_event/1")), kv("event", js(e.id)), kv("at", jint(e.at)), kv("text", js(e.text))] ++ (if e.major == "" then [] else [kv("major", js(e.major))]), e.transfers, e.major, events) {
  Err(err) => Err(err),
  Ok(f) => eventFlows(f.session, rest, f.events)
 }

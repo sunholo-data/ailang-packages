@@ -1,0 +1,288 @@
+module sunholo/crew_core/auto
+import std/result (Result, Ok, Err)
+import std/option (Option, Some, None)
+import std/list (map, filter, foldl, length, head, any, contains, range)
+import std/json (Json, decode, getString, getInt, getArray, getStringArrayOrEmpty, keys)
+import std/string (startsWith)
+import pkg/sunholo/social_dynamics/model (Task, Offered, Working)
+import ./scenario (Scenario)
+import ./session (Session, Request, HostError, HostFailure, offer, ask, complete, startTask, resolve, cancel, input, encodeHostError)
+import ./policy (Policy, authoredAnswer)
+
+-- Auto-captain (crew_core 0.3.0, Stapledon R2-CREW CI-0). Standing orders say
+-- what the captain would decide; escalation rules say which moments must go
+-- to the player. advanceAuto runs whole turns under the orders, with the
+-- same host calls and journal records as a player's decisions, and stops at
+-- the first escalation. Reactions are authored (response policy and the
+-- caller's seed); nothing here is random beyond that seed.
+--
+-- One turn, in this order (the crew lab's crew-sim captain loop):
+--  1. offered work: start it if the worker agreed earlier, else ask again;
+--  2. every other turn, check in with working crew; answer relief requests;
+--  3. each idle worker (scenario order): offer work (or rest when tired and
+--     the orders rest the tired), ask, start under the orders;
+--  4. advance one tick.
+
+-- crew_standing_orders/1.
+--  start: "agreed" (start only what the worker accepted) | "always" (orders)
+--  rest: "tired" (send the tired to rest) | "never"
+--  relief: "grant" | "deny" | "strained" (grant only at or over the
+--    overextension threshold)
+--  fatigue, stress: what counts as tired
+export type Orders = { start: string, rest: string, relief: string, fatigue: int, stress: int } deriving (Eq)
+
+-- crew_escalation/1 rules. kind:
+--  "refusal_under_orders": a worker declines and the orders would start anyway
+--  "breakdown": a crew indicator reaches threshold (each crossing once)
+--  "trust_floor": a crew member's trust in the captain is below threshold
+--    (each fall once, until it recovers)
+--  "major": a ship event of one of `kinds` (loss, deep_time, ...) fires
+--  "argument": crew argue over lost capacity
+export type Rule = { kind: string, indicator: string, threshold: int, kinds: [string] } deriving (Eq)
+
+-- What happened, for callers that tally (crew-sim) or show (the game).
+-- kind: offer | reply | start | refusal | relief_asked | relief_decision | error
+export type Act = { kind: string, actor: string, label: string, detail: string, request: Option[Request], tick: int, fatigue: int, stress: int, morale: int } deriving (Eq)
+
+export type Escalated = { rule: string, actor: string, task: string, tick: int, detail: string } deriving (Eq)
+
+-- Carried between calls: the seed, workers' earlier acceptances, and which
+-- breakdown crossings were already raised.
+export type AutoState = { seed: int, agreed: [string], raised: [string] } deriving (Eq)
+
+-- noted: every escalation seen in counting mode (decideTurn and finishTurn,
+-- for the lab), where play goes on under the orders instead of stopping.
+export type AutoResult = { session: Session, state: AutoState, turns: int, escalated: Option[Escalated], log: [Act], noted: [Escalated] } deriving (Eq)
+
+export pure func consentOrders() -> Orders ! {}
+ensures { result.start == "agreed" } = { start: "agreed", rest: "tired", relief: "grant", fatigue: 70, stress: 75 }
+
+export pure func ordersOrders() -> Orders ! {}
+ensures { result.start == "always" } = { start: "always", rest: "never", relief: "deny", fatigue: 70, stress: 75 }
+
+-- --------------------------------------------------------------- decoding
+
+pure func str(j: Json, k: string) -> string = match getString(j, k) { Some(s) => s, None => "" }
+
+export pure func decodeOrders(body: string) -> Result[Orders, string] ! {}
+ensures { match result { Ok(o) => o.start == "agreed" || o.start == "always", Err(_) => true } } = match decode(body) {
+ Err(e) => Err("standing orders JSON: ${e}"),
+ Ok(j) => if str(j, "schema") != "crew_standing_orders/1" then Err("standing orders: schema must be crew_standing_orders/1")
+  else if any(\k. not contains(["schema", "start", "rest", "relief", "fatigue", "stress"], k), keys(j)) then Err("standing orders: unknown field")
+  else if not contains(["agreed", "always"], str(j, "start")) then Err("standing orders: start must be agreed or always")
+  else if not contains(["tired", "never"], str(j, "rest")) then Err("standing orders: rest must be tired or never")
+  else if not contains(["grant", "deny", "strained"], str(j, "relief")) then Err("standing orders: relief must be grant, deny or strained")
+  else match (getInt(j, "fatigue"), getInt(j, "stress")) {
+   (Some(f), Some(s)) => if f < 0 || f > 100 || s < 0 || s > 100 then Err("standing orders: fatigue and stress must be 0..100") else Ok({ start: str(j, "start"), rest: str(j, "rest"), relief: str(j, "relief"), fatigue: f, stress: s }),
+   _ => Ok({ start: str(j, "start"), rest: str(j, "rest"), relief: str(j, "relief"), fatigue: 70, stress: 75 })
+  }
+}
+
+pure func readRule(j: Json) -> Result[Rule, string] = {
+ let kind = str(j, "kind");
+ if not contains(["refusal_under_orders", "breakdown", "trust_floor", "major", "argument"], kind) then Err("escalation: unknown kind ${kind}")
+ else {
+  let threshold = match getInt(j, "threshold") { Some(n) => n, None => 0 - 1 };
+  let kinds = getStringArrayOrEmpty(j, "kinds");
+  if (kind == "breakdown" || kind == "trust_floor") && (threshold < 0 || threshold > 100) then Err("escalation: ${kind} needs threshold 0..100")
+  else if kind == "breakdown" && str(j, "indicator") == "" then Err("escalation: breakdown needs an indicator")
+  else if kind == "major" && length(kinds) == 0 then Err("escalation: major needs kinds")
+  else Ok({ kind: kind, indicator: str(j, "indicator"), threshold: threshold, kinds: kinds })
+ }
+}
+
+@allow_empty_ok("No rules is a valid escalation set: auto-play never stops early")
+export pure func decodeEscalation(body: string) -> Result[[Rule], string] ! {}
+ensures { match result { Ok(rs) => length(rs) <= 32, Err(_) => true } } = match decode(body) {
+ Err(e) => Err("escalation JSON: ${e}"),
+ Ok(j) => if str(j, "schema") != "crew_escalation/1" then Err("escalation: schema must be crew_escalation/1") else match getArray(j, "rules") {
+  None => Err("escalation: rules must be a list"),
+  Some(xs) => if length(xs) > 32 then Err("escalation: at most 32 rules") else foldl(\acc x. match acc { Err(e) => Err(e), Ok(rs) => match readRule(x) { Err(e) => Err(e), Ok(r) => Ok(rs ++ [r]) } }, Ok([]), xs)
+ }
+}
+
+-- ------------------------------------------------------------------ helpers
+
+type Run = { session: Session, state: AutoState, log: [Act], escalated: Option[Escalated], halting: bool, noted: [Escalated] }
+
+pure func indicator(s: Session, actor: string, id: string) -> int = match head(filter(\a. a.id == actor, s.state.actors)) {
+ None => 0,
+ Some(a) => match head(filter(\v. v.id == id, a.indicators)) { Some(v) => v.value, None => 0 }
+}
+
+pure func trustOf(s: Session, actor: string) -> int = match head(filter(\r. r.from == actor && r.to == s.scenario.captain && r.dimension == "trust", s.state.relationships)) {
+ Some(r) => r.value, None => 0
+}
+
+pure func threshold(s: Session, worker: string) -> int = match head(filter(\r. r.id == "overextended_${worker}", s.scenario.rules)) { Some(r) => r.threshold, None => 101 }
+
+pure func busy(s: Session, worker: string) -> bool = any(\t. (t.status == Offered || t.status == Working) && contains(t.participants, worker), s.state.tasks)
+
+pure func workRecipe(sc: Scenario, worker: string) -> string = match head(filter(\o. o.text == worker && o.id != "rest_${worker}", sc.owners)) {
+ Some(o) => o.id, None => "rest_${worker}"
+}
+
+pure func act(r: Run, kind: string, actor: string, label: string, detail: string, request: Option[Request], s: Session) -> Run =
+ {r | log: r.log ++ [{ kind: kind, actor: actor, label: label, detail: detail, request: request, tick: s.state.tick, fatigue: indicator(s, actor, "fatigue"), stress: indicator(s, actor, "stress"), morale: indicator(s, actor, "morale") }]}
+
+pure func stopped(r: Run) -> bool = match r.escalated { Some(_) => true, None => false }
+
+pure func escalate(r: Run, rule: string, actor: string, task: string, detail: string) -> Run = {
+ let e = { rule: rule, actor: actor, task: task, tick: r.session.state.tick, detail: detail };
+ if stopped(r) then r else if r.halting then {r | escalated: Some(e)} else {r | noted: r.noted ++ [e]}
+}
+
+pure func ruled(rules: [Rule], kind: string) -> bool = any(\x. x.kind == kind, rules)
+
+-- Ask `actor` about `task`; the response policy chooses the reaction.
+pure func hear(r: Run, p: Policy, actor: string, task: string, id: string) -> {run: Run, label: string} = match ask(r.session, actor, task, id) {
+ Err(e) => {run: act(r, "error", actor, "", "ask: ${encodeHostError(e)}", None, r.session), label: ""},
+ Ok(a) => match head(filter(\q. q.id == id, a.session.pending)) {
+  None => {run: act({r | session: a.session}, "error", actor, "", "ask: no pending request", None, r.session), label: ""},
+  Some(request) => match authoredAnswer(p, request, r.state.seed) {
+   Err(e) => {run: act({r | session: a.session}, "error", actor, "", "answer: ${e}", None, r.session), label: ""},
+   Ok(answer) => {
+    let st = r.state;
+    match complete(a.session, id, answer.body, answer.roll) {
+     Err(e) => {
+      let released = match cancel(a.session, id) { Ok(o) => o.session, Err(_) => a.session };
+      {run: act({r | session: released, state: {st | seed: answer.seed}}, "error", actor, "", "complete: ${encodeHostError(e)}", None, r.session), label: ""}
+     },
+     Ok(c) => {
+      let agreed = if answer.label == "accept" && not contains(st.agreed, task) then st.agreed ++ [task] else st.agreed;
+      {run: act({r | session: c.session, state: {st | seed: answer.seed, agreed: agreed}}, "reply", actor, answer.label, task, Some(request), a.session), label: answer.label}
+     }
+    }
+   }
+  }
+ }
+}
+
+pure func begin(r: Run, task: string, actor: string) -> Run = match startTask(r.session, task) {
+ Ok(o) => if o.failed then act({r | session: o.session}, "error", actor, "", "start: blocked", None, r.session) else act({r | session: o.session}, "start", actor, "", task, None, r.session),
+ Err(e) => act(r, "refusal", actor, "", encodeHostError(e), None, r.session)
+}
+
+-- Start, unless the orders would override a refusal that must go to the player.
+pure func decide(r: Run, o: Orders, rules: [Rule], task: string, actor: string, label: string) -> Run =
+ if stopped(r) then r
+ else if label == "accept" then begin(r, task, actor)
+ else if o.start == "always" then (if label != "" && ruled(rules, "refusal_under_orders") && r.halting then escalate(r, "refusal_under_orders", actor, task, label) else begin(if label != "" && ruled(rules, "refusal_under_orders") then escalate(r, "refusal_under_orders", actor, task, label) else r, task, actor))
+ else r
+
+pure func persuade(r: Run, p: Policy, o: Orders, rules: [Rule], turn: int, t: Task) -> Run =
+ if stopped(r) then r else if contains(r.state.agreed, t.id) then begin(r, t.id, match head(t.participants) { Some(w) => w, None => "" }) else match head(t.participants) {
+  None => r,
+  Some(worker) => { let h = hear(r, p, worker, t.id, "p${show(turn)}-${t.id}"); decide(h.run, o, rules, t.id, worker, h.label) }
+ }
+
+pure func grants(o: Orders, s: Session, worker: string) -> bool =
+ if o.relief == "grant" then true else if o.relief == "deny" then false else indicator(s, worker, "stress") >= threshold(s, worker)
+
+pure func checkIn(r: Run, p: Policy, o: Orders, turn: int, t: Task) -> Run =
+ if stopped(r) then r else match head(t.participants) {
+  None => r,
+  Some(worker) => if turn % 2 != 0 then r else {
+   let rid = "c${show(turn)}-${t.id}";
+   let h = hear(r, p, worker, t.id, rid);
+   if h.label != "request_relief" then h.run else {
+    let asked = act(h.run, "relief_asked", worker, "", t.id, None, h.run.session);
+    let go = grants(o, asked.session, worker);
+    match resolve(asked.session, "relief-${rid}", go) {
+     Err(e) => act(asked, "error", worker, "", "relief: ${encodeHostError(e)}", None, asked.session),
+     Ok(x) => act({asked | session: x.session}, "relief_decision", worker, if go then "granted" else "denied", t.id, None, asked.session)
+    }
+   }
+  }
+ }
+
+pure func assign(r: Run, p: Policy, o: Orders, rules: [Rule], turn: int, worker: string) -> Run =
+ if stopped(r) || busy(r.session, worker) then r else {
+  let tired = indicator(r.session, worker, "fatigue") >= o.fatigue || indicator(r.session, worker, "stress") >= o.stress;
+  let recipe = if tired && o.rest == "tired" then "rest_${worker}" else workRecipe(r.session.scenario, worker);
+  let id = "t${show(turn)}-${worker}";
+  match offer(r.session, worker, recipe, id) {
+   Err(e) => act(r, "error", worker, "", "offer: ${encodeHostError(e)}", None, r.session),
+   Ok(x) => {
+    let offered = act({r | session: x.session}, "offer", worker, recipe, id, None, r.session);
+    let h = hear(offered, p, worker, id, "q-${id}");
+    decide(h.run, o, rules, id, worker, h.label)
+   }
+  }
+ }
+
+pure func step(r: Run, turn: int) -> Run = match input(r.session, "{\"command\":\"advance\",\"tick\":${show(turn)},\"budget\":64}") {
+ Ok(x) => if x.failed then act({r | session: x.session}, "error", "", "", "advance: blocked", None, r.session) else {r | session: x.session},
+ Err(e) => act(r, "error", "", "", "advance: ${encodeHostError(e)}", None, r.session)
+}
+
+-- Forget acceptances of work the host no longer offers or runs.
+pure func prune(r: Run) -> Run = { let st = r.state; {r | state: {st | agreed: filter(\id. any(\t. t.id == id && (t.status == Offered || t.status == Working), r.session.state.tasks), st.agreed)}} }
+
+-- After the advance: breakdowns, trust floors, majors and arguments that
+-- this turn produced.
+pure func watch(r: Run, rules: [Rule], before: Session) -> Run = foldl(\acc rule. if stopped(acc) then acc else {
+ let s = acc.session;
+ if rule.kind == "breakdown" then match head(filter(\w. indicator(s, w, rule.indicator) >= rule.threshold && not contains(acc.state.raised, "${rule.indicator}/${w}"), s.scenario.workers)) {
+  Some(w) => { let st = acc.state; escalate({acc | state: {st | raised: st.raised ++ ["${rule.indicator}/${w}"]}}, "breakdown", w, "", "${rule.indicator} ${show(indicator(s, w, rule.indicator))}") },
+  None => { let st = acc.state; {acc | state: {st | raised: filter(\k. any(\w. k == "${rule.indicator}/${w}" && indicator(s, w, rule.indicator) >= rule.threshold, s.scenario.workers) || not any(\w. k == "${rule.indicator}/${w}", s.scenario.workers), st.raised)}} }
+ }
+ else if rule.kind == "trust_floor" then match head(filter(\w. trustOf(s, w) < rule.threshold && not contains(acc.state.raised, "trust/${w}"), s.scenario.workers)) {
+  Some(w) => { let st = acc.state; escalate({acc | state: {st | raised: st.raised ++ ["trust/${w}"]}}, "trust_floor", w, "", "trust ${show(trustOf(s, w))}") },
+  None => { let st = acc.state; {acc | state: {st | raised: filter(\k. not any(\w. k == "trust/${w}" && trustOf(s, w) >= rule.threshold, s.scenario.workers), st.raised)}} }
+ }
+ else if rule.kind == "argument" then match head(filter(\e. not any(\b. b.id == e.id, before.state.evidence) && startsWith(e.id, "sf-"), s.state.evidence)) {
+  Some(e) => escalate(acc, "argument", "", "", e.id),
+  None => acc
+ }
+ else if rule.kind == "major" then match head(filter(\e. not any(\b. b.id == e.id, before.state.evidence) && majorIn(e.text, rule.kinds), s.state.evidence)) {
+  Some(e) => escalate(acc, "major", "", "", e.id),
+  None => acc
+ }
+ else acc
+}, r, rules)
+
+pure func majorIn(text: string, kinds: [string]) -> bool = match decode(text) {
+ Ok(j) => str(j, "schema") == "crew_ship_event/1" && contains(kinds, str(j, "major")),
+ Err(_) => false
+}
+
+pure func decisions(r: Run, p: Policy, o: Orders, rules: [Rule], turn: int) -> Run = {
+ let offered = filter(\t. t.status == Offered, r.session.state.tasks);
+ let r1 = foldl(\acc t. persuade(acc, p, o, rules, turn, t), r, offered);
+ let working = filter(\t. t.status == Working, r1.session.state.tasks);
+ let r2 = foldl(\acc t. checkIn(acc, p, o, turn, t), r1, working);
+ foldl(\acc w. assign(acc, p, o, rules, turn, w), r2, r2.session.scenario.workers)
+}
+
+pure func closing(r: Run, rules: [Rule], turn: int) -> Run = if stopped(r) then r else { let before = r.session; prune(watch(step(r, turn), rules, before)) }
+
+pure func turnOf(r: Run, p: Policy, o: Orders, rules: [Rule], turn: int) -> Run = closing(decisions(r, p, o, rules, turn), rules, turn)
+
+pure func result(r: Run, start: int) -> AutoResult = { session: r.session, state: r.state, turns: r.session.state.tick - start, escalated: r.escalated, log: r.log, noted: r.noted }
+
+-- The two halves of one turn, for callers that look between them (the crew
+-- lab measures resources after the decisions). They count escalations
+-- (noted) instead of stopping: play goes on as the orders decide. decideTurn makes the turn's
+-- decisions; finishTurn advances to `turn` and checks the escalation rules.
+export pure func decideTurn(s: Session, st: AutoState, p: Policy, o: Orders, rules: [Rule], turn: int) -> AutoResult ! {}
+ensures { result.session.state.tick == s.state.tick } = result(decisions({ session: s, state: st, log: [], escalated: None, halting: false, noted: [] }, p, o, rules, turn), s.state.tick)
+
+export pure func finishTurn(a: AutoResult, rules: [Rule], turn: int) -> AutoResult ! {}
+ensures { result.session.state.tick >= a.session.state.tick } = {
+ let start = a.session.state.tick;
+ let r = closing({ session: a.session, state: a.state, log: a.log, escalated: a.escalated, halting: false, noted: a.noted }, rules, turn);
+ {result(r, start) | turns: a.turns + (r.session.state.tick - start)}
+}
+
+-- Run up to n turns from the session's tick under `orders`, stopping at the
+-- first escalation. The turn that escalates stops before its advance when a
+-- decision is handed over (refusal under orders), or after it (breakdown,
+-- trust floor, major, argument).
+export pure func advanceAuto(s: Session, st: AutoState, p: Policy, o: Orders, rules: [Rule], n: int) -> Result[AutoResult, HostError] ! {}
+ensures { match result { Ok(a) => a.turns <= n && a.session.state.tick >= s.state.tick, Err(_) => true } } =
+ if n < 0 || n > 100000 then Err(HostFailure("auto turns must be 0..100000")) else {
+  let start = s.state.tick;
+  let run = foldl(\acc k. if stopped(acc) then acc else turnOf(acc, p, o, rules, start + k), { session: s, state: st, log: [], escalated: None, halting: true, noted: [] }, range(1, n + 1));
+  Ok(result(run, start))
+ }
