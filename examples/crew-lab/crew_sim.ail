@@ -23,13 +23,28 @@ import pkg/sunholo/crew_core/policy (Policy, decodePolicy, watchPolicyBody, auth
 -- ranks strategies or scenarios.
 
 export type Count = {id: string, value: int} deriving (Eq)
-export type Tally = {replies: [Count], byCrew: [Count], offers: int, starts: int, refused: int, stockouts: int, reliefAsked: int, granted: int, denied: int, errors: int, why: [Count], refusals: [Count]} deriving (Eq)
+export type Tally = {replies: [Count], byCrew: [Count], offers: int, starts: int, refused: int, stockouts: int, reliefAsked: int, granted: int, denied: int, errors: int, why: [Count], refusals: [Count], short: [Count], low: [Count], zero: [Count]} deriving (Eq)
 -- What a crew member was asked and how they reacted (authored), with their state
 -- at the time; kept only when a caller asks (crew-sample), up to `keep`.
 export type Heard = {request: Request, label: string, tick: int, fatigue: int, stress: int, morale: int} deriving (Eq)
 export type Sim = {session: Session, seed: int, tally: Tally, captain: string, policy: Policy, scenario: Scenario, agreed: [string], heard: [Heard], keep: int} deriving (Eq)
 
-pure func zero() -> Tally = {replies: [], byCrew: [], offers: 0, starts: 0, refused: 0, stockouts: 0, reliefAsked: 0, granted: 0, denied: 0, errors: 0, why: [], refusals: []}
+-- Resources: `low` starts at each account's opening balance and keeps the
+-- lowest available seen after any turn; `zero` counts turns ending with none
+-- available; `short` counts stockout refusals by resource.
+pure func zero(sc: Scenario) -> Tally = {replies: [], byCrew: [], offers: 0, starts: 0, refused: 0, stockouts: 0, reliefAsked: 0, granted: 0, denied: 0, errors: 0, why: [], refusals: [], short: [], low: map(\r. {id: r.id, value: r.available}, sc.resources), zero: map(\r. {id: r.id, value: 0}, sc.resources)}
+
+pure func observe(sim: Sim) -> Sim = {
+ let t = sim.tally;
+ let rs = sim.session.state.resources;
+ let avail = \id. match head(filter(\r. r.id == id, rs)) { Some(r) => r.available, None => 0 };
+ withTally(sim, {t | low: map(\c. {id: c.id, value: if avail(c.id) < c.value then avail(c.id) else c.value}, t.low), zero: map(\c. {id: c.id, value: c.value + (if avail(c.id) == 0 then 1 else 0)}, t.zero)})
+}
+
+pure func stockoutOf(text: string) -> string = match decode(text) {
+ Ok(j) => if getString(j, "code") == Some("insufficient_resource") then match getString(j, "detail") { Some(d) => d, None => "" } else "",
+ Err(_) => ""
+}
 
 pure func bump(xs: [Count], id: string) -> [Count] =
  if any(\c. c.id == id, xs) then map(\c. if c.id == id then {c | value: c.value + 1} else c, xs) else xs ++ [{id: id, value: 1}]
@@ -90,7 +105,9 @@ pure func begin(sim: Sim, task: string) -> Sim = match startTask(sim.session, ta
  Ok(o) => if o.failed then failed({sim | session: o.session}, "start: blocked") else countStart({sim | session: o.session}),
  Err(e) => {
   let text = encodeHostError(e);
-  countRefusal(sim, refusalCode(text))
+  let counted = countRefusal(sim, refusalCode(text));
+  let r = stockoutOf(text);
+  if r == "" then counted else { let t = counted.tally; withTally(counted, {t | short: bump(t.short, r)}) }
  }
 }
 
@@ -170,7 +187,7 @@ pure func checkIn(sim: Sim, turn: int, t: Task) -> Sim = match head(t.participan
 }
 
 pure func advanceTo(sim: Sim, turn: int) -> Sim = match input(sim.session, "{\"command\":\"advance\",\"tick\":${show(turn)},\"budget\":64}") {
- Ok(o) => if o.failed then failed({sim | session: o.session}, "advance: blocked") else {sim | session: o.session},
+ Ok(o) => if o.failed then failed({sim | session: o.session}, "advance: blocked") else observe({sim | session: o.session}),
  Err(e) => failed(sim, "advance: ${reason(e)}")
 }
 
@@ -192,11 +209,12 @@ ensures { match result { Ok(sim) => sim.session.state.tick <= turns && length(si
  else if turns < 1 || turns > 500 then Err("turns must be 1..500")
  else match start(sc, "{\"command\":\"start\",\"policy\":\"${if captain == "orders" then "orders" else "consent"}\",\"scenario\":\"watch-v2\"}") {
   Err(e) => Err(encodeHostError(e)),
-  Ok(o) => Ok(foldl(\acc turn. turnOf(acc, turn), {session: untraced(o.session), seed: seed, tally: zero(), captain: captain, policy: policy, scenario: sc, agreed: [], heard: [], keep: if keep < 0 then 0 else keep}, range(1, turns + 1)))
+  Ok(o) => Ok(foldl(\acc turn. turnOf(acc, turn), {session: untraced(o.session), seed: seed, tally: zero(sc), captain: captain, policy: policy, scenario: sc, agreed: [], heard: [], keep: if keep < 0 then 0 else keep}, range(1, turns + 1)))
  }
 
 pure func counts(xs: [Count]) -> Json = jo(map(\c. kv(c.id, jint(c.value)), xs))
 
+pure func countOf(xs: [Count], id: string) -> int = match head(filter(\c. c.id == id, xs)) { Some(c) => c.value, None => 0 }
 pure func crewCount(t: Tally, key: string) -> int = match head(filter(\c. c.id == key, t.byCrew)) { Some(c) => c.value, None => 0 }
 pure func crewReplies(t: Tally, w: string) -> Json = counts(flatMap(\c. if startsWith(c.id, "${w}/reply/") then [{id: substring(c.id, stringLength("${w}/reply/"), stringLength(c.id)), value: c.value}] else [], t.byCrew))
 
@@ -212,6 +230,8 @@ ensures { result != "" } = {
   kv("offers", jint(sim.tally.offers)), kv("starts", jint(sim.tally.starts)), kv("refused", jint(sim.tally.refused)), kv("refusal_reasons", counts(sim.tally.refusals)), kv("stockouts", jint(sim.tally.stockouts)),
   kv("relief", jo([kv("asked", jint(sim.tally.reliefAsked)), kv("granted", jint(sim.tally.granted)), kv("denied", jint(sim.tally.denied))])),
   kv("completed", counts(filter(\c. c.value > 0, completed))),
-  kv("crew", jo(crew)), kv("errors", jint(sim.tally.errors)), kv("error_kinds", counts(sim.tally.why))
+  kv("crew", jo(crew)),
+  kv("resources", jo(map(\r. kv(r.id, jo([kv("min", jint(countOf(sim.tally.low, r.id))), kv("zero_ticks", jint(countOf(sim.tally.zero, r.id))), kv("stockouts", jint(countOf(sim.tally.short, r.id))), kv("in", jint(r.transferredIn)), kv("out", jint(r.transferredOut))])), s.state.resources))),
+  kv("errors", jint(sim.tally.errors)), kv("error_kinds", counts(sim.tally.why))
  ]))
 }

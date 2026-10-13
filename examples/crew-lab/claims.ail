@@ -5,7 +5,7 @@ import std/string (split, join, length as size, startsWith)
 import std/option (Option, Some, None)
 import std/result (Result, Ok, Err)
 import std/math (intToFloat, floatToInt, floor)
-import pkg/sunholo/crew_core/scenario (Scenario)
+import pkg/sunholo/crew_core/scenario (Scenario, decodeScenario)
 import ./crew_sim (refusalCodes)
 
 -- crew_claims/1: what a designer expects the simulation to do, checked over
@@ -33,6 +33,7 @@ ensures { not result || size(path) > 0 } = match split(path, ".") {
  ["completed", x] => any(\r. r.id == x, sc.recipes),
  ["crew", w, f] => contains(sc.workers, w) && (contains(crewFields(), f) || contains(["relief_asked", "relief_granted", "relief_denied"], f)),
  ["crew", w, "replies", x] => contains(sc.workers, w) && contains(replyLabels(), x),
+ ["resources", r, f] => any(\x. x.id == r, sc.resources) && contains(["min", "zero_ticks", "stockouts", "in", "out"], f),
  _ => false
 }
 
@@ -145,5 +146,12 @@ test "a claim with no runs never holds; absent count keys read as zero" {
  match (decode("{\"replies\":{\"accept\":2}}"), decode("{\"replies\":{}}")) {
   (Ok(a), Ok(b)) => not judge(c("max", ">=", 0.0), []).holds && measure([a, b], "replies.accept") == [2.0, 0.0],
   _ => false
+ }
+}
+
+test "resource metrics name a scenario resource and a known measure" {
+ match decodeScenario("{\"schema\":\"crew_scenario/1\",\"id\":\"t\",\"indicators\":[\"stress\",\"trust\"],\"indicator_defaults\":{\"stress\":10},\"captain\":{\"id\":\"captain\",\"values\":{\"m\":1},\"start\":{}},\"crew\":[{\"id\":\"cook\",\"role\":\"Cook\",\"ocean\":{\"openness\":1,\"conscientiousness\":1,\"extraversion\":1,\"agreeableness\":1,\"neuroticism\":1},\"values\":{\"c\":1},\"start\":{},\"work\":[{\"id\":\"w\",\"name\":\"W\",\"purpose\":\"P.\",\"duration\":1,\"costs\":[],\"effects\":{}}]}],\"rest\":{\"purpose\":\"R.\",\"duration\":1,\"effects\":{}},\"overextended\":{\"indicator\":\"stress\",\"threshold\":70,\"recovery\":40,\"duration\":2,\"cooldown\":3},\"trust_in_captain\":50,\"resources\":[{\"id\":\"water\",\"name\":\"Water\",\"initial\":1}]}") {
+  Err(_) => false,
+  Ok(sc) => metricOK(sc, "resources.water.min") && metricOK(sc, "resources.water.zero_ticks") && metricOK(sc, "resources.water.out") && not metricOK(sc, "resources.air.min") && not metricOK(sc, "resources.water.max")
  }
 }
