@@ -19,7 +19,7 @@
 | ✅ K3 | Auto-captain in crew_core: `crew_standing_orders/1` and `crew_escalation/1`; `advance(n)` running turns under orders until the first escalation (`escalated` record); fast path when nothing is open | crew_core tests; `crew-sim --auto` with escalation claims per year |
 | ⚠️ K4 | Speed: a 10-year interlude (3,650 turns) inside the target, measured in the lab | `crew-sim --auto --turns 3650` timing |
 | ✅ K5 | Ergosphere: a third heat user (D-70 OQ6); claims rerun and recorded | `crew-sim --check` 20 seeds |
-| K6 | Close: changelogs, parity check, independent evaluation, PR; merge sha posted on #137 | lab `make validate` keyless |
+| ✅ K6 | Close: changelogs, parity check, independent evaluation, PR; merge sha posted on #137 | lab `make validate` keyless |
 
 ## Outcome (2026-10-13)
 
