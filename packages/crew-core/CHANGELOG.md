@@ -1,5 +1,43 @@
 # Changelog
 
+## 0.3.0
+
+For Stapledon's crew integration (R2-CREW CI-0; ailang-packages#137).
+Existing commands, journal records and outcome codes are unchanged; 0.2.0
+recordings replay byte-identically.
+
+- **`policy` command:** switch consent and orders mid-session, journalled
+  (`Session.command`). The engine configuration keeps its founding policy,
+  and the snapshot shows `command` once it differs.
+- **`ship_event` command:** raise a ship event now. It runs through the same
+  flow as a scheduled event, via an advance to the current tick (see
+  ailang#1812).
+- **Archiving** (opt-in: start line `"keep": 1..10000`). Finished, and lapsed
+  offered, work older than keep is folded away with its agreement, reports,
+  reliefs, evidence (including evidence caused by it) and knowledge.
+  Completed counts are kept (`completedCount`). The operation log keeps its
+  newest 512. Without archiving, a busy session hits the 256-commitment cap
+  near turn 290.
+- **New module `auto`, the auto-captain.**
+  - `crew_standing_orders/1`: start agreed|always, rest tired|never, relief
+    grant|deny|strained, a tired threshold, cadence 1..365.
+  - `crew_escalation/1`: refusal_under_orders, breakdown, trust_floor, major,
+    argument.
+  - `advanceAuto`: runs turns under the orders with the same host commands
+    as a player, and stops at the first escalation.
+  - `decideTurn` and `finishTurn`: count escalations instead of stopping,
+    for the lab.
+  - `auto` is opt-in: `session` does not import it.
+- **Ship-event evidence** records `major` when set.
+
+Performance, measured on the crew lab's default ship:
+- 500 turns take 28.5 s, linear with archiving.
+- A 10-year skip takes 1.9 s with yearly check-ins and about 60 s with weekly
+  or monthly ones. The cost is per decision, and much of it is VM list-tail
+  copying (ailang#1814).
+- A cold compile peaks around 10 GB for `session` and 14 GB for `auto`
+  (ailang#1812).
+
 ## 0.2.0
 
 Crew strain (design `design_docs/planned/crew-strain.md`). Requires

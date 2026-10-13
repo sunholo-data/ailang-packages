@@ -6,7 +6,8 @@ import std/json (Json, decode, getString, getInt, getArray, getStringArrayOrEmpt
 import std/string (startsWith)
 import pkg/sunholo/social_dynamics/model (Task, Offered, Working)
 import ./scenario (Scenario)
-import ./session (Session, Request, HostError, HostFailure, TaskAgreement, offer, ask, complete, startTask, resolve, cancel, input, encodeHostError)
+import ./session (Session, Output, Request, HostError, HostFailure, TaskAgreement, input, encodeHostError)
+import std/json (encode, jo, kv, js, jnum, jint, jb)
 import ./policy (Policy, authoredAnswer)
 
 -- Auto-captain (crew_core 0.3.0, Stapledon R2-CREW CI-0). Standing orders say
@@ -135,6 +136,17 @@ pure func busy(s: Session, worker: string) -> bool = any(\t. ((t.status == Offer
 pure func workRecipe(sc: Scenario, worker: string) -> string = match head(filter(\o. o.text == worker && o.id != "rest_${worker}", sc.owners)) {
  Some(o) => o.id, None => "rest_${worker}"
 }
+
+-- Every host call goes through the one command entry point (input), the same
+-- lines a recording would hold. Fewer call sites into the session module keep
+-- a cold compile smaller (ailang#1812).
+pure func cmd(s: Session, fields: [{key: string, value: Json}]) -> Result[Output, HostError] = input(s, encode(jo(fields)))
+pure func offer(s: Session, worker: string, recipe: string, id: string) -> Result[Output, HostError] = cmd(s, [kv("command", js("offer")), kv("worker", js(worker)), kv("recipe", js(recipe)), kv("id", js(id))])
+pure func ask(s: Session, actor: string, task: string, id: string) -> Result[Output, HostError] = cmd(s, [kv("command", js("ask")), kv("actor", js(actor)), kv("task", js(task)), kv("id", js(id))])
+pure func complete(s: Session, id: string, body: string, roll: float) -> Result[Output, HostError] = cmd(s, [kv("command", js("answer")), kv("request", js(id)), kv("body", js(body)), kv("roll", jnum(roll))])
+pure func startTask(s: Session, id: string) -> Result[Output, HostError] = cmd(s, [kv("command", js("start_task")), kv("task", js(id))])
+pure func resolve(s: Session, id: string, release: bool) -> Result[Output, HostError] = cmd(s, [kv("command", js("resolve_relief")), kv("id", js(id)), kv("release", jb(release))])
+pure func cancel(s: Session, id: string) -> Result[Output, HostError] = cmd(s, [kv("command", js("cancel_request")), kv("id", js(id))])
 
 pure func act(r: Run, kind: string, actor: string, label: string, detail: string, request: Option[Request], s: Session) -> Run =
  {r | log: [{ kind: kind, actor: actor, label: label, detail: detail, request: request, tick: s.state.tick, fatigue: indicator(s, actor, "fatigue"), stress: indicator(s, actor, "stress"), morale: indicator(s, actor, "morale") }] ++ r.log}

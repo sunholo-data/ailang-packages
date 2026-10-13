@@ -9,6 +9,18 @@ Local only; never published.
   `compute`, `signal`; stapledons-design `bubble-resources.md`). Stocks are
   used up; capacities are only reserved. All claims are unchanged: 33 of 36
   hold.
+- **crew_core 0.3.0 in the lab (S-CREW-CORE-0.3).**
+  - crew-sim's consent and orders captains run crew_core's auto-captain,
+    with byte-identical output.
+  - New flags:
+    - `--archive N`;
+    - `--auto escalation.json` (counts `escalations.<rule>`, available to
+      claims);
+    - `--skip N --cadence C` (times the game's skip).
+  - `recording_cli` prints `crew_core.recording` for parity checks.
+  - The pack gains `escalation.json` and year-long auto claims (6 of 6
+    hold).
+  - The ergosphere scenario gets a third heat user (D-70 OQ6).
 - **Crew strain (S-CREW-STRAIN).**
   - crew-sim's orders captain no longer rests people on its own initiative.
   - New per-crew measures: `peak_stress`, `peak_fatigue`,
