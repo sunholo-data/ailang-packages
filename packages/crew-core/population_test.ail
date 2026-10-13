@@ -1,0 +1,75 @@
+module sunholo/crew_core/population_test
+import std/result (Result, Ok, Err)
+import std/option (Option, Some, None)
+import std/list (head, filter, length, any, map)
+import std/string (contains, replace)
+import ./scenario (decodeScenario)
+import ./session (Session, Output, HostError, HostFailure, start, input, snapshot)
+import ./cohorts (Population, total, headcount, meanBand, personOf)
+
+-- The galley ship with a cook who voices the kitchens, a loss at tick 10,
+-- and a population of 300 in two departments.
+pure func base() -> string = "{\"schema\":\"crew_scenario/1\",\"id\":\"galley\",\"indicators\":[\"fatigue\",\"stress\",\"trust\"],\"indicator_defaults\":{\"fatigue\":0,\"stress\":20},\"captain\":{\"id\":\"captain\",\"values\":{\"mission\":80},\"start\":{}},\"crew\":[{\"id\":\"cook\",\"role\":\"Cook\",\"ocean\":{\"openness\":50,\"conscientiousness\":50,\"extraversion\":50,\"agreeableness\":90,\"neuroticism\":50},\"values\":{\"care\":60},\"start\":{\"stress\":35},\"work\":[{\"id\":\"work_cook\",\"name\":\"Bake\",\"purpose\":\"Feed everyone.\",\"duration\":5,\"costs\":[],\"effects\":{\"fatigue\":1}}]}],\"rest\":{\"purpose\":\"Recover.\",\"duration\":1,\"effects\":{\"fatigue\":-10}},\"overextended\":{\"indicator\":\"stress\",\"threshold\":70,\"recovery\":40,\"duration\":2,\"cooldown\":3},\"trust_in_captain\":80,\"resources\":[{\"id\":\"garden\",\"name\":\"Garden\",\"initial\":10,\"kind\":\"capacity\"}],\"events\":[{\"id\":\"burial\",\"at\":10,\"text\":\"A funeral in the gardens.\",\"transfers\":[],\"major\":\"loss\"}]"
+pure func ship(cohorts: bool) -> string = if cohorts then "${base()},\"cohorts\":{\"groups\":[{\"id\":\"kitchens\",\"department\":\"galley\",\"ocean\":{\"openness\":40,\"conscientiousness\":60,\"extraversion\":50,\"agreeableness\":70,\"neuroticism\":40},\"mood\":[100,50,0,0],\"trust\":[50,100,0,0],\"ages\":[0,0,40,40,40,30,0,0,0,0],\"voice\":\"cook\"},{\"id\":\"gardens\",\"department\":\"gardens\",\"ocean\":{\"openness\":60,\"conscientiousness\":50,\"extraversion\":50,\"agreeableness\":60,\"neuroticism\":70},\"mood\":[100,50,0,0],\"trust\":[50,100,0,0],\"ages\":[0,0,40,40,40,30,0,0,0,0]}],\"birth_needs\":[\"garden\"]}}" else "${base()}}"
+
+pure func begin(cohorts: bool) -> Result[Session, HostError] = match decodeScenario(ship(cohorts)) {
+ Err(e) => Err(HostFailure(e)),
+ Ok(sc) => match start(sc, "{\"command\":\"start\",\"policy\":\"orders\",\"scenario\":\"watch-v2\"}") { Err(e) => Err(e), Ok(o) => Ok(o.session) }
+}
+pure func run(s: Result[Session, HostError], line: string) -> Result[Output, HostError] = match s { Err(e) => Err(e), Ok(x) => input(x, line) }
+pure func after(o: Result[Output, HostError]) -> Result[Session, HostError] = match o { Err(e) => Err(e), Ok(x) => Ok(x.session) }
+pure func to(s: Result[Session, HostError], tick: int) -> Result[Session, HostError] = after(run(s, "{\"command\":\"advance\",\"tick\":${show(tick)},\"budget\":4096}"))
+pure func pop(s: Result[Session, HostError]) -> Option[Population] = match s { Ok(x) => x.population, Err(_) => None }
+pure func ok(s: Result[Session, HostError]) -> bool = match s { Ok(_) => true, Err(_) => false }
+pure func failsWith(o: Result[Output, HostError], m: string) -> bool = match o { Err(HostFailure(e)) => contains(e, m), _ => false }
+
+-- Outside the test body: ailang test miscounts braces inside strings there.
+pure func promotedCook() -> string = "\"promoted\":{\"kind\":\"promoted\",\"role\":\"cook\",\"person\":\"kitchens-p1\""
+
+test "a scenario without cohorts has no population and no new snapshot key" {
+ match begin(false) { Ok(s) => s.population == None && not contains(snapshot(s), "\"population\""), Err(_) => false }
+}
+
+test "cohorts start with the session and show in the snapshot" {
+ match begin(true) { Ok(s) => (match s.population { Some(p) => total(p) == 300, None => false }) && contains(snapshot(s), "\"population\""), Err(_) => false }
+}
+
+test "the loss at tick 10 is heard by the cohorts" {
+ match (pop(to(begin(true), 9)), pop(to(begin(true), 11))) {
+  (Some(a), Some(b)) => a.heard == [] && b.heard == ["burial"],
+  _ => false
+ }
+}
+
+test "a year of ticks runs the population step" {
+ match pop(to(begin(true), 400)) { Some(p) => p.year == 1 && total(p) == 300 + p.births - p.deaths, None => false }
+}
+
+test "birth policy is a captain command, and needs cohorts" {
+ (match pop(after(run(begin(true), "{\"command\":\"birth_policy\",\"policy\":\"restrict\"}"))) { Some(p) => p.birthPolicy == "restrict", None => false })
+ && failsWith(run(begin(false), "{\"command\":\"birth_policy\",\"policy\":\"hold\"}"), "needs cohorts")
+ && failsWith(run(begin(true), "{\"command\":\"birth_policy\",\"policy\":\"ban\"}"), "birth_policy")
+}
+
+test "a departure promotes someone from the voiced cohort into the role" {
+ match run(begin(true), "{\"command\":\"depart\",\"crew\":\"cook\",\"reason\":\"death\"}") {
+  Err(_) => false,
+  Ok(o) => ((match o.session.population { Some(p) => total(p) == 299 && personOf(p, "cook") == "kitchens-p1", None => false }) && contains(o.trace, promotedCook()) && (match head(filter(\a. a.id == "cook", o.session.state.actors)) { Some(a) => length(a.attributes) == 5, None => false }))
+ }
+}
+
+test "the departing person's work stops" {
+ let working = after(run(after(run(begin(true), "{\"command\":\"offer\",\"worker\":\"cook\",\"recipe\":\"work_cook\",\"id\":\"bake1\"}")), "{\"command\":\"start_task\",\"task\":\"bake1\"}"));
+ match after(run(working, "{\"command\":\"depart\",\"crew\":\"cook\",\"reason\":\"left\"}")) {
+  Ok(s) => not any(\t. t.id == "bake1" && t.participants == ["cook"] && show(t.status) == "Working", s.state.tasks),
+  Err(_) => false
+ }
+}
+
+test "departures are checked" {
+ failsWith(run(begin(true), "{\"command\":\"depart\",\"crew\":\"ghost\",\"reason\":\"death\"}"), "unknown crew")
+ && failsWith(run(begin(true), "{\"command\":\"depart\",\"crew\":\"cook\",\"reason\":\"bored\"}"), "reason")
+ && failsWith(run(begin(false), "{\"command\":\"depart\",\"crew\":\"cook\",\"reason\":\"death\"}"), "needs cohorts")
+}
+
+test "cohort sessions replay" { to(begin(true), 800) == to(begin(true), 800) }
