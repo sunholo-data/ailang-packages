@@ -146,7 +146,7 @@ pure func preset(o: Options) -> Orders = { let base = if o.captain == "orders" t
 
 func skipMain(o: Options, sc: Scenario, policy: Policy, rules: [Rule]) -> () ! {IO} = match start(sc, "{\"command\":\"start\",\"policy\":\"${if o.captain == "orders" then "orders" else "consent"}\",\"scenario\":\"watch-v2\"${if o.archive > 0 then ",\"keep\":${show(o.archive)}" else ""}}") {
  Err(e) => { println(encodeHostError(e)); exit(1) },
- Ok(st) => forEachE(\seed. match advanceAuto(untraced(st.session), {seed: seed, agreed: [], raised: []}, policy, preset(o), rules, o.skip) {
+ Ok(st) => forEachE(\seed. match advanceAuto(untraced(st.session), {seed: seed, agreed: [], raised: [], calls: 0}, policy, preset(o), rules, o.skip) {
   Err(e) => println(encodeHostError(e)),
   Ok(a) => println(encode(jo([kv("schema", js("crew_skip/1")), kv("seed", jint(seed)), kv("cadence", jint(o.cadence)), kv("asked", jint(o.skip)), kv("turns", jint(a.turns)), kv("tick", jint(a.session.state.tick)), kv("decisions", jint(length(filter(\x. x.kind == "reply", a.log)))), kv("offers", jint(length(filter(\x. x.kind == "offer", a.log)))), kv("starts", jint(length(filter(\x. x.kind == "start", a.log)))), kv("refusals", jint(length(filter(\x. x.kind == "refusal", a.log)))), kv("errors", jint(length(filter(\x. x.kind == "error", a.log)))), kv("first_error", js(match head(filter(\x. x.kind == "error" || x.kind == "refusal", a.log)) { Some(x) => x.detail, None => "" })), kv("escalated", match a.escalated { Some(e) => jo([kv("rule", js(e.rule)), kv("actor", js(e.actor)), kv("tick", jint(e.tick)), kv("detail", js(e.detail))]), None => js("") })])))
  }, range(o.first, o.last + 1))

@@ -34,7 +34,7 @@ export type Report = { id: string, task: string, agreement: string, worker: stri
 -- Archive (crew_core 0.3.0): what archiving folded away, so measures stay
 -- exact. `keep` 0 means archiving is off (the default; old journals unchanged).
 export type Tally = { id: string, count: int } deriving (Eq)
-export type Archive = { keep: int, tasks: int, evidence: int, knowledge: int, accepted: int, completed: [Tally] } deriving (Eq)
+export type Archive = { keep: int, tasks: int, evidence: int, knowledge: int, accepted: int, completed: [Tally], events: [string] } deriving (Eq)
 
 export type Session = { scenario: Scenario, policy: string, command: string, archive: Archive, config: Config, state: State, bindings: [TaskAgreement], pending: [Request], bank: [Bank], reports: [Report], chat: ConversationStore, personalities: [Personality], traced: bool } deriving (Eq)
 
@@ -73,9 +73,13 @@ pure func reservedId(id: string) -> bool = any(\p. startsWith(id, p), ["ev-", "y
 pure func checkedId(id: string) -> bool = validId(id) && stringLength(id) <= 64 && not reservedId(id)
 
 pure func owned(s: Session, worker: string, recipe: string) -> bool = workerRecipe(s.scenario, worker, recipe)
+-- The session's config is the one its scenario and founding policy give.
+-- Compared structurally: the engine checks the encoded config body against
+-- the state on every operation, so encoding it here too (three times per host
+-- call, previously) only cost time.
 pure func identity(s: Session) -> bool = match scenarioConfig(s.scenario, s.policy) {
   Err(_) => false,
-  Ok(c) => encodeConfig(c) == encodeConfig(s.config) && encodeConfig(c) == s.state.configBody && s.state.config == c.id && s.state.session == c.session
+  Ok(c) => c == s.config && s.state.config == c.id && s.state.session == c.session
 }
 
 pure func idle(s: Session) -> bool = match s.state.continuation {
@@ -365,7 +369,7 @@ pure func advanceOutput(s:Session,state:State,events:[Event])->Result[Output,Hos
 @allow_empty_ok("Legacy hosts intentionally have no personality sidecar; only watch-v3 initializes profiles")
 pure func initialized(scenario:Scenario,policy:string,c:Config,state:State,version:int,keep:int)->Result[Output,HostError] =
  match (if version==1 then initializeShip(state) else Ok([])) {
-  Err(e)=>Err(HostFailure("personality initialization: ${e}")),Ok(ps)=>Ok(output({scenario:scenario,policy:policy,command:policy,archive:{keep:keep,tasks:0,evidence:0,knowledge:0,accepted:0,completed:[]},config:c,state:state,bindings:[],pending:[],bank:[],reports:[],chat:emptyConversation(version),personalities:ps,traced:true},[]))
+  Err(e)=>Err(HostFailure("personality initialization: ${e}")),Ok(ps)=>Ok(output({scenario:scenario,policy:policy,command:policy,archive:{keep:keep,tasks:0,evidence:0,knowledge:0,accepted:0,completed:[],events:[]},config:c,state:state,bindings:[],pending:[],bank:[],reports:[],chat:emptyConversation(version),personalities:ps,traced:true},[]))
  }
 
 pure func majorDeliveries(s:Session,observers:[string],evidence:string,events:[Event])->Result[{session:Session,events:[Event]},HostError] = match observers {
@@ -410,7 +414,7 @@ ensures {match result {Err(_)=>true,Ok(o)=>o.session.state.tick==s.state.tick &&
 
 type Flowed = {session: Session, events: [Event]}
 
-pure func seen(s: Session, id: string) -> bool = any(\e. e.id == id, s.state.evidence)
+pure func seen(s: Session, id: string) -> bool = any(\e. e.id == id, s.state.evidence) || contains(s.archive.events, id)
 
 pure func appliedJson(a: Applied) -> Json = jo([kv("resource", js(a.resource)), kv("requested", jint(a.requested)), kv("applied", jint(a.applied))])
 
@@ -554,7 +558,7 @@ pure func eventFlows(s: Session, due: [ShipEvent], events: [Event]) -> Result[Fl
  }
 }
 
-pure func eventFlows2(s: Session, e: ShipEvent, rest: [ShipEvent], events: [Event]) -> Result[Flowed, HostError] = match flow(s, "ev-${e.id}", s.scenario.workers, [kv("schema", js("crew_ship_event/1")), kv("event", js(e.id)), kv("at", jint(e.at)), kv("text", js(e.text))] ++ (if e.major == "" then [] else [kv("major", js(e.major))]), e.transfers, e.major, events) {
+pure func eventFlows2(s: Session, e: ShipEvent, rest: [ShipEvent], events: [Event]) -> Result[Flowed, HostError] = match flow(s, "ev-${e.id}", s.scenario.workers, [kv("schema", js("crew_ship_event/1")), kv("event", js(e.id)), kv("at", jint(e.at)), kv("text", js(e.text))], e.transfers, e.major, events) {
  Err(err) => Err(err),
  Ok(f) => eventFlows(f.session, rest, f.events)
 }
@@ -580,9 +584,13 @@ pure func flowsDue(o: Output, events: [Event]) -> Result[Output, HostError] = {
 -- (commitment), reports,
 -- resolved reliefs, its evidence (offer, agreement, reports, reliefs,
 -- completion marker, yield, and anything caused by those, such as the
--- crew's concerns) and the knowledge of it. Completed tasks are
--- counted per recipe. The operation log keeps its newest 512 entries. Ship
--- event and argument evidence stays (it is bounded by events). Measures read
+-- crew's concerns), its closed conversation, and the knowledge of it.
+-- Completed tasks are counted per recipe. Ship events applied at or before
+-- tick - keep fold their evidence and arguments too; their ids are kept so
+-- they never fire again. The operation log keeps its newest 512 entries: the
+-- engine's duplicate check then covers only those, so an operation id older
+-- than that could be applied again if replayed (host ids are unique, so this
+-- only matters for hand-written recordings). Measures read
 -- archived counts plus live state (completedCount).
 pure func keepOK(j: Json) -> bool = match getInt(j, "keep") { Some(k) => k >= 1 && k <= 10000, None => false }
 
@@ -591,7 +599,7 @@ pure func archiveJson(a: Archive) -> Json = jo([kv("keep", jint(a.keep)), kv("ta
 pure func tallied(xs: [Tally], id: string) -> [Tally] = if any(\t. t.id == id, xs) then map(\t. if t.id == id then {t | count: t.count + 1} else t, xs) else xs ++ [{id: id, count: 1}]
 
 pure func held(s: Session, t: Task) -> bool =
- any(\r. r.task == t.id, s.pending) || any(\b. b.request.task == t.id, s.bank) || any(\r. r.task == t.id && not r.resolved, s.state.reliefs) || any(\i. i.task == t.id, s.chat.issues)
+ any(\r. r.task == t.id, s.pending) || any(\b. b.request.task == t.id, s.bank) || any(\r. r.task == t.id && not r.resolved, s.state.reliefs) || any(\i. i.task == t.id && i.status == "open", s.chat.issues)
 
 -- Offers whose agreement fell due keep ago (never answered in time) go too.
 pure func lapsed(s: Session, t: Task) -> bool = t.status == Offered && (match head(filter(\b. b.task == t.id, s.bindings)) {
@@ -605,13 +613,16 @@ export pure func archiveNow(s: Session) -> Session ! {}
 ensures { length(result.state.tasks) <= length(s.state.tasks) && length(result.state.evidence) <= length(s.state.evidence) } =
  if s.archive.keep <= 0 then s else {
   let gone = filter(\t. archivable(s, t), s.state.tasks);
-  if length(gone) == 0 && length(s.state.accepted) <= 512 then s else {
+  let oldEvents = filter(\e. e.at <= s.state.tick - s.archive.keep && seen(s, "ev-${e.id}") && not contains(s.archive.events, "ev-${e.id}"), s.scenario.events);
+  if length(gone) == 0 && length(oldEvents) == 0 && length(s.state.accepted) <= 512 then s else {
    let ids = map(\t. t.id, gone);
    let agreements = map(\b. b.agreement, filter(\b. contains(ids, b.task), s.bindings));
    let reports = map(\r. r.id, filter(\r. contains(ids, r.task), s.reports));
    let reliefs = map(\r. r.id, filter(\r. contains(ids, r.task), s.state.reliefs));
-   let marks = ids ++ agreements ++ reports ++ reliefs ++ map(\i. "yd-${i}", ids);
-   let dropE = \e. contains(marks, e.id) || (e.kind == "task_completed" && contains(ids, e.text)) || any(\c. contains(marks, c), e.causes);
+   let evIds = map(\e. "ev-${e.id}", oldEvents);
+   let sfPre = map(\e. "sf-${e.id}-", oldEvents);
+   let marks = ids ++ agreements ++ reports ++ reliefs ++ map(\i. "yd-${i}", ids) ++ evIds;
+   let dropE = \e. contains(marks, e.id) || any(\p. startsWith(e.id, p), sfPre) || (e.kind == "task_completed" && contains(ids, e.text)) || any(\c. contains(marks, c), e.causes);
    let evidence = filter(\e. not dropE(e), s.state.evidence);
    let goneE = map(\e. e.id, filter(dropE, s.state.evidence));
    let knowledge = filter(\k. not contains(goneE, k.evidence), s.state.knowledge);
@@ -620,7 +631,8 @@ ensures { length(result.state.tasks) <= length(s.state.tasks) && length(result.s
    let a = s.archive;
    {s | state: {s.state | tasks: filter(\t. not contains(ids, t.id), s.state.tasks), evidence: evidence, knowledge: knowledge, reliefs: filter(\r. not contains(ids, r.task), s.state.reliefs), commitments: filter(\c. not contains(agreements, c.id), s.state.commitments), accepted: accepted},
         bindings: filter(\b. not contains(ids, b.task), s.bindings), reports: filter(\r. not contains(ids, r.task), s.reports),
-        archive: {a | tasks: a.tasks + length(gone), evidence: a.evidence + length(goneE), knowledge: a.knowledge + length(s.state.knowledge) - length(knowledge), accepted: a.accepted + (n - length(accepted)), completed: foldl(\acc t. tallied(acc, t.recipe), a.completed, filter(\t. t.status == Completed, gone))}}
+        chat: {s.chat | issues: filter(\i. not contains(ids, i.task), s.chat.issues), speech: filter(\x. not contains(ids, x.task), s.chat.speech)},
+        archive: {a | tasks: a.tasks + length(gone), evidence: a.evidence + length(goneE), knowledge: a.knowledge + length(s.state.knowledge) - length(knowledge), accepted: a.accepted + (n - length(accepted)), completed: foldl(\acc t. tallied(acc, t.recipe), a.completed, filter(\t. t.status == Completed, gone)), events: a.events ++ evIds}}
   }
  }
 

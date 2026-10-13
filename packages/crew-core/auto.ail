@@ -42,6 +42,8 @@ export type Orders = { start: string, rest: string, relief: string, fatigue: int
 --    (each fall once, until it recovers)
 --  "major": a ship event of one of `kinds` (loss, deep_time, ...) fires
 --  "argument": crew argue over lost capacity
+--  "uncovered": a request no standing order covers: a crew member opens a
+--    conversation issue only the captain can answer (watch-v3)
 export type Rule = { kind: string, indicator: string, threshold: int, kinds: [string] } deriving (Eq)
 
 -- What happened, for callers that tally (crew-sim) or show (the game).
@@ -52,7 +54,10 @@ export type Escalated = { rule: string, actor: string, task: string, tick: int, 
 
 -- Carried between calls: the seed, workers' earlier acceptances, and which
 -- breakdown crossings were already raised.
-export type AutoState = { seed: int, agreed: [string], raised: [string] } deriving (Eq)
+-- calls: how many advanceAuto calls came before; from the second call on,
+-- request and offer ids carry "a<calls>" so resuming at the tick a call
+-- stopped on never reuses an id.
+export type AutoState = { seed: int, agreed: [string], raised: [string], calls: int } deriving (Eq)
 
 -- noted: every escalation seen in counting mode (decideTurn and finishTurn,
 -- for the lab), where play goes on under the orders instead of stopping.
@@ -87,7 +92,7 @@ pure func cadenceOf(j: Json) -> int = match getInt(j, "cadence") { Some(c) => c,
 
 pure func readRule(j: Json) -> Result[Rule, string] = {
  let kind = str(j, "kind");
- if not contains(["refusal_under_orders", "breakdown", "trust_floor", "major", "argument"], kind) then Err("escalation: unknown kind ${kind}")
+ if not contains(["refusal_under_orders", "breakdown", "trust_floor", "major", "argument", "uncovered"], kind) then Err("escalation: unknown kind ${kind}")
  else {
   let threshold = match getInt(j, "threshold") { Some(n) => n, None => 0 - 1 };
   let kinds = getStringArrayOrEmpty(j, "kinds");
@@ -110,7 +115,7 @@ ensures { match result { Ok(rs) => length(rs) <= 32, Err(_) => true } } = match 
 
 -- ------------------------------------------------------------------ helpers
 
-type Run = { session: Session, state: AutoState, log: [Act], escalated: Option[Escalated], halting: bool, noted: [Escalated] }
+type Run = { session: Session, state: AutoState, log: [Act], escalated: Option[Escalated], halting: bool, noted: [Escalated], salt: string }
 
 pure func indicator(s: Session, actor: string, id: string) -> int = match head(filter(\a. a.id == actor, s.state.actors)) {
  None => 0,
@@ -125,13 +130,14 @@ pure func threshold(s: Session, worker: string) -> int = match head(filter(\r. r
 
 -- An offer whose agreement has fallen due can no longer be answered (long
 -- check-in jumps leave such offers behind); it no longer occupies the worker
--- and is not asked about again. Archiving folds it away.
+-- and is not asked about again (only with a cadence above 1: daily play keeps
+-- the crew lab's loop exactly). Archiving folds lapsed offers away.
 pure func stale(s: Session, t: Task) -> bool = t.status == Offered && (match head(filter(\b. b.task == t.id, s.bindings)) {
  Some(b) => any(\c. c.id == b.agreement && c.due <= s.state.tick, s.state.commitments),
  None => false
 })
 
-pure func busy(s: Session, worker: string) -> bool = any(\t. ((t.status == Offered && not stale(s, t)) || t.status == Working) && contains(t.participants, worker), s.state.tasks)
+pure func busy(s: Session, o: Orders, worker: string) -> bool = any(\t. ((t.status == Offered && not (o.cadence > 1 && stale(s, t))) || t.status == Working) && contains(t.participants, worker), s.state.tasks)
 
 pure func workRecipe(sc: Scenario, worker: string) -> string = match head(filter(\o. o.text == worker && o.id != "rest_${worker}", sc.owners)) {
  Some(o) => o.id, None => "rest_${worker}"
@@ -199,7 +205,7 @@ pure func decide(r: Run, o: Orders, rules: [Rule], task: string, actor: string, 
 pure func persuade(r: Run, p: Policy, o: Orders, rules: [Rule], turn: int, t: Task) -> Run =
  if stopped(r) then r else if contains(r.state.agreed, t.id) then begin(r, t.id, match head(t.participants) { Some(w) => w, None => "" }) else match head(t.participants) {
   None => r,
-  Some(worker) => { let h = hear(r, p, worker, t.id, "p${show(turn)}-${t.id}"); decide(h.run, o, rules, t.id, worker, h.label) }
+  Some(worker) => { let h = hear(r, p, worker, t.id, "p${show(turn)}${r.salt}-${t.id}"); decide(h.run, o, rules, t.id, worker, h.label) }
  }
 
 pure func grants(o: Orders, s: Session, worker: string) -> bool =
@@ -209,7 +215,7 @@ pure func checkIn(r: Run, p: Policy, o: Orders, turn: int, t: Task) -> Run =
  if stopped(r) then r else match head(t.participants) {
   None => r,
   Some(worker) => if turn % 2 != 0 then r else {
-   let rid = "c${show(turn)}-${t.id}";
+   let rid = "c${show(turn)}${r.salt}-${t.id}";
    let h = hear(r, p, worker, t.id, rid);
    if h.label != "request_relief" then h.run else {
     let asked = act(h.run, "relief_asked", worker, "", t.id, None, h.run.session);
@@ -223,10 +229,10 @@ pure func checkIn(r: Run, p: Policy, o: Orders, turn: int, t: Task) -> Run =
  }
 
 pure func assign(r: Run, p: Policy, o: Orders, rules: [Rule], turn: int, worker: string) -> Run =
- if stopped(r) || busy(r.session, worker) then r else {
+ if stopped(r) || busy(r.session, o, worker) then r else {
   let tired = indicator(r.session, worker, "fatigue") >= o.fatigue || indicator(r.session, worker, "stress") >= o.stress;
   let recipe = if tired && o.rest == "tired" then "rest_${worker}" else workRecipe(r.session.scenario, worker);
-  let id = "t${show(turn)}-${worker}";
+  let id = "t${show(turn)}${r.salt}-${worker}";
   match offer(r.session, worker, recipe, id) {
    Err(e) => act(r, "error", worker, "", "offer: ${encodeHostError(e)}", None, r.session),
    Ok(x) => {
@@ -255,34 +261,40 @@ pure func prune(r: Run) -> Run = { let st = r.state; {r | state: {st | agreed: f
 
 -- After the advance: breakdowns, trust floors, majors and arguments that
 -- this turn produced.
+-- Once-per-crossing memory, per rule: "<kind>:<indicator>:<threshold>/<who>".
+pure func key(rule: Rule, who: string) -> string = "${rule.kind}:${rule.indicator}:${show(rule.threshold)}/${who}"
+
+-- Raise every match of one crossing rule (a halting run stops at the first);
+-- re-arm those that are back across the line.
+pure func crossings(acc: Run, rule: Rule, over: string -> bool, detail: string -> string) -> Run = {
+ let s = acc.session;
+ let fresh = filter(\w. over(w) && not contains(acc.state.raised, key(rule, w)), s.scenario.workers);
+ let st = acc.state;
+ let kept = filter(\k. not any(\w. k == key(rule, w) && not over(w), s.scenario.workers), st.raised);
+ foldl(\a w. { let st2 = a.state; escalate({a | state: {st2 | raised: st2.raised ++ [key(rule, w)]}}, rule.kind, w, "", detail(w)) }, {acc | state: {st | raised: kept}}, fresh)
+}
+
+pure func newEvidence(s: Session, before: Session, p: string -> bool) -> [string] = map(\e. e.id, filter(\e. p(e.id) && not any(\b. b.id == e.id, before.state.evidence), s.state.evidence))
+
+-- A ship event's major kind comes from the session's event list (scheduled
+-- and run-time events both live there), by its evidence id ev-<id>.
+pure func majorOf(s: Session, evidence: string) -> string = match head(filter(\e. "ev-${e.id}" == evidence, s.scenario.events)) { Some(e) => e.major, None => "" }
+
+-- After the advance: breakdowns, trust floors, majors, arguments and requests
+-- no standing order covers (open conversation issues the captain must answer).
 pure func watch(r: Run, rules: [Rule], before: Session) -> Run = foldl(\acc rule. if stopped(acc) then acc else {
  let s = acc.session;
- if rule.kind == "breakdown" then match head(filter(\w. indicator(s, w, rule.indicator) >= rule.threshold && not contains(acc.state.raised, "${rule.indicator}/${w}"), s.scenario.workers)) {
-  Some(w) => { let st = acc.state; escalate({acc | state: {st | raised: st.raised ++ ["${rule.indicator}/${w}"]}}, "breakdown", w, "", "${rule.indicator} ${show(indicator(s, w, rule.indicator))}") },
-  None => { let st = acc.state; {acc | state: {st | raised: filter(\k. any(\w. k == "${rule.indicator}/${w}" && indicator(s, w, rule.indicator) >= rule.threshold, s.scenario.workers) || not any(\w. k == "${rule.indicator}/${w}", s.scenario.workers), st.raised)}} }
- }
- else if rule.kind == "trust_floor" then match head(filter(\w. trustOf(s, w) < rule.threshold && not contains(acc.state.raised, "trust/${w}"), s.scenario.workers)) {
-  Some(w) => { let st = acc.state; escalate({acc | state: {st | raised: st.raised ++ ["trust/${w}"]}}, "trust_floor", w, "", "trust ${show(trustOf(s, w))}") },
-  None => { let st = acc.state; {acc | state: {st | raised: filter(\k. not any(\w. k == "trust/${w}" && trustOf(s, w) >= rule.threshold, s.scenario.workers), st.raised)}} }
- }
- else if rule.kind == "argument" then match head(filter(\e. not any(\b. b.id == e.id, before.state.evidence) && startsWith(e.id, "sf-"), s.state.evidence)) {
-  Some(e) => escalate(acc, "argument", "", "", e.id),
-  None => acc
- }
- else if rule.kind == "major" then match head(filter(\e. not any(\b. b.id == e.id, before.state.evidence) && majorIn(e.text, rule.kinds), s.state.evidence)) {
-  Some(e) => escalate(acc, "major", "", "", e.id),
-  None => acc
- }
+ if rule.kind == "breakdown" then crossings(acc, rule, \w. indicator(s, w, rule.indicator) >= rule.threshold, \w. "${rule.indicator} ${show(indicator(s, w, rule.indicator))}")
+ else if rule.kind == "trust_floor" then crossings(acc, rule, \w. trustOf(s, w) < rule.threshold, \w. "trust ${show(trustOf(s, w))}")
+ else if rule.kind == "argument" then foldl(\a id. escalate(a, "argument", "", "", id), acc, newEvidence(s, before, \id. startsWith(id, "sf-")))
+ else if rule.kind == "major" then foldl(\a id. escalate(a, "major", "", "", id), acc, filter(\id. contains(rule.kinds, majorOf(s, id)), newEvidence(s, before, \id. startsWith(id, "ev-"))))
+ else if rule.kind == "uncovered" then foldl(\a i. escalate(a, "uncovered", i.worker, i.task, i.id), acc, filter(\i. i.status == "open" && not any(\b. b.id == i.id && b.status == "open", before.chat.issues), s.chat.issues))
  else acc
 }, r, rules)
 
-pure func majorIn(text: string, kinds: [string]) -> bool = match decode(text) {
- Ok(j) => str(j, "schema") == "crew_ship_event/1" && contains(kinds, str(j, "major")),
- Err(_) => false
-}
 
 pure func decisions(r: Run, p: Policy, o: Orders, rules: [Rule], turn: int) -> Run = {
- let offered = filter(\t. t.status == Offered && not stale(r.session, t), r.session.state.tasks);
+ let offered = filter(\t. t.status == Offered && not (o.cadence > 1 && stale(r.session, t)), r.session.state.tasks);
  let r1 = foldl(\acc t. persuade(acc, p, o, rules, turn, t), r, offered);
  let working = filter(\t. t.status == Working, r1.session.state.tasks);
  let r2 = foldl(\acc t. checkIn(acc, p, o, turn, t), r1, working);
@@ -302,12 +314,12 @@ pure func result(r: Run, start: int) -> AutoResult = { session: r.session, state
 -- (noted) instead of stopping: play goes on as the orders decide. decideTurn makes the turn's
 -- decisions; finishTurn advances to `turn` and checks the escalation rules.
 export pure func decideTurn(s: Session, st: AutoState, p: Policy, o: Orders, rules: [Rule], turn: int) -> AutoResult ! {}
-ensures { result.session.state.tick == s.state.tick } = result(decisions({ session: s, state: st, log: [], escalated: None, halting: false, noted: [] }, p, o, rules, turn), s.state.tick)
+ensures { result.session.state.tick == s.state.tick } = result(decisions({ session: s, state: st, log: [], escalated: None, halting: false, noted: [], salt: "" }, p, o, rules, turn), s.state.tick)
 
 export pure func finishTurn(a: AutoResult, rules: [Rule], turn: int) -> AutoResult ! {}
 ensures { result.session.state.tick >= a.session.state.tick } = {
  let start = a.session.state.tick;
- let r = closing({ session: a.session, state: a.state, log: reverse(a.log), escalated: a.escalated, halting: false, noted: reverse(a.noted) }, rules, turn);
+ let r = closing({ session: a.session, state: a.state, log: reverse(a.log), escalated: a.escalated, halting: false, noted: reverse(a.noted), salt: "" }, rules, turn);
  {result(r, start) | turns: a.turns + (r.session.state.tick - start)}
 }
 
@@ -321,6 +333,8 @@ ensures { match result { Ok(a) => a.turns <= n && a.session.state.tick >= s.stat
   let start = s.state.tick;
   let c = if o.cadence < 1 then 1 else o.cadence;
   let blocks = (n + c - 1) / c;
-  let run = foldl(\acc b. if stopped(acc) then acc else { let first = start + b * c + 1; let last = if start + (b + 1) * c > start + n then start + n else start + (b + 1) * c; closing(decisions(acc, p, o, rules, first), rules, last) }, { session: s, state: st, log: [], escalated: None, halting: true, noted: [] }, range(0, blocks));
-  Ok(result(run, start))
+  let run = foldl(\acc b. if stopped(acc) then acc else { let first = start + b * c + 1; let last = if start + (b + 1) * c > start + n then start + n else start + (b + 1) * c; closing(decisions(acc, p, o, rules, first), rules, last) }, { session: s, state: st, log: [], escalated: None, halting: true, noted: [], salt: if st.calls == 0 then "" else "a${show(st.calls)}" }, range(0, blocks));
+  let done = result(run, start);
+  let after = done.state;
+  Ok({done | state: {after | calls: after.calls + 1}})
  }

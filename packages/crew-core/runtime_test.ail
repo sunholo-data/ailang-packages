@@ -72,3 +72,13 @@ test "a run-time ship event with an unknown resource or no transfers list is ref
    && (match run(s, "{\"command\":\"ship_event\",\"event\":{\"id\":\"x\",\"text\":\"T.\"}}") { Err(_) => true, Ok(_) => false })
  }
 }
+
+test "a run-time ship event mid-session fires at the current tick" {
+ match begin("orders") {
+  Err(_) => false,
+  Ok(s) => match run(s, "{\"command\":\"advance\",\"tick\":3,\"budget\":64}") {
+   Err(_) => false,
+   Ok(t) => match run(t, leak()) { Err(_) => false, Ok(u) => u.state.tick == 3 && water(u) == 1 && any(\e. e.id == "ev-leak", u.state.evidence) }
+  }
+ }
+}

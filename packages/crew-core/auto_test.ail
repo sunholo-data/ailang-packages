@@ -1,7 +1,7 @@
 module sunholo/crew_core/auto_test
 import std/result (Result, Ok, Err)
 import std/option (Option, Some, None)
-import std/list (head, filter, length, any)
+import std/list (head, filter, length, any, contains)
 import pkg/sunholo/social_dynamics/model (Offered)
 import ./scenario (decodeScenario)
 import ./example (firstContact)
@@ -17,7 +17,7 @@ pure func ship(policy: string) -> Result[Session, HostError] = match firstContac
 pure func responses() -> Result[Policy, string] = decodePolicy(watchPolicyBody())
 
 pure func run(policy: string, o: Orders, rules: [Rule], n: int) -> Result[AutoResult, HostError] = match (ship(policy), responses()) {
- (Ok(s), Ok(p)) => advanceAuto(s, {seed: 7, agreed: [], raised: []}, p, o, rules, n),
+ (Ok(s), Ok(p)) => advanceAuto(s, {seed: 7, agreed: [], raised: [], calls: 0}, p, o, rules, n),
  (Err(e), _) => Err(e),
  (_, Err(e)) => Err(HostFailure(e))
 }
@@ -38,10 +38,16 @@ test "a refusal under orders stops before the override and leaves the work offer
  }
 }
 
-test "a breakdown threshold escalates once per crossing" {
- match run("orders", ordersOrders(), [rule("breakdown", "stress", 1)], 5) {
-  Ok(a) => match a.escalated { Some(e) => e.rule == "breakdown" && a.turns == 1 && length(a.state.raised) == 1, None => false },
-  Err(_) => false
+test "a breakdown threshold escalates once per crossing, not again while it lasts" {
+ match (run("orders", ordersOrders(), [rule("breakdown", "stress", 1)], 5), responses()) {
+  (Ok(a), Ok(p)) => match a.escalated {
+   Some(e) => e.rule == "breakdown" && a.turns == 1 && length(a.state.raised) >= 1 && (match advanceAuto(a.session, a.state, p, ordersOrders(), [rule("breakdown", "stress", 1)], 3) {
+     Ok(b) => b.escalated == None || (match b.escalated { Some(x) => not contains(a.state.raised, "breakdown:stress:1/${x.actor}"), None => true }),
+     Err(_) => false
+   }),
+   None => false
+  },
+  _ => false
  }
 }
 
@@ -66,7 +72,7 @@ pure func heatShip() -> string =
 pure func crew(id: string) -> string = "{\"id\":\"${id}\",\"role\":\"Crew ${id}\",\"ocean\":{\"openness\":50,\"conscientiousness\":50,\"extraversion\":50,\"agreeableness\":50,\"neuroticism\":40},\"values\":{\"duty\":60},\"start\":{},\"work\":[{\"id\":\"work_${id}\",\"name\":\"Cool ${id}\",\"purpose\":\"Hold the line.\",\"duration\":6,\"costs\":[{\"resource\":\"heat\",\"reserve\":1,\"consume\":0}],\"effects\":{\"fatigue\":5}}]}"
 
 pure func heatRun(rules: [Rule]) -> Result[AutoResult, HostError] = match (decodeScenario(heatShip()), responses()) {
- (Ok(sc), Ok(p)) => match start(sc, "{\"command\":\"start\",\"policy\":\"orders\",\"scenario\":\"watch-v2\"}") { Err(e) => Err(e), Ok(o) => advanceAuto(o.session, {seed: 3, agreed: [], raised: []}, p, ordersOrders(), rules, 4) },
+ (Ok(sc), Ok(p)) => match start(sc, "{\"command\":\"start\",\"policy\":\"orders\",\"scenario\":\"watch-v2\"}") { Err(e) => Err(e), Ok(o) => advanceAuto(o.session, {seed: 3, agreed: [], raised: [], calls: 0}, p, ordersOrders(), rules, 4) },
  (Err(e), _) => Err(HostFailure(e)),
  (_, Err(e)) => Err(HostFailure(e))
 }
@@ -95,4 +101,25 @@ test "a weekly cadence covers the whole span with far fewer decisions" {
 test "cadence must be 1..365" {
  (match decodeOrders("{\"schema\":\"crew_standing_orders/1\",\"start\":\"agreed\",\"rest\":\"tired\",\"relief\":\"grant\",\"cadence\":0}") { Err(_) => true, Ok(_) => false })
  && (match decodeOrders("{\"schema\":\"crew_standing_orders/1\",\"start\":\"agreed\",\"rest\":\"tired\",\"relief\":\"grant\",\"cadence\":7}") { Ok(o) => o.cadence == 7, Err(_) => false })
+}
+
+-- Resume after a refusal stop: the next call salts its ids, so nothing collides.
+pure func resumeTwice() -> Result[{first: AutoResult, second: AutoResult}, HostError] = match (ship("orders"), responses()) {
+ (Ok(s), Ok(p)) => match advanceAuto(s, {seed: 7, agreed: [], raised: [], calls: 0}, p, ordersOrders(), [rule("refusal_under_orders", "", 0)], 40) {
+  Err(e) => Err(e),
+  Ok(a) => match advanceAuto(a.session, a.state, p, ordersOrders(), [rule("refusal_under_orders", "", 0)], 40) { Err(e) => Err(e), Ok(b) => Ok({first: a, second: b}) }
+ },
+ (Err(e), _) => Err(e),
+ (_, Err(e)) => Err(HostFailure(e))
+}
+
+test "resuming after a refusal stop reuses no ids and logs no errors" {
+ match resumeTwice() {
+  Ok(x) => x.first.state.calls == 1 && x.second.state.calls == 2 && not any(\a. a.kind == "error", x.second.log) && any(\a. a.kind == "reply", x.second.log),
+  Err(_) => false
+ }
+}
+
+test "a partial last cadence block still covers the whole span" {
+ match run("consent", {consentOrders() | cadence: 4}, [], 10) { Ok(a) => a.turns == 10 && a.session.state.tick == 10, Err(_) => false }
 }

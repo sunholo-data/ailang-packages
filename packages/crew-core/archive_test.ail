@@ -46,3 +46,16 @@ test "without keep nothing is archived and the snapshot is unchanged" {
 test "keep must be 1..10000" {
  (match begin(",\"keep\":0") { Err(_) => true, Ok(_) => false }) && (match begin(",\"keep\":10001") { Err(_) => true, Ok(_) => false }) && (match begin(",\"keep\":\"x\"") { Err(_) => true, Ok(_) => false })
 }
+
+test "work a pending request still refers to is never folded away" {
+ match begin(",\"keep\":1") {
+  Err(_) => false,
+  Ok(s) => match bakes(s, 6) {
+   Err(_) => false,
+   Ok(t) => match input(t, "{\"command\":\"ask\",\"actor\":\"cook\",\"task\":\"b6\",\"id\":\"late-q\"}") {
+    Err(_) => true,
+    Ok(q) => match input(q.session, "{\"command\":\"advance\",\"tick\":9,\"budget\":64}") { Ok(z) => not any(\r. r.task == "b6", z.session.pending) || any(\t. t.id == "b6", z.session.state.tasks), Err(_) => false }
+   }
+  }
+ }
+}

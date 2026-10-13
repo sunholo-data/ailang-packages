@@ -243,7 +243,7 @@ pure func tallyAct(sim: Sim, a: Act) -> Sim =
 
 pure func autoTurn(sim: Sim, turn: int) -> Sim = {
  let o = if sim.captain == "orders" then ordersOrders() else consentOrders();
- let d = decideTurn(sim.session, {seed: sim.seed, agreed: sim.agreed, raised: sim.raised}, sim.policy, o, sim.rules, turn);
+ let d = decideTurn(sim.session, {seed: sim.seed, agreed: sim.agreed, raised: sim.raised, calls: 0}, sim.policy, o, sim.rules, turn);
  let mid = observeLow(foldl(\acc a. tallyAct(acc, a), {sim | session: d.session, seed: d.state.seed, agreed: d.state.agreed}, d.log));
  let f = finishTurn({d | session: mid.session, log: [], noted: []}, sim.rules, turn);
  let after0 = foldl(\acc a. tallyAct(acc, a), {mid | session: f.session, seed: f.state.seed, agreed: f.state.agreed, raised: f.state.raised}, f.log);
