@@ -4,11 +4,12 @@ import std/option (Some, None)
 import std/list (head, filter, length, map, range)
 import std/string (contains)
 import std/json (encode, jo, kv, js, jnum, jint)
-import pkg/sunholo/social_dynamics/model (State, AI, ActorPrincipal, AcceptCommitment, Authored, Event, Pending, Done, Working, Offered)
+import pkg/sunholo/social_dynamics/model (Value, State, AI, ActorPrincipal, AcceptCommitment, Authored, Event, Pending, Done, Working, Offered)
 import pkg/sunholo/social_dynamics/proposals (apply)
 import ./session (Session, Output, HostError, HostFailure, start as startWith, untraced, input, offer, ask, complete, startTask, resolve, cancel, snapshot, compacted)
 import ./example (firstContact)
 import ./host_policy (policies)
+import ./codec (traitDelta, RefusedOrder, CompliedStart)
 import ./policy (decodePolicy, watchPolicyBody, authoredAnswer)
 
 -- Host invariants on the first-contact example ship (ported from the
@@ -450,4 +451,24 @@ test "untraced sessions give the same state with an empty trace" {
       _ => false
     }
   }
+}
+
+pure func trustOf(s: Session, w: string) -> int = match head(filter(\r. r.from == w && r.to == "captain" && r.dimension == "trust", s.state.relationships)) { Some(r) => r.value, None => 0 - 1 }
+pure func oceanOf(s: Session, w: string) -> [Value] = match head(filter(\a. a.id == w, s.state.actors)) { Some(a) => a.attributes, None => [] }
+
+-- crew_core 0.2.0: trust follows traits. An overridden refusal costs the
+-- scientist traitDelta(RefusedOrder, their OCEAN), not a flat -8; a "yes"
+-- under orders is complied_start, worth 2 - voice.
+test "under orders, trust moves by the crew member's traits" {
+ match (prepared("orders"), prepared("orders")) {
+  (Ok(a), Ok(b)) => match (complete(a, "r1", response("decline", 0.8, false), 0.9), complete(b, "r1", response("accept", 0.8, false), 0.1)) {
+   (Ok(declined), Ok(agreed)) => match (startTask(declined.session, "science"), startTask(agreed.session, "science")) {
+    (Ok(overridden), Ok(complied)) => trustOf(overridden.session, "scientist") == trustOf(a, "scientist") + traitDelta(RefusedOrder, oceanOf(a, "scientist"))
+     && trustOf(complied.session, "scientist") == trustOf(b, "scientist") + traitDelta(CompliedStart, oceanOf(b, "scientist")),
+    _ => false
+   },
+   _ => false
+  },
+  _ => false
+ }
 }

@@ -50,9 +50,9 @@ pure func raise(xs: [Count], id: string, v: int) -> [Count] = if any(\c. c.id ==
 pure func peaked(sim: Sim) -> Sim = {
  let t = sim.tally;
  let s = sim.session;
- let threshold = match head(sim.scenario.rules) { Some(r) => r.threshold, None => 101 };
+ let threshold = \w. match head(filter(\r. r.id == "overextended_${w}", sim.scenario.rules)) { Some(r) => r.threshold, None => 101 };
  withTally(sim, {t | peaks: foldl(\acc w. raise(raise(acc, "${w}/stress", indicator(s, w, "stress")), "${w}/fatigue", indicator(s, w, "fatigue")), t.peaks, sim.scenario.workers),
-  over: foldl(\acc w. if indicator(s, w, "stress") >= threshold then bump(acc, w) else acc, t.over, sim.scenario.workers)})
+  over: foldl(\acc w. if indicator(s, w, "stress") >= threshold(w) then bump(acc, w) else acc, t.over, sim.scenario.workers)})
 }
 
 pure func observe(sim: Sim) -> Sim = peaked(observeTurn(sim))

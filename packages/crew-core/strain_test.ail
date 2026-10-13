@@ -64,3 +64,36 @@ test "no argument while free units cover the loss" {
   }
  }
 }
+
+pure func ship2(x: string, y: string, at: int, transfers: string) -> string =
+ "{\"schema\":\"crew_scenario/1\",\"id\":\"radiators\",\"indicators\":[\"fatigue\",\"stress\",\"trust\"],\"indicator_defaults\":{\"fatigue\":0,\"stress\":20},\"captain\":{\"id\":\"captain\",\"values\":{\"mission\":80},\"start\":{}},\"crew\":[${x},${y}],\"rest\":{\"purpose\":\"Recover.\",\"duration\":1,\"effects\":{\"fatigue\":-10}},\"overextended\":{\"indicator\":\"stress\",\"threshold\":70,\"recovery\":40,\"duration\":2,\"cooldown\":3},\"trust_in_captain\":50,\"resources\":[{\"id\":\"heat\",\"name\":\"Heat headroom\",\"initial\":2,\"kind\":\"capacity\"}],\"events\":[{\"id\":\"sky\",\"at\":${show(at)},\"text\":\"The forward sky loads the radiators.\",\"transfers\":${transfers}}]}"
+
+pure func adv(s: Session, t: int) -> Result[Session, HostError] = match input(s, "{\"command\":\"advance\",\"tick\":${show(t)},\"budget\":64}") { Err(e) => Err(e), Ok(o) => Ok(o.session) }
+pure func begin(s: Session, w: string) -> Result[Session, HostError] = match offer(s, w, "work_${w}", "t${w}") { Err(e) => Err(e), Ok(a) => match startTask(a.session, "t${w}") { Err(e) => Err(e), Ok(b) => Ok(b.session) } }
+
+-- x starts at tick 0, y at tick 1; equal traits, so equal hold scores.
+test "on equal hold scores the later start is halted; the earlier starter keeps their work" {
+ match decodeScenario(ship2(crew("x", 50, 50, 50, 40), crew("y", 50, 50, 50, 40), 2, "[{\"resource\":\"heat\",\"delta\":-1}]")) {
+  Err(_) => false,
+  Ok(sc) => match start(sc, "{\"command\":\"start\",\"policy\":\"orders\",\"scenario\":\"watch-v2\"}") {
+   Err(_) => false,
+   Ok(o) => match begin(o.session, "x") { Err(_) => false, Ok(a) => match adv(a, 1) { Err(_) => false, Ok(b) => match begin(b, "y") { Err(_) => false, Ok(c) => match adv(c, 2) {
+    Err(_) => false,
+    Ok(s) => status(s, "ty") && not status(s, "tx")
+   } } } }
+  }
+ }
+}
+
+test "two outward transfers of one resource are argued as one loss" {
+ match decodeScenario(ship2(crew("x", 90, 10, 10, 40), crew("y", 10, 90, 90, 40), 1, "[{\"resource\":\"heat\",\"delta\":-1},{\"resource\":\"heat\",\"delta\":-1}]")) {
+  Err(_) => false,
+  Ok(sc) => match start(sc, "{\"command\":\"start\",\"policy\":\"orders\",\"scenario\":\"watch-v2\"}") {
+   Err(_) => false,
+   Ok(o) => match begin(o.session, "x") { Err(_) => false, Ok(a) => match begin(a, "y") { Err(_) => false, Ok(b) => match adv(b, 1) {
+    Err(_) => false,
+    Ok(s) => status(s, "tx") && status(s, "ty") && heat(s).out == 2 && length(filter(\e. e.id == "sf-sky-0", s.state.evidence)) == 1
+   } } }
+  }
+ }
+}

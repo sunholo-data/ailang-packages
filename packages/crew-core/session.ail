@@ -396,8 +396,9 @@ ensures {match result {Err(_)=>true,Ok(o)=>o.session.state.tick==s.state.tick &&
 -- due: all yields first (tasks in state order), then events (scenario order),
 -- not interleaved by tick. Yields are heard by the task's participants; events
 -- by the whole crew. Knowledge cost is bounded: at most 32 events x 15 crew
--- (480 rows) plus one row per completed task with yields (tasks <= 256), well
--- inside the 8,192 knowledge limit. Each flow moves resources (flows.transferAll) and is
+-- (480 rows), plus one argument per event and resource (at most 8 x 32 x
+-- 15 = 3,840 rows), plus one row per completed task with yields (tasks <=
+-- 256): at most about 4,600 rows, inside the 8,192 knowledge limit. Each flow moves resources (flows.transferAll) and is
 -- raised as captain evidence heard by the whole crew; its evidence id ("yd-"
 -- task, "ev-" event) marks it done, so a flow never fires twice. Scenarios
 -- without yields or events are untouched.
@@ -450,12 +451,16 @@ pure func yieldFlows(s: Session, tasks: [Task], events: [Event]) -> Result[Flowe
 -- holds the rest, the holders argue (crew-strain design, Mark 2026-10-13).
 -- Each takes a stance from traits and state: hold score = (100 - A) + E/2 +
 -- C/2 + 15 if overextended; 100 or more holds, less yields. The lowest scores
--- are halted first (later starts first on ties) until the shortfall is
--- covered. A halted crew member gains stress 5 + N/10; one who held loses
+-- are halted first until the shortfall is covered; on equal scores the later
+-- start is halted first, so whoever started earlier keeps their work. A
+-- halted crew member gains stress 5 + N/10; one who held loses
 -- regard (N/10 + 2) for each colleague whose work kept running; one who
 -- yielded is regarded +1 by those colleagues. The argument is evidence
 -- "sf-<event>-<transfer index>" heard by the whole crew.
 
+-- One holder per running task, argued by its first participant (crew work is
+-- single-participant today); a crew member halted on two tasks takes the
+-- stress twice.
 type Holder = {task: Task, worker: string, score: int} deriving (Eq)
 
 pure func traitOf(s: Session, worker: string, id: string) -> int = match head(filter(\a. a.id == worker, s.state.actors)) {
@@ -527,6 +532,10 @@ pure func argueOne(s: Session, e: ShipEvent, t: Transfer, at: int, events: [Even
  }
 }
 
+-- An event's outward transfers, summed per resource (first-seen order), so
+-- one argument covers everything the event takes of that resource.
+pure func outward(ts: [Transfer]) -> [Transfer] = foldl(\acc t. if t.delta >= 0 then acc else if any(\a. a.resource == t.resource, acc) then map(\a. if a.resource == t.resource then {a | delta: a.delta + t.delta} else a, acc) else acc ++ [t], [], ts)
+
 pure func argue(s: Session, e: ShipEvent, ts: [Transfer], at: int, events: [Event]) -> Result[Flowed, HostError] = match ts {
  [] => Ok({session: s, events: events}),
  t :: rest => match argueOne(s, e, t, at, events) { Err(err) => Err(err), Ok(f) => argue(f.session, e, rest, at + 1, f.events) }
@@ -534,7 +543,7 @@ pure func argue(s: Session, e: ShipEvent, ts: [Transfer], at: int, events: [Even
 
 pure func eventFlows(s: Session, due: [ShipEvent], events: [Event]) -> Result[Flowed, HostError] = match due {
  [] => Ok({session: s, events: events}),
- e :: rest => match argue(s, e, e.transfers, 0, events) {
+ e :: rest => match argue(s, e, outward(e.transfers), 0, events) {
   Err(err) => Err(err),
   Ok(argued) => eventFlows2(argued.session, e, rest, argued.events)
  }

@@ -106,7 +106,7 @@ pack's `policy.json` (strain on); claims are over 20 seeds.
   halted first; a halted crew member who held their ground resents the
   colleagues who kept working.
 
-**Results: 44 of 50 claims hold.**
+**Results: 44 of 50 claims hold.** One of those passes vacuously (`navigator-holds-the-heat`; see below).
 - **Breakdown is now possible.** Under orders, peak stress reaches 95 for the
   engineer and 100 for the medic (median). The strained skeptic's trust falls
   to 14.
@@ -122,7 +122,9 @@ pack's `policy.json` (strain on); claims are over 20 seeds.
     that finishes on the same tick, so an event on a shift boundary takes
     nothing from running work. That ordering is deliberate and documented.
   - So `approach-forces-an-argument` and `halted-engineer-resents-navigator`
-    fail, and `navigator-holds-the-heat` passes only vacuously.
+    fail, and `navigator-holds-the-heat` passes only vacuously (19 of 20 runs
+    have no argument). `heat-blocks-work-under-orders` (finding 1 above) still
+    fails too: the median of heat stockouts is 0.
   - The fix is an authoring choice for Mark, not a tuning knob. Options: a
     third heat user (the medical bay's cooling), less heat headroom (2 instead
     of 3), or bracing that needs less mass.

@@ -25,6 +25,14 @@ Crew strain (design `design_docs/planned/crew-strain.md`). Requires
   decline and request_relief while the crew member is overextended, scaled by
   neuroticism. Policies without it are unchanged.
 - The `sf-` id prefix is reserved for flows.
+- **Behaviour change for orders runs.** Crew with OCEAN traits now get
+  personal trust deltas, so orders sessions recorded on 0.1.0 replay to
+  different trust values:
+  - a "yes" under orders is `complied_start`, worth 2 − voice;
+  - an overridden refusal costs −4 to −12, not a flat −8;
+  - a denied relief costs −(2 + N/25), not −4.
+
+  Consent sessions are unchanged. `session_test` pins the new values.
 
 ## 0.1.0
 

@@ -47,7 +47,8 @@ work holds the rest, the host raises a **shortfall**.
   - Hold score = (100 − A) + E/2 + C/2 + (stress ≥ threshold ? 15 : 0).
     That is: disagreeable, assertive, dutiful and strained people dig in.
   - Holders are sorted by score. The lowest-scoring are halted first until the
-    shortfall is covered; ties go to whoever started earlier.
+    shortfall is covered. On equal scores the later start is halted first, so
+    whoever started earlier keeps their work.
 - **Consequences:**
   - The halted work stops (`social_dynamics` `HaltTask`). Its reservation is
     released, and nothing it would have consumed is used.
@@ -58,6 +59,8 @@ work holds the rest, the host raises a **shortfall**.
     It exists only in scenarios with ship events, so older scenarios are
     unchanged byte for byte.
   - **Stress:** the halted crew member gains +(5 + N/10).
+  - **Several transfers:** an event's outward transfers of one resource are
+    summed, and one argument covers the total.
   - **Everyone hears it:** the argument and its outcome are evidence the whole
     crew knows (`sf-<event>`), and the words come through the reply pipeline.
 - **Engine operation:** `social_dynamics` 0.4.0 adds one host-only operation,
