@@ -297,7 +297,7 @@ pure func assemble(id: string, indicators: [string], captain: Actor, crew: [Crew
 }
 
 pure func fromJson(j: Json) -> Result[Scenario, string] =
- if not exactOpt(j, topFields(), ["events"]) then Err("scenario: top-level fields must be schema, id, indicators, indicator_defaults, captain, crew, rest, overextended, trust_in_captain, resources, and optionally events") else
+ if not exactOpt(j, topFields(), ["events", "cohorts"]) then Err("scenario: top-level fields must be schema, id, indicators, indicator_defaults, captain, crew, rest, overextended, trust_in_captain, resources, and optionally events and cohorts") else
  if getString(j, "schema") != Some("crew_scenario/1") then Err("scenario: schema must be crew_scenario/1") else
  match (ident(j, "id", "scenario"), names(j, "indicators")) {
   (Err(e), _) => Err(e), (_, Err(e)) => Err(e),

@@ -13,6 +13,7 @@ import pkg/sunholo/social_dynamics/relationships (appraisalContext, deliver)
 import pkg/sunholo/social_dynamics/wire (encodeState, encodeEvents, encodeError, encodeConfig)
 import ./scenario (Scenario, ShipEvent, Transfer, decodeShipEvent, config as scenarioConfig, workerRecipe, projectName, resourceName, purpose, yieldsOf)
 import ./flows (Applied, transferAll)
+import ./cohorts (Population, Signal, decodePopulation, populationJson, hear, drift, yearsTo, setBirthPolicy, promote)
 import ./host_policy (policies)
 import ./example (firstContact)
 import ./codec (object, fields, text, integer, number, CrewOutcome, AgreedStart, CompliedStart, StrainedStart, RefusedOrder, GrantedRelief, DeniedRelief, encodeOutcome)
@@ -36,7 +37,7 @@ export type Report = { id: string, task: string, agreement: string, worker: stri
 export type Tally = { id: string, count: int } deriving (Eq)
 export type Archive = { keep: int, tasks: int, evidence: int, knowledge: int, accepted: int, completed: [Tally], events: [string] } deriving (Eq)
 
-export type Session = { scenario: Scenario, policy: string, command: string, archive: Archive, config: Config, state: State, bindings: [TaskAgreement], pending: [Request], bank: [Bank], reports: [Report], chat: ConversationStore, personalities: [Personality], traced: bool } deriving (Eq)
+export type Session = { scenario: Scenario, policy: string, command: string, archive: Archive, config: Config, state: State, bindings: [TaskAgreement], pending: [Request], bank: [Bank], reports: [Report], chat: ConversationStore, personalities: [Personality], population: Option[Population], traced: bool } deriving (Eq)
 
 export type Output = { session: Session, trace: string, failed: bool } deriving (Eq)
 
@@ -57,7 +58,7 @@ pure func reportJson(r: Report) -> Json =
 
 export pure func snapshot(s: Session) -> string
 ensures { stringLength(result) > 0 } =
-  encode(jo([kv("state", js(encodeState(s.state))), kv("policy", js(s.policy))] ++ (if s.command != s.policy then [kv("command", js(s.command))] else []) ++ (if s.archive.keep > 0 then [kv("archived", archiveJson(s.archive))] else []) ++ [kv("bindings", ja(map(\b. jo([kv("task", js(b.task)), kv("agreement", js(b.agreement)), kv("captain", js(b.captain)), kv("worker", js(b.worker)), kv("recipe", js(b.recipe))]), s.bindings))), kv("pending", ja(map(requestJson, s.pending))), kv("bank", ja(map(bankJson, s.bank))), kv("reports", ja(map(reportJson, s.reports)))] ++ (if s.chat.version == 1 then [kv("conversations", conversationJson(s.chat)),kv("personalities",personalitiesJson(s.personalities))] else [])))
+  encode(jo([kv("state", js(encodeState(s.state))), kv("policy", js(s.policy))] ++ (if s.command != s.policy then [kv("command", js(s.command))] else []) ++ (if s.archive.keep > 0 then [kv("archived", archiveJson(s.archive))] else []) ++ (match s.population { Some(p) => [kv("population", populationJson(p))], None => [] }) ++ [kv("bindings", ja(map(\b. jo([kv("task", js(b.task)), kv("agreement", js(b.agreement)), kv("captain", js(b.captain)), kv("worker", js(b.worker)), kv("recipe", js(b.recipe))]), s.bindings))), kv("pending", ja(map(requestJson, s.pending))), kv("bank", ja(map(bankJson, s.bank))), kv("reports", ja(map(reportJson, s.reports)))] ++ (if s.chat.version == 1 then [kv("conversations", conversationJson(s.chat)),kv("personalities",personalitiesJson(s.personalities))] else [])))
 
 -- Untraced sessions (batch runs) skip the per-call state encoding; their
 -- outputs carry an empty trace. Journals require traced sessions.
@@ -361,15 +362,19 @@ pure func delivered(s: Session, observer: string, evidence: string, id: string) 
     }
   }
 
-pure func advanceOutput(s:Session,state:State,events:[Event])->Result[Output,HostError] =
+pure func advanceOutput(s0:Session,state:State,events:[Event])->Result[Output,HostError] = {
+ let s = {s0 | population: match s0.population { Some(p) => Some(populationAt(s0, p, state)), None => None }};
+ advanceOutput2(s,state,events)
+}
+pure func advanceOutput2(s:Session,state:State,events:[Event])->Result[Output,HostError] =
  if not isConversation(s) then Ok(output({s|state:state},events)) else match advanceShip(s.personalities,state.tick) {
   Err(e)=>Err(HostFailure("personality advance: ${e}")),Ok(ps)=>Ok(output({s|state:projectPersonalities(ps,state),personalities:ps},events))
  }
 
 @allow_empty_ok("Legacy hosts intentionally have no personality sidecar; only watch-v3 initializes profiles")
-pure func initialized(scenario:Scenario,policy:string,c:Config,state:State,version:int,keep:int)->Result[Output,HostError] =
+pure func initialized(scenario:Scenario,policy:string,c:Config,state:State,version:int,keep:int,pop:Option[Population])->Result[Output,HostError] =
  match (if version==1 then initializeShip(state) else Ok([])) {
-  Err(e)=>Err(HostFailure("personality initialization: ${e}")),Ok(ps)=>Ok(output({scenario:scenario,policy:policy,command:policy,archive:{keep:keep,tasks:0,evidence:0,knowledge:0,accepted:0,completed:[],events:[]},config:c,state:state,bindings:[],pending:[],bank:[],reports:[],chat:emptyConversation(version),personalities:ps,traced:true},[]))
+  Err(e)=>Err(HostFailure("personality initialization: ${e}")),Ok(ps)=>Ok(output({scenario:scenario,policy:policy,command:policy,archive:{keep:keep,tasks:0,evidence:0,knowledge:0,accepted:0,completed:[],events:[]},config:c,state:state,bindings:[],pending:[],bank:[],reports:[],chat:emptyConversation(version),personalities:ps,population:pop,traced:true},[]))
  }
 
 pure func majorDeliveries(s:Session,observers:[string],evidence:string,events:[Event])->Result[{session:Session,events:[Event]},HostError] = match observers {
@@ -632,7 +637,7 @@ ensures { length(result.state.tasks) <= length(s.state.tasks) && length(result.s
    {s | state: {s.state | tasks: filter(\t. not contains(ids, t.id), s.state.tasks), evidence: evidence, knowledge: knowledge, reliefs: filter(\r. not contains(ids, r.task), s.state.reliefs), commitments: filter(\c. not contains(agreements, c.id), s.state.commitments), accepted: accepted},
         bindings: filter(\b. not contains(ids, b.task), s.bindings), reports: filter(\r. not contains(ids, r.task), s.reports),
         chat: {s.chat | issues: filter(\i. not contains(ids, i.task), s.chat.issues), speech: filter(\x. not contains(ids, x.task), s.chat.speech)},
-        archive: {a | tasks: a.tasks + length(gone), evidence: a.evidence + length(goneE), knowledge: a.knowledge + length(s.state.knowledge) - length(knowledge), accepted: a.accepted + (n - length(accepted)), completed: foldl(\acc t. tallied(acc, t.recipe), a.completed, filter(\t. t.status == Completed, gone)), events: a.events ++ evIds}}
+        archive: {a | tasks: a.tasks + length(gone), evidence: a.evidence + length(goneE), knowledge: a.knowledge + length(s.state.knowledge) - length(knowledge), accepted: a.accepted + (n - length(accepted)), completed: foldl(\acc t. tallied(acc, t.recipe), a.completed, filter(\t. t.status == Completed, gone)), events: sorted(a.events ++ evIds)}}
   }
  }
 
@@ -670,7 +675,10 @@ ensures { match result {
       Err(e) => Err(HostFailure(e)),
       Ok(c) => match init(c, scenario.actors, scenario.resources) {
         Err(e) => Err(DomainFailure(e)),
-        Ok(state) => initialized(scenario,policy,c,state,if getString(j, "scenario") == Some("watch-v3") then 1 else 0,match getInt(j, "keep") { Some(k) => k, None => 0 })
+        Ok(state) => match decodePopulation(scenario.canonical, scenario.workers, map(\r. r.id, scenario.resources)) {
+          Err(e) => Err(HostFailure(e)),
+          Ok(pop) => initialized(scenario,policy,c,state,if getString(j, "scenario") == Some("watch-v3") then 1 else 0,match getInt(j, "keep") { Some(k) => k, None => 0 },pop)
+        }
       }
     },
     _ => Err(HostFailure("start command required"))
@@ -696,6 +704,92 @@ export pure func raiseShipEvent(s: Session, event: ShipEvent) -> Result[Output, 
 ensures { match result { Ok(o) => o.session.state.tick >= s.state.tick, Err(_) => true } } =
  input(s, encode(jo([kv("command", js("ship_event")), kv("event", jo([kv("id", js(event.id)), kv("text", js(event.text)), kv("transfers", ja(map(\t. jo([kv("resource", js(t.resource)), kv("delta", jint(t.delta))]), event.transfers)))] ++ (if event.major == "" then [] else [kv("major", js(event.major))])))])))
 
+-- ------------------------------------------------------------ cohorts (0.4.0)
+
+-- What a cohort hears from its voice: their stress and their trust in the
+-- captain (-1 without a voice).
+pure func indicatorOf(state: State, actor: string, id: string) -> int = match head(filter(\a. a.id == actor, state.actors)) {
+ Some(a) => match head(filter(\v. v.id == id, a.indicators)) { Some(v) => v.value, None => 0 - 1 },
+ None => 0 - 1
+}
+pure func trustOf(state: State, actor: string, captain: string) -> int = match head(filter(\r. r.from == actor && r.to == captain && r.dimension == "trust", state.relationships)) { Some(r) => r.value, None => 0 - 1 }
+pure func signals(s: Session, p: Population, state: State) -> [Signal] = flatMap(\c. if c.voice == "" then [] else [{cohort: c.id, stress: indicatorOf(state, c.voice, "stress"), trust: trustOf(state, c.voice, s.scenario.captain)}], p.cohorts)
+-- Resources the ship has lost below a fifth of their opening amount. Units
+-- reserved by work in progress still count as the ship's: a botanist working
+-- the beds is not a shortage.
+pure func shortNow(state: State) -> [string] = flatMap(\r. if (r.available + r.reserved) * 5 < r.initial then [r.id] else [], state.resources)
+
+-- Cohorts catch up with the ship tick by tick in calendar order, so one
+-- advance over many days ends where a day at a time would: at each tick
+-- that matters, events due by then are heard, then the year turns (every
+-- 365 ticks, one tick a ship-day, D-70 OQ1), then the week's drift (every 7).
+-- Voice signals and shortages are those at the end of the advance: hosts
+-- that batch days add multiples of 7 and 365 as flow points.
+pure func hearDue(s: Session, p: Population, tick: int) -> Population = foldl(\acc e. if e.at <= tick then hear(acc, e.id, e.major, any(\t. t.delta < 0, e.transfers)) else acc, p, s.scenario.events)
+pure func nextTick(s: Session, p: Population, target: int) -> int = {
+ let week = (p.day / 7 + 1) * 7;
+ let year = (p.day / 365 + 1) * 365;
+ let ev = foldl(\acc e. if e.at > p.day && e.at < acc && not contains(p.heard, e.id) then e.at else acc, target, s.scenario.events);
+ foldl(\a b. if b < a then b else a, target, [week, year, ev])
+}
+pure func catchUp(s: Session, p: Population, target: int, sig: [Signal], short: [string]) -> Population =
+ if p.day >= target then p else {
+  let t = nextTick(s, p, target);
+  let heard = hearDue(s, p, t);
+  catchUp(s, drift(yearsTo(heard, t / 365, short), t, sig, short), target, sig, short)
+ }
+pure func populationAt(s: Session, p: Population, state: State) -> Population = {
+ let now = hearDue(s, p, p.day);
+ let short = shortNow(state);
+ catchUp(s, now, state.tick, signals(s, now, state), short)
+}
+
+pure func birthPolicyCommand(s: Session, j: Json) -> Result[Output, HostError] =
+ if not fields(j, ["command", "policy"]) then Err(HostFailure("birth_policy fields")) else match (s.population, getString(j, "policy")) {
+  (None, _) => Err(HostFailure("birth_policy needs cohorts")),
+  (_, None) => Err(HostFailure("birth_policy types")),
+  (Some(p), Some(q)) => match setBirthPolicy(p, q) { Err(e) => Err(HostFailure(e)), Ok(p2) => Ok(output({s | population: Some(p2)}, [])) }
+ }
+
+-- Stop the departing person's work (the role keeps its open offers).
+pure func haltRole(s: Session, tasks: [Task], events: [Event]) -> Result[Flowed, HostError] = match tasks {
+ [] => Ok({session: s, events: events}),
+ t :: rest => match halt(s.config, s.state, Host, t.id, "departed") {
+  Err(e) => Err(DomainFailure(e)),
+  Ok(step) => haltRole({s | state: step.state}, rest, events ++ step.events)
+ }
+}
+
+pure func oceanNames() -> [string] = ["openness","conscientiousness","extraversion","agreeableness","neuroticism"]
+pure func founding(s: Session, role: string) -> [Value] = match head(filter(\a. a.id == role, s.scenario.actors)) { Some(a) => a.indicators, None => [] }
+pure func renewed(s: Session, role: string, mix: [int], trust: int, state: State) -> State =
+ {state |
+  actors: map(\a. if a.id != role then a else {a | attributes: map(\pr. match pr { (k, v) => {id: k, value: v} }, zipNames(oceanNames(), mix)), indicators: founding(s, role)}, state.actors),
+  relationships: map(\r. if r.from == role && r.to == s.scenario.captain && r.dimension == "trust" then {r | value: trust} else if (r.from == role || r.to == role) && r.dimension == "regard" then {r | value: 50} else r, state.relationships)}
+pure func zipNames(ks: [string], vs: [int]) -> [(string, int)] = match (ks, vs) { (k :: a, v :: b) => (k, v) :: zipNames(a, b), _ => [] }
+
+-- A featured crew member leaves the story (the game decides: death,
+-- breakdown or leaving). Someone from their cohort steps into the role: the
+-- role id stays (D-70 OQ2), the person is new (`<cohort>-p<n>`, named by the
+-- host, D-74), with the cohort's mix plus a seeded offset, founding
+-- indicators, the cohort's trust in the captain and neutral regard.
+pure func departCommand(s: Session, j: Json) -> Result[Output, HostError] =
+ if not fields(j, ["command", "crew", "reason"]) then Err(HostFailure("depart fields")) else match (s.population, getString(j, "crew"), getString(j, "reason")) {
+  (None, _, _) => Err(HostFailure("depart needs cohorts")),
+  (Some(p), Some(role), Some(reason)) => if not contains(s.scenario.workers, role) then Err(HostFailure("depart: unknown crew ${role}")) else if not contains(["death", "breakdown", "left"], reason) then Err(HostFailure("depart: reason must be death, breakdown or left")) else match promote(p, role, s.state.tick) {
+   Err(e) => Err(HostFailure(e)),
+   Ok(r) => match haltRole(s, filter(\t. t.status == Working && contains(t.participants, role), s.state.tasks), []) {
+    Err(e) => Err(e),
+    Ok(f) => {
+     let s2 = {f.session | state: renewed(s, role, r.mix, r.trust, f.session.state), population: Some(r.population)};
+     let o = output(s2, f.events);
+     Ok({o | trace: if s2.traced then "{\"state\":${encodeState(s2.state)},\"events\":${encodeEvents(f.events)},\"host\":${snapshot(s2)},\"promoted\":${encode(jo([kv("kind", js("promoted")), kv("id", js(r.person.person)), kv("role", js(role)), kv("person", js(r.person.person)), kv("cohort", js(r.person.cohort)), kv("reason", js(reason)), kv("at", jint(r.person.at))]))}}" else ""})
+    }
+   }
+  },
+  _ => Err(HostFailure("depart types"))
+ }
+
 -- Command bodies live in their own functions: inlined into dispatch's big
 -- match they multiplied the compiler's memory (ailang#1812).
 pure func policyCommand(s: Session, j: Json) -> Result[Output, HostError] =
@@ -713,6 +807,8 @@ pure func shipEventCommand(s: Session, j: Json) -> Result[Output, HostError] =
 pure func dispatch(s: Session, j: Json) -> Result[Output, HostError] = match getString(j, "command") {
   Some("policy") => policyCommand(s, j),
   Some("ship_event") => shipEventCommand(s, j),
+  Some("birth_policy") => birthPolicyCommand(s, j),
+  Some("depart") => departCommand(s, j),
   Some("lab_major")=>if not fields(j,["command","id","kind"]) then Err(HostFailure("lab report schema")) else match (text(j,"id"),text(j,"kind")){(Ok(id),Ok(kind))=>labMajor(s,id,kind),_=>Err(HostFailure("lab report types"))},
   Some("captain_reply") => if not fields(j,["command","id","issue","text","approach","tick","revision"]) then Err(HostFailure("captain reply schema")) else match (text(j,"id"),text(j,"issue"),text(j,"text"),text(j,"approach"),integer(j,"tick"),integer(j,"revision")) {
    (Ok(id),Ok(issue),Ok(words),Ok(approach),Ok(tick),Ok(revision))=>captainReply(s,id,issue,words,approach,tick,revision),

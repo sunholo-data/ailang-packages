@@ -6,6 +6,7 @@ import std/option (Option, Some, None)
 import std/result (Result, Ok, Err)
 import std/math (intToFloat, floatToInt, floor)
 import pkg/sunholo/crew_core/scenario (Scenario, decodeScenario)
+import pkg/sunholo/crew_core/cohorts (decodePopulation)
 import ./crew_sim (refusalCodes)
 
 -- crew_claims/1: what a designer expects the simulation to do, checked over
@@ -33,10 +34,17 @@ ensures { not result || size(path) > 0 } = match split(path, ".") {
  ["completed", x] => any(\r. r.id == x, sc.recipes),
  ["crew", w, f] => contains(sc.workers, w) && (contains(crewFields(), f) || contains(["relief_asked", "relief_granted", "relief_denied"], f)),
  ["crew", w, "replies", x] => contains(sc.workers, w) && contains(replyLabels(), x),
- ["escalations", x] => contains(["refusal_under_orders", "breakdown", "trust_floor", "major", "argument"], x),
+ ["escalations", x] => contains(["refusal_under_orders", "breakdown", "trust_floor", "major", "argument", "uncovered", "cohort"], x) || (startsWith(x, "cohort:") && contains(cohortIds(sc), substringFrom(x, 7))),
+ ["population", x] => length(cohortIds(sc)) > 0 && contains(["total", "births", "deaths", "year", "groups"], x),
+ ["cohorts", c, f] => contains(cohortIds(sc), c) && contains(["headcount", "pressure", "division", "mood", "trust"], f),
  ["resources", r, f] => any(\x. x.id == r, sc.resources) && contains(["min", "zero_ticks", "stockouts", "in", "out"], f),
  _ => false
 }
+
+-- The scenario's cohort ids (none without a cohorts section).
+pure func cohortIds(sc:Scenario) -> [string] = match decodePopulation(sc.canonical, sc.workers, map(\r. r.id, sc.resources)) {Ok(Some(p)) => map(\c. c.id, p.cohorts), _ => []}
+pure func substringFrom(s:string, i:int) -> string = join(":", dropFirst(split(s, ":")))
+pure func dropFirst(xs:[string]) -> [string] = match xs {[] => [], _ :: rest => rest}
 
 pure func number(j:Json, k:string) -> Option[float] = match getNumber(j, k) {Some(n) => Some(n), None => None}
 

@@ -32,6 +32,8 @@ for name, filename, edits in mutants:
         shutil.copytree(root / "packages/terminal-ui", workspace / "packages/terminal-ui")
         shutil.copytree(root / "packages/crew-core", workspace / "packages/crew-core")
         core = workspace / "packages/crew-core"
+        # No mutant touches cohorts.ail; its 48 tests run in core-tests, not once per mutant.
+        (core / "cohorts_test.ail").unlink()
         source = workspace / filename
         original = source.read_text()
         changed = original

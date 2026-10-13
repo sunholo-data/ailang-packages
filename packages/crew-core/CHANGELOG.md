@@ -1,5 +1,72 @@
 # Changelog
 
+## 0.4.0
+
+Cohorts for Stapledon's population (R2-CREW-POP CP-0, ledger D-73; about
+1,000 aboard growing to about 1,500, D-75). Additive: a scenario without a
+`cohorts` section behaves exactly as in 0.3.0, the six 0.2.0/0.3.0 parity
+recordings replay byte-identically, and the snapshot gains `population`
+only when cohorts exist.
+
+- **New module `cohorts`.** A cohort holds counts, never individuals:
+  people per mood band (content, uneasy, strained, breaking), per band of
+  trust in the captain, and per year of age. Integer arithmetic only, so
+  the VM and the interpreter agree bit for bit.
+  - Moves between bands draw once per band, never per person: expected
+    mode (default) rounds n·p; seeded mode draws per person below 13 and
+    uses a normal approximation above. Cost does not grow with headcount.
+  - Readouts: mean band, `division` (how split, 0..100) and `pressure`
+    (strained and breaking, raised by low trust, 0..100).
+  - Ship events are heard once by every cohort (major kinds by
+    neuroticism; first contact also lifts open cohorts). Moods drift each
+    week toward a target set by recent shocks, the voice's stress and
+    shortages; trust drifts toward the voice's trust in the captain.
+  - A yearly step: ageing, deaths by age band (fractions carried),
+    births from adults aged 20-44 under the captain's `birth_policy`
+    (encourage, hold, restrict), children joining departments at 18, and
+    a department splitting off its ship-born once they are a quarter of
+    it (16 groups at most). Births stop while a birth need is short.
+  - **Birth policy is a source of tension** (Mark, 2026-10-13):
+    restricting births costs trust and mood where many people are of
+    child-bearing age, scaled by agreeableness and extraversion, for as
+    long as the policy lasts; encouraging births while a birth need is
+    short costs trust with the conscientious.
+  - Default rates per mille of fertile adults a year: encourage 70, hold
+    48, restrict 20, calibrated on the Stapledon founders pack. The first
+    draft (60/30/8) was below replacement and the ship died out.
+- **Session:** `birth_policy` and `depart` commands; cohorts catch up on
+  every advance (365 ticks a year). `depart` (death, breakdown or left)
+  promotes someone from the role's cohort: the role id stays (D-70 OQ2),
+  the person is new (`<cohort>-p<n>`, named by the host, D-74), their work
+  stops, traits come from the cohort mix plus a seeded offset. The trace
+  carries a `promoted` record.
+- **Auto-captain:** escalation rule kind `cohort` (indicator `pressure`
+  or `division`, threshold 0..100), once per crossing per cohort.
+- **Scenario:** optional top-level `cohorts` section (1-15 groups plus
+  children), validated with the field named.
+
+Measured (v0.54.8 strict VM, Apple silicon, lab founders pack: 1,000 aboard
+in 10 departments plus children, five featured crew; 10-year skip at
+cadence 30 with keep 30, seed 1):
+
+| Run | Time |
+|---|---|
+| founders, no cohorts section | 19.6 s |
+| founders, 1,000 people | 20.1-20.2 s |
+| founders ×100, 100,000 people | 20.4 s |
+
+Cohorts cost about 0.6 s a decade, the same at 1,000 or 100,000 people.
+Pack claims (crew-lab, claims written before the runs; 18 of 18 hold over
+seeds 1..3, split over 1..20): a calm year, the century (1,643 at year 100 under hold, the
+top of D-75's band), births stop when the beds go dark, restricting births
+escalates a cohort within ten years, a split cohort escalates and a
+uniformly uneasy one does not. Two findings on the way: the restrict claim
+first failed because the yearly grievance drifted away within weeks (fixed:
+the grievance holds while the policy does), and decade skips without
+archiving hit the 256-task cap (long claims run with keep 30, as the game
+does). Observation for scenario design: ten years of restrict brought
+births to zero in every run, because the grievance also sours moods.
+
 ## 0.3.0
 
 For Stapledon's crew integration (R2-CREW CI-0; ailang-packages#137).
