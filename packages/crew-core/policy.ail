@@ -91,7 +91,7 @@ pure func readRules(xs: [Json]) -> Result[[ResponseRule], string] = match xs {
 }
 
 pure func policyOK(p: Policy) -> bool =
-  p.callLimit >= 0 && p.callLimit <= 8 && length(p.rules) > 0 && length(p.rules) <= 32 && (if any(\r. if ruleOK(r) then false else true, p.rules) then false else true) && length(dedup(map(\r. "${r.label}/${r.phase}/${r.recipe}", p.rules))) == length(p.rules)
+  p.callLimit >= 0 && p.callLimit <= 64 && length(p.rules) > 0 && length(p.rules) <= 32 && (if any(\r. if ruleOK(r) then false else true, p.rules) then false else true) && length(dedup(map(\r. "${r.label}/${r.phase}/${r.recipe}", p.rules))) == length(p.rules)
 
 export pure func decodePolicy(body: string) -> Result[Policy, string]
 ensures { match result {
@@ -99,7 +99,7 @@ ensures { match result {
   Err(_) => true
 } } = match object(body) {
   Err(e) => Err(e),
-  Ok(j) => if not fields(j, ["schema", "callLimit", "rules"]) || str(j, "schema") != "crew_response_policy/1" || not integer(j, "callLimit", 0, 8) then Err("policy_schema") else match getArray(j, "rules") {
+  Ok(j) => if not fields(j, ["schema", "callLimit", "rules"]) || str(j, "schema") != "crew_response_policy/1" || not integer(j, "callLimit", 0, 64) then Err("policy_schema") else match getArray(j, "rules") {
     None => Err("rules"),
     Some(xs) => if length(xs) > 32 then Err("rules_size") else match readRules(xs) {
       Err(e) => Err(e),
@@ -131,7 +131,7 @@ ensures { size(result) > 0 && size(result) <= 65536 } =
 export pure func watchPolicyBody() -> string ! {}
 ensures { size(result) > 0 && size(result) <= 65536 } = {
   let rs = [rule("accept", "offered", "*", 400, [inf("attribute", "openness", "", 1), inf("attribute", "conscientiousness", "", 1), inf("attribute", "agreeableness", "", 1), inf("attribute", "neuroticism", "", -1), inf("indicator", "fatigue", "", -2), inf("indicator", "stress", "", -2), inf("indicator", "morale", "", 2), inf("relationship", "trust", "captain", 1)]), rule("decline", "offered", "*", 120, [inf("indicator", "fatigue", "", 2), inf("indicator", "stress", "", 2), inf("indicator", "morale", "", -1), inf("relationship", "trust", "captain", -1)]), rule("concern", "offered", "*", 160, [inf("attribute", "extraversion", "", 1), inf("attribute", "neuroticism", "", 1), inf("indicator", "stress", "", 2)]), rule("defer", "any", "*", 80, [inf("indicator", "fatigue", "", 1), inf("indicator", "stress", "", 1)]), rule("continue", "working", "*", 400, [inf("attribute", "conscientiousness", "", 1), inf("indicator", "fatigue", "", -2), inf("indicator", "stress", "", -2), inf("indicator", "morale", "", 2), inf("relationship", "trust", "captain", 1)]), rule("request_relief", "working", "*", 160, [inf("indicator", "fatigue", "", 3), inf("indicator", "stress", "", 2), inf("indicator", "morale", "", -1), inf("attribute", "neuroticism", "", 1)]), rule("accept", "offered", "work_scientist", 100, [inf("value", "curiosity", "", 1)]), rule("accept", "offered", "work_engineer", 100, [inf("value", "reliability", "", 1)]), rule("accept", "offered", "work_medic", 100, [inf("value", "care", "", 1)]), rule("accept", "offered", "work_pilot", 100, [inf("value", "safety", "", 1)]), rule("accept", "offered", "work_diplomat", 100, [inf("value", "cooperation", "", 1)])]
-  encode(jo([kv("schema", js("crew_response_policy/1")), kv("callLimit", jint(6)), kv("rules", ja(map(ruleJson, rs)))]))
+  encode(jo([kv("schema", js("crew_response_policy/1")), kv("callLimit", jint(12)), kv("rules", ja(map(ruleJson, rs)))]))
 }
 
 -- Only frozen observer-owned Request.context is read. Missing data is an error.

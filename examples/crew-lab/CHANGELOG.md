@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.7.0
+
+Local only; never published. A verification loop for tuning:
+
+- `crew-sim --check claims.json`: expectations as `crew_claims/1` (one captain, one
+  measure, a statistic over the seeds, or the share of seeds meeting a condition),
+  validated against the scenario; PASS/FAIL per claim with the observed value, exit 1
+  on any failure. `data/watch-claims.json` records the default ship (10 claims).
+- Long runs: `crew_core` drops answers to expired requests when its bank fills, and
+  its scenario limits rose, so `crew-sim --turns 60` runs are clean.
+- `crew-sample`: crew wording across varied moments, fetched as the watch would,
+  within `--max-calls`; `--report` for reading; `crew-sample-offline` for authored words without a provider key.
+- The watch policy allows up to 64 AI attempts (default 12 for new homes).
+
+New checks: `make ... claims-test`, `sample-test`.
+
 ## 0.6.0
 
 Local only; never published. Live crew words arrive in the background: a crew

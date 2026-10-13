@@ -73,7 +73,7 @@ test "missing duplicate and out of range observations do not default zero" {
 }
 
 test "policy duplicate keys bad limits unknown fields and noninteger coefficients fail" {
-  badPolicy(replace(defaultPolicyBody(), "\"callLimit\":2", "\"callLimit\":9")) && badPolicy(replace(defaultPolicyBody(), "\"coefficient\":1", "\"coefficient\":1.5")) && badPolicy(replace(defaultPolicyBody(), "\"callLimit\":2", "\"callLimit\":2,\"callLimit\":2")) && badPolicy(replace(defaultPolicyBody(), "\"callLimit\":2", "\"callLimit\":2,\"secret\":0")) && badPolicy("${defaultPolicyBody()} {}")
+  badPolicy(replace(defaultPolicyBody(), "\"callLimit\":2", "\"callLimit\":65")) && badPolicy(replace(defaultPolicyBody(), "\"coefficient\":1", "\"coefficient\":1.5")) && badPolicy(replace(defaultPolicyBody(), "\"callLimit\":2", "\"callLimit\":2,\"callLimit\":2")) && badPolicy(replace(defaultPolicyBody(), "\"callLimit\":2", "\"callLimit\":2,\"secret\":0")) && badPolicy("${defaultPolicyBody()} {}")
 }
 
 pure func badPolicy(s: string) -> bool = match decodePolicy(s) {

@@ -99,5 +99,15 @@ reply-test:
 	@cd "$(EX)" && for m in reply_jobs reply_codec; do "$(AILANG)" test --allow-skips $$m.ail || exit; "$(AILANG)" test --allow-skips --bytecode --strict-bytecode $$m.ail || exit; done
 async-test:
 	@AILANG="$(AILANG)" "$(EX)/test-async.sh"
+# Verification loop: claims over crew-sim runs, and long sessions.
+claims-test:
+	@cd "$(EX)" && "$(AILANG)" test --allow-skips claims.ail
+	@cd "$(EX)" && "$(AILANG)" test --allow-skips --bytecode --strict-bytecode claims.ail
+	@AILANG="$(AILANG)" "$(EX)/test-claims.sh"
+sample-test:
+	@AILANG="$(AILANG)" "$(EX)/test-sample.sh"
+# Draft Stapledon scenario pack: every scenario and claims file loads and runs clean.
+scenario-pack-test:
+	@cd "$(EX)" && for f in scenarios/stapledon/*.claims.json; do s=$${f%.claims.json}.json; "$(AILANG)" run --quiet --bytecode --package-dir . --caps IO,FS,Env --fs-max-bytes 64MB sim_cli.ail -- --scenario "$$s" --seeds 1..3 --turns 12 | jq -s -e 'length==3 and all(.[]; .errors==0)' >/dev/null || { echo "scenario failed: $$s" >&2; exit 1; }; "$(AILANG)" run --quiet --bytecode --package-dir . --caps IO,FS,Env --fs-max-bytes 64MB sim_cli.ail -- --check "$$f" --scenario "$$s" --seeds 1 | grep -q 'claims hold' || { echo "claims did not run: $$f" >&2; exit 1; }; done; printf '1\n1\n1\n2\nq\n' | "$(AILANG)" run --quiet --package-dir . --entry offline --caps IO,FS,Env,AI,Process,Clock --ai-stub --fs-max-bytes 16MB native_watch.ail -- --mode plain --scenario scenarios/stapledon/ergosphere-question.json --home "$$(mktemp -d)" --seed 42 > "$${TMPDIR:-/tmp}/crew-pack-watch.out" && grep -q 'navigator: Model the tidal margins' "$${TMPDIR:-/tmp}/crew-pack-watch.out" && grep -q 'Calculate how close the ship can pass' "$${TMPDIR:-/tmp}/crew-pack-watch.out" || { echo "watch did not play a non-default crew" >&2; exit 1; }; printf 'Stapledon scenario pack: all scenarios run clean and all claims files load; the watch plays a non-default crew\n'
 
-validate: deps core-tests library-tests terminal-tests tests scenarios replay parity store-test quality native-ui-test native-watch-test native-watch-pty-test short-reply-test conversations-test sim-test scenario-test reply-test async-test
+validate: deps core-tests library-tests terminal-tests tests scenarios replay parity store-test quality native-ui-test native-watch-test native-watch-pty-test short-reply-test conversations-test sim-test scenario-test reply-test async-test claims-test sample-test scenario-pack-test

@@ -35,7 +35,7 @@ test "first contact major reaches only actual five specialist receipts with sour
 }
 test "blocked scheduler drift uses earlier successful tick instead of requested later time" {
  match start("{\"command\":\"start\",\"policy\":\"orders\",\"scenario\":\"watch-v3\"}"){Err(_)=>false,Ok(s)=>match report(s.session,"report-a","first_contact"){Err(_)=>false,Ok(m)=>match offer(m,"scientist","rest_scientist","rest"){Err(_)=>false,Ok(r)=>match startTask(r.session,"rest"){Err(_)=>false,Ok(w)=>match offer(w.session,"engineer","work_engineer","repair"){Err(_)=>false,Ok(e)=>match startTask(e.session,"repair"){Err(_)=>false,Ok(t)=>{
- let padded={t.session|state:{t.session.state|evidence:t.session.state.evidence ++ map(\i. {id:"pad-${i}",author:"captain",kind:"note",text:"",causes:[]},range(1,512-length(t.session.state.evidence)))}};
+ let padded={t.session|state:{t.session.state|evidence:t.session.state.evidence ++ map(\i. {id:"pad-${i}",author:"captain",kind:"note",text:"",causes:[]},range(1,2048-length(t.session.state.evidence)))}};
  match input(padded,"{\"command\":\"advance\",\"tick\":10,\"budget\":64}"){Err(_)=>false,Ok(o)=>o.failed && o.session.state.tick==2 && not any(\p. p.lastTick!=2,o.session.personalities) && any(\a. a.id=="scientist" && any(\v. v.id=="openness" && v.value==82,a.attributes),o.session.state.actors)}
  }}}}}}}
 }

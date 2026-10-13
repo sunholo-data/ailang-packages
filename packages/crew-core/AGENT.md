@@ -52,5 +52,7 @@ crew-lab's `crew-host`, so an external host (a Godot simulation) can drive this
 package over stdin/stdout. Asking produces a pending request: answer it later with
 `complete`, which is how a background reply inbox fits without core changes.
 
-Limits: the captain's id must be `captain`; at most 16 pending and 64 answered
-requests per session; conversation prompts are keyed by role in code.
+Limits: the captain's id must be `captain`; at most 16 pending requests; the bank
+keeps 64 answers and drops answers to expired requests when full (a retry of a
+dropped answer reports `unknown request`); finished tasks are not archived (256 task
+limit, runs slow as they grow); conversation prompts are keyed by role in code.

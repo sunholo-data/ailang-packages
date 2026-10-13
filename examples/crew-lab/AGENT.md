@@ -136,7 +136,7 @@ Normal modern surfaces show descriptive psychology and exact AI quotations; --de
 is the only development score switch. Authored stock is an app-owned narrator
 projection of frozen local state, while original selected bundle/text remains exact
 in the journal. Normal Guide never announces concealed variables.
-Use separate response-policy-watch-v2.json, callLimit6 default/cap8; never overwrite
+Use separate response-policy-watch-v2.json, callLimit12 default/cap64; never overwrite
 legacy response-policy.json or existing user edits. Modern signatures hash exact
 configuration identity and include local frozen perception, project/purpose, model,
 policy and prompt version. Prompt omits full config/effects and policy text. Reject

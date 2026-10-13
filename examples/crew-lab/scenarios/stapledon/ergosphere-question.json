@@ -1,0 +1,265 @@
+{
+ "schema": "crew_scenario/1",
+ "id": "stapledon-ergosphere-question",
+ "indicators": [
+  "fatigue",
+  "stress",
+  "morale",
+  "readiness",
+  "observations",
+  "trust"
+ ],
+ "indicator_defaults": {
+  "fatigue": 0,
+  "stress": 0,
+  "morale": 50,
+  "readiness": 50,
+  "observations": 0
+ },
+ "captain": {
+  "id": "captain",
+  "values": {
+   "mission": 90
+  },
+  "start": {
+   "fatigue": 25,
+   "stress": 70,
+   "morale": 45
+  }
+ },
+ "crew": [
+  {
+   "id": "navigator",
+   "role": "Navigator",
+   "ocean": {
+    "openness": 60,
+    "conscientiousness": 85,
+    "extraversion": 30,
+    "agreeableness": 45,
+    "neuroticism": 35
+   },
+   "values": {
+    "safety": 80,
+    "truth": 80
+   },
+   "start": {
+    "fatigue": 35,
+    "stress": 60,
+    "morale": 50
+   },
+   "work": [
+    {
+     "id": "work_navigator",
+     "name": "Model the tidal margins",
+     "purpose": "Calculate how close the ship can pass before tides become fatal; the numbers will decide what the crew believes is possible.",
+     "duration": 3,
+     "costs": [
+      {
+       "resource": "compute_slots",
+       "reserve": 2,
+       "consume": 0
+      }
+     ],
+     "effects": {
+      "observations": 25,
+      "fatigue": 20,
+      "stress": 15
+     }
+    }
+   ]
+  },
+  {
+   "id": "medic",
+   "role": "Medic",
+   "ocean": {
+    "openness": 55,
+    "conscientiousness": 60,
+    "extraversion": 45,
+    "agreeableness": 85,
+    "neuroticism": 55
+   },
+   "values": {
+    "care": 90,
+    "family": 85
+   },
+   "start": {
+    "fatigue": 35,
+    "stress": 70,
+    "morale": 45
+   },
+   "work": [
+    {
+     "id": "work_medic",
+     "name": "Prepare the medical bay",
+     "purpose": "Ready the bay for an approach that no one aboard has survived with memories intact.",
+     "duration": 2,
+     "costs": [
+      {
+       "resource": "medical_stock",
+       "reserve": 1,
+       "consume": 1
+      }
+     ],
+     "effects": {
+      "readiness": 15,
+      "fatigue": 10,
+      "stress": 10
+     }
+    }
+   ]
+  },
+  {
+   "id": "skeptic",
+   "role": "Skeptic",
+   "ocean": {
+    "openness": 55,
+    "conscientiousness": 60,
+    "extraversion": 40,
+    "agreeableness": 30,
+    "neuroticism": 45
+   },
+   "values": {
+    "truth": 85,
+    "autonomy": 80
+   },
+   "start": {
+    "fatigue": 35,
+    "stress": 75,
+    "morale": 40
+   },
+   "work": [
+    {
+     "id": "work_skeptic",
+     "name": "Question the approach plan",
+     "purpose": "Go through every assumption in the plan; a refusal now is cheaper than one at the horizon.",
+     "duration": 2,
+     "costs": [
+      {
+       "resource": "compute_slots",
+       "reserve": 1,
+       "consume": 0
+      }
+     ],
+     "effects": {
+      "observations": 15,
+      "fatigue": 10,
+      "stress": 5
+     }
+    }
+   ]
+  },
+  {
+   "id": "zealot",
+   "role": "Zealot",
+   "ocean": {
+    "openness": 25,
+    "conscientiousness": 80,
+    "extraversion": 55,
+    "agreeableness": 45,
+    "neuroticism": 55
+   },
+   "values": {
+    "faith": 90,
+    "cooperation": 70
+   },
+   "start": {
+    "fatigue": 30,
+    "stress": 55,
+    "morale": 60
+   },
+   "work": [
+    {
+     "id": "work_zealot",
+     "name": "Hold the vigil",
+     "purpose": "Keep a vigil in the Cathedral for the crew who will not remember this approach afterwards.",
+     "duration": 2,
+     "costs": [],
+     "effects": {
+      "morale": 10,
+      "fatigue": 10,
+      "stress": -5
+     }
+    }
+   ]
+  },
+  {
+   "id": "engineer",
+   "role": "Chief Engineer",
+   "ocean": {
+    "openness": 20,
+    "conscientiousness": 85,
+    "extraversion": 25,
+    "agreeableness": 45,
+    "neuroticism": 30
+   },
+   "values": {
+    "reliability": 90,
+    "family": 75
+   },
+   "start": {
+    "fatigue": 40,
+    "stress": 65,
+    "morale": 45
+   },
+   "work": [
+    {
+     "id": "work_engineer",
+     "name": "Brace the bubble generator",
+     "purpose": "Reinforce the generator mounts against tidal stress; it uses parts the ship cannot replace.",
+     "duration": 3,
+     "costs": [
+      {
+       "resource": "compute_slots",
+       "reserve": 1,
+       "consume": 0
+      },
+      {
+       "resource": "spare_parts",
+       "reserve": 2,
+       "consume": 2
+      }
+     ],
+     "effects": {
+      "readiness": 25,
+      "fatigue": 20,
+      "stress": 10
+     }
+    }
+   ]
+  }
+ ],
+ "rest": {
+  "purpose": "Step back to rest and recover before another assignment.",
+  "duration": 2,
+  "effects": {
+   "fatigue": -20,
+   "stress": -15,
+   "morale": 5
+  }
+ },
+ "overextended": {
+  "indicator": "stress",
+  "threshold": 70,
+  "recovery": 45,
+  "duration": 2,
+  "cooldown": 3
+ },
+ "trust_in_captain": 45,
+ "resources": [
+  {
+   "id": "compute_slots",
+   "name": "Archive compute slots",
+   "initial": 3
+  },
+  {
+   "id": "medical_stock",
+   "name": "Medical stock",
+   "initial": 2
+  },
+  {
+   "id": "spare_parts",
+   "name": "Generator spare parts",
+   "initial": 3
+  }
+ ]
+}

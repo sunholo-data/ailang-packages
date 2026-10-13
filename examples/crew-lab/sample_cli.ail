@@ -1,0 +1,98 @@
+module sunholo/crew_lab/sample_cli
+import std/io (println, exit)
+import std/fs (readFileResult, writeFileResult)
+import std/env (getArgs, getEnvOr)
+import std/result (Result, Ok, Err)
+import std/option (Some, None)
+import std/list (map, filter, length, range, flatMap, foldlE, forEachE)
+import std/string (split, stringToInt)
+import pkg/sunholo/crew_core/scenario (Scenario, decodeScenario)
+import pkg/sunholo/crew_core/example (firstContactJson)
+import pkg/sunholo/crew_core/policy (Policy, decodePolicy)
+import ./crew_sim (playKeeping)
+import ./sample (Moment, Sample, choose, encodeSample, report)
+import ./dialogue (watchSignatureIn)
+import ./store (PolicyFile, loadWatchPolicy, resolveChosen, cachedChosen)
+import ./play (model)
+
+-- crew-sample: wording for review. Plays the consent captain without AI,
+-- chooses varied moments crew members were asked something, and fetches their
+-- words exactly as the watch would (same library, prompts and checks). Saved
+-- words are free; at most --max-calls new provider calls. --offline: authored.
+type Options = {scenario:string, policy:string, first:int, last:int, turns:int, count:int, maxCalls:int, home:string, offline:bool, report:string}
+
+pure func range2(text:string) -> Result[{first:int, last:int}, string] = match split(text, "..") {
+ [a] => match stringToInt(a) {Some(n) => if n >= 1 && n <= 2147483646 then Ok({first:n, last:n}) else Err("seed out of range"), None => Err("--seeds takes N or A..B")},
+ [a, b] => match (stringToInt(a), stringToInt(b)) {(Some(x), Some(y)) => if x >= 1 && y >= x && y - x < 100 then Ok({first:x, last:y}) else Err("--seeds A..B: at most 100 seeds"), _ => Err("--seeds takes N or A..B")},
+ _ => Err("--seeds takes N or A..B")
+}
+
+pure func number(n:string, lo:int, hi:int, name:string) -> Result[int, string] = match stringToInt(n) {
+ Some(v) => if v >= lo && v <= hi then Ok(v) else Err("${name} must be ${show(lo)}..${show(hi)}"),
+ None => Err("${name} must be a whole number")
+}
+
+pure func parse(xs:[string], o:Options) -> Result[Options, string] = match xs {
+ [] => Ok(o),
+ "--scenario" :: p :: rest => parse(rest, {o | scenario:p}),
+ "--policy" :: p :: rest => parse(rest, {o | policy:p}),
+ "--home" :: p :: rest => parse(rest, {o | home:p}),
+ "--report" :: p :: rest => parse(rest, {o | report:p}),
+ "--offline" :: rest => parse(rest, {o | offline:true}),
+ "--seeds" :: r :: rest => match range2(r) {Ok(x) => parse(rest, {o | first:x.first, last:x.last}), Err(e) => Err(e)},
+ "--turns" :: n :: rest => match number(n, 1, 60, "--turns") {Ok(v) => parse(rest, {o | turns:v}), Err(e) => Err(e)},
+ "--count" :: n :: rest => match number(n, 1, 100, "--count") {Ok(v) => parse(rest, {o | count:v}), Err(e) => Err(e)},
+ "--max-calls" :: n :: rest => match number(n, 0, 64, "--max-calls") {Ok(v) => parse(rest, {o | maxCalls:v}), Err(e) => Err(e)},
+ "--help" :: _ => Err("help"),
+ x :: _ => Err("unknown argument ${x}")
+}
+
+pure func usage() -> string =
+ "crew-sample: crew wording for review, fetched as the watch would.\n  crew-sample [--scenario FILE] [--policy FILE] [--seeds A..B] [--turns N] [--count N] [--max-calls N] [--home PATH] [--offline] [--report FILE] > samples.ndjson\nDefaults: seeds 1..3, 8 turns, 12 moments, at most 6 new provider calls, the watch's home (~/.ailang/crew-lab) and its policy and library.\nOne crew_sample/1 line per moment; --report writes a readable copy. Reactions are authored and seeded; only the words come from the model."
+
+-- One moment: saved words are used as they are; a new fetch needs a call left.
+func fetch(sc:Scenario, pf:PolicyFile, o:Options, acc:{used:int, out:[Sample]}, m:Moment) -> {used:int, out:[Sample]} ! {FS, AI} = {
+ let h = m.heard;
+ let base = watchSignatureIn(sc, h.request, pf.body, model());
+ let saved = cachedChosen(o.home, base, h.label);
+ if not o.offline && not saved && acc.used >= o.maxCalls then {used:acc.used, out:acc.out ++ [{seed:m.seed, heard:h, source:"skipped", calls:0, words:[], error:"call budget used"}]}
+ else {
+  let f = resolveChosen(o.home, base, h.request.legal, h.label, model(), if o.offline then "offline" else "live", if o.offline then 0 else o.maxCalls - acc.used);
+  let s = match f.outcome {
+   Ok(b) => {seed:m.seed, heard:h, source:f.source, calls:f.calls, words:map(\v. v.text, filter(\v. v.label == h.label, b.variants)), error:""},
+   Err(e) => {seed:m.seed, heard:h, source:f.source, calls:f.calls, words:[], error:e}
+  };
+  {used:acc.used + f.calls, out:acc.out ++ [s]}
+ }
+}
+
+func run(o:Options) -> () ! {IO, FS, Env, AI} =
+ match (if o.scenario == "" then Ok(firstContactJson()) else readFileResult(o.scenario), if o.policy == "" then loadWatchPolicy(o.home) else match readFileResult(o.policy) {Err(e) => Err(e), Ok(b) => match decodePolicy(b) {Ok(p) => Ok({policy:p, body:b}), Err(e) => Err("invalid policy: ${e}")}}) {
+  (Err(e), _) => {println("cannot read scenario: ${e}"); exit(1)},
+  (_, Err(e)) => {println(e); exit(1)},
+  (Ok(sb), Ok(pf)) => match decodeScenario(sb) {
+   Err(e) => {println("invalid scenario: ${e}"); exit(1)},
+   Ok(sc) => {
+    let played = map(\seed. match playKeeping(sc, pf.policy, "consent", seed, o.turns, 200) {Ok(sim) => Ok(map(\h. {seed:seed, heard:h}, sim.heard)), Err(e) => Err("seed ${show(seed)}: ${e}")}, range(o.first, o.last + 1));
+    match flatMap(\r. match r {Err(e) => [e], Ok(_) => []}, played) {
+     e :: _ => {println("run failed: ${e}"); exit(1)},
+     [] => {
+    let moments = flatMap(\r. match r {Ok(ms) => ms, Err(_) => []}, played);
+    let done = foldlE(\acc m. fetch(sc, pf, o, acc, m), {used:0, out:[]}, choose(moments, o.count));
+    forEachE(\s. println(encodeSample(sc, s)), done.out);
+    if o.report == "" then () else match writeFileResult(o.report, "${report(sc, done.out)}\n") {Ok(_) => (), Err(e) => {println("cannot write report: ${e}"); exit(1)}}
+     }
+    }
+   }
+  }
+ }
+
+func launch(offline:bool) -> () ! {IO, FS, Env, AI} = match parse(getArgs(), {scenario:"", policy:"", first:1, last:3, turns:8, count:12, maxCalls:6, home:"${getEnvOr("HOME", ".")}/.ailang/crew-lab", offline:offline, report:""}) {
+ Err("help") => println(usage()),
+ Err(e) => {println("${e}\n\n${usage()}"); exit(2)},
+ Ok(o) => run(o)
+}
+
+export func main() -> () ! {IO, FS, Env, AI} = launch(false)
+-- crew-sample-offline: authored words only; runs without any provider key.
+export func offline() -> () ! {IO, FS, Env, AI} = launch(true)

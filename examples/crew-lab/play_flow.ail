@@ -48,8 +48,11 @@ ensures { match result { Ok(s) => s.seed == seed, Err(_) => true } } = match def
 export pure func beginConversationWatch(policyChoice:string,seed:int)->Result[PlayState,string] ! {}
 ensures {match result {Err(_)=>true,Ok(s)=>s.seed==seed}} = match defaultShip() { Ok(sc) => beginConversationWatchIn(sc, policyChoice, seed), Err(e) => Err(e) }
 
+-- Every session is a watch session since the scenario became data: the config is
+-- the session's own scenario under its policy (any scenario id, not only the
+-- default ship's crew-watch-v2).
 export pure func isWatch(s: PlayState) -> bool ! {}
-ensures { result == (s.session.config.id == "crew-watch-v2-${s.session.policy}") } = s.session.config.id == "crew-watch-v2-${s.session.policy}"
+ensures { result == (s.session.config.id == "${s.session.scenario.id}-${s.session.policy}") } = s.session.config.id == "${s.session.scenario.id}-${s.session.policy}"
 
 export pure func beginConversationWatchIn(sc:Scenario,policyChoice:string,seed:int)->Result[PlayState,string] ! {}
 ensures {match result {Err(_)=>true,Ok(s)=>s.seed==seed && s.seq==0 && isConversation(s.session)}} =

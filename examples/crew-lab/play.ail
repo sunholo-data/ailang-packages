@@ -242,7 +242,7 @@ func act(r: Run, i: Intent) -> Result[Applied, string] ! {IO, FS, AI} = if i.kin
 -- boundaries. UI-owned navigation never calls them. No second input owner.
 func openWatchScenario(sc:Scenario,policyText:string,home:string,seed:int,policyChoice:string,mode:string,debug:bool,conversation:bool)->Result[Run,string] ! {FS,Env}
 requires { stringLength(home)>0 && stringLength(home)<=4096 && seed>=1 && seed<=2147483646 && (mode=="live" || mode=="offline") }
-ensures { match result {Err(_)=>true,Ok(r)=>r.ui.seed==seed && r.ui.seq==0 && isWatch(r.ui) && r.remaining>=0 && r.remaining<=8} } =
+ensures { match result {Err(_)=>true,Ok(r)=>r.ui.seed==seed && r.ui.seq==0 && isWatch(r.ui) && r.remaining>=0 && r.remaining<=64} } =
  match (if conversation then beginConversationWatchIn(sc,policyChoice,seed) else beginWatchIn(sc,policyChoice,seed),if policyText=="" then loadWatchPolicy(home) else match decodePolicy(policyText) {Ok(p)=>Ok({policy:p,body:policyText}),Err(e)=>Err("Invalid --policy: ${e}")}) {
   (Err(e),_)=>Err(e),(_,Err(e))=>Err(e),
   (Ok(ui),Ok(config))=>{
@@ -263,7 +263,7 @@ requires {stringLength(home)>0 && stringLength(home)<=4096 && seed>=1 && seed<=2
 ensures {match result {Err(_)=>true,Ok(r)=>isWatch(r.ui) && isConversation(r.ui.session)}} = openWatchScenario(sc,policyText,home,seed,policyChoice,mode,debug,true)
 
 export func applyWatch(r:Run,i:Intent)->Result[Applied,string] ! {IO,FS,AI}
-requires { isWatch(r.ui) && r.remaining>=0 && r.remaining<=8 && (r.mode=="live" || r.mode=="offline") }
+requires { isWatch(r.ui) && r.remaining>=0 && r.remaining<=64 && (r.mode=="live" || r.mode=="offline") }
 ensures { match result {Err(_)=>true,Ok(a)=>a.run.remaining<=r.remaining && a.run.remaining>=0 && a.run.path==r.path && a.run.ui.session.config.id==r.ui.session.config.id} } =
  match act({r|modern:false},i) {Err(e)=>Err(e),Ok(a)=>Ok({a|run:{a.run|modern:true}})}
 

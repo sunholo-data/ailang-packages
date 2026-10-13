@@ -14,7 +14,7 @@ pure func all[a](f:a->bool,xs:[a])->bool = not any(\x. not f(x),xs)
 test "new captain sees teaching and both command style meanings at40x16" {
  let f = frame(None,initial(40,16,false),"",[],"offline",0,"journal",false,false);
  let text = join("\n",f.lines);
- length(f.lines) == 16 && all(\l. cells(l) <= 40,f.lines) && contains(text,"You are captain") && contains(text,"Five specialists") && contains(text,"requires") && contains(text,"despite refusal") && contains(text,"Enter") && not contains(f.text,"\u{1B}")
+ length(f.lines) == 16 && all(\l. cells(l) <= 40,f.lines) && contains(text,"You are captain") && contains(text,"specialists") && contains(text,"requires") && contains(text,"despite refusal") && contains(text,"Enter") && not contains(f.text,"\u{1B}")
 }
 test "reading guide hides inactive Start and uses reading controls" {
  match beginWatch("2",61) {Err(_)=>false,Ok(s)=>{

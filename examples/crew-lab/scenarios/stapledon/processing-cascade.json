@@ -1,0 +1,266 @@
+{
+ "schema": "crew_scenario/1",
+ "id": "stapledon-processing-cascade",
+ "indicators": [
+  "fatigue",
+  "stress",
+  "morale",
+  "readiness",
+  "observations",
+  "trust"
+ ],
+ "indicator_defaults": {
+  "fatigue": 0,
+  "stress": 0,
+  "morale": 50,
+  "readiness": 50,
+  "observations": 0
+ },
+ "captain": {
+  "id": "captain",
+  "values": {
+   "mission": 75,
+   "safety": 80
+  },
+  "start": {
+   "fatigue": 30,
+   "stress": 65,
+   "morale": 45
+  }
+ },
+ "crew": [
+  {
+   "id": "engineer",
+   "role": "Chief Engineer",
+   "ocean": {
+    "openness": 20,
+    "conscientiousness": 90,
+    "extraversion": 25,
+    "agreeableness": 45,
+    "neuroticism": 35
+   },
+   "values": {
+    "reliability": 90,
+    "family": 85
+   },
+   "start": {
+    "fatigue": 50,
+    "stress": 75,
+    "morale": 45
+   },
+   "work": [
+    {
+     "id": "work_engineer",
+     "name": "Rebuild the water reclaimer",
+     "purpose": "Strip and rebuild the failed reclaimer; every part used is mass the ship can never replace.",
+     "duration": 3,
+     "costs": [
+      {
+       "resource": "repair_stock",
+       "reserve": 2,
+       "consume": 2
+      },
+      {
+       "resource": "fabrication_time",
+       "reserve": 1,
+       "consume": 0
+      }
+     ],
+     "effects": {
+      "readiness": 25,
+      "fatigue": 25,
+      "stress": 10
+     }
+    }
+   ]
+  },
+  {
+   "id": "pilot",
+   "role": "Pilot",
+   "ocean": {
+    "openness": 35,
+    "conscientiousness": 30,
+    "extraversion": 80,
+    "agreeableness": 55,
+    "neuroticism": 25
+   },
+   "values": {
+    "safety": 75,
+    "adventure": 80
+   },
+   "start": {
+    "fatigue": 30,
+    "stress": 55,
+    "morale": 60
+   },
+   "work": [
+    {
+     "id": "work_pilot",
+     "name": "Trim the drive to cut load",
+     "purpose": "Reduce drive load so life support has headroom; the leg will take longer, and Earth's clock keeps running.",
+     "duration": 2,
+     "costs": [
+      {
+       "resource": "fabrication_time",
+       "reserve": 1,
+       "consume": 0
+      }
+     ],
+     "effects": {
+      "readiness": 15,
+      "fatigue": 10,
+      "stress": 10
+     }
+    }
+   ]
+  },
+  {
+   "id": "skeptic",
+   "role": "Skeptic",
+   "ocean": {
+    "openness": 55,
+    "conscientiousness": 60,
+    "extraversion": 40,
+    "agreeableness": 30,
+    "neuroticism": 45
+   },
+   "values": {
+    "truth": 85,
+    "autonomy": 80
+   },
+   "start": {
+    "fatigue": 35,
+    "stress": 65,
+    "morale": 45
+   },
+   "work": [
+    {
+     "id": "work_skeptic",
+     "name": "Inspect the other reclaimers",
+     "purpose": "Look for the same fault elsewhere before anyone calls the repair finished.",
+     "duration": 2,
+     "costs": [
+      {
+       "resource": "repair_stock",
+       "reserve": 1,
+       "consume": 0
+      }
+     ],
+     "effects": {
+      "observations": 20,
+      "fatigue": 15,
+      "stress": 10
+     }
+    }
+   ]
+  },
+  {
+   "id": "botanist",
+   "role": "Botanist",
+   "ocean": {
+    "openness": 65,
+    "conscientiousness": 70,
+    "extraversion": 35,
+    "agreeableness": 75,
+    "neuroticism": 40
+   },
+   "values": {
+    "growth": 85,
+    "care": 75
+   },
+   "start": {
+    "fatigue": 35,
+    "stress": 60,
+    "morale": 55
+   },
+   "work": [
+    {
+     "id": "work_botanist",
+     "name": "Shift the gardens to water-light crops",
+     "purpose": "Replant the lower gardens with crops that need less water while reclaimer capacity is short.",
+     "duration": 3,
+     "costs": [
+      {
+       "resource": "seed_stock",
+       "reserve": 1,
+       "consume": 1
+      }
+     ],
+     "effects": {
+      "readiness": 15,
+      "fatigue": 15,
+      "morale": 5
+     }
+    }
+   ]
+  },
+  {
+   "id": "quartermaster",
+   "role": "Quartermaster",
+   "ocean": {
+    "openness": 30,
+    "conscientiousness": 90,
+    "extraversion": 40,
+    "agreeableness": 50,
+    "neuroticism": 40
+   },
+   "values": {
+    "fairness": 85,
+    "reliability": 80
+   },
+   "start": {
+    "fatigue": 35,
+    "stress": 60,
+    "morale": 50
+   },
+   "work": [
+    {
+     "id": "work_quartermaster",
+     "name": "Recount the stores",
+     "purpose": "Count what the mass budget really holds before anyone promises rations or repairs.",
+     "duration": 2,
+     "costs": [],
+     "effects": {
+      "observations": 15,
+      "fatigue": 10,
+      "stress": 10
+     }
+    }
+   ]
+  }
+ ],
+ "rest": {
+  "purpose": "Step back to rest and recover before another assignment.",
+  "duration": 2,
+  "effects": {
+   "fatigue": -20,
+   "stress": -15,
+   "morale": 5
+  }
+ },
+ "overextended": {
+  "indicator": "stress",
+  "threshold": 70,
+  "recovery": 45,
+  "duration": 2,
+  "cooldown": 3
+ },
+ "trust_in_captain": 50,
+ "resources": [
+  {
+   "id": "repair_stock",
+   "name": "Repair stock (kg blocks)",
+   "initial": 4
+  },
+  {
+   "id": "fabrication_time",
+   "name": "Fabrication bay time",
+   "initial": 2
+  },
+  {
+   "id": "seed_stock",
+   "name": "Water-light seed stock",
+   "initial": 2
+  }
+ ]
+}

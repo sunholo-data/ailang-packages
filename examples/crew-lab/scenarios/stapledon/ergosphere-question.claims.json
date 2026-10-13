@@ -1,0 +1,54 @@
+{
+  "schema": "crew_claims/1",
+  "claims": [
+    {
+      "id": "consent-runs-clean",
+      "captain": "consent",
+      "metric": "errors",
+      "stat": "max",
+      "op": "==",
+      "value": 0
+    },
+    {
+      "id": "orders-runs-clean",
+      "captain": "orders",
+      "metric": "errors",
+      "stat": "max",
+      "op": "==",
+      "value": 0
+    },
+    {
+      "id": "skeptic-pushes-back",
+      "captain": "orders",
+      "metric": "crew.skeptic.replies.decline",
+      "stat": "median",
+      "op": ">=",
+      "value": 1,
+      "note": "someone says no before the horizon"
+    },
+    {
+      "id": "orders-cost-skeptic-trust",
+      "captain": "orders",
+      "metric": "crew.skeptic.trust",
+      "stat": "median",
+      "op": "<",
+      "value": 40
+    },
+    {
+      "id": "consent-keeps-skeptic-talking",
+      "captain": "consent",
+      "metric": "crew.skeptic.trust",
+      "stat": "median",
+      "op": ">=",
+      "value": 45
+    },
+    {
+      "id": "navigator-models-margins",
+      "captain": "consent",
+      "metric": "crew.navigator.observations",
+      "stat": "median",
+      "op": ">=",
+      "value": 25
+    }
+  ]
+}

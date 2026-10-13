@@ -1,0 +1,57 @@
+module sunholo/crew_lab/sample
+import std/json (Json, decode, encode, getString, jo, kv, js, jint, ja, jb)
+import std/list (map, filter, foldl, length, any, take, contains)
+import std/string (join, length as size)
+import std/option (Option, Some, None)
+import std/result (Result, Ok, Err)
+import pkg/sunholo/crew_core/scenario (Scenario, projectName)
+import ./crew_sim (Heard)
+import ./dialogue (narrativeText)
+
+-- crew-sample: pick a varied set of moments crew members were asked something,
+-- fetch their words through the watch's library, and print them for review.
+export type Moment = {seed:int, heard:Heard} deriving (Eq)
+export type Sample = {seed:int, heard:Heard, source:string, calls:int, words:[string], error:string} deriving (Eq)
+
+pure func pair(h:Heard) -> string = "${h.request.actor}/${h.label}"
+pure func band(n:int) -> int = if n < 40 then 0 else if n < 70 then 1 else 2
+pure func situation(h:Heard) -> string = "${pair(h)}/${show(band(h.fatigue))}${show(band(h.stress))}${show(band(h.morale))}"
+
+-- Varied first: each new crew/reaction pair, then each new pair at a different
+-- fatigue/stress/morale band, then the rest in order. Stable and bounded.
+export pure func choose(xs:[Moment], n:int) -> [Moment] ! {}
+ensures { length(result) <= (if n < 0 then 0 else n) && length(result) <= length(xs) } = {
+ let firstPairs = foldl(\acc x. if any(\y. pair(y.heard) == pair(x.heard), acc) then acc else acc ++ [x], [], xs);
+ let bands = foldl(\acc x. if any(\y. situation(y.heard) == situation(x.heard), acc) then acc else acc ++ [x], firstPairs, xs);
+ let rest = foldl(\acc x. if any(\y. y.seed == x.seed && y.heard.request.id == x.heard.request.id, acc) then acc else acc ++ [x], bands, xs);
+ take(if n < 0 then 0 else n, rest)
+}
+
+pure func recipe(h:Heard) -> string = match decode(h.request.context) {
+ Err(_) => "",
+ Ok(j) => match getString(j, "recipe") {Some(r) => r, None => ""}
+}
+
+export pure func encodeSample(sc:Scenario, s:Sample) -> string ! {}
+ensures { size(result) > 0 } = {
+ let h = s.heard;
+ encode(jo([kv("schema", js("crew_sample/1")), kv("seed", jint(s.seed)), kv("tick", jint(h.tick)), kv("actor", js(h.request.actor)), kv("project", js(projectName(sc, recipe(h)))), kv("reaction", js(h.label)),
+  kv("fatigue", jint(h.fatigue)), kv("stress", jint(h.stress)), kv("morale", jint(h.morale)), kv("source", js(s.source)), kv("calls", jint(s.calls)),
+  kv("words", ja(map(js, s.words))), kv("narrative_ok", jb(not any(\w. not narrativeText(w), s.words))), kv("error", js(s.error))]))
+}
+
+pure func entry(sc:Scenario, s:Sample) -> string = {
+ let h = s.heard;
+ let head = "- ${h.label} about ${projectName(sc, recipe(h))} (turn ${show(h.tick)}; fatigue ${show(h.fatigue)}, stress ${show(h.stress)}, morale ${show(h.morale)}; ${s.source})";
+ let body = if s.error != "" then "\n    (no words: ${s.error})" else join("", map(\w. "\n    \"${w}\"${if narrativeText(w) then "" else "  [leaks mechanics]"}", s.words));
+ "${head}${body}"
+}
+
+-- Reading copy, grouped by crew member in the order sampled.
+export pure func report(sc:Scenario, xs:[Sample]) -> string ! {}
+ensures { size(result) > 0 } = {
+ let actors = foldl(\acc s. if contains(acc, s.heard.request.actor) then acc else acc ++ [s.heard.request.actor], [], xs);
+ let calls = foldl(\n s. n + s.calls, 0, xs);
+ let header = "CREW WORDING SAMPLES: ${show(length(xs))} moments, ${show(calls)} provider calls. Reactions are authored; the words are what the watch would show.";
+ join("\n", header :: map(\a. "\n${a}\n${join("\n", map(\s. entry(sc, s), filter(\s. s.heard.request.actor == a, xs)))}", actors))
+}
