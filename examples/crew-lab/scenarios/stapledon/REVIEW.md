@@ -11,11 +11,36 @@ Six draft scenarios, each checked by `crew-sim --check` (20 seeds, 12 turns, con
 5. **Rest offers read awkwardly** ("the medic rest assignment"): the rest project is named `<Role> rest`. A per-scenario rest name would fix it.
 6. **Gaps between the lab and canon** (inputs for integration, not defects here): the lab models 5 featured crew, not ~100 founders; turns, not game-weeks; no family or chemistry relationships yet (the engineer is canonically parent of the pilot and skeptic); the Archive is not an actor; refusal is individual, with no votes or mutiny; samples use the watch-v2 prompts, not the conversation prompts.
 
+## Update 2026-10-13: one set of resources
+
+Mark's review asked for universal, physical resources in place of abstract
+ones. Every scenario now uses only the eight bubble resources from
+stapledons-design `features/next/bubble-resources.md`: `mass`, `water`,
+`power`, `heat`, `garden`, `fabrication`, `compute` and `signal`, at crew-scale
+units. Stocks (`mass`, `water`) are used up. Capacities (the other six) are
+only reserved while work runs.
+
+| Before | Now |
+|---|---|
+| Spare parts, paper, medical stock, cartridges, repair stock | `mass` (fabricated free mass; one pool, so they compete) |
+| Archive access, compute slots, message bandwidth, diagnostic time | `compute` |
+| Relay windows, antenna time | `signal` |
+| Fabrication bay time | `fabrication` |
+| Seed stock | `garden` (reserved, no longer consumed) |
+| Clinic hours | dropped (the medic's time is fatigue) |
+
+Claims over 20 seeds are unchanged: still 33 of 36, with the same three
+findings. Only `processing-cascade` moved. Its median stockouts fell from 5 to
+3, and median relief granted from 2 to 1, because the botanist no longer uses
+up garden beds. The scenarios do not yet use `water`, `power` or `heat`; the
+next pass should, with the reclaimer failure draining `water` and the gardens
+competing for `power`.
+
 ## Scenarios
 
 ### Last messages home (`last-messages-home`)
 
-Cast: Medic, Chief Engineer, Analyst, Pilot, Counselor. Supplies: Outbound relay windows 2, Diagnostic bay time 2, Drive spare parts 3.
+Cast: Medic, Chief Engineer, Analyst, Pilot, Counselor. Supplies: free mass 3, Archive compute 2, antenna windows 2 (were relay windows, diagnostic bay time, drive spare parts).
 
 Claims: 6 of 6 claims hold (seeds 1..20, 12 turns).
 
@@ -29,7 +54,7 @@ Claims: 6 of 6 claims hold (seeds 1..20, 12 turns).
 
 ### News from Earth, decades late (`news-decades-late`)
 
-Cast: Medic, Counselor, Analyst, Scientist, Dreamer. Supplies: Clinic hours 2, Archive message bandwidth 2, Diagnostic cartridges 3.
+Cast: Medic, Counselor, Analyst, Scientist, Dreamer. Supplies: free mass 3, Archive compute 2 (were diagnostic cartridges and message bandwidth; clinic hours dropped, since the medic's time is fatigue).
 
 Claims: 5 of 6 claims hold (seeds 1..20, 12 turns). Failing:
 - `FAIL orders-keep-medic-strained: orders captain, median crew.medic.stress over 20 runs = 65.0 (expected >= 70.0)`
@@ -44,7 +69,7 @@ Claims: 5 of 6 claims hold (seeds 1..20, 12 turns). Failing:
 
 ### The Archive misremembers (`archive-misremembers`)
 
-Cast: Analyst, Skeptic, Zealot, Chief Engineer, Counselor. Supplies: Archive core access 3, Paper stock 4, Spare memory modules 2.
+Cast: Analyst, Skeptic, Zealot, Chief Engineer, Counselor. Supplies: free mass 6, Archive compute 3 (paper and memory modules are both fabricated mass, so they now share one pool).
 
 Claims: 6 of 6 claims hold (seeds 1..20, 12 turns).
 
@@ -58,7 +83,7 @@ Claims: 6 of 6 claims hold (seeds 1..20, 12 turns).
 
 ### A cascade in Processing (`processing-cascade`)
 
-Cast: Chief Engineer, Pilot, Skeptic, Botanist, Quartermaster. Supplies: Repair stock (kg blocks) 4, Fabrication bay time 2, Water-light seed stock 2.
+Cast: Chief Engineer, Pilot, Skeptic, Botanist, Quartermaster. Supplies: free mass 4, lit garden beds 2, fabricator shifts 2 (garden beds are now reserved, not used up).
 
 Claims: 5 of 6 claims hold (seeds 1..20, 12 turns). Failing:
 - `FAIL engineer-under-strain: orders captain, median crew.engineer.stress over 20 runs = 65.0 (expected >= 70.0) — the engineer carries the crisis`
@@ -73,7 +98,7 @@ Claims: 5 of 6 claims hold (seeds 1..20, 12 turns). Failing:
 
 ### The ergosphere question (`ergosphere-question`)
 
-Cast: Navigator, Medic, Skeptic, Zealot, Chief Engineer. Supplies: Archive compute slots 3, Medical stock 2, Generator spare parts 3.
+Cast: Navigator, Medic, Skeptic, Zealot, Chief Engineer. Supplies: free mass 5, Archive compute 3 (medicine and spare parts are both fabricated mass).
 
 Claims: 6 of 6 claims hold (seeds 1..20, 12 turns).
 
@@ -87,7 +112,7 @@ Claims: 6 of 6 claims hold (seeds 1..20, 12 turns).
 
 ### Light from the dead (`light-from-the-dead`)
 
-Cast: Analyst, Dreamer, Scientist, Diplomat, Counselor. Supplies: Dome antenna time 2, Archive compute slots 3.
+Cast: Analyst, Dreamer, Scientist, Diplomat, Counselor. Supplies: Archive compute 3, antenna windows 2.
 
 Claims: 5 of 6 claims hold (seeds 1..20, 12 turns). Failing:
 - `FAIL orders-sour-the-diplomat: orders captain, median crew.diplomat.trust over 20 runs = 61.0 (expected < 50.0)`

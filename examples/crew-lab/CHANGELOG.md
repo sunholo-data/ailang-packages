@@ -1,5 +1,22 @@
 # Changelog
 
+## Unreleased
+
+Local only; never published.
+
+- **Universal resources.** The Stapledon pack uses only the eight bubble
+  resources (`mass`, `water`, `power`, `heat`, `garden`, `fabrication`,
+  `compute`, `signal`; stapledons-design `bubble-resources.md`). Stocks are
+  used up; capacities are only reserved. All claims are unchanged: 33 of 36
+  hold.
+- **Crew memory spike.**
+  - `memory.ail` (pure, exported) provides recall, the variety check
+    (`echoes`), `margin` and the Archive's near-miss `pick`.
+  - `recall_spike.ail` measures local embeddings (EmbeddingGemma 2 on Ollama)
+    on the pack's sampled words. Report:
+    `spikes/recall-spike-2026-10-13.txt`.
+  - Design: `design_docs/planned/crew-memory.md`.
+
 ## 0.7.0
 
 Local only; never published. A verification loop for tuning:
