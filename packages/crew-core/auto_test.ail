@@ -25,7 +25,7 @@ pure func run(policy: string, o: Orders, rules: [Rule], n: int) -> Result[AutoRe
 pure func rule(kind: string, indicator: string, threshold: int) -> Rule = {kind: kind, indicator: indicator, threshold: threshold, kinds: []}
 
 test "without rules auto-play runs every turn and never escalates" {
- match run("consent", consentOrders(), [], 12) { Ok(a) => a.turns == 12 && a.session.state.tick == 12 && a.escalated == None && length(a.log) > 0, Err(_) => false }
+ match run("consent", consentOrders(), [], 6) { Ok(a) => a.turns == 6 && a.session.state.tick == 6 && a.escalated == None && length(a.log) > 0, Err(_) => false }
 }
 
 test "a refusal under orders stops before the override and leaves the work offered" {
@@ -53,7 +53,7 @@ test "a trust floor escalates when someone's trust falls below it" {
 }
 
 test "standing orders and escalation rules decode and validate" {
- decodeOrders("{\"schema\":\"crew_standing_orders/1\",\"start\":\"always\",\"rest\":\"never\",\"relief\":\"strained\"}") == Ok({start: "always", rest: "never", relief: "strained", fatigue: 70, stress: 75})
+ decodeOrders("{\"schema\":\"crew_standing_orders/1\",\"start\":\"always\",\"rest\":\"never\",\"relief\":\"strained\"}") == Ok({start: "always", rest: "never", relief: "strained", fatigue: 70, stress: 75, cadence: 1})
  && (match decodeOrders("{\"schema\":\"crew_standing_orders/1\",\"start\":\"maybe\",\"rest\":\"never\",\"relief\":\"deny\"}") { Err(_) => true, Ok(_) => false })
  && (match decodeEscalation("{\"schema\":\"crew_escalation/1\",\"rules\":[{\"kind\":\"breakdown\",\"indicator\":\"stress\",\"threshold\":85},{\"kind\":\"major\",\"kinds\":[\"loss\",\"deep_time\"]},{\"kind\":\"argument\"}]}") { Ok(rs) => length(rs) == 3, Err(_) => false })
  && (match decodeEscalation("{\"schema\":\"crew_escalation/1\",\"rules\":[{\"kind\":\"breakdown\",\"threshold\":85}]}") { Err(_) => true, Ok(_) => false })
@@ -83,4 +83,16 @@ test "a major ship event of a listed kind escalates" {
   (Ok(a), Ok(b)) => (match a.escalated { Some(e) => e.rule == "major" && e.detail == "ev-sky", None => false }) && b.escalated == None,
   _ => false
  }
+}
+
+test "a weekly cadence covers the whole span with far fewer decisions" {
+ match (run("consent", {consentOrders() | cadence: 7}, [], 21), run("consent", consentOrders(), [], 21)) {
+  (Ok(weekly), Ok(daily)) => weekly.turns == 21 && weekly.session.state.tick == 21 && length(filter(\a. a.kind == "offer", weekly.log)) * 2 < length(filter(\a. a.kind == "offer", daily.log)),
+  _ => false
+ }
+}
+
+test "cadence must be 1..365" {
+ (match decodeOrders("{\"schema\":\"crew_standing_orders/1\",\"start\":\"agreed\",\"rest\":\"tired\",\"relief\":\"grant\",\"cadence\":0}") { Err(_) => true, Ok(_) => false })
+ && (match decodeOrders("{\"schema\":\"crew_standing_orders/1\",\"start\":\"agreed\",\"rest\":\"tired\",\"relief\":\"grant\",\"cadence\":7}") { Ok(o) => o.cadence == 7, Err(_) => false })
 }

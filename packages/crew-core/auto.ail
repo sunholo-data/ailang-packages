@@ -1,12 +1,12 @@
 module sunholo/crew_core/auto
 import std/result (Result, Ok, Err)
 import std/option (Option, Some, None)
-import std/list (map, filter, foldl, length, head, any, contains, range)
+import std/list (map, filter, foldl, length, head, any, contains, range, reverse)
 import std/json (Json, decode, getString, getInt, getArray, getStringArrayOrEmpty, keys)
 import std/string (startsWith)
 import pkg/sunholo/social_dynamics/model (Task, Offered, Working)
 import ./scenario (Scenario)
-import ./session (Session, Request, HostError, HostFailure, offer, ask, complete, startTask, resolve, cancel, input, encodeHostError)
+import ./session (Session, Request, HostError, HostFailure, TaskAgreement, offer, ask, complete, startTask, resolve, cancel, input, encodeHostError)
 import ./policy (Policy, authoredAnswer)
 
 -- Auto-captain (crew_core 0.3.0, Stapledon R2-CREW CI-0). Standing orders say
@@ -29,7 +29,10 @@ import ./policy (Policy, authoredAnswer)
 --  relief: "grant" | "deny" | "strained" (grant only at or over the
 --    overextension threshold)
 --  fatigue, stress: what counts as tired
-export type Orders = { start: string, rest: string, relief: string, fatigue: int, stress: int } deriving (Eq)
+--  cadence: decide every `cadence` turns (1 = daily). Between check-ins the
+--    engine runs on: work completes and events fire, but nobody is asked;
+--    a decade at a monthly cadence is about 120 decision turns.
+export type Orders = { start: string, rest: string, relief: string, fatigue: int, stress: int, cadence: int } deriving (Eq)
 
 -- crew_escalation/1 rules. kind:
 --  "refusal_under_orders": a worker declines and the orders would start anyway
@@ -55,10 +58,10 @@ export type AutoState = { seed: int, agreed: [string], raised: [string] } derivi
 export type AutoResult = { session: Session, state: AutoState, turns: int, escalated: Option[Escalated], log: [Act], noted: [Escalated] } deriving (Eq)
 
 export pure func consentOrders() -> Orders ! {}
-ensures { result.start == "agreed" } = { start: "agreed", rest: "tired", relief: "grant", fatigue: 70, stress: 75 }
+ensures { result.start == "agreed" } = { start: "agreed", rest: "tired", relief: "grant", fatigue: 70, stress: 75, cadence: 1 }
 
 export pure func ordersOrders() -> Orders ! {}
-ensures { result.start == "always" } = { start: "always", rest: "never", relief: "deny", fatigue: 70, stress: 75 }
+ensures { result.start == "always" } = { start: "always", rest: "never", relief: "deny", fatigue: 70, stress: 75, cadence: 1 }
 
 -- --------------------------------------------------------------- decoding
 
@@ -68,15 +71,18 @@ export pure func decodeOrders(body: string) -> Result[Orders, string] ! {}
 ensures { match result { Ok(o) => o.start == "agreed" || o.start == "always", Err(_) => true } } = match decode(body) {
  Err(e) => Err("standing orders JSON: ${e}"),
  Ok(j) => if str(j, "schema") != "crew_standing_orders/1" then Err("standing orders: schema must be crew_standing_orders/1")
-  else if any(\k. not contains(["schema", "start", "rest", "relief", "fatigue", "stress"], k), keys(j)) then Err("standing orders: unknown field")
+  else if any(\k. not contains(["schema", "start", "rest", "relief", "fatigue", "stress", "cadence"], k), keys(j)) then Err("standing orders: unknown field")
+  else if (match getInt(j, "cadence") { Some(c) => c < 1 || c > 365, None => false }) then Err("standing orders: cadence must be 1..365")
   else if not contains(["agreed", "always"], str(j, "start")) then Err("standing orders: start must be agreed or always")
   else if not contains(["tired", "never"], str(j, "rest")) then Err("standing orders: rest must be tired or never")
   else if not contains(["grant", "deny", "strained"], str(j, "relief")) then Err("standing orders: relief must be grant, deny or strained")
   else match (getInt(j, "fatigue"), getInt(j, "stress")) {
-   (Some(f), Some(s)) => if f < 0 || f > 100 || s < 0 || s > 100 then Err("standing orders: fatigue and stress must be 0..100") else Ok({ start: str(j, "start"), rest: str(j, "rest"), relief: str(j, "relief"), fatigue: f, stress: s }),
-   _ => Ok({ start: str(j, "start"), rest: str(j, "rest"), relief: str(j, "relief"), fatigue: 70, stress: 75 })
+   (Some(f), Some(s)) => if f < 0 || f > 100 || s < 0 || s > 100 then Err("standing orders: fatigue and stress must be 0..100") else Ok({ start: str(j, "start"), rest: str(j, "rest"), relief: str(j, "relief"), fatigue: f, stress: s, cadence: cadenceOf(j) }),
+   _ => Ok({ start: str(j, "start"), rest: str(j, "rest"), relief: str(j, "relief"), fatigue: 70, stress: 75, cadence: cadenceOf(j) })
   }
 }
+
+pure func cadenceOf(j: Json) -> int = match getInt(j, "cadence") { Some(c) => c, None => 1 }
 
 pure func readRule(j: Json) -> Result[Rule, string] = {
  let kind = str(j, "kind");
@@ -116,20 +122,28 @@ pure func trustOf(s: Session, actor: string) -> int = match head(filter(\r. r.fr
 
 pure func threshold(s: Session, worker: string) -> int = match head(filter(\r. r.id == "overextended_${worker}", s.scenario.rules)) { Some(r) => r.threshold, None => 101 }
 
-pure func busy(s: Session, worker: string) -> bool = any(\t. (t.status == Offered || t.status == Working) && contains(t.participants, worker), s.state.tasks)
+-- An offer whose agreement has fallen due can no longer be answered (long
+-- check-in jumps leave such offers behind); it no longer occupies the worker
+-- and is not asked about again. Archiving folds it away.
+pure func stale(s: Session, t: Task) -> bool = t.status == Offered && (match head(filter(\b. b.task == t.id, s.bindings)) {
+ Some(b) => any(\c. c.id == b.agreement && c.due <= s.state.tick, s.state.commitments),
+ None => false
+})
+
+pure func busy(s: Session, worker: string) -> bool = any(\t. ((t.status == Offered && not stale(s, t)) || t.status == Working) && contains(t.participants, worker), s.state.tasks)
 
 pure func workRecipe(sc: Scenario, worker: string) -> string = match head(filter(\o. o.text == worker && o.id != "rest_${worker}", sc.owners)) {
  Some(o) => o.id, None => "rest_${worker}"
 }
 
 pure func act(r: Run, kind: string, actor: string, label: string, detail: string, request: Option[Request], s: Session) -> Run =
- {r | log: r.log ++ [{ kind: kind, actor: actor, label: label, detail: detail, request: request, tick: s.state.tick, fatigue: indicator(s, actor, "fatigue"), stress: indicator(s, actor, "stress"), morale: indicator(s, actor, "morale") }]}
+ {r | log: [{ kind: kind, actor: actor, label: label, detail: detail, request: request, tick: s.state.tick, fatigue: indicator(s, actor, "fatigue"), stress: indicator(s, actor, "stress"), morale: indicator(s, actor, "morale") }] ++ r.log}
 
 pure func stopped(r: Run) -> bool = match r.escalated { Some(_) => true, None => false }
 
 pure func escalate(r: Run, rule: string, actor: string, task: string, detail: string) -> Run = {
  let e = { rule: rule, actor: actor, task: task, tick: r.session.state.tick, detail: detail };
- if stopped(r) then r else if r.halting then {r | escalated: Some(e)} else {r | noted: r.noted ++ [e]}
+ if stopped(r) then r else if r.halting then {r | escalated: Some(e)} else {r | noted: [e] ++ r.noted}
 }
 
 pure func ruled(rules: [Rule], kind: string) -> bool = any(\x. x.kind == kind, rules)
@@ -211,8 +225,16 @@ pure func assign(r: Run, p: Policy, o: Orders, rules: [Rule], turn: int, worker:
   }
  }
 
-pure func step(r: Run, turn: int) -> Run = match input(r.session, "{\"command\":\"advance\",\"tick\":${show(turn)},\"budget\":64}") {
- Ok(x) => if x.failed then act({r | session: x.session}, "error", "", "", "advance: blocked", None, r.session) else {r | session: x.session},
+-- Advance to `turn`, continuing a pending advance (the engine works in
+-- budgets of 64 events) until it completes; long check-in jumps need several.
+pure func step(r: Run, turn: int) -> Run = stepN(r, turn, 0)
+
+pure func stepN(r: Run, turn: int, tries: int) -> Run = match input(r.session, "{\"command\":\"advance\",\"tick\":${show(turn)},\"budget\":64}") {
+ Ok(x) => if x.failed then act({r | session: x.session}, "error", "", "", "advance: blocked", None, r.session)
+  else match x.session.state.continuation {
+   None => {r | session: x.session},
+   Some(_) => if tries >= 1000 then act({r | session: x.session}, "error", "", "", "advance: unfinished", None, r.session) else stepN({r | session: x.session}, turn, tries + 1)
+  },
  Err(e) => act(r, "error", "", "", "advance: ${encodeHostError(e)}", None, r.session)
 }
 
@@ -248,7 +270,7 @@ pure func majorIn(text: string, kinds: [string]) -> bool = match decode(text) {
 }
 
 pure func decisions(r: Run, p: Policy, o: Orders, rules: [Rule], turn: int) -> Run = {
- let offered = filter(\t. t.status == Offered, r.session.state.tasks);
+ let offered = filter(\t. t.status == Offered && not stale(r.session, t), r.session.state.tasks);
  let r1 = foldl(\acc t. persuade(acc, p, o, rules, turn, t), r, offered);
  let working = filter(\t. t.status == Working, r1.session.state.tasks);
  let r2 = foldl(\acc t. checkIn(acc, p, o, turn, t), r1, working);
@@ -259,7 +281,9 @@ pure func closing(r: Run, rules: [Rule], turn: int) -> Run = if stopped(r) then 
 
 pure func turnOf(r: Run, p: Policy, o: Orders, rules: [Rule], turn: int) -> Run = closing(decisions(r, p, o, rules, turn), rules, turn)
 
-pure func result(r: Run, start: int) -> AutoResult = { session: r.session, state: r.state, turns: r.session.state.tick - start, escalated: r.escalated, log: r.log, noted: r.noted }
+-- Logs are built newest-first (constant-time adds over long skips) and
+-- returned oldest-first.
+pure func result(r: Run, start: int) -> AutoResult = { session: r.session, state: r.state, turns: r.session.state.tick - start, escalated: r.escalated, log: reverse(r.log), noted: reverse(r.noted) }
 
 -- The two halves of one turn, for callers that look between them (the crew
 -- lab measures resources after the decisions). They count escalations
@@ -271,7 +295,7 @@ ensures { result.session.state.tick == s.state.tick } = result(decisions({ sessi
 export pure func finishTurn(a: AutoResult, rules: [Rule], turn: int) -> AutoResult ! {}
 ensures { result.session.state.tick >= a.session.state.tick } = {
  let start = a.session.state.tick;
- let r = closing({ session: a.session, state: a.state, log: a.log, escalated: a.escalated, halting: false, noted: a.noted }, rules, turn);
+ let r = closing({ session: a.session, state: a.state, log: reverse(a.log), escalated: a.escalated, halting: false, noted: reverse(a.noted) }, rules, turn);
  {result(r, start) | turns: a.turns + (r.session.state.tick - start)}
 }
 
@@ -283,6 +307,8 @@ export pure func advanceAuto(s: Session, st: AutoState, p: Policy, o: Orders, ru
 ensures { match result { Ok(a) => a.turns <= n && a.session.state.tick >= s.state.tick, Err(_) => true } } =
  if n < 0 || n > 100000 then Err(HostFailure("auto turns must be 0..100000")) else {
   let start = s.state.tick;
-  let run = foldl(\acc k. if stopped(acc) then acc else turnOf(acc, p, o, rules, start + k), { session: s, state: st, log: [], escalated: None, halting: true, noted: [] }, range(1, n + 1));
+  let c = if o.cadence < 1 then 1 else o.cadence;
+  let blocks = (n + c - 1) / c;
+  let run = foldl(\acc b. if stopped(acc) then acc else { let first = start + b * c + 1; let last = if start + (b + 1) * c > start + n then start + n else start + (b + 1) * c; closing(decisions(acc, p, o, rules, first), rules, last) }, { session: s, state: st, log: [], escalated: None, halting: true, noted: [] }, range(0, blocks));
   Ok(result(run, start))
  }

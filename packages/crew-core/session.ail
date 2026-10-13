@@ -593,7 +593,13 @@ pure func tallied(xs: [Tally], id: string) -> [Tally] = if any(\t. t.id == id, x
 pure func held(s: Session, t: Task) -> bool =
  any(\r. r.task == t.id, s.pending) || any(\b. b.request.task == t.id, s.bank) || any(\r. r.task == t.id && not r.resolved, s.state.reliefs) || any(\i. i.task == t.id, s.chat.issues)
 
-pure func archivable(s: Session, t: Task) -> bool = (t.status == Completed || t.status == Stopped) && t.due <= s.state.tick - s.archive.keep && not held(s, t)
+-- Offers whose agreement fell due keep ago (never answered in time) go too.
+pure func lapsed(s: Session, t: Task) -> bool = t.status == Offered && (match head(filter(\b. b.task == t.id, s.bindings)) {
+ Some(b) => any(\c. c.id == b.agreement && c.due <= s.state.tick - s.archive.keep, s.state.commitments),
+ None => false
+})
+
+pure func archivable(s: Session, t: Task) -> bool = (((t.status == Completed || t.status == Stopped) && t.due <= s.state.tick - s.archive.keep) || lapsed(s, t)) && not held(s, t)
 
 export pure func archiveNow(s: Session) -> Session ! {}
 ensures { length(result.state.tasks) <= length(s.state.tasks) && length(result.state.evidence) <= length(s.state.evidence) } =
