@@ -34,11 +34,11 @@ deadlocks from day 1. It was found by the R2-CREW integration agent
 
 | ID | What | Gate |
 |---|---|---|
-| F1 | **Concerns.** The auto-captain never asks about or offers a task with an open conversation issue; that worker counts as waiting on the captain. An open concern always escalates (`uncovered`, implied in v3 whatever the rules say), **once per issue**: the issue id goes into `raised` and is not raised again until it is answered or reopened, so a resumed hold doesn't come back every decision day. New standing order `concerns: escalate` (the default) or a host suggestion approach (`clear_scope`, `ask_advice`, `explain_priority`, …): the auto-captain replies with that suggestion through `captain_reply` and play goes on | tests on both engines: deadlock repro gives 0 errors; default escalates at the concern's tick; resuming without an answer does not re-escalate the same issue; auto-reply answers and work resumes |
-| F2 | **Stuck guard.** `advanceAuto` escalates `stuck` (actor, detail = the error) when the same error act (the same actor and error text) repeats 3 times in one call, so two crew stuck on different tasks each raise it once, so a dropped log cannot hide a deadlock | test: an injected repeating failure escalates on its third occurrence |
-| F3 | **Stale offers at every cadence.** `stale` applies at cadence 1 too: a lapsed offer no longer holds its worker or gets asked about | test: seed-10 repro (orders, keep 30, 365 days) has 0 errors; without archiving the ship keeps offering after day 35 |
-| F4 | **Hysteresis.** A crossing rule (breakdown, trust_floor, cohort) re-arms only after the value is 10 back across the line | test: a value oscillating 69–71 raises once; dropping to 59 then rising raises again |
-| F5 | **Lab: v3.** `crew-sim --profile v2\|v3` (v3 default for `--auto` and `--skip`). Re-run all auto claims on v3, plus a new gate claim from the integration agent: zero error acts over 365 days at cadence 1 and 30, both captains, keep 30, the game's scenario. **Measure concerns per 100 days** on v3 (both captains, cadence 1 and 30), for Mark's choice of the game default | `crew-sim --check`; the claim changes recorded in REVIEW.md |
+| ✅ F1 | **Concerns.** The auto-captain never asks about or offers a task with an open conversation issue; that worker counts as waiting on the captain. An open concern always escalates (`uncovered`, implied in v3 whatever the rules say), **once per issue**: the issue id goes into `raised` and is not raised again until it is answered or reopened, so a resumed hold doesn't come back every decision day. New standing order `concerns: escalate` (the default) or a host suggestion approach (`clear_scope`, `ask_advice`, `explain_priority`, …): the auto-captain replies with that suggestion through `captain_reply` and play goes on | tests on both engines: deadlock repro gives 0 errors; default escalates at the concern's tick; resuming without an answer does not re-escalate the same issue; auto-reply answers and work resumes |
+| ✅ F2 | **Stuck guard.** `advanceAuto` escalates `stuck` (actor, detail = the error) when the same error act (the same actor and error text) repeats 3 times in one call, so two crew stuck on different tasks each raise it once, so a dropped log cannot hide a deadlock | test: an injected repeating failure escalates on its third occurrence |
+| ✅ F3 | **Stale offers at every cadence.** `stale` applies at cadence 1 too: a lapsed offer no longer holds its worker or gets asked about | test: seed-10 repro (orders, keep 30, 365 days) has 0 errors; without archiving the ship keeps offering after day 35 |
+| ✅ F4 | **Hysteresis.** A crossing rule (breakdown, trust_floor, cohort) re-arms only after the value is 10 back across the line | test: a value oscillating 69–71 raises once; dropping to 59 then rising raises again |
+| ✅ F5 | **Lab: v3.** `crew-sim --profile v2\|v3` (v3 default for `--auto` and `--skip`). Re-run all auto claims on v3, plus a new gate claim from the integration agent: zero error acts over 365 days at cadence 1 and 30, both captains, keep 30, the game's scenario. **Measure concerns per 100 days** on v3 (both captains, cadence 1 and 30), for Mark's choice of the game default | `crew-sim --check`; the claim changes recorded in REVIEW.md |
 | F6 | Close: changelog, parity, independent evaluation (≥70), PR, publish 0.4.1, merge sha to the integration agent | CI green; publish |
 
 ## Questions for Mark
@@ -59,3 +59,29 @@ deadlocks from day 1. It was found by the R2-CREW integration agent
      hold card, and words for `stuck`. Today the hold card only has Resume.
 2. **The hysteresis margin of 10.** It is a design number, set before
    measuring. The claims will show how often `hands_on` stops with it.
+
+## Outcome (2026-10-14)
+
+- **F1–F5 done.** crew_core: 188 tests pass on both engines, there are no
+  quality gates, the saved recordings replay identically, and the interpreter
+  and strict-VM traces match.
+- **Gate (the game's scenario, v3, keep 30, seeds 1..5):** 0 host errors over
+  a year, in counting mode and as a skip at cadence 1 and 30, both captains.
+- **Concern frequency under escalate:** a median of 73 a year under consent
+  and 57 under orders. Mark chooses the game default from these numbers; the
+  integration agent plans critical_only with `ask_advice` and hands_on with
+  `escalate`.
+- **Found during the sprint and fixed:**
+  - personality receipts filled after 21 to 27 years of replies (archiving
+    now folds them);
+  - concerns on running work or lapsed offers were unanswerable and blocked
+    the worker (now moot);
+  - two test ships lacked `morale`, so their crew never answered.
+- **Deviations from the plan:**
+  - Blocked starts (shortages) are excluded from the stuck guard.
+  - The dead `uncovered` check after the advance was removed: concerns open
+    during decisions and are handled there.
+  - The 0.4.0 population claims were rerun with `--concerns ask_advice` as
+    well as with escalate. Under escalate, skips stop at the first concern by
+    design.
+- F6 (evaluation, PR, publish) follows.

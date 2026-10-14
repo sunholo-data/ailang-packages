@@ -5,9 +5,11 @@ import std/list (head, filter, length, any, contains, foldl, range)
 import ./example (firstContact)
 import ./session (Session, HostError, HostFailure, start)
 import ./policy (Policy, decodePolicy, watchPolicyBody)
+import pkg/sunholo/social_dynamics/personality (Personality, ReceiptEntry, MajorReceived, InteractionReceived)
 import ./auto (Orders, Rule, AutoResult, Act, AutoState, advanceAuto, consentOrders, ordersOrders, stuckAt, below, above)
 
-pure func startLine(policy: string) -> string = "{\"command\":\"start\",\"policy\":\"${policy}\",\"scenario\":\"watch-v3\",\"keep\":30}"
+pure func startLine(policy: string) -> string = startKeeping(policy, 30)
+pure func startKeeping(policy: string, keep: int) -> string = "{\"command\":\"start\",\"policy\":\"${policy}\",\"scenario\":\"watch-v3\",\"keep\":${show(keep)}}"
 pure func shipV3(policy: string) -> Result[Session, HostError] = match firstContact() {
  Err(e) => Err(HostFailure(e)),
  Ok(sc) => match start(sc, startLine(policy)) { Err(e) => Err(e), Ok(o) => Ok(o.session) }
@@ -85,4 +87,20 @@ test "the stuck guard fires on the third identical error, per actor and text" {
 
 test "crossings re-arm only 10 back across the line" {
  not below(69, 70) && not below(61, 70) && below(59, 70) && below(0, 5) && not above(41, 40) && above(50, 40) && above(100, 95)
+}
+
+pure func at(e: ReceiptEntry) -> int = match e { MajorReceived(m) => m.receipt.receivedAt, InteractionReceived(i) => i.receipt.receivedAt }
+pure func idOf(e: ReceiptEntry) -> string = match e { MajorReceived(m) => m.receipt.id, InteractionReceived(i) => i.receipt.id }
+pure func activeTrigger(p: Personality) -> string = match p.active { Some(r) => r.trigger, None => "" }
+pure func shortKeep() -> Result[AutoResult, HostError] = match (firstContact(), responses()) {
+ (Ok(sc), Ok(p)) => match start(sc, startKeeping("consent", 5)) { Err(e) => Err(e), Ok(o) => advanceAuto(o.session, {seed: 7, agreed: [], raised: [], calls: 0}, p, asking(), [], 30) },
+ (Err(e), _) => Err(HostFailure(e)),
+ (_, Err(e)) => Err(HostFailure(e))
+}
+
+test "archiving folds personality receipts older than the window, so decades of replies never fill them" {
+ match shortKeep() {
+  Ok(a) => a.turns == 30 && errorsOf(a.log) == 0 && count(a.log, "captain_reply") >= 1 && not any(\p. any(\e. at(e) <= a.session.state.tick - 5 && idOf(e) != activeTrigger(p), p.history), a.session.personalities),
+  Err(_) => false
+ }
 }

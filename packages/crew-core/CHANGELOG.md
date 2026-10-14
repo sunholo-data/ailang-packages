@@ -1,5 +1,52 @@
 # Changelog
 
+## 0.4.1
+
+Auto-captain fixes for Stapledon's game profile (`watch-v3`). Found by the
+R2-CREW integration agent and in the crew lab, 2026-10-14. The host wire is
+unchanged (commands, journal records, outcome codes), and the saved
+recordings replay identically.
+
+- **Concerns no longer deadlock auto-play.** In 0.4.0, when a crew member
+  replied with a concern, the auto-captain re-asked and re-offered the task
+  every turn. The host refused each time, and nothing escalated: on the game's
+  scenario, 130 errors in 30 days and 5 starts.
+  - The auto-captain now never asks about or offers a task with an open
+    concern; the worker waits on the captain.
+  - New standing-order field `concerns`:
+    - `escalate` (the default) raises `uncovered` once per opening of the
+      concern;
+    - an approach (`clear_scope`, `ask_advice`, `stage_plan`,
+      `explain_priority`, `assert_authority`) replies once per concern with
+      the host's suggested words, then hears the reconsideration.
+  - An `uncovered` rule escalates even when the orders would reply.
+  - Check-ins skip tasks with an open concern.
+- **Moot concerns** (`session.moot`). A concern about a lapsed offer or about
+  running work can no longer be answered. It no longer blocks offering that
+  assignment again, and it no longer keeps the task from being archived.
+- **Stuck guard.** The same host error (actor and text) three times in one
+  `advanceAuto` call escalates `stuck`. A start blocked by a shortage is not
+  counted.
+- **Lapsed offers are stale at every cadence.** At cadence 1, 0.4.0 kept
+  asking about them. Without archiving the worker stayed busy for good; with
+  archiving, the host erred every turn (285 errors a year).
+- **Hysteresis.** Breakdown, trust-floor and cohort rules re-arm only once
+  the value is 10 back across the line. On the hands_on preset, a breakdown
+  line at 70 had re-armed about 130 times a year.
+- **Archiving folds personality receipts older than the window**, keeping any
+  that an active response answers to. social_dynamics keeps 128 per crew
+  member, so 21 to 27 years of replies filled them, and every later reply
+  failed. The stuck guard found this in a century skip.
+- **Tests:** 10 new (concerns, moot concerns, resume without an answer, auto-
+  reply under both captains, the uncovered override, stuck, hysteresis,
+  personality retention). The `morale` indicator was added to two test
+  ships, whose crew could never answer before (the stuck guard showed it).
+- **Lab (crew-lab):** `crew-sim --profile v2|v3` (v3 is the default with
+  `--auto` or `--skip`) and `--concerns`. The gate claims on the game's
+  scenario, both captains, a year at cadence 1 and 30: 0 host errors.
+  Concerns under escalate: a median of 73 a year under consent and 57 under
+  orders.
+
 ## 0.4.0
 
 Cohorts for Stapledon's population (R2-CREW-POP CP-0, ledger D-73; about

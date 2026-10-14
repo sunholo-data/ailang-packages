@@ -18,7 +18,7 @@ import ./host_policy (policies)
 import ./example (firstContact)
 import ./codec (object, fields, text, integer, number, CrewOutcome, AgreedStart, CompliedStart, StrainedStart, RefusedOrder, GrantedRelief, DeniedRelief, encodeOutcome)
 import ./actor_policy (evaluate, requestBody, encodeChoice)
-import pkg/sunholo/social_dynamics/personality (Personality,MajorReceived)
+import pkg/sunholo/social_dynamics/personality (Personality,ReceiptEntry,MajorReceived,InteractionReceived)
 import ./personality_host (initializeShip, advanceShip, project as projectPersonalities, json as personalitiesJson, receiveSpeech, receiveMajor, majorKind)
 import ./conversations (ConversationStore, Conversation, Issue, Speech, empty as emptyConversation, json as conversationJson, lookup as issueLookup, subject as issueSubject, suggestions as replySuggestions, approaches, validReply, register as registerIssue, record as recordSpeech, reaction as conversationReaction)
 
@@ -634,7 +634,7 @@ ensures { length(result.state.tasks) <= length(s.state.tasks) && length(result.s
  if s.archive.keep <= 0 then s else {
   let gone = filter(\t. archivable(s, t), s.state.tasks);
   let oldEvents = filter(\e. e.at <= s.state.tick - s.archive.keep && seen(s, "ev-${e.id}") && not contains(s.archive.events, "ev-${e.id}"), s.scenario.events);
-  if length(gone) == 0 && length(oldEvents) == 0 && length(s.state.accepted) <= 512 then s else {
+  if length(gone) == 0 && length(oldEvents) == 0 && length(s.state.accepted) <= 512 && not any(\p. overdue(p, s.state.tick - s.archive.keep), s.personalities) then s else {
    let ids = map(\t. t.id, gone);
    let agreements = map(\b. b.agreement, filter(\b. contains(ids, b.task), s.bindings));
    let reports = map(\r. r.id, filter(\r. contains(ids, r.task), s.reports));
@@ -649,12 +649,26 @@ ensures { length(result.state.tasks) <= length(s.state.tasks) && length(result.s
    let n = length(s.state.accepted);
    let accepted = if n > 512 then drop(n - 512, s.state.accepted) else s.state.accepted;
    let a = s.archive;
-   {s | state: {s.state | tasks: filter(\t. not contains(ids, t.id), s.state.tasks), evidence: evidence, knowledge: knowledge, reliefs: filter(\r. not contains(ids, r.task), s.state.reliefs), commitments: filter(\c. not contains(agreements, c.id), s.state.commitments), accepted: accepted},
+   {s | personalities: map(\p. trimmed(p, s.state.tick - s.archive.keep), s.personalities), state: {s.state | tasks: filter(\t. not contains(ids, t.id), s.state.tasks), evidence: evidence, knowledge: knowledge, reliefs: filter(\r. not contains(ids, r.task), s.state.reliefs), commitments: filter(\c. not contains(agreements, c.id), s.state.commitments), accepted: accepted},
         bindings: filter(\b. not contains(ids, b.task), s.bindings), reports: filter(\r. not contains(ids, r.task), s.reports),
         chat: {s.chat | issues: filter(\i. not contains(ids, i.task), s.chat.issues), speech: filter(\x. not contains(ids, x.task), s.chat.speech)},
         archive: {a | tasks: a.tasks + length(gone), evidence: a.evidence + length(goneE), knowledge: a.knowledge + length(s.state.knowledge) - length(knowledge), accepted: a.accepted + (n - length(accepted)), completed: foldl(\acc t. tallied(acc, t.recipe), a.completed, filter(\t. t.status == Completed, gone)), events: sorted(a.events ++ evIds)}}
   }
  }
+
+-- Personality receipts (the captain's words and major events each crew
+-- member has received) older than the window are folded too, keeping the
+-- one an active response still answers to. social_dynamics keeps at most
+-- 128 per crew member for its duplicate check, so without this a voyage of
+-- decades fills it and every later reply fails (crew_core 0.4.1; found by the
+-- auto-captain's stuck guard about 25 years into a century skip). As with the
+-- operation log, a receipt id older than the window could be applied again
+-- only by a hand-written recording.
+pure func receivedAt(e: ReceiptEntry) -> int = match e { MajorReceived(m) => m.receipt.receivedAt, InteractionReceived(i) => i.receipt.receivedAt }
+pure func receiptId(e: ReceiptEntry) -> string = match e { MajorReceived(m) => m.receipt.id, InteractionReceived(i) => i.receipt.id }
+pure func trigger(p: Personality) -> string = match p.active { Some(r) => r.trigger, None => "" }
+pure func overdue(p: Personality, before: int) -> bool = any(\e. receivedAt(e) <= before && receiptId(e) != trigger(p), p.history)
+pure func trimmed(p: Personality, before: int) -> Personality = {p | history: filter(\e. receivedAt(e) > before || receiptId(e) == trigger(p), p.history)}
 
 -- Completed tasks of a recipe: archived plus live.
 export pure func completedCount(s: Session, recipe: string) -> int ! {}
