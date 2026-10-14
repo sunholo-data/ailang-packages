@@ -4,6 +4,11 @@
 
 Local only; never published.
 
+- **The game's profile (crew_core 0.4.1, 2026-10-14).**
+  - `crew-sim --profile v2|v3` (v3 is the default with `--auto` or `--skip`)
+    and `--concerns escalate|APPROACH`.
+  - v3 gate claims: 0 host errors over a year.
+  - All 0.4.0 auto claims rerun on v3; the findings are in `REVIEW.md`.
 - **`hands_on` preset (2026-10-14).** The Stapledon pack gains
   `hands_on.json`, for the game's `hands_on` auto-run:
   - breakdown at stress 70, trust floor 40, `uncovered` and cohort pressure

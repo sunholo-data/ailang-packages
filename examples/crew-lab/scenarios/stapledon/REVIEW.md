@@ -151,6 +151,58 @@ the radiators too"). Over 20 seeds, 10 of 12 claims hold.
   - a standing heat load from a resident system;
   - an orders claim instead of a consent claim, since orders start everything.
 
+## Update 2026-10-14 (crew_core 0.4.1): the game's profile (watch-v3)
+
+Until now every auto-run claim ran on `watch-v2`, but the game runs `watch-v3`
+(personalities and conversations). crew-sim now defaults to v3 with `--auto`
+or `--skip` (`--profile v2|v3`), and `--concerns` sets the auto-captain's
+standing order for concerns.
+
+**The gate (integration agent):** last-messages-home, keep 30, seeds 1..5.
+There are 0 host errors in every run:
+- a year in counting mode, both captains (`auto/v3-year.claims.json`, 4 of 6;
+  the two failures are the frequency findings below);
+- a 365-day skip at cadence 1 and at cadence 30, both captains, with
+  `--concerns ask_advice` (`auto/v3-skip.claims.json`, 3 of 3 each). The
+  skip runs the full year.
+
+On crew_core 0.4.0, the same runs deadlocked from day 1 (130 errors in 30
+days, 5 starts).
+
+**The 0.4.0 claims rerun on v3:**
+
+| Claims | v3, concerns escalate | v3, concerns ask_advice |
+|---|---|---|
+| founders-century | 2 of 5: the skip stops at the first concern (year 0) | 5 of 5 (after the personality-retention fix) |
+| founders-restrict | 1 of 2: it stops at a concern before a cohort escalates | 2 of 2 |
+| founders-famine | 1 of 2 | 2 of 2 |
+| founders-split | 1 of 2 | 2 of 2 |
+| processing-cascade-year | 5 of 6 | |
+| hands_on-year | 6 of 8 | |
+| hands_on-founders / -restrict | 2 of 2 / 1 of 1 | |
+
+Findings:
+- **Under `escalate`, a skip stops at the first concern; that is the design.**
+  The population claims hold once concerns are answered by standing order.
+  This is what the game's `critical_only` preset will do (`ask_advice`).
+- **Concerns are frequent.** Under escalate, concerns reach the captain a
+  median of 73 times a year under consent and 57 under orders (last-messages-
+  home). On processing-cascade with hands_on it is 74.5 and 67. That is about
+  one every 5 days, and Mark chooses the game default from these numbers.
+- **Orders meets more refusals on v3:** the median `refusal_under_orders` is
+  86 a year on processing-cascade, against at most 52 on v2
+  (`orders-interrupt-at-most-weekly` fails). Crew with personalities and
+  conversations decline more often.
+- **The stuck guard found a host limit.** After about 21 to 27 years of
+  auto-replies, every captain_reply failed with
+  `personality_retention_full`. social_dynamics keeps 128 receipts per crew
+  member, and nothing pruned them. Archiving now folds personality receipts
+  older than the window. Fixed in crew_core 0.4.1, with a test that fails
+  without the fix.
+- **The stuck guard also found that two crew_core test ships had no `morale`
+  indicator.** Their crew could never answer a request (every answer
+  errored), so those tests never exercised a reply. The fixtures are fixed.
+
 ## Update 2026-10-14: the `hands_on` preset (`hands_on.json`)
 
 `hands_on.json` holds the game's earlier-warning auto-run rules:

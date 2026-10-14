@@ -1,0 +1,100 @@
+{
+  "sprint_id": "S-CREW-CORE-0.4.1",
+  "status": "in_progress",
+  "plan": "design_docs/planned/crew-core-0.4.1-sprint.md",
+  "design": "stapledons-godot integration report 2026-10-14 (watch-v3 concern deadlock); ailang-packages #140 findings",
+  "ledger": "Mark attended 2026-10-14",
+  "evaluations": [
+    ".ailang/state/evaluations/eval_S-CREW-CORE-0.4.1_round_1.json (86, PASS)"
+  ],
+  "features": [
+    {
+      "id": "F1",
+      "description": "Concerns: no re-ask/re-offer with an open issue; escalate once per issue (uncovered implied in v3); standing order concerns escalate|approach",
+      "dependencies": [],
+      "acceptance_criteria": [
+        "deadlock repro 0 errors",
+        "default escalates at the concern tick",
+        "resume without answer does not re-escalate",
+        "auto-reply answers and work resumes"
+      ],
+      "passes": true,
+      "started": "2026-10-14",
+      "completed": "2026-10-14",
+      "notes": "concerns: no re-ask/re-offer; escalate once per opening (uncovered implied); concerns:<approach> auto-reply; moot concerns; check-ins skip open issues; 6 tests"
+    },
+    {
+      "id": "F2",
+      "description": "Stuck guard: same actor+error text 3 times in one call escalates stuck",
+      "dependencies": [],
+      "acceptance_criteria": [
+        "repeating failure escalates on third occurrence",
+        "different actors each raise once"
+      ],
+      "passes": true,
+      "started": null,
+      "completed": "2026-10-14",
+      "notes": "stuck guard on 3rd identical error (actor+text), blocked starts excluded; unit test; found morale-less fixtures"
+    },
+    {
+      "id": "F3",
+      "description": "Stale offers filtered at every cadence",
+      "dependencies": [],
+      "acceptance_criteria": [
+        "seed-10 repro 0 errors",
+        "without archiving offers continue after day 35"
+      ],
+      "passes": true,
+      "started": null,
+      "completed": "2026-10-14",
+      "notes": "stale at every cadence; v3 skip claims at cadence 1 and 30 run the year with 0 errors"
+    },
+    {
+      "id": "F4",
+      "description": "Hysteresis 10 on crossing rules",
+      "dependencies": [],
+      "acceptance_criteria": [
+        "69-71 oscillation raises once",
+        "drop to 59 then rise raises again"
+      ],
+      "passes": true,
+      "started": null,
+      "completed": "2026-10-14",
+      "notes": "hysteresis margin 10 (below/above), unit test"
+    },
+    {
+      "id": "F5",
+      "description": "crew-sim --profile v2|v3 (v3 default for auto/skip); rerun auto claims on v3; zero-error gate claim; concerns per 100 days",
+      "dependencies": [
+        "F1",
+        "F2",
+        "F3",
+        "F4"
+      ],
+      "acceptance_criteria": [
+        "crew-sim --check",
+        "claim changes recorded in REVIEW.md"
+      ],
+      "passes": true,
+      "started": null,
+      "completed": "2026-10-14",
+      "notes": "crew-sim --profile/--concerns; v3 gate 0 errors; all auto claims rerun on v3 (REVIEW.md); personality retention fix found by stuck guard"
+    },
+    {
+      "id": "F6",
+      "description": "Close: changelog, parity, independent evaluation, PR, publish 0.4.1",
+      "dependencies": [
+        "F5"
+      ],
+      "acceptance_criteria": [
+        "CI green",
+        "evaluation >= 70",
+        "published"
+      ],
+      "passes": null,
+      "started": "2026-10-14",
+      "completed": null,
+      "notes": null
+    }
+  ]
+}

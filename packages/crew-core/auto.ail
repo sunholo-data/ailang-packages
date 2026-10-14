@@ -6,7 +6,8 @@ import std/json (Json, decode, getString, getInt, getArray, getStringArrayOrEmpt
 import std/string (startsWith)
 import pkg/sunholo/social_dynamics/model (Task, Offered, Working)
 import ./scenario (Scenario)
-import ./session (Session, Output, Request, HostError, HostFailure, TaskAgreement, input, encodeHostError)
+import ./session (Session, Output, Request, HostError, HostFailure, TaskAgreement, input, encodeHostError, moot)
+import ./conversations (Issue, approaches, suggestions as replySuggestions)
 import std/json (encode, jo, kv, js, jnum, jint, jb)
 import ./policy (Policy, authoredAnswer)
 import ./cohorts (Cohort, division, pressure)
@@ -34,7 +35,18 @@ import ./cohorts (Cohort, division, pressure)
 --  cadence: decide every `cadence` turns (1 = daily). Between check-ins the
 --    engine runs on: work completes and events fire, but nobody is asked;
 --    a decade at a monthly cadence is about 120 decision turns.
-export type Orders = { start: string, rest: string, relief: string, fatigue: int, stress: int, cadence: int } deriving (Eq)
+--  concerns (0.4.1, watch-v3): what the auto-captain does with a crew
+--    member's open concern about an offer, which only the captain can answer.
+--    "escalate" (the default): hand it to the player (escalation `uncovered`,
+--    once per opening of the concern). An approach (clear_scope, ask_advice,
+--    stage_plan, explain_priority, assert_authority): reply once per concern
+--    with the host's suggested words for that approach, then hear the
+--    worker's reconsideration. An `uncovered` rule in the escalation set
+--    escalates whatever this says. Until the concern is settled, the worker
+--    is not asked again or offered other work. A concern the worker reopens
+--    after that one reply is not answered again: it waits until the offer
+--    lapses (20 ticks), then the worker is offered work afresh.
+export type Orders = { start: string, rest: string, relief: string, fatigue: int, stress: int, cadence: int, concerns: string } deriving (Eq)
 
 -- crew_escalation/1 rules. kind:
 --  "refusal_under_orders": a worker declines and the orders would start anyway
@@ -44,7 +56,12 @@ export type Orders = { start: string, rest: string, relief: string, fatigue: int
 --  "major": a ship event of one of `kinds` (loss, deep_time, ...) fires
 --  "argument": crew argue over lost capacity
 --  "uncovered": a request no standing order covers: a crew member opens a
---    conversation issue only the captain can answer (watch-v3)
+--    conversation issue only the captain can answer (watch-v3). Implied
+--    whenever the standing orders say concerns "escalate"
+--  "stuck" (never listed; always on): the same error (actor and text) three
+--    times in one advanceAuto call, so a deadlocked crew cannot look calm
+--  Crossing rules (breakdown, trust_floor, cohort) re-arm only once the value
+--    is 10 back across the line (hysteresis, 0.4.1).
 --  "cohort": a cohort's `indicator` ("pressure" or "division", 0..100)
 --    reaches threshold (each crossing once, until it falls back). The
 --    escalation's actor is the cohort's voice (may be empty) and its detail
@@ -69,10 +86,10 @@ export type AutoState = { seed: int, agreed: [string], raised: [string], calls: 
 export type AutoResult = { session: Session, state: AutoState, turns: int, escalated: Option[Escalated], log: [Act], noted: [Escalated] } deriving (Eq)
 
 export pure func consentOrders() -> Orders ! {}
-ensures { result.start == "agreed" } = { start: "agreed", rest: "tired", relief: "grant", fatigue: 70, stress: 75, cadence: 1 }
+ensures { result.start == "agreed" } = { start: "agreed", rest: "tired", relief: "grant", fatigue: 70, stress: 75, cadence: 1, concerns: "escalate" }
 
 export pure func ordersOrders() -> Orders ! {}
-ensures { result.start == "always" } = { start: "always", rest: "never", relief: "deny", fatigue: 70, stress: 75, cadence: 1 }
+ensures { result.start == "always" } = { start: "always", rest: "never", relief: "deny", fatigue: 70, stress: 75, cadence: 1, concerns: "escalate" }
 
 -- --------------------------------------------------------------- decoding
 
@@ -82,18 +99,20 @@ export pure func decodeOrders(body: string) -> Result[Orders, string] ! {}
 ensures { match result { Ok(o) => o.start == "agreed" || o.start == "always", Err(_) => true } } = match decode(body) {
  Err(e) => Err("standing orders JSON: ${e}"),
  Ok(j) => if str(j, "schema") != "crew_standing_orders/1" then Err("standing orders: schema must be crew_standing_orders/1")
-  else if any(\k. not contains(["schema", "start", "rest", "relief", "fatigue", "stress", "cadence"], k), keys(j)) then Err("standing orders: unknown field")
+  else if any(\k. not contains(["schema", "start", "rest", "relief", "fatigue", "stress", "cadence", "concerns"], k), keys(j)) then Err("standing orders: unknown field")
+  else if not contains(["escalate"] ++ approaches(), concernsOf(j)) then Err("standing orders: concerns must be escalate or a reply approach")
   else if (match getInt(j, "cadence") { Some(c) => c < 1 || c > 365, None => false }) then Err("standing orders: cadence must be 1..365")
   else if not contains(["agreed", "always"], str(j, "start")) then Err("standing orders: start must be agreed or always")
   else if not contains(["tired", "never"], str(j, "rest")) then Err("standing orders: rest must be tired or never")
   else if not contains(["grant", "deny", "strained"], str(j, "relief")) then Err("standing orders: relief must be grant, deny or strained")
   else match (getInt(j, "fatigue"), getInt(j, "stress")) {
-   (Some(f), Some(s)) => if f < 0 || f > 100 || s < 0 || s > 100 then Err("standing orders: fatigue and stress must be 0..100") else Ok({ start: str(j, "start"), rest: str(j, "rest"), relief: str(j, "relief"), fatigue: f, stress: s, cadence: cadenceOf(j) }),
-   _ => Ok({ start: str(j, "start"), rest: str(j, "rest"), relief: str(j, "relief"), fatigue: 70, stress: 75, cadence: cadenceOf(j) })
+   (Some(f), Some(s)) => if f < 0 || f > 100 || s < 0 || s > 100 then Err("standing orders: fatigue and stress must be 0..100") else Ok({ start: str(j, "start"), rest: str(j, "rest"), relief: str(j, "relief"), fatigue: f, stress: s, cadence: cadenceOf(j), concerns: concernsOf(j) }),
+   _ => Ok({ start: str(j, "start"), rest: str(j, "rest"), relief: str(j, "relief"), fatigue: 70, stress: 75, cadence: cadenceOf(j), concerns: concernsOf(j) })
   }
 }
 
 pure func cadenceOf(j: Json) -> int = match getInt(j, "cadence") { Some(c) => c, None => 1 }
+pure func concernsOf(j: Json) -> string = match getString(j, "concerns") { Some(c) => c, None => "escalate" }
 
 pure func readRule(j: Json) -> Result[Rule, string] = {
  let kind = str(j, "kind");
@@ -135,15 +154,16 @@ pure func trustOf(s: Session, actor: string) -> int = match head(filter(\r. r.fr
 pure func threshold(s: Session, worker: string) -> int = match head(filter(\r. r.id == "overextended_${worker}", s.scenario.rules)) { Some(r) => r.threshold, None => 101 }
 
 -- An offer whose agreement has fallen due can no longer be answered (long
--- check-in jumps leave such offers behind); it no longer occupies the worker
--- and is not asked about again (only with a cadence above 1: daily play keeps
--- the crew lab's loop exactly). Archiving folds lapsed offers away.
+-- check-in jumps and unanswered concerns leave such offers behind); it no
+-- longer occupies the worker and is not asked about again, at every cadence
+-- (0.4.1; 0.3.0 kept asking at cadence 1, which archiving turned into a host
+-- error every turn). Archiving folds lapsed offers away.
 pure func stale(s: Session, t: Task) -> bool = t.status == Offered && (match head(filter(\b. b.task == t.id, s.bindings)) {
  Some(b) => any(\c. c.id == b.agreement && c.due <= s.state.tick, s.state.commitments),
  None => false
 })
 
-pure func busy(s: Session, o: Orders, worker: string) -> bool = any(\t. ((t.status == Offered && not (o.cadence > 1 && stale(s, t))) || t.status == Working) && contains(t.participants, worker), s.state.tasks)
+pure func busy(s: Session, o: Orders, worker: string) -> bool = any(\t. ((t.status == Offered && not stale(s, t)) || t.status == Working) && contains(t.participants, worker), s.state.tasks)
 
 pure func workRecipe(sc: Scenario, worker: string) -> string = match head(filter(\o. o.text == worker && o.id != "rest_${worker}", sc.owners)) {
  Some(o) => o.id, None => "rest_${worker}"
@@ -160,8 +180,19 @@ pure func startTask(s: Session, id: string) -> Result[Output, HostError] = cmd(s
 pure func resolve(s: Session, id: string, release: bool) -> Result[Output, HostError] = cmd(s, [kv("command", js("resolve_relief")), kv("id", js(id)), kv("release", jb(release))])
 pure func cancel(s: Session, id: string) -> Result[Output, HostError] = cmd(s, [kv("command", js("cancel_request")), kv("id", js(id))])
 
-pure func act(r: Run, kind: string, actor: string, label: string, detail: string, request: Option[Request], s: Session) -> Run =
- {r | log: [{ kind: kind, actor: actor, label: label, detail: detail, request: request, tick: s.state.tick, fatigue: indicator(s, actor, "fatigue"), stress: indicator(s, actor, "stress"), morale: indicator(s, actor, "morale") }] ++ r.log}
+pure func act(r: Run, kind: string, actor: string, label: string, detail: string, request: Option[Request], s: Session) -> Run = {
+ let logged = {r | log: [{ kind: kind, actor: actor, label: label, detail: detail, request: request, tick: s.state.tick, fatigue: indicator(s, actor, "fatigue"), stress: indicator(s, actor, "stress"), morale: indicator(s, actor, "morale") }] ++ r.log};
+ if kind == "error" && stuckAt(logged.log, actor, detail) then escalate(logged, "stuck", actor, "", detail) else logged
+}
+
+-- The stuck guard: this host error (actor and text) has now happened exactly
+-- three times in the call's log, so it is raised once. A start the engine
+-- blocks for lack of resources is a shortage the ship can see (resources,
+-- stockouts), like a resource refusal, not a stuck host, so it is not
+-- counted. Host error texts carry no per-turn ids (fixed strings, codes or
+-- crew ids), so a repeat matches.
+export pure func stuckAt(log: [Act], actor: string, detail: string) -> bool ! {}
+ensures { not result || length(log) >= 3 } = detail != "start: blocked" && length(filter(\a. a.kind == "error" && a.actor == actor && a.detail == detail, log)) == 3
 
 pure func stopped(r: Run) -> bool = match r.escalated { Some(_) => true, None => false }
 
@@ -175,20 +206,26 @@ pure func ruled(rules: [Rule], kind: string) -> bool = any(\x. x.kind == kind, r
 -- Ask `actor` about `task`; the response policy chooses the reaction.
 pure func hear(r: Run, p: Policy, actor: string, task: string, id: string) -> {run: Run, label: string} = match ask(r.session, actor, task, id) {
  Err(e) => {run: act(r, "error", actor, "", "ask: ${encodeHostError(e)}", None, r.session), label: ""},
- Ok(a) => match head(filter(\q. q.id == id, a.session.pending)) {
-  None => {run: act({r | session: a.session}, "error", actor, "", "ask: no pending request", None, r.session), label: ""},
+ Ok(a) => answerPending({r | session: a.session}, p, actor, task, id)
+}
+
+-- Answer the pending request `id` (an ask, or the host's reconsideration
+-- after a captain's reply) from the response policy.
+pure func answerPending(r: Run, p: Policy, actor: string, task: string, id: string) -> {run: Run, label: string} = {
+ match head(filter(\q. q.id == id, r.session.pending)) {
+  None => {run: act({r | session: r.session}, "error", actor, "", "ask: no pending request", None, r.session), label: ""},
   Some(request) => match authoredAnswer(p, request, r.state.seed) {
-   Err(e) => {run: act({r | session: a.session}, "error", actor, "", "answer: ${e}", None, r.session), label: ""},
+   Err(e) => {run: act({r | session: r.session}, "error", actor, "", "answer: ${e}", None, r.session), label: ""},
    Ok(answer) => {
     let st = r.state;
-    match complete(a.session, id, answer.body, answer.roll) {
+    match complete(r.session, id, answer.body, answer.roll) {
      Err(e) => {
-      let released = match cancel(a.session, id) { Ok(o) => o.session, Err(_) => a.session };
+      let released = match cancel(r.session, id) { Ok(o) => o.session, Err(_) => r.session };
       {run: act({r | session: released, state: {st | seed: answer.seed}}, "error", actor, "", "complete: ${encodeHostError(e)}", None, r.session), label: ""}
      },
      Ok(c) => {
       let agreed = if answer.label == "accept" && not contains(st.agreed, task) then st.agreed ++ [task] else st.agreed;
-      {run: act({r | session: c.session, state: {st | seed: answer.seed, agreed: agreed}}, "reply", actor, answer.label, task, Some(request), a.session), label: answer.label}
+      {run: act({r | session: c.session, state: {st | seed: answer.seed, agreed: agreed}}, "reply", actor, answer.label, task, Some(request), r.session), label: answer.label}
      }
     }
    }
@@ -217,8 +254,10 @@ pure func persuade(r: Run, p: Policy, o: Orders, rules: [Rule], turn: int, t: Ta
 pure func grants(o: Orders, s: Session, worker: string) -> bool =
  if o.relief == "grant" then true else if o.relief == "deny" then false else indicator(s, worker, "stress") >= threshold(s, worker)
 
+-- The host takes no check-in while a concern about the task is open (even
+-- one the captain can no longer answer), so those are skipped.
 pure func checkIn(r: Run, p: Policy, o: Orders, turn: int, t: Task) -> Run =
- if stopped(r) then r else match head(t.participants) {
+ if stopped(r) || any(\i. i.task == t.id && i.status == "open", r.session.chat.issues) then r else match head(t.participants) {
   None => r,
   Some(worker) => if turn % 2 != 0 then r else {
    let rid = "c${show(turn)}${r.salt}-${t.id}";
@@ -271,12 +310,18 @@ pure func prune(r: Run) -> Run = { let st = r.state; {r | state: {st | agreed: f
 pure func key(rule: Rule, who: string) -> string = "${rule.kind}:${rule.indicator}:${show(rule.threshold)}/${who}"
 
 -- Raise every match of one crossing rule (a halting run stops at the first);
--- re-arm those that are back across the line.
-pure func crossings(acc: Run, rule: Rule, over: string -> bool, detail: string -> string) -> Run = crossingsOver(acc, rule, acc.session.scenario.workers, \w. w, over, detail)
-pure func crossingsOver(acc: Run, rule: Rule, whos: [string], actor: string -> string, over: string -> bool, detail: string -> string) -> Run = {
+-- re-arm those that are back across the line by the margin, so a value
+-- sitting on the line raises once, not on every wobble.
+pure func margin() -> int = 10
+export pure func below(v: int, line: int) -> bool ! {}
+ensures { not result || v < line || line <= 0 } = v + margin() < line || (line <= margin() && v == 0)
+export pure func above(v: int, line: int) -> bool ! {}
+ensures { not result || v >= line || v == 100 } = v >= line + margin() || (line + margin() > 100 && v == 100)
+pure func crossings(acc: Run, rule: Rule, over: string -> bool, rearm: string -> bool, detail: string -> string) -> Run = crossingsOver(acc, rule, acc.session.scenario.workers, \w. w, over, rearm, detail)
+pure func crossingsOver(acc: Run, rule: Rule, whos: [string], actor: string -> string, over: string -> bool, rearm: string -> bool, detail: string -> string) -> Run = {
  let fresh = filter(\w. over(w) && not contains(acc.state.raised, key(rule, w)), whos);
  let st = acc.state;
- let kept = filter(\k. not any(\w. k == key(rule, w) && not over(w), whos), st.raised);
+ let kept = filter(\k. not any(\w. k == key(rule, w) && rearm(w), whos), st.raised);
  foldl(\a w. { let st2 = a.state; escalate({a | state: {st2 | raised: st2.raised ++ [key(rule, w)]}}, rule.kind, actor(w), "", detail(w)) }, {acc | state: {st | raised: kept}}, fresh)
 }
 
@@ -294,26 +339,60 @@ pure func newEvidence(s: Session, before: Session, p: string -> bool) -> [string
 -- and run-time events both live there), by its evidence id ev-<id>.
 pure func majorOf(s: Session, evidence: string) -> string = match head(filter(\e. "ev-${e.id}" == evidence, s.scenario.events)) { Some(e) => e.major, None => "" }
 
--- After the advance: breakdowns, trust floors, majors, arguments and requests
--- no standing order covers (open conversation issues the captain must answer).
+-- After the advance: breakdowns, trust floors, majors and arguments.
+-- Concerns open during decisions (a reply), so they are handled there.
 pure func watch(r: Run, rules: [Rule], before: Session) -> Run = foldl(\acc rule. if stopped(acc) then acc else {
  let s = acc.session;
- if rule.kind == "breakdown" then crossings(acc, rule, \w. indicator(s, w, rule.indicator) >= rule.threshold, \w. "${rule.indicator} ${show(indicator(s, w, rule.indicator))}")
- else if rule.kind == "trust_floor" then crossings(acc, rule, \w. trustOf(s, w) < rule.threshold, \w. "trust ${show(trustOf(s, w))}")
+ if rule.kind == "breakdown" then crossings(acc, rule, \w. indicator(s, w, rule.indicator) >= rule.threshold, \w. below(indicator(s, w, rule.indicator), rule.threshold), \w. "${rule.indicator} ${show(indicator(s, w, rule.indicator))}")
+ else if rule.kind == "trust_floor" then crossings(acc, rule, \w. trustOf(s, w) < rule.threshold, \w. above(trustOf(s, w), rule.threshold), \w. "trust ${show(trustOf(s, w))}")
  else if rule.kind == "argument" then foldl(\a id. escalate(a, "argument", "", "", id), acc, newEvidence(s, before, \id. startsWith(id, "sf-")))
  else if rule.kind == "major" then foldl(\a id. escalate(a, "major", "", "", id), acc, filter(\id. contains(rule.kinds, majorOf(s, id)), newEvidence(s, before, \id. startsWith(id, "ev-"))))
- else if rule.kind == "cohort" then crossingsOver(acc, rule, map(\c. c.id, cohortsOf(s)), \c. voiceOf(s, c), \c. cohortValue(s, c, rule.indicator) >= rule.threshold, \c. "cohort:${c} ${rule.indicator} ${show(cohortValue(s, c, rule.indicator))}")
- else if rule.kind == "uncovered" then foldl(\a i. escalate(a, "uncovered", i.worker, i.task, i.id), acc, filter(\i. i.status == "open" && not any(\b. b.id == i.id && b.status == "open", before.chat.issues), s.chat.issues))
+ else if rule.kind == "cohort" then crossingsOver(acc, rule, map(\c. c.id, cohortsOf(s)), \c. voiceOf(s, c), \c. cohortValue(s, c, rule.indicator) >= rule.threshold, \c. below(cohortValue(s, c, rule.indicator), rule.threshold), \c. "cohort:${c} ${rule.indicator} ${show(cohortValue(s, c, rule.indicator))}")
  else acc
 }, r, rules)
 
 
+-- Open concerns (watch-v3) about live offers: the worker waits on the
+-- captain. Settled before the turn's other decisions and again after them,
+-- so a concern raised this turn is handled this turn.
+pure func concernsOpen(s: Session) -> [Issue] = filter(\i. i.status == "open" && not moot(s, i), s.chat.issues)
+pure func waiting(s: Session, task: string) -> bool = any(\i. i.task == task, concernsOpen(s))
+
+pure func escalating(o: Orders, rules: [Rule]) -> bool = o.concerns == "escalate" || ruled(rules, "uncovered")
+
+pure func settle(r: Run, p: Policy, o: Orders, rules: [Rule], turn: int) -> Run =
+ foldl(\acc i. if stopped(acc) then acc else if escalating(o, rules) then raiseConcern(acc, i) else if i.replyCount == 0 then replyConcern(acc, p, o, rules, turn, i) else acc, r, concernsOpen(r.session))
+
+-- Once per opening: a reopened concern carries a new request id.
+pure func raiseConcern(r: Run, i: Issue) -> Run = {
+ let k = "uncovered:${i.id}:${i.request}";
+ if contains(r.state.raised, k) then r else { let st = r.state; escalate({r | state: {st | raised: st.raised ++ [k]}}, "uncovered", i.worker, i.task, i.id) }
+}
+
+-- Reply once with the host's suggested words for the ordered approach (the
+-- third suggestion when the kind has no such approach), then hear the
+-- worker's reconsideration as for any request.
+pure func replyConcern(r: Run, p: Policy, o: Orders, rules: [Rule], turn: int, i: Issue) -> Run = {
+ let options = replySuggestions(i, if r.state.seed < 1 then 1 else r.state.seed);
+ let chosen = match head(filter(\x. x.approach == o.concerns, options)) { Some(x) => x, None => match head(reverse(options)) { Some(x) => x, None => { id: "", key: "", text: "", approach: "", preview: "" } } };
+ let id = "s${show(turn)}${r.salt}-${i.task}";
+ match cmd(r.session, [kv("command", js("captain_reply")), kv("id", js(id)), kv("issue", js(i.id)), kv("text", js(chosen.text)), kv("approach", js(chosen.approach)), kv("tick", jint(r.session.state.tick)), kv("revision", jint(r.session.state.revision))]) {
+  Err(e) => act(r, "error", i.worker, "", "captain_reply: ${encodeHostError(e)}", None, r.session),
+  Ok(x) => {
+   let replied = act({r | session: x.session}, "captain_reply", i.worker, chosen.approach, i.task, None, r.session);
+   let h = answerPending(replied, p, i.worker, i.task, "reconsider-${id}");
+   decide(h.run, o, rules, i.task, i.worker, h.label)
+  }
+ }
+}
+
 pure func decisions(r: Run, p: Policy, o: Orders, rules: [Rule], turn: int) -> Run = {
- let offered = filter(\t. t.status == Offered && not (o.cadence > 1 && stale(r.session, t)), r.session.state.tasks);
- let r1 = foldl(\acc t. persuade(acc, p, o, rules, turn, t), r, offered);
+ let r0 = settle(r, p, o, rules, turn);
+ let offered = filter(\t. t.status == Offered && not stale(r0.session, t) && not waiting(r0.session, t.id), r0.session.state.tasks);
+ let r1 = foldl(\acc t. persuade(acc, p, o, rules, turn, t), r0, offered);
  let working = filter(\t. t.status == Working, r1.session.state.tasks);
  let r2 = foldl(\acc t. checkIn(acc, p, o, turn, t), r1, working);
- foldl(\acc w. assign(acc, p, o, rules, turn, w), r2, r2.session.scenario.workers)
+ settle(foldl(\acc w. assign(acc, p, o, rules, turn, w), r2, r2.session.scenario.workers), p, o, rules, turn)
 }
 
 pure func closing(r: Run, rules: [Rule], turn: int) -> Run = if stopped(r) then r else { let before = r.session; prune(watch(step(r, turn), rules, before)) }

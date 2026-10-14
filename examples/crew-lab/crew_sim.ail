@@ -31,7 +31,7 @@ export type Tally = {replies: [Count], byCrew: [Count], offers: int, starts: int
 export type Heard = {request: Request, label: string, tick: int, fatigue: int, stress: int, morale: int} deriving (Eq)
 -- rules: escalation rules counted (not stopped at) under the auto-captain;
 -- raised: their once-per-crossing memory; escalations: counts per rule.
-export type Sim = {session: Session, seed: int, tally: Tally, captain: string, policy: Policy, scenario: Scenario, agreed: [string], heard: [Heard], keep: int, rules: [Rule], raised: [string], escalations: [Count]} deriving (Eq)
+export type Sim = {session: Session, seed: int, tally: Tally, captain: string, policy: Policy, scenario: Scenario, agreed: [string], heard: [Heard], keep: int, rules: [Rule], raised: [string], escalations: [Count], concerns: string} deriving (Eq)
 
 -- Resources: `low` starts at each account's opening balance and keeps the
 -- lowest available seen after work is assigned or after an advance; `zero` counts turns ending with none
@@ -257,7 +257,8 @@ pure func tallyAct(sim: Sim, a: Act) -> Sim =
  else failed(sim, errorKey(a.detail))
 
 pure func autoTurn(sim: Sim, turn: int) -> Sim = {
- let o = if sim.captain == "orders" then ordersOrders() else consentOrders();
+ let base = if sim.captain == "orders" then ordersOrders() else consentOrders();
+ let o = {base | concerns: sim.concerns};
  let d = decideTurn(sim.session, {seed: sim.seed, agreed: sim.agreed, raised: sim.raised, calls: 0}, sim.policy, o, sim.rules, turn);
  let mid = observeLow(foldl(\acc a. tallyAct(acc, a), {sim | session: d.session, seed: d.state.seed, agreed: d.state.agreed}, d.log));
  let f = finishTurn({d | session: mid.session, log: [], noted: []}, sim.rules, turn);
@@ -292,13 +293,20 @@ ensures { match result { Ok(sim) => sim.session.state.tick <= turns, Err(_) => t
 -- rules: escalation rules counted per run under the auto-captain (consent
 -- and orders captains; the random captain ignores them).
 export pure func playAuto(sc: Scenario, policy: Policy, captain: string, seed: int, turns: int, keep: int, archive: int, rules: [Rule]) -> Result[Sim, string]
+ensures { match result { Ok(sim) => sim.session.state.tick <= turns, Err(_) => true } } = playAs(sc, policy, captain, seed, turns, keep, archive, rules, "v2", "escalate")
+
+-- profile: the host profile, "v2" (no conversations) or "v3" (personalities
+-- and conversations, as the game runs). concerns: the auto-captain's standing
+-- order for open concerns (crew_core 0.4.1).
+export pure func playAs(sc: Scenario, policy: Policy, captain: string, seed: int, turns: int, keep: int, archive: int, rules: [Rule], profile: string, concerns: string) -> Result[Sim, string]
 ensures { match result { Ok(sim) => sim.session.state.tick <= turns && length(sim.heard) <= (if keep < 0 then 0 else keep), Err(_) => true } } =
- if captain != "consent" && captain != "orders" && captain != "random" then Err("captain must be consent, orders or random")
+ if profile != "v2" && profile != "v3" then Err("profile must be v2 or v3")
+ else if captain != "consent" && captain != "orders" && captain != "random" then Err("captain must be consent, orders or random")
  else if turns < 1 || turns > 500 then Err("turns must be 1..500")
  else if archive < 0 || archive > 10000 then Err("archive must be 0..10000")
- else match start(sc, "{\"command\":\"start\",\"policy\":\"${if captain == "orders" then "orders" else "consent"}\",\"scenario\":\"watch-v2\"${if archive > 0 then ",\"keep\":${show(archive)}" else ""}}") {
+ else match start(sc, "{\"command\":\"start\",\"policy\":\"${if captain == "orders" then "orders" else "consent"}\",\"scenario\":\"watch-${profile}\"${if archive > 0 then ",\"keep\":${show(archive)}" else ""}}") {
   Err(e) => Err(encodeHostError(e)),
-  Ok(o) => Ok(foldl(\acc turn. turnOf(acc, turn), {session: untraced(o.session), seed: seed, tally: zero(sc), captain: captain, policy: policy, scenario: sc, agreed: [], heard: [], keep: if keep < 0 then 0 else keep, rules: rules, raised: [], escalations: []}, range(1, turns + 1)))
+  Ok(o) => Ok(foldl(\acc turn. turnOf(acc, turn), {session: untraced(o.session), seed: seed, tally: zero(sc), captain: captain, policy: policy, scenario: sc, agreed: [], heard: [], keep: if keep < 0 then 0 else keep, rules: rules, raised: [], escalations: [], concerns: concerns}, range(1, turns + 1)))
  }
 
 pure func counts(xs: [Count]) -> Json = jo(map(\c. kv(c.id, jint(c.value)), xs))
