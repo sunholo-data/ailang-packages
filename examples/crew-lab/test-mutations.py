@@ -33,7 +33,10 @@ for name, filename, edits in mutants:
         shutil.copytree(root / "packages/crew-core", workspace / "packages/crew-core")
         core = workspace / "packages/crew-core"
         # No mutant touches cohorts.ail; its 48 tests run in core-tests, not once per mutant.
+        # The slow auto-run concerns tests (about a minute) also run once, in core-tests;
+        # every mutant here is killed without them.
         (core / "cohorts_test.ail").unlink()
+        (core / "concerns_test.ail").unlink()
         source = workspace / filename
         original = source.read_text()
         changed = original
