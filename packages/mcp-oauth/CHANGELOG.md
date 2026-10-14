@@ -1,5 +1,12 @@
 # Changelog — sunholo/mcp_oauth
 
+## 0.1.2 — 2026-10-14
+
+- **Compiles on ailang ≥ 0.53.1.** `revokeFamily` called the `revoke` hook inside a lambda passed to
+  `mapE`, which the latent-effect checker introduced in 0.53.1 rejects with an internal invariant
+  (ailang #1826), so the package failed to build for any adopter on a current toolchain. It now
+  revokes with a small recursive helper, in the same order. No behaviour or API change.
+
 ## 0.1.1 — 2026-10-07
 
 - **Authorization responses carry `iss`** (RFC 9207). The redirect is now

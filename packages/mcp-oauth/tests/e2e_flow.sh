@@ -2,7 +2,8 @@
 # End-to-end PKCE flow against the example service under real serve-api:
 # authorize -> login complete -> token -> gated MCP tool (200); then replay
 # the code -> invalid_grant, and the revoked token -> 401 on the tool.
-# Also runs `ailang mcp check --target both` (all five checks must PASS).
+# Also runs `ailang mcp check --target both` (every check must PASS; ailang
+# v0.52 ran five, current versions run more).
 set -uo pipefail
 cd "$(dirname "$0")/example"
 P=${E2E_PORT:-18999}
@@ -55,7 +56,8 @@ else fail "replay revoked the token" "still accepted"; fi
 
 CHECK=$(ailang mcp check "$BASE/mcp/connect/" --target both 2>&1); CHECK_RC=$?
 NPASS=$(grep -c "^  PASS" <<<"$CHECK")
-if [ $CHECK_RC -eq 0 ] && [ "$NPASS" -eq 5 ]; then pass "mcp check 5/5"; else fail "mcp check" "rc=$CHECK_RC pass=$NPASS"; fi
+NFAIL=$(grep -c "^  FAIL" <<<"$CHECK")
+if [ $CHECK_RC -eq 0 ] && [ "$NFAIL" -eq 0 ] && [ "$NPASS" -ge 5 ]; then pass "mcp check $NPASS/$NPASS"; else fail "mcp check" "rc=$CHECK_RC pass=$NPASS fail=$NFAIL"; fi
 grep -E "  WARN|  ERROR" "$LOG" | grep -v MOD010 && fail "server log clean" "warnings above" || pass "server log clean"
 [ $rc -eq 0 ] && echo "ok: e2e flow"
 exit $rc

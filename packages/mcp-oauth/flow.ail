@@ -22,7 +22,7 @@ import std/string (replace, contains as strContains, length)
 import std/json (encode, decode, jo, kv, js, jb, jnum, ja, getString, getBool, getInt, getStringArrayOrEmpty)
 import std/option (Option, Some, None)
 import std/result (Result, Ok, Err)
-import std/list (mapE, map, length as listLen)
+import std/list (map, length as listLen)
 import std/io (println)
 import std/math (intToFloat)
 import ./core (challengeMethodOk, pkceOk, redirectOk, codeExpiresAt, isExpired, verifierCharsOk, authResponseUrl)
@@ -184,6 +184,15 @@ func tokenBody(access: string<secret>, refreshTok: string<secret>, ttlSec: int) 
   encode(jo([kv("access_token", js(access)), kv("token_type", js("Bearer")),
              kv("expires_in", jnum(intToFloat(ttlSec))), kv("refresh_token", js(refreshTok))]))
 
+-- Revoke each digest in order. Not mapE(\d. h.revoke(d), ds): calling a hook
+-- field inside a lambda passed to mapE fails to compile on ailang >= 0.53.1
+-- (ailang #1826). A family holds one digest per refresh, so the list is short.
+func revokeEach(h: Hooks, ds: [string]) -> bool ! {IO, FS, Env, Net, Clock, SharedMem} =
+  match ds {
+    [] => true,
+    [d, ...rest] => { let _ = h.revoke(d); revokeEach(h, rest) }
+  }
+
 -- Revoke every access token issued in a refresh family and close it.
 export func revokeFamily(h: Hooks, family: string, nowSec: int) -> bool ! {IO, FS, Env, Net, Clock, SharedMem} =
   match h.get("fam:${family}") {
@@ -192,7 +201,7 @@ export func revokeFamily(h: Hooks, family: string, nowSec: int) -> bool ! {IO, F
       Err(_) => false,
       Ok(fam) => {
         let digests = getStringArrayOrEmpty(fam, "tokens");
-        let _ = mapE(\d. h.revoke(d), digests);
+        let _ = revokeEach(h, digests);
         audit("revoked family=${family} tokens=${show(listLen(digests))}");
         h.put("fam:${family}", encode(jo([kv("tokens", ja(map(js, digests))), kv("closed", jb(true))])), nowSec + refreshTtlSec())
       }
