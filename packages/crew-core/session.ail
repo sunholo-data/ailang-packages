@@ -120,7 +120,7 @@ ensures { match result {
   Ok(o) => length(o.session.bindings) == length(s.bindings) + 1,
   Err(_) => true
 } } =
-  if not idle(s) || not identity(s) then Err(HostFailure("offer context")) else if s.chat.version == 1 && any(\i. i.worker == worker && i.status == "open" && any(\b. b.task == i.task && b.recipe == recipe, s.bindings), s.chat.issues) then Err(HostFailure("answer the existing concern before reoffering this assignment")) else if not checkedId(id) || not owned(s, worker, recipe) || s.state.tick > numericLimit() - 20 then Err(HostFailure("offer fields")) else {
+  if not idle(s) || not identity(s) then Err(HostFailure("offer context")) else if s.chat.version == 1 && any(\i. i.worker == worker && i.status == "open" && not moot(s, i) && any(\b. b.task == i.task && b.recipe == recipe, s.bindings), s.chat.issues) then Err(HostFailure("answer the existing concern before reoffering this assignment")) else if not checkedId(id) || not owned(s, worker, recipe) || s.state.tick > numericLimit() - 20 then Err(HostFailure("offer fields")) else {
     let agreement = "agreement-${id}"
     let b: TaskAgreement = { task: id, agreement: agreement, captain: "captain", worker: worker, recipe: recipe }
     match domain(s, "offer-${id}", "captain", Authored, [OfferTask(id, recipe, [worker], []), OfferCommitment(agreement, ["captain", worker], "Project agreement ${id}", s.state.tick + 20, []), AcceptCommitment(agreement)]) {
@@ -604,7 +604,22 @@ pure func archiveJson(a: Archive) -> Json = jo([kv("keep", jint(a.keep)), kv("ta
 pure func tallied(xs: [Tally], id: string) -> [Tally] = if any(\t. t.id == id, xs) then map(\t. if t.id == id then {t | count: t.count + 1} else t, xs) else xs ++ [{id: id, count: 1}]
 
 pure func held(s: Session, t: Task) -> bool =
- any(\r. r.task == t.id, s.pending) || any(\b. b.request.task == t.id, s.bank) || any(\r. r.task == t.id && not r.resolved, s.state.reliefs) || any(\i. i.task == t.id && i.status == "open", s.chat.issues)
+ any(\r. r.task == t.id, s.pending) || any(\b. b.request.task == t.id, s.bank) || any(\r. r.task == t.id && not r.resolved, s.state.reliefs) || any(\i. i.task == t.id && i.status == "open" && not moot(s, i), s.chat.issues)
+
+-- A captain can answer a concern only about a live offer (captain_reply).
+-- One about work already running or finished (a check-in reply of defer
+-- opens one too) or about an offer whose agreement has fallen due can no
+-- longer be answered. It no longer blocks offering the worker that
+-- assignment again, and it does not keep the task from being archived
+-- (crew_core 0.4.1).
+export pure func moot(s: Session, i: Issue) -> bool ! {}
+ensures { result || any(\t. t.id == i.task && t.status == Offered, s.state.tasks) } = match head(filter(\t. t.id == i.task, s.state.tasks)) {
+ Some(t) => t.status != Offered || (match head(filter(\b. b.task == i.task, s.bindings)) {
+  Some(b) => any(\c. c.id == b.agreement && c.due <= s.state.tick, s.state.commitments),
+  None => true
+ }),
+ None => true
+}
 
 -- Offers whose agreement fell due keep ago (never answered in time) go too.
 pure func lapsed(s: Session, t: Task) -> bool = t.status == Offered && (match head(filter(\b. b.task == t.id, s.bindings)) {

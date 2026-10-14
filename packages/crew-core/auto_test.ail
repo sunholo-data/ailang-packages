@@ -59,7 +59,7 @@ test "a trust floor escalates when someone's trust falls below it" {
 }
 
 test "standing orders and escalation rules decode and validate" {
- decodeOrders("{\"schema\":\"crew_standing_orders/1\",\"start\":\"always\",\"rest\":\"never\",\"relief\":\"strained\"}") == Ok({start: "always", rest: "never", relief: "strained", fatigue: 70, stress: 75, cadence: 1})
+ decodeOrders("{\"schema\":\"crew_standing_orders/1\",\"start\":\"always\",\"rest\":\"never\",\"relief\":\"strained\"}") == Ok({start: "always", rest: "never", relief: "strained", fatigue: 70, stress: 75, cadence: 1, concerns: "escalate"})
  && (match decodeOrders("{\"schema\":\"crew_standing_orders/1\",\"start\":\"maybe\",\"rest\":\"never\",\"relief\":\"deny\"}") { Err(_) => true, Ok(_) => false })
  && (match decodeEscalation("{\"schema\":\"crew_escalation/1\",\"rules\":[{\"kind\":\"breakdown\",\"indicator\":\"stress\",\"threshold\":85},{\"kind\":\"major\",\"kinds\":[\"loss\",\"deep_time\"]},{\"kind\":\"argument\"}]}") { Ok(rs) => length(rs) == 3, Err(_) => false })
  && (match decodeEscalation("{\"schema\":\"crew_escalation/1\",\"rules\":[{\"kind\":\"breakdown\",\"threshold\":85}]}") { Err(_) => true, Ok(_) => false })
@@ -68,7 +68,7 @@ test "standing orders and escalation rules decode and validate" {
 
 -- Two crew hold heat; the forward sky takes some at turn 1: they argue.
 pure func heatShip() -> string =
- "{\"schema\":\"crew_scenario/1\",\"id\":\"radiators\",\"indicators\":[\"fatigue\",\"stress\",\"trust\"],\"indicator_defaults\":{\"fatigue\":0,\"stress\":20},\"captain\":{\"id\":\"captain\",\"values\":{\"mission\":80},\"start\":{}},\"crew\":[${crew("x")},${crew("y")}],\"rest\":{\"purpose\":\"Recover.\",\"duration\":1,\"effects\":{\"fatigue\":-10}},\"overextended\":{\"indicator\":\"stress\",\"threshold\":70,\"recovery\":40,\"duration\":2,\"cooldown\":3},\"trust_in_captain\":80,\"resources\":[{\"id\":\"heat\",\"name\":\"Heat headroom\",\"initial\":2,\"kind\":\"capacity\"}],\"events\":[{\"id\":\"sky\",\"at\":1,\"text\":\"The forward sky loads the radiators.\",\"transfers\":[{\"resource\":\"heat\",\"delta\":-1}],\"major\":\"deep_time\"}]}"
+ "{\"schema\":\"crew_scenario/1\",\"id\":\"radiators\",\"indicators\":[\"fatigue\",\"stress\",\"trust\",\"morale\"],\"indicator_defaults\":{\"fatigue\":0,\"stress\":20,\"morale\":50},\"captain\":{\"id\":\"captain\",\"values\":{\"mission\":80},\"start\":{}},\"crew\":[${crew("x")},${crew("y")}],\"rest\":{\"purpose\":\"Recover.\",\"duration\":1,\"effects\":{\"fatigue\":-10}},\"overextended\":{\"indicator\":\"stress\",\"threshold\":70,\"recovery\":40,\"duration\":2,\"cooldown\":3},\"trust_in_captain\":80,\"resources\":[{\"id\":\"heat\",\"name\":\"Heat headroom\",\"initial\":2,\"kind\":\"capacity\"}],\"events\":[{\"id\":\"sky\",\"at\":1,\"text\":\"The forward sky loads the radiators.\",\"transfers\":[{\"resource\":\"heat\",\"delta\":-1}],\"major\":\"deep_time\"}]}"
 pure func crew(id: string) -> string = "{\"id\":\"${id}\",\"role\":\"Crew ${id}\",\"ocean\":{\"openness\":50,\"conscientiousness\":50,\"extraversion\":50,\"agreeableness\":50,\"neuroticism\":40},\"values\":{\"duty\":60},\"start\":{},\"work\":[{\"id\":\"work_${id}\",\"name\":\"Cool ${id}\",\"purpose\":\"Hold the line.\",\"duration\":6,\"costs\":[{\"resource\":\"heat\",\"reserve\":1,\"consume\":0}],\"effects\":{\"fatigue\":5}}]}"
 
 pure func heatRun(rules: [Rule]) -> Result[AutoResult, HostError] = match (decodeScenario(heatShip()), responses()) {

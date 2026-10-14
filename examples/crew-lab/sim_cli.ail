@@ -12,16 +12,16 @@ import std/crypto (sha256Hex)
 import pkg/sunholo/crew_core/scenario (Scenario, decodeScenario, scenarioHash)
 import pkg/sunholo/crew_core/example (firstContactJson)
 import pkg/sunholo/crew_core/policy (Policy, decodePolicy, watchPolicyBody)
-import ./crew_sim (play, playArchived, playAuto, report, escalationKeys, populationFields)
+import ./crew_sim (play, playArchived, playAuto, playAs, report, escalationKeys, populationFields)
 import pkg/sunholo/crew_core/auto (Rule, Orders, decodeEscalation, advanceAuto, consentOrders, ordersOrders)
 import pkg/sunholo/crew_core/session (start, untraced, encodeHostError)
 import std/json (encode, jo, kv, js, jint)
 import ./bubble (lintPack)
 import ./claims (Claim, Verdict, decodeClaims, judge, line, captains)
 
-export type Options = {scenario: string, policy: string, captain: string, first: int, last: int, turns: int, summary: string, check: string, bubble: bool, archive: int, auto: string, skip: int, cadence: int} deriving (Eq)
+export type Options = {scenario: string, policy: string, captain: string, first: int, last: int, turns: int, summary: string, check: string, bubble: bool, archive: int, auto: string, skip: int, cadence: int, profile: string, concerns: string} deriving (Eq)
 
-pure func defaults() -> Options = {scenario: "", policy: "", captain: "consent", first: 1, last: 20, turns: 12, summary: "", check: "", bubble: false, archive: 0, auto: "", skip: 0, cadence: 1}
+pure func defaults() -> Options = {scenario: "", policy: "", captain: "consent", first: 1, last: 20, turns: 12, summary: "", check: "", bubble: false, archive: 0, auto: "", skip: 0, cadence: 1, profile: "", concerns: "escalate"}
 
 pure func seedRange(text: string) -> Result[{first: int, last: int}, string] = match split(text, "..") {
  [a] => match stringToInt(a) { Some(n) => if n >= 1 && n <= 2147483646 then Ok({first: n, last: n}) else Err("seed out of range"), None => Err("--seeds takes N or A..B") },
@@ -47,12 +47,14 @@ ensures { match result { Ok(r) => r.first >= 1 && r.last >= r.first && r.turns >
  "--skip" :: n :: rest => match stringToInt(n) { Some(k) => if k >= 1 && k <= 100000 then parse(rest, {o | skip: k}) else Err("--skip must be 1..100000"), None => Err("--skip must be a whole number") },
  "--cadence" :: n :: rest => match stringToInt(n) { Some(k) => if k >= 1 && k <= 365 then parse(rest, {o | cadence: k}) else Err("--cadence must be 1..365"), None => Err("--cadence must be a whole number") },
  "--archive" :: n :: rest => match stringToInt(n) { Some(k) => if k >= 0 && k <= 10000 then parse(rest, {o | archive: k}) else Err("--archive must be 0..10000"), None => Err("--archive must be a whole number") },
+ "--profile" :: v :: rest => if v == "v2" || v == "v3" then parse(rest, {o | profile: v}) else Err("--profile must be v2 or v3"),
+ "--concerns" :: c :: rest => parse(rest, {o | concerns: c}),
  "--help" :: _ => Err("help"),
  x :: _ => Err("unknown argument ${x}")
 }
 
 pure func usage() -> string =
- "crew-sim: batch runs of the captain/crew host without AI.\n  crew-sim [--scenario FILE] [--policy FILE] [--captain consent|orders|random] [--seeds A..B] [--turns N] > runs.ndjson\n  crew-sim --summary runs.ndjson\n  crew-sim --check claims.json [--scenario FILE] [--policy FILE] [--seeds A..B] [--turns N]   (exit 1 if a claim fails)\n  crew-sim ... --auto escalation.json   (count crew_escalation/1 rules per run under the auto-captain; measure escalations.<rule>)\n  crew-sim --skip N [--cadence C] [--captain consent|orders] [--auto rules.json]   (the game's skip: one advanceAuto call)\n  crew-sim ... --archive N   (crew_core archiving: fold finished work older than N turns)\n  crew-sim --bubble --scenario FILE   (exit 1 unless it uses only the eight Stapledon bubble resources, with the right kinds)\nDefaults: the first-contact example ship, its authored response policy, consent, seeds 1..20, 12 turns. Runs of 60 turns take a few seconds per seed; longer runs slow down as finished work accumulates.\nOne JSON line per seed; the same inputs always give the same output."
+ "crew-sim: batch runs of the captain/crew host without AI.\n  crew-sim [--scenario FILE] [--policy FILE] [--captain consent|orders|random] [--seeds A..B] [--turns N] > runs.ndjson\n  crew-sim --summary runs.ndjson\n  crew-sim --check claims.json [--scenario FILE] [--policy FILE] [--seeds A..B] [--turns N]   (exit 1 if a claim fails)\n  crew-sim ... --auto escalation.json   (count crew_escalation/1 rules per run under the auto-captain; measure escalations.<rule>)\n  crew-sim --skip N [--cadence C] [--captain consent|orders] [--auto rules.json]   (the game's skip: one advanceAuto call)\n  crew-sim ... --archive N   (crew_core archiving: fold finished work older than N turns)\n  crew-sim ... --profile v2|v3   (host profile; v3, with conversations as the game runs, is the default with --auto or --skip)\n  crew-sim ... --concerns escalate|APPROACH   (the auto-captain standing order for open concerns; default escalate)\n  crew-sim --bubble --scenario FILE   (exit 1 unless it uses only the eight Stapledon bubble resources, with the right kinds)\nDefaults: the first-contact example ship, its authored response policy, consent, seeds 1..20, 12 turns. Runs of 60 turns take a few seconds per seed; longer runs slow down as finished work accumulates.\nOne JSON line per seed; the same inputs always give the same output."
 
 func readOr(path: string, fallback: string) -> Result[string, string] ! {FS} =
  if path == "" then Ok(fallback) else match readFileResult(path) { Ok(b) => Ok(b), Err(e) => Err("cannot read ${path}: ${e}") }
@@ -110,8 +112,11 @@ export pure func checkArchived(sc: Scenario, policy: Policy, pb: string, cs: [Cl
 ensures { match result { Ok(vs) => length(vs) == length(cs), Err(_) => true } } = checkAuto(sc, policy, pb, cs, first, last, turns, archive, [])
 
 export pure func checkAuto(sc: Scenario, policy: Policy, pb: string, cs: [Claim], first: int, last: int, turns: int, archive: int, rules: [Rule]) -> Result[[Verdict], string]
+ensures { match result { Ok(vs) => length(vs) == length(cs), Err(_) => true } } = checkAs(sc, policy, pb, cs, first, last, turns, archive, rules, "v2", "escalate")
+
+export pure func checkAs(sc: Scenario, policy: Policy, pb: string, cs: [Claim], first: int, last: int, turns: int, archive: int, rules: [Rule], profile: string, concerns: string) -> Result[[Verdict], string]
 ensures { match result { Ok(vs) => length(vs) == length(cs), Err(_) => true } } = {
- let runs = map(\k. {captain: k, rows: map(\seed. match playAuto(sc, policy, k, seed, turns, 0, archive, rules) {
+ let runs = map(\k. {captain: k, rows: map(\seed. match playAs(sc, policy, k, seed, turns, 0, archive, rules, profile, concerns) {
    Err(e) => Err(e),
    Ok(sim) => match decode(report(sim, seed, turns, scenarioHash(sc), sha256Hex(pb))) { Ok(j) => Ok(j), Err(e) => Err(e) }
   }, range(first, last + 1))}, captains(cs));
@@ -127,7 +132,7 @@ func checkMain(o: Options, sc: Scenario, policy: Policy, pb: string, rules: [Rul
  Err(e) => { println("cannot read ${o.check}: ${e}"); exit(1) },
  Ok(body) => match decodeClaims(sc, body) {
   Err(e) => { println("invalid claims: ${e}"); exit(1) },
-  Ok(cs) => match (if o.skip > 0 then checkSkip(o, sc, policy, cs, rules) else checkAuto(sc, policy, pb, cs, o.first, o.last, o.turns, o.archive, rules)) {
+  Ok(cs) => match (if o.skip > 0 then checkSkip(o, sc, policy, cs, rules) else checkAs(sc, policy, pb, cs, o.first, o.last, o.turns, o.archive, rules, profileOf(o), o.concerns)) {
    Err(e) => { println("run failed: ${e}"); exit(1) },
    Ok(vs) => {
     forEachE(\v. println(line(v)), vs);
@@ -142,14 +147,18 @@ func checkMain(o: Options, sc: Scenario, policy: Policy, pb: string, rules: [Rul
 -- --skip N: one advanceAuto call (the game's skip) from a fresh start under the
 -- captain's preset orders at --cadence, stopping at the first escalation of
 -- --auto rules. Prints where it stopped.
-pure func preset(o: Options) -> Orders = { let base = if o.captain == "orders" then ordersOrders() else consentOrders(); {base | cadence: o.cadence} }
+pure func preset(o: Options) -> Orders = { let base = if o.captain == "orders" then ordersOrders() else consentOrders(); {base | cadence: o.cadence, concerns: o.concerns} }
+
+-- The host profile: --profile, else v3 (the game's) for auto-captain runs
+-- with escalation rules or a skip, else v2 (crew_core 0.4.1).
+export pure func profileOf(o: Options) -> string = if o.profile != "" then o.profile else if o.auto != "" || o.skip > 0 then "v3" else "v2"
 
 -- One skip as a crew_skip/1 line: where it stopped, what the auto-captain
 -- did, the escalation that stopped it (counted under escalations.<rule>, and
 -- escalations.cohort:<id> for cohort rules) and, with cohorts, the
 -- population measures.
 export pure func skipRow(o: Options, sc: Scenario, policy: Policy, rules: [Rule], seed: int) -> Result[string, string] ! {}
-ensures { match result { Ok(r) => r != "", Err(_) => true } } = match start(sc, "{\"command\":\"start\",\"policy\":\"${if o.captain == "orders" then "orders" else "consent"}\",\"scenario\":\"watch-v2\"${if o.archive > 0 then ",\"keep\":${show(o.archive)}" else ""}}") {
+ensures { match result { Ok(r) => r != "", Err(_) => true } } = match start(sc, "{\"command\":\"start\",\"policy\":\"${if o.captain == "orders" then "orders" else "consent"}\",\"scenario\":\"watch-${profileOf(o)}\"${if o.archive > 0 then ",\"keep\":${show(o.archive)}" else ""}}") {
  Err(e) => Err(encodeHostError(e)),
  Ok(st) => match advanceAuto(untraced(st.session), {seed: seed, agreed: [], raised: [], calls: 0}, policy, preset(o), rules, o.skip) {
   Err(e) => Err(encodeHostError(e)),
@@ -191,7 +200,7 @@ export func main() -> () ! {IO, FS, Env} = match parse(getArgs(), defaults()) {
    (Err(e), _, _) => { println("invalid scenario: ${e}"); exit(1) },
    (_, Err(e), _) => { println("invalid policy: ${e}"); exit(1) },
    (_, _, Err(e)) => { println("invalid escalation rules: ${e}"); exit(1) },
-   (Ok(sc), Ok(policy), Ok(rules)) => if o.bubble then bubbleMain(sc) else if o.check != "" then checkMain(o, sc, policy, pb, rules) else if o.skip > 0 then skipMain(o, sc, policy, rules) else forEachE(\seed. match playAuto(sc, policy, o.captain, seed, o.turns, 0, o.archive, rules) {
+   (Ok(sc), Ok(policy), Ok(rules)) => if o.bubble then bubbleMain(sc) else if o.check != "" then checkMain(o, sc, policy, pb, rules) else if o.skip > 0 then skipMain(o, sc, policy, rules) else forEachE(\seed. match playAs(sc, policy, o.captain, seed, o.turns, 0, o.archive, rules, profileOf(o), o.concerns) {
      Err(e) => { println("{\"error\":\"${e}\"}"); exit(1) },
      Ok(sim) => println(report(sim, seed, o.turns, scenarioHash(sc), sha256Hex(pb)))
     }, range(o.first, o.last + 1))

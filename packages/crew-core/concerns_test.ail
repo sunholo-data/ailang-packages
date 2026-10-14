@@ -1,0 +1,88 @@
+module sunholo/crew_core/concerns_test
+import std/result (Result, Ok, Err)
+import std/option (Option, Some, None)
+import std/list (head, filter, length, any, contains, foldl, range)
+import ./example (firstContact)
+import ./session (Session, HostError, HostFailure, start)
+import ./policy (Policy, decodePolicy, watchPolicyBody)
+import ./auto (Orders, Rule, AutoResult, Act, AutoState, advanceAuto, consentOrders, ordersOrders, stuckAt, below, above)
+
+pure func startLine(policy: string) -> string = "{\"command\":\"start\",\"policy\":\"${policy}\",\"scenario\":\"watch-v3\",\"keep\":30}"
+pure func shipV3(policy: string) -> Result[Session, HostError] = match firstContact() {
+ Err(e) => Err(HostFailure(e)),
+ Ok(sc) => match start(sc, startLine(policy)) { Err(e) => Err(e), Ok(o) => Ok(o.session) }
+}
+pure func responses() -> Result[Policy, string] = decodePolicy(watchPolicyBody())
+export pure func runV3(policy: string, o: Orders, rules: [Rule], n: int) -> Result[AutoResult, HostError] = match (shipV3(policy), responses()) {
+ (Ok(s), Ok(p)) => advanceAuto(s, {seed: 7, agreed: [], raised: [], calls: 0}, p, o, rules, n),
+ (Err(e), _) => Err(e),
+ (_, Err(e)) => Err(HostFailure(e))
+}
+export pure func errorsOf(log: [Act]) -> int = length(filter(\a. a.kind == "error", log))
+
+pure func rule(kind: string) -> Rule = {kind: kind, indicator: "", threshold: 0, kinds: []}
+pure func count(log: [Act], kind: string) -> int = length(filter(\a. a.kind == kind, log))
+pure func errorAct(actor: string, detail: string) -> Act = {kind: "error", actor: actor, label: "", detail: detail, request: None, tick: 0, fatigue: 0, stress: 0, morale: 0}
+pure func asking() -> Orders = {consentOrders() | concerns: "ask_advice"}
+
+-- Resume a halted run `k` times, `n` days each (the game resumes after a hold
+-- without answering); returns every call's log and the last result.
+pure func resumed(a: AutoResult, p: Policy, o: Orders, k: int, n: int) -> {last: AutoResult, log: [Act], held: [string]} =
+ foldl(\acc i. match advanceAuto(acc.last.session, acc.last.state, p, o, [], n) {
+  Ok(b) => {last: b, log: acc.log ++ b.log, held: acc.held ++ (match b.escalated { Some(e) => [e.detail], None => [] })},
+  Err(_) => acc
+ }, {last: a, log: a.log, held: (match a.escalated { Some(e) => [e.detail], None => [] })}, range(0, k))
+
+test "watch-v3: an open concern escalates (uncovered) at once by default, with no host errors" {
+ match runV3("consent", consentOrders(), [], 60) {
+  Ok(a) => match a.escalated { Some(e) => e.rule == "uncovered" && e.actor == "diplomat" && e.tick == 0 && errorsOf(a.log) == 0, None => false },
+  Err(_) => false
+ }
+}
+
+test "watch-v3: resuming without an answer never raises the same concern twice, and the crew keep working" {
+ match (runV3("consent", consentOrders(), [], 60), responses()) {
+  (Ok(a), Ok(p)) => { let r = resumed(a, p, consentOrders(), 6, 10); errorsOf(r.log) == 0 && length(r.held) == length(foldl(\acc d. if contains(acc, d) then acc else acc ++ [d], [], r.held)) && count(r.log, "start") >= 10 },
+  _ => false
+ }
+}
+
+test "watch-v3: a concern nobody answers lapses with its offer, and the worker is offered work again" {
+ match (runV3("consent", consentOrders(), [], 60), responses()) {
+  (Ok(a), Ok(p)) => { let r = resumed(a, p, consentOrders(), 6, 10); any(\x. x.kind == "offer" && x.actor == "diplomat" && x.tick > 20, r.log) },
+  _ => false
+ }
+}
+
+test "watch-v3: standing orders to reply answer concerns, and 30 days run with no errors and no escalation" {
+ match runV3("consent", asking(), [], 30) {
+  Ok(a) => a.escalated == None && a.turns == 30 && errorsOf(a.log) == 0 && count(a.log, "captain_reply") >= 1 && count(a.log, "start") >= 10,
+  Err(_) => false
+ }
+}
+
+test "watch-v3: orders captain replying to concerns runs 30 days with no errors" {
+ match runV3("orders", {ordersOrders() | concerns: "clear_scope"}, [], 30) {
+  Ok(a) => a.turns == 30 && errorsOf(a.log) == 0 && count(a.log, "captain_reply") >= 1,
+  Err(_) => false
+ }
+}
+
+test "an uncovered rule escalates concerns even when the orders would reply" {
+ match runV3("consent", asking(), [rule("uncovered")], 60) {
+  Ok(a) => match a.escalated { Some(e) => e.rule == "uncovered" && count(a.log, "captain_reply") == 0, None => false },
+  Err(_) => false
+ }
+}
+
+test "the stuck guard fires on the third identical error, per actor and text" {
+ let two = [errorAct("medic", "x"), errorAct("medic", "x")];
+ let three = [errorAct("medic", "x")] ++ two;
+ let mixed = [errorAct("pilot", "x"), errorAct("medic", "y")] ++ two;
+ let blocked = [errorAct("medic", "start: blocked"), errorAct("medic", "start: blocked"), errorAct("medic", "start: blocked")];
+ not stuckAt(two, "medic", "x") && stuckAt(three, "medic", "x") && not stuckAt(mixed, "medic", "x") && not stuckAt(mixed, "pilot", "x") && not stuckAt(blocked, "medic", "start: blocked")
+}
+
+test "crossings re-arm only 10 back across the line" {
+ not below(69, 70) && not below(61, 70) && below(59, 70) && below(0, 5) && not above(41, 40) && above(50, 40) && above(100, 95)
+}
