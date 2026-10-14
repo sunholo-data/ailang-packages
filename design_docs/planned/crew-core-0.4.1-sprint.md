@@ -17,7 +17,7 @@ deadlocks from day 1. It was found by the R2-CREW integration agent
     archiving; without it, the ship stops offering after about day 35);
   - the `hands_on` breakdown line re-arms about 130 times a year.
 
-**Authorization:** pending (Mark).
+**Authorization:** Mark, attended 2026-10-14: "yes go ahead with 0.4.1". Concern default: crew_core escalates (plan default; the game picks per preset).
 **AILANG prompt version loaded:** v0.16.7 (runtime v0.54.8).
 **Registry reuse:** none (fixes inside crew_core).
 
