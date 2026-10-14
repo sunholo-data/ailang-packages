@@ -43,7 +43,9 @@ import ./cohorts (Cohort, division, pressure)
 --    with the host's suggested words for that approach, then hear the
 --    worker's reconsideration. An `uncovered` rule in the escalation set
 --    escalates whatever this says. Until the concern is settled, the worker
---    is not asked again or offered other work.
+--    is not asked again or offered other work. A concern the worker reopens
+--    after that one reply is not answered again: it waits until the offer
+--    lapses (20 ticks), then the worker is offered work afresh.
 export type Orders = { start: string, rest: string, relief: string, fatigue: int, stress: int, cadence: int, concerns: string } deriving (Eq)
 
 -- crew_escalation/1 rules. kind:
@@ -187,7 +189,8 @@ pure func act(r: Run, kind: string, actor: string, label: string, detail: string
 -- three times in the call's log, so it is raised once. A start the engine
 -- blocks for lack of resources is a shortage the ship can see (resources,
 -- stockouts), like a resource refusal, not a stuck host, so it is not
--- counted.
+-- counted. Host error texts carry no per-turn ids (fixed strings, codes or
+-- crew ids), so a repeat matches.
 export pure func stuckAt(log: [Act], actor: string, detail: string) -> bool ! {}
 ensures { not result || length(log) >= 3 } = detail != "start: blocked" && length(filter(\a. a.kind == "error" && a.actor == actor && a.detail == detail, log)) == 3
 

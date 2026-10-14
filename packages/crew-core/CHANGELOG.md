@@ -18,7 +18,9 @@ recordings replay identically.
       concern;
     - an approach (`clear_scope`, `ask_advice`, `stage_plan`,
       `explain_priority`, `assert_authority`) replies once per concern with
-      the host's suggested words, then hears the reconsideration.
+      the host's suggested words, then hears the reconsideration. A concern
+      reopened after that reply waits for its offer to lapse (20 ticks),
+      and then the worker is offered work afresh.
   - An `uncovered` rule escalates even when the orders would reply.
   - Check-ins skip tasks with an open concern.
 - **Moot concerns** (`session.moot`). A concern about a lapsed offer or about
@@ -37,7 +39,7 @@ recordings replay identically.
   that an active response answers to. social_dynamics keeps 128 per crew
   member, so 21 to 27 years of replies filled them, and every later reply
   failed. The stuck guard found this in a century skip.
-- **Tests:** 10 new (concerns, moot concerns, resume without an answer, auto-
+- **Tests:** 9 new (concerns, moot concerns, resume without an answer, auto-
   reply under both captains, the uncovered override, stuck, hysteresis,
   personality retention). The `morale` indicator was added to two test
   ships, whose crew could never answer before (the stuck guard showed it).
