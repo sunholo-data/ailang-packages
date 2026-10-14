@@ -159,7 +159,11 @@ The rule from R2-CREW holds: **AI text never decides anything.**
     skip, or when the store reaches its cap.
   - Which records: the lowest salience among the oldest.
   - The new numbers:
-    - fidelity = the parents' fidelity × 85/100, less a stress term;
+    - fidelity = the parents' fidelity × a retention rate, less a stress
+      term. The rate is about 85/100 for ordinary memories and about 95/100
+      for first-hand memories of significant events (loss, first contact,
+      deep time, betrayal, a large trust or regard change), so those last for
+      decades (Mark, 2026-10-14);
     - tone moves a bounded step toward current trust and regard
       (reconsolidation);
     - salience is the parents' maximum plus a recall bonus.
@@ -176,16 +180,26 @@ The rule from R2-CREW holds: **AI text never decides anything.**
   - no people or events outside the sources;
   - tone agrees in sign with `tone` (an embedding against valence anchors).
 
-  Misattribution is allowed only below a fidelity floor, by a seeded roll,
-  and only for the Archive at first.
+  Misattribution (who did what, when, in what order) is allowed only below a
+  fidelity floor, by a seeded roll. Its chance comes from:
+  - **the Archive:** its memory health;
+  - **crew:** personality and state at compaction, with no separate trait.
+    - Low conscientiousness loosens details.
+    - High neuroticism pulls memories toward threat and blame.
+    - High openness fills gaps with plausible invention.
+    - High stress or fatigue raises the chance, and age raises it slowly.
+
+  Two crew members can then remember one event differently because of who
+  they are and what they were going through.
 - **Cache and offline:**
   - Cached by a hash of the parent hashes, the numbers, the state, the prompt
     version and the model, like the sampled words. Replays and offline play
     reuse it.
   - With no model, a template writes the gist from the numbers ("Years ago,
     something about the reclaimer. Still bitter.").
-- **Where memories are used:** in dialogue prompts (crew replies, the
-  Archive) and on the Crew page if Mark wants players to see them.
+- **Where memories are used:** only in what crew and the Archive say
+  (dialogue prompts). Players hear memories; they never see a list of them
+  (Mark, 2026-10-14).
   - Grievance, trust and regard stay as numbers in crew_core; behaviour never
     reads memory text.
 
@@ -207,16 +221,14 @@ The rule from R2-CREW holds: **AI text never decides anything.**
     misattribution floor);
   - offline play gives the template text, and the run completes.
 
-### Questions for Mark
+### Decided (Mark, 2026-10-14)
 
-1. **How fast memories fade.** At 85% fidelity per compaction and about one
-   compaction a year, a memory is down to gist by year 5 to 6 and vague by
-   year 10. Is that right for crew, or should first-hand memories of major
-   events last longer?
-2. **Who may misremember who did what.** I propose the Archive only at first,
-   and crew later if it plays well.
-3. **Visibility.** Should players see what crew remember (a "remembers" line
-   on the Crew page), or only hear it in what they say?
+1. **Fade:** first-hand memories of significant events last longer than
+   ordinary ones (retention rate above).
+2. **Misremembering:** the Archive's comes from its health. A crew member's
+   comes from personality and state; I proposed this in answer to Mark's
+   question "health or personality trait?".
+3. **Visibility:** players only hear memories in what crew say.
 
 The game-side design belongs in stapledons-design `semantic-memory.md` (#19).
 This section is the lab prototype's plan; it moves there once Mark agrees.
