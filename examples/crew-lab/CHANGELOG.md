@@ -4,6 +4,16 @@
 
 Local only; never published.
 
+- **`hands_on` preset (2026-10-14).** The Stapledon pack gains
+  `hands_on.json`, for the game's `hands_on` auto-run:
+  - breakdown at stress 70, trust floor 40, `uncovered` and cohort pressure
+    25;
+  - claims in counting mode: 10 of 11 hold.
+
+  Findings are in `REVIEW.md`:
+  - the line at 70 re-arms about 130 times a year (hysteresis proposed);
+  - at cadence 1 with archiving, crew_core asks about lapsed offers (an
+    old bug, also in `critical_only` and crew_core 0.3.0).
 - **Universal resources.** The Stapledon pack uses only the eight bubble
   resources (`mass`, `water`, `power`, `heat`, `garden`, `fabrication`,
   `compute`, `signal`; stapledons-design `bubble-resources.md`). Stocks are

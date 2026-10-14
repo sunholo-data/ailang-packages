@@ -151,6 +151,58 @@ the radiators too"). Over 20 seeds, 10 of 12 claims hold.
   - a standing heat load from a resident system;
   - an orders claim instead of a consent claim, since orders start everything.
 
+## Update 2026-10-14: the `hands_on` preset (`hands_on.json`)
+
+`hands_on.json` holds the game's earlier-warning auto-run rules:
+- everything in `escalation.json` (`critical_only`), with a breakdown at
+  stress 70 instead of 85 and a trust floor at 40 instead of 25;
+- `uncovered` (a request no standing order covers);
+- `cohort` pressure 25.
+
+Claims were written before the runs. In counting mode (`--turns N --auto`,
+where play goes on and every escalation is counted), 10 of 11 hold:
+- `auto/hands_on-year.claims.json`: `processing-cascade`, 365 turns, seeds
+  1..20, consent and orders; 7 of 8 hold;
+- `auto/hands_on-founders.claims.json`: `founders`, 500 turns, hold; 2 of 2;
+- `auto/hands_on-restrict.claims.json`: `founders-restrict`, 500 turns;
+  1 of 1. Every run raises a cohort once the first year turns.
+
+Findings:
+- **The 70 line interrupts far too often: 127–133 breakdown escalations a
+  year under the consent captain.**
+  - The engineer starts at stress 75, and most of the cast peaks at 80. Stress
+    sits on the line, so each dip below 70 re-arms the rule and the next rise
+    raises it again. `critical_only` (85) raises none.
+  - In the game every escalation is a hold, so a careful captain on
+    `hands_on` would be stopped every three days or so.
+  - `hands-on-flags-the-strained-engineer` holds, but its note ("raises it
+    once") was wrong.
+  - Fix proposed for crew_core: hysteresis, so a crossing re-arms only after
+    the value falls some margin below the line.
+- **The first `--skip` stops within days.** A skip makes one `advanceAuto`
+  call and stops at the first escalation:
+  - consent: day 1 in all 20 runs (the engineer);
+  - founders: day 30–60 (the engineer or the skeptic), before any cohort
+    pressure can count.
+
+  Skip claims under `hands_on` therefore measure only the first stop. That
+  is why these claims use counting mode.
+- **`hands-on-year-clean-orders` fails, but not because of `hands_on`.** Seed
+  10 under orders gives 285 host errors, all `ask: subject transition/expiry`.
+  - `critical_only` gives the same errors, and so does crew_core 0.3.0. They
+    appear only with `--archive 30`; without archiving, the errors are 0.
+  - Cause: at cadence 1, crew_core's auto-captain keeps asking about offers
+    whose agreement has lapsed (`stale` filters only above cadence 1).
+    - Without archiving, such an offer keeps its worker busy for good. The
+      ship quietly stops making offers after about turn 35, which is a
+      second bug.
+    - With archiving, the lapsed offer is folded after 30 turns. New offers
+      follow and lapse, and each is asked about every turn until folded.
+  - The earlier `processing-cascade-year` claims ran without archiving and
+    missed this. The game runs with archiving and with a daily cadence near
+    stars (D-76), so it can hit the same thing.
+  - It goes to crew_core as a fix.
+
 ## Scenarios
 
 ### Last messages home (`last-messages-home`)
