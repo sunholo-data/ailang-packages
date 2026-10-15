@@ -59,6 +59,24 @@ The response policy may carry `strain {indicator, threshold, shift}`.
   - Each flow fires once. Accounts stay balanced (`flows.balanced`):
     available + reserved + consumed == initial + transferredIn − transferredOut.
 
+## Resource units (`units`, 0.5.0)
+
+A game's scenarios draw on resources from a table the game owns, given as
+data (`crew_units/1`): `{"schema":"crew_units/1","name":"bubble","units":[{id,
+kind, unit, physical, per}]}`. Each crew unit is `per` of the `physical`
+quantity. `decodeUnits(json)` checks it (unique ids, stock or capacity, per of
+at least 1). Every function takes the table first:
+- `allocate(table, ship)`: a physical ledger to whole crew units, rounded
+  down; unknown ids and negative amounts give nothing.
+- `lintPack(table, scenario)`: "<id>: not one of the <count> <name>
+  resources" or "<id>: must be a <kind>".
+- `lintAgainstShip(table, scenario, ship)`: lintPack, plus "<id>: N units but
+  the ship can spare M".
+- `usedOf(table, consumed)`: crew units back to physical amounts.
+
+crew_core never builds a table in. Stapledon's eight bubble resources live
+with its scenarios (crew lab `scenarios/stapledon/resources.json`).
+
 ## Driving a session
 
 ```ailang

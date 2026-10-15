@@ -1,12 +1,74 @@
 {
   "sprint_id": "S-CREW-CORE-0.5",
-  "status": "awaiting_approval",
+  "status": "in_progress",
   "plan": "design_docs/planned/crew-core-0.5-sprint.md",
   "features": [
-    {"id": "U1", "description": "crew_core/units: table-as-data resource units (decodeUnits, unitOf, allocate, lintPack, lintAgainstShip, usedOf)", "estimated_loc": 160, "dependencies": [], "acceptance_criteria": ["units_test.ail passes on both engines", "the game's crew_events_test resource cases reproduce byte for byte with the Stapledon table", "pkg quality --strict shows no gates"], "passes": null, "started": null, "completed": null, "notes": null},
-    {"id": "U2", "description": "Stapledon table as scenarios/stapledon/resources.json; lab bubble.ail reads it via crew_core/units", "estimated_loc": 60, "dependencies": ["U1"], "acceptance_criteria": ["every lab claim file unchanged", "crew-sim --check on the auto claims"], "passes": null, "started": null, "completed": null, "notes": null},
-    {"id": "U3", "description": "Release 0.5.0: changelog, README, parity recordings unchanged, independent evaluation >= 70, PR, publish", "estimated_loc": 40, "dependencies": ["U2"], "acceptance_criteria": ["CI green", "evaluation >= 70 by a different model", "published"], "passes": null, "started": null, "completed": null, "notes": null},
-    {"id": "U4", "description": "Hand-off to the integration agent: pin 0.5.0, sync resources.json, slim sim/crew_resources.ail", "estimated_loc": 0, "dependencies": ["U3"], "acceptance_criteria": ["message sent with the merge sha"], "passes": null, "started": null, "completed": null, "notes": null}
+    {
+      "id": "U1",
+      "description": "crew_core/units: table-as-data resource units (decodeUnits, unitOf, allocate, lintPack, lintAgainstShip, usedOf)",
+      "estimated_loc": 160,
+      "dependencies": [],
+      "acceptance_criteria": [
+        "units_test.ail passes on both engines",
+        "the game's crew_events_test resource cases reproduce byte for byte with the Stapledon table",
+        "pkg quality --strict shows no gates"
+      ],
+      "passes": true,
+      "started": null,
+      "completed": "2026-10-15",
+      "notes": "crew_core/units, 7 tests on both engines and strict VM; game cases byte for byte; quality no gates; cohorts.years precondition fixed (property test)"
+    },
+    {
+      "id": "U2",
+      "description": "Stapledon table as scenarios/stapledon/resources.json; lab bubble.ail reads it via crew_core/units",
+      "estimated_loc": 60,
+      "dependencies": [
+        "U1"
+      ],
+      "acceptance_criteria": [
+        "every lab claim file unchanged",
+        "crew-sim --check on the auto claims"
+      ],
+      "passes": true,
+      "started": null,
+      "completed": "2026-10-15",
+      "notes": "resources.json identical to the game's table (8 rows); bubble.ail removed; crew-sim --bubble --units; scenario-pack, claims, sim, parity, replay pass; v3-skip gate 3/3"
+    },
+    {
+      "id": "U3",
+      "description": "Release 0.5.0: changelog, README, parity recordings unchanged, independent evaluation >= 70, PR, publish",
+      "estimated_loc": 40,
+      "dependencies": [
+        "U2"
+      ],
+      "acceptance_criteria": [
+        "CI green",
+        "evaluation >= 70 by a different model",
+        "published"
+      ],
+      "passes": null,
+      "started": null,
+      "completed": null,
+      "notes": null
+    },
+    {
+      "id": "U4",
+      "description": "Hand-off to the integration agent: pin 0.5.0, sync resources.json, slim sim/crew_resources.ail",
+      "estimated_loc": 0,
+      "dependencies": [
+        "U3"
+      ],
+      "acceptance_criteria": [
+        "message sent with the merge sha"
+      ],
+      "passes": null,
+      "started": null,
+      "completed": null,
+      "notes": null
+    }
   ],
-  "velocity": {"estimated_total_loc": 260, "estimated_days": 1}
+  "velocity": {
+    "estimated_total_loc": 260,
+    "estimated_days": 1
+  }
 }

@@ -1,0 +1,97 @@
+module sunholo/crew_core/units
+-- Resource units as data (0.5.0). A game's crew scenarios use resources from
+-- a table the game owns: each crew-scale unit is a fixed amount of a physical
+-- quantity, so the game's ship ledger can hand a scenario its opening units
+-- (allocate) and read back what the crew used (usedOf). The table is data
+-- (crew_units/1 JSON), never built in: Stapledon's Voyage keeps its eight
+-- bubble resources with its scenarios.
+import std/result (Result, Ok, Err)
+import std/option (Option, Some, None)
+import std/list (map, filter, flatMap, head, any, length, contains)
+import std/json (Json, keys, asObject, getString, getInt, getArray)
+import std/string (length as stringLength)
+import ./scenario (Scenario, resourceKind)
+
+export type UnitDef = {id: string, kind: string, unit: string, physical: string, per: int} deriving (Eq)
+export type UnitTable = {name: string, units: [UnitDef]} deriving (Eq)
+-- An amount by resource id: physical in a ship ledger, crew units after allocate.
+export type Amount = {id: string, value: int} deriving (Eq)
+-- What the crew used, in crew units and back in physical units.
+export type Used = {id: string, units: int, amount: int, physical: string} deriving (Eq)
+
+pure func unique(xs: [string]) -> bool = not any(\x. length(filter(\y. y == x, xs)) != 1, xs)
+pure func exactly(j: Json, ks: [string]) -> bool = match asObject(j) {
+ Some(_) => let have = keys(j) in length(have) == length(ks) && not any(\k. not contains(ks, k), have),
+ None => false
+}
+pure func text(j: Json, k: string) -> Result[string, string] = match getString(j, k) {
+ Some(s) => if stringLength(s) > 0 && stringLength(s) <= 64 then Ok(s) else Err("units: ${k} must be 1..64 characters"),
+ None => Err("units: ${k} must be a string")
+}
+pure func readUnit(j: Json) -> Result[UnitDef, string] =
+ if not exactly(j, ["id","kind","unit","physical","per"]) then Err("units: fields must be id, kind, unit, physical, per") else
+ match (text(j, "id"), getString(j, "kind"), text(j, "unit"), text(j, "physical"), getInt(j, "per")) {
+  (Ok(id), Some(kind), Ok(unit), Ok(physical), Some(per)) =>
+   if kind != "stock" && kind != "capacity" then Err("units: ${id}: kind must be \"stock\" or \"capacity\"")
+   else if per < 1 || per > 1000000000 then Err("units: ${id}: per must be 1..1000000000")
+   else Ok({id: id, kind: kind, unit: unit, physical: physical, per: per}),
+  (Err(e), _, _, _, _) => Err(e), (_, None, _, _, _) => Err("units: kind must be a string"), (_, _, Err(e), _, _) => Err(e), (_, _, _, Err(e), _) => Err(e),
+  (_, _, _, _, None) => Err("units: per must be an integer")
+ }
+pure func readAll(js: [Json], acc: [UnitDef]) -> Result[[UnitDef], string] = match js {
+ [] => Ok(acc),
+ j :: rest => match readUnit(j) { Err(e) => Err(e), Ok(u) => readAll(rest, acc ++ [u]) }
+}
+
+-- Decode a crew_units/1 table: {"schema":"crew_units/1","name":…,"units":[…]}.
+-- Ids are unique, kinds are stock or capacity, and per is at least 1.
+export pure func decodeUnits(j: Json) -> Result[UnitTable, string] ! {}
+ensures { match result { Ok(t) => unique(map(\u. u.id, t.units)) && not any(\u. u.per < 1, t.units), Err(_) => true } } =
+ if not exactly(j, ["schema","name","units"]) then Err("units: fields must be schema, name, units")
+ else if getString(j, "schema") != Some("crew_units/1") then Err("units: schema must be crew_units/1")
+ else match (text(j, "name"), getArray(j, "units")) {
+  (Ok(name), Some(us)) => match readAll(us, []) {
+   Err(e) => Err(e),
+   Ok(units) => if unique(map(\u. u.id, units)) then Ok({name: name, units: units}) else Err("units: ids must be unique")
+  },
+  (Err(e), _) => Err(e),
+  (_, None) => Err("units: units must be an array")
+ }
+
+export pure func unitOf(t: UnitTable, id: string) -> Option[UnitDef] ! {}
+ensures { match result { Some(u) => u.id == id, None => true } } = head(filter(\u. u.id == id, t.units))
+
+-- Whole crew units for each known resource in a physical ledger, rounded
+-- down. Unknown ids and negative amounts give nothing; the crew never sees
+-- part of a unit.
+export pure func allocate(t: UnitTable, ship: [Amount]) -> [Amount] ! {}
+ensures { length(result) <= length(ship) && not any(\a. a.value < 0, result) } =
+ flatMap(\a. match unitOf(t, a.id) { Some(u) => if a.value < 0 || u.per < 1 then [] else [{id: a.id, value: a.value / u.per}], None => [] }, ship)
+
+pure func unitsIn(xs: [Amount], id: string) -> int = match head(filter(\a. a.id == id, xs)) { Some(a) => a.value, None => 0 }
+
+pure func countWord(n: int) -> string = match n {
+ 1 => "one", 2 => "two", 3 => "three", 4 => "four", 5 => "five", 6 => "six",
+ 7 => "seven", 8 => "eight", 9 => "nine", 10 => "ten", 11 => "eleven", 12 => "twelve",
+ _ => show(n)
+}
+
+-- Problems with a scenario's resources: not in the table, or the wrong kind.
+-- Empty when the scenario may come aboard.
+export pure func lintPack(t: UnitTable, sc: Scenario) -> [string] ! {}
+ensures { length(result) <= length(sc.resources) } =
+ flatMap(\r. match unitOf(t, r.id) {
+  None => ["${r.id}: not one of the ${countWord(length(t.units))} ${t.name} resources"],
+  Some(u) => if resourceKind(sc, r.id) == u.kind then [] else ["${r.id}: must be a ${u.kind}"]
+ }, sc.resources)
+
+-- lintPack, plus every resource that opens with more units than the ship can
+-- spare (`ship` in crew units, as allocate returns them).
+export pure func lintAgainstShip(t: UnitTable, sc: Scenario, ship: [Amount]) -> [string] ! {}
+ensures { length(result) <= 2 * length(sc.resources) } =
+ lintPack(t, sc) ++ flatMap(\r. if r.initial > unitsIn(ship, r.id) then ["${r.id}: ${show(r.initial)} units but the ship can spare ${show(unitsIn(ship, r.id))}"] else [], sc.resources)
+
+-- What the crew used, in physical units (unknown ids are left out).
+export pure func usedOf(t: UnitTable, consumed: [Amount]) -> [Used] ! {}
+ensures { length(result) <= length(consumed) } =
+ flatMap(\a. match unitOf(t, a.id) { Some(u) => [{id: a.id, units: a.value, amount: a.value * u.per, physical: u.physical}], None => [] }, consumed)

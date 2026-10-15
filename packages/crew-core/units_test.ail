@@ -1,0 +1,51 @@
+module sunholo/crew_core/units_test
+import ./units (UnitTable, decodeUnits, unitOf, allocate, lintPack, lintAgainstShip, usedOf)
+import ./example (firstContact)
+import std/json (decode)
+import std/result (Ok, Err)
+import std/option (Some, None)
+import std/list (length, map, any)
+import std/string (contains)
+
+-- Stapledon's bubble table (stapledons-design bubble-resources §6, D-69), as the
+-- crew lab's scenarios/stapledon/resources.json carries it.
+pure func bubbleJson() -> string = "{\"schema\":\"crew_units/1\",\"name\":\"bubble\",\"units\":[{\"id\":\"mass\",\"kind\":\"stock\",\"unit\":\"10 kg block\",\"physical\":\"kg\",\"per\":10},{\"id\":\"water\",\"kind\":\"stock\",\"unit\":\"1 t\",\"physical\":\"kg\",\"per\":1000},{\"id\":\"power\",\"kind\":\"capacity\",\"unit\":\"50 kW of headroom\",\"physical\":\"kW\",\"per\":50},{\"id\":\"heat\",\"kind\":\"capacity\",\"unit\":\"50 kW of headroom\",\"physical\":\"kW\",\"per\":50},{\"id\":\"garden\",\"kind\":\"capacity\",\"unit\":\"100 m2 of lit beds\",\"physical\":\"m2\",\"per\":100},{\"id\":\"fabrication\",\"kind\":\"capacity\",\"unit\":\"one bay for one shift\",\"physical\":\"bay-shifts\",\"per\":1},{\"id\":\"compute\",\"kind\":\"capacity\",\"unit\":\"one Archive slot\",\"physical\":\"slots\",\"per\":1},{\"id\":\"signal\",\"kind\":\"capacity\",\"unit\":\"one antenna window\",\"physical\":\"windows\",\"per\":1}]}"
+
+pure func bubble() -> UnitTable = match decode(bubbleJson()) {
+ Ok(j) => match decodeUnits(j) { Ok(t) => t, Err(_) => {name: "", units: []} },
+ Err(_) => {name: "", units: []}
+}
+
+test "the bubble table decodes: eight units, mass and water are the stocks" {
+ let t = bubble();
+ length(t.units) == 8 && t.name == "bubble" && map(\u. u.id, t.units) == ["mass","water","power","heat","garden","fabrication","compute","signal"]
+}
+test "unitOf finds a unit by id" { match (unitOf(bubble(), "water"), unitOf(bubble(), "air")) { (Some(u), None) => u.per == 1000 && u.physical == "kg", _ => false } }
+-- The game's crew_events_test case, byte for byte.
+test "allocate: whole units rounded down, unknown and negative give nothing" {
+ allocate(bubble(), [{id: "mass", value: 45}, {id: "water", value: 3500}, {id: "power", value: 149}, {id: "air", value: 9}, {id: "heat", value: 0 - 5}]) == [{id: "mass", value: 4}, {id: "water", value: 3}, {id: "power", value: 2}]
+}
+test "usedOf: crew units back to physical amounts" { usedOf(bubble(), [{id: "mass", value: 2}]) == [{id: "mass", units: 2, amount: 20, physical: "kg"}] }
+-- The example scenario's three resources (archive_compute, replacement_modules,
+-- diagnostic_cartridges; all stocks; 3, 3 and 4 units) are none of the eight.
+test "lint messages are the game's, word for word" {
+ match firstContact() {
+  Ok(sc) => lintPack(bubble(), sc) == ["archive_compute: not one of the eight bubble resources", "replacement_modules: not one of the eight bubble resources", "diagnostic_cartridges: not one of the eight bubble resources"],
+  Err(_) => false
+ }
+}
+pure func lab() -> UnitTable = {name: "lab", units: [{id: "archive_compute", kind: "capacity", unit: "one slot", physical: "slots", per: 1}, {id: "replacement_modules", kind: "stock", unit: "one module", physical: "modules", per: 1}, {id: "diagnostic_cartridges", kind: "stock", unit: "one cartridge", physical: "cartridges", per: 1}]}
+test "lintAgainstShip: wrong kind, then what the ship cannot spare" {
+ match firstContact() {
+  Ok(sc) => lintAgainstShip(lab(), sc, [{id: "replacement_modules", value: 3}, {id: "diagnostic_cartridges", value: 1}]) == ["archive_compute: must be a capacity", "archive_compute: 3 units but the ship can spare 0", "diagnostic_cartridges: 4 units but the ship can spare 1"],
+  Err(_) => false
+ }
+}
+test "decodeUnits refuses duplicate ids, bad kinds and per below 1" {
+ let bad = \s. match decode(s) { Ok(j) => match decodeUnits(j) { Err(_) => true, Ok(_) => false }, Err(_) => false };
+ bad("{\"schema\":\"crew_units/1\",\"name\":\"x\",\"units\":[{\"id\":\"a\",\"kind\":\"stock\",\"unit\":\"u\",\"physical\":\"p\",\"per\":1},{\"id\":\"a\",\"kind\":\"stock\",\"unit\":\"u\",\"physical\":\"p\",\"per\":1}]}")
+ && bad("{\"schema\":\"crew_units/1\",\"name\":\"x\",\"units\":[{\"id\":\"a\",\"kind\":\"flow\",\"unit\":\"u\",\"physical\":\"p\",\"per\":1}]}")
+ && bad("{\"schema\":\"crew_units/1\",\"name\":\"x\",\"units\":[{\"id\":\"a\",\"kind\":\"stock\",\"unit\":\"u\",\"physical\":\"p\",\"per\":0}]}")
+ && bad("{\"schema\":\"crew_units/2\",\"name\":\"x\",\"units\":[]}")
+ && bad("{\"schema\":\"crew_units/1\",\"name\":\"x\",\"units\":[{\"id\":\"a\",\"kind\":\"stock\",\"unit\":\"u\",\"physical\":\"p\",\"per\":1,\"extra\":1}]}")
+}

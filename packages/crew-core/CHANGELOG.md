@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.5.0
+
+Resource units as data (Mark's repo-use review, 2026-10-15). The game had a
+port of the crew lab's bubble table, made because the lab is never
+published. The logic now lives here, and the table stays with each game's
+scenarios.
+
+- **New module `units`:** `UnitDef`, `UnitTable`, `Amount`, `Used`,
+  `decodeUnits` (crew_units/1), `unitOf`, `allocate`, `lintPack`,
+  `lintAgainstShip`, `usedOf`. It reproduces the game's port exactly: the same
+  rounding and the same lint messages, word for word, for Stapledon's table.
+  Tested on both engines and under the strict VM.
+- **Contract fix:** `cohorts.years` gains the precondition its callers
+  already meet (at most ten non-negative decade counts). Without it, the
+  contract's sum claim was false for longer or negative lists. A generated
+  property test found it.
+- Nothing else changes: the host wire, the journal and the saved recordings
+  replay identically.
+
 ## 0.4.1
 
 Auto-captain fixes for Stapledon's game profile (`watch-v3`). Found by the
