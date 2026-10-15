@@ -604,7 +604,7 @@ pure func archiveJson(a: Archive) -> Json = jo([kv("keep", jint(a.keep)), kv("ta
 pure func tallied(xs: [Tally], id: string) -> [Tally] = if any(\t. t.id == id, xs) then map(\t. if t.id == id then {t | count: t.count + 1} else t, xs) else xs ++ [{id: id, count: 1}]
 
 pure func held(s: Session, t: Task) -> bool =
- any(\r. r.task == t.id, s.pending) || any(\b. b.request.task == t.id, s.bank) || any(\r. r.task == t.id && not r.resolved, s.state.reliefs) || any(\i. i.task == t.id && i.status == "open" && not moot(s, i), s.chat.issues)
+ any(\r. r.task == t.id, s.pending) || any(\b. b.request.task == t.id && b.request.expires > s.state.tick, s.bank) || any(\r. r.task == t.id && not r.resolved, s.state.reliefs) || any(\i. i.task == t.id && i.status == "open" && not moot(s, i), s.chat.issues)
 
 -- A captain can answer a concern only about a live offer (captain_reply).
 -- One about work already running or finished (a check-in reply of defer
@@ -650,7 +650,7 @@ ensures { length(result.state.tasks) <= length(s.state.tasks) && length(result.s
    let accepted = if n > 512 then drop(n - 512, s.state.accepted) else s.state.accepted;
    let a = s.archive;
    {s | personalities: map(\p. trimmed(p, s.state.tick - s.archive.keep), s.personalities), state: {s.state | tasks: filter(\t. not contains(ids, t.id), s.state.tasks), evidence: evidence, knowledge: knowledge, reliefs: filter(\r. not contains(ids, r.task), s.state.reliefs), commitments: filter(\c. not contains(agreements, c.id), s.state.commitments), accepted: accepted},
-        bindings: filter(\b. not contains(ids, b.task), s.bindings), reports: filter(\r. not contains(ids, r.task), s.reports),
+        bindings: filter(\b. not contains(ids, b.task), s.bindings), reports: filter(\r. not contains(ids, r.task), s.reports), bank: filter(\b. not contains(ids, b.request.task), s.bank),
         chat: {s.chat | issues: filter(\i. not contains(ids, i.task), s.chat.issues), speech: filter(\x. not contains(ids, x.task), s.chat.speech)},
         archive: {a | tasks: a.tasks + length(gone), evidence: a.evidence + length(goneE), knowledge: a.knowledge + length(s.state.knowledge) - length(knowledge), accepted: a.accepted + (n - length(accepted)), completed: foldl(\acc t. tallied(acc, t.recipe), a.completed, filter(\t. t.status == Completed, gone)), events: sorted(a.events ++ evIds)}}
   }

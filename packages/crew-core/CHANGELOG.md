@@ -17,6 +17,25 @@ scenarios.
   already meet (at most ten non-negative decade counts). Without it, the
   contract's sum claim was false for longer or negative lists. A generated
   property test found it.
+- **Archiving no longer waits for the bank to fill.** An answered request
+  stays in the bank for idempotent retries until it expires (one turn), and
+  then can never be applied again. 0.4.x still counted it as holding its
+  task, so with `keep` nothing answered was archived until the bank reached
+  its limit of 64. Every request carries its crew member's visible evidence,
+  so each auto-run decision grew with the session.
+  - Found by the R2-CREW integration agent as step timeouts on a 1,201-tick
+    leg: monthly decisions reached 750 ms.
+  - Lab probe (last-messages-home, orders, cadence 30, keep 30), at day 300:
+    evidence went from 203 to 23, knowledge from 332 to 32, tasks from 50 to
+    5, and the bank from 60 to 6.
+  - The cost per decision is now flat (about 21 ms to 730 days, where it
+    grew from 20 to 64 ms), and a 292-day skip drops from 3.1 s to 1.7 s,
+    with the same decisions.
+  - `held` ignores expired bank entries, and archiving drops the bank
+    entries of the tasks it archives. A retry of such an answer reports
+    "unknown request", as for a bank entry that was already compacted.
+  - New test: `archive_test` "answered work is folded away once its request
+    expires". It fails on 0.4.1.
 - Nothing else changes: the host wire, the journal and the saved recordings
   replay identically.
 

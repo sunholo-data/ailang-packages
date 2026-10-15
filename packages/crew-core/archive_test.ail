@@ -5,6 +5,8 @@ import std/list (head, filter, length, any, range, foldl)
 import std/string (contains)
 import ./scenario (decodeScenario)
 import ./session (Session, Output, HostError, HostFailure, start, input, offer, startTask, snapshot, completedCount)
+import ./policy (fixtureBody)
+import std/json (encode, jo, kv, js, jnum)
 
 pure func ship() -> string =
  "{\"schema\":\"crew_scenario/1\",\"id\":\"galley\",\"indicators\":[\"fatigue\",\"stress\",\"trust\"],\"indicator_defaults\":{\"fatigue\":0,\"stress\":20},\"captain\":{\"id\":\"captain\",\"values\":{\"mission\":80},\"start\":{}},\"crew\":[{\"id\":\"cook\",\"role\":\"Cook\",\"ocean\":{\"openness\":50,\"conscientiousness\":50,\"extraversion\":50,\"agreeableness\":90,\"neuroticism\":50},\"values\":{\"care\":60},\"start\":{},\"work\":[{\"id\":\"work_cook\",\"name\":\"Bake\",\"purpose\":\"Feed everyone.\",\"duration\":1,\"costs\":[],\"effects\":{\"fatigue\":1}}]}],\"rest\":{\"purpose\":\"Recover.\",\"duration\":1,\"effects\":{\"fatigue\":-10}},\"overextended\":{\"indicator\":\"stress\",\"threshold\":70,\"recovery\":40,\"duration\":2,\"cooldown\":3},\"trust_in_captain\":100,\"resources\":[]}"
@@ -56,6 +58,38 @@ test "work a pending request still refers to is never folded away" {
     Err(_) => true,
     Ok(q) => match input(q.session, "{\"command\":\"advance\",\"tick\":9,\"budget\":64}") { Ok(z) => not any(\r. r.task == "b6", z.session.pending) || any(\t. t.id == "b6", z.session.state.tasks), Err(_) => false }
    }
+  }
+ }
+}
+
+-- 0.5.1: an answered request stays in the bank for retries until it expires
+-- (one turn), and then can never be applied again. It must not hold its task
+-- back from archiving: before 0.5.1 every answered task stayed until the bank
+-- filled (64), and each request carried its evidence, so an auto-run's
+-- decisions grew with the session (found by the R2-CREW integration agent).
+pure func askedBakes(s: Session, n: int) -> Result[Session, HostError] = foldl(\acc t. match acc {
+ Err(e) => Err(e),
+ Ok(x) => match offer(x, "cook", "work_cook", "b${show(t)}") {
+  Err(e) => Err(e),
+  Ok(o) => match input(o.session, "{\"command\":\"ask\",\"actor\":\"cook\",\"task\":\"b${show(t)}\",\"id\":\"q${show(t)}\"}") {
+   Err(e) => Err(e),
+   Ok(a) => match head(a.session.pending) {
+    None => Err(HostFailure("no request")),
+    Some(r) => match input(a.session, encode(jo([kv("command", js("answer")), kv("request", js(r.id)), kv("body", js(fixtureBody(r, "accept"))), kv("roll", jnum(0.5))]))) {
+     Err(e) => Err(e),
+     Ok(b) => match startTask(b.session, "b${show(t)}") { Err(e) => Err(e), Ok(p) => match input(p.session, "{\"command\":\"advance\",\"tick\":${show(t)},\"budget\":64}") { Err(e) => Err(e), Ok(q) => Ok(q.session) } }
+    }
+   }
+  }
+ }
+}, Ok(s), range(1, n + 1))
+
+test "answered work is folded away once its request expires, before the bank fills" {
+ match begin(",\"keep\":2") {
+  Err(_) => false,
+  Ok(s) => match askedBakes(s, 10) {
+   Err(_) => false,
+   Ok(t) => length(t.state.tasks) <= 3 && length(t.bank) <= 3 && t.archive.tasks >= 7 && completedCount(t, "work_cook") == 10
   }
  }
 }
