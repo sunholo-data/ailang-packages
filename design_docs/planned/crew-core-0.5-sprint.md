@@ -25,10 +25,16 @@
 | U3 | **Release 0.5.0** (kind feature): changelog, the README section "Resource units", parity recordings unchanged. Independent evaluation by a different model (score of 70 or more), then PR and publish | CI green; publish |
 | U4 | **Hand-off to the integration agent (game side, its sprint):** pin 0.5.0, sync `resources.json` into `data/crew/` with a SYNC line, reduce `sim/crew_resources.ail` to `shipUnits` plus calls into crew_core/units, keep `make crew-parity` | message with the merge sha |
 
-**Then crew_core 0.6, the Archive actor (archive-npc A1).** Planned separately once Mark answers its open questions:
+**Then crew_core 0.6, the Archive actor (archive-npc A1).** Planned separately once Mark answers OQ3 and OQ4. Both the captain coupling and integrity decay over time will be switches, so either answer only changes a default:
 - an actor kind `archive` with `integrity` and `confidence`, which never takes work or asks for relief;
 - trust and regard both ways with each crew member, moved by the archive-crew-trust table: confirmed or contradicted answers, help or failure in a crisis, witnessed confusion, the captain backing it;
 - claims on v3.
+
+## Game-side checks (from the integration agent, 2026-10-15)
+
+- **The table.** The eight ids, kinds, units, physical units and `per` values are unchanged. `resources.json` is generated from the game's current table and compared to it byte for byte.
+- **Signatures.** In crew_core the functions take the table first, for example `allocate(table, ship)` and `lintPack(table, sc)`. The game keeps its current call sites by wrapping them, `allocate(ship) = units.allocate(stapledon(), ship)`, so no caller changes.
+- **Reason strings.** The `blocked:<code>:<detail>` reasons come from the host and are not touched. The lint messages ("<id>: not one of the eight bubble resources", "<id>: must be a <kind>", "<id>: N units but the ship can spare M") are kept verbatim, and U1 tests assert them.
 
 ## Questions for Mark
 
