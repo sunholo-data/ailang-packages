@@ -1,6 +1,6 @@
 # Crew strain: arguments over lost capacity, breakdown, and personal trust
 
-**Status:** Proposed (2026-10-13), awaiting Mark's approval.
+**Status:** Implemented 2026-10-13 (S-CREW-STRAIN, ailang-packages #136; social_dynamics 0.4.0).
 **Packages:**
 - `sunholo/social_dynamics` 0.4.0 (one host operation; published);
 - `sunholo/crew_core` 0.2.0;

@@ -9,7 +9,7 @@
 | Grounded Strangeness | 0 | No content change. |
 | We Are Not Built For This | +1 | Faster live play makes it practical to tune strain and refusal against real wording. |
 
-**Status:** Planned 2026-10-12. Mark asked for this sprint ("do the next sprint for
+**Status:** Implemented 2026-10-13 (S-CREW-REPLY-INBOX-2, ailang-packages #131, crew-lab 0.6.0).
 background") after S-CREW-CORE-SPLIT merged (ailang-packages #130).
 **Supersedes:** the 2026-10-10 plan S-CREW-REPLY-INBOX (mailboxes, gossip relay, five
 days), whose M1 gate failed because AILANG v0.52.0 could not stop worker processes.
