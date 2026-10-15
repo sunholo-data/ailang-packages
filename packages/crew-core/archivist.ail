@@ -1,0 +1,159 @@
+module sunholo/crew_core/archivist
+-- The Archive as a crew actor (0.6.0; stapledons-godot archive-npc A1,
+-- stapledons-design archive-crew-trust.md). A scenario may name one ship's
+-- mind: it never works, but each crew member trusts and regards it, and it
+-- them, and its integrity can fall and be repaired.
+--
+-- Rulings (Mark, 2026-10-15): one trust scale for all trust, 0..100 with 50
+-- neutral; the numbers are never shown to the player, they choose
+-- descriptions (trustBand, integrityBand). The game raises the events from
+-- what happens; this module only applies them, by a fixed table and each
+-- witness's traits, with no rolls. Captain coupling and integrity decay over
+-- time are switches, off by default.
+--
+-- A sidecar like personalities and cohorts: the engine configuration is
+-- unchanged, so a scenario without "archive" runs byte-identically.
+import std/result (Result, Ok, Err)
+import std/option (Option, Some, None)
+import std/list (map, filter, head, any, length, contains, flatMap, foldl)
+import std/json (Json, decode, get, getString, getInt, getBool, asObject, keys, jo, kv, js, jint, jb, ja)
+import std/string (length as stringLength)
+import pkg/sunholo/social_dynamics/model (Value, validId)
+
+export type Witnessed = {id: string, at: int} deriving (Eq)
+-- trust/regard: each crew member's toward the Archive (Value.id = crew id).
+-- trusts/regards: the Archive's toward each crew member.
+export type Archivist = {id: string, name: string, integrity: int, confidence: int, ocean: [Value], trust: [Value], regard: [Value], trusts: [Value], regards: [Value], coupling: bool, decay: int, log: [Witnessed]} deriving (Eq)
+-- One applied event: the Archive after it, and how much each witness's trust in
+-- the captain moves (empty unless coupling is on).
+export type Applied = {archivist: Archivist, captain: [Value]} deriving (Eq)
+
+export pure func eventKinds() -> [string] ! {}
+ensures { length(result) == 8 } = ["answer_confirmed", "answer_contradicted", "crisis_help", "crisis_failure", "confusion_witnessed", "captain_backs", "repair", "degraded"]
+
+pure func oceanIds() -> [string] = ["openness","conscientiousness","extraversion","agreeableness","neuroticism"]
+pure func clamp(v: int) -> int = if v < 0 then 0 else if v > 100 then 100 else v
+pure func valueOf(vs: [Value], id: string, fallback: int) -> int = match head(filter(\v. v.id == id, vs)) { Some(v) => v.value, None => fallback }
+pure func setValue(vs: [Value], id: string, v: int) -> [Value] = map(\x. if x.id == id then {x | value: clamp(v)} else x, vs)
+pure func exactly(j: Json, required: [string], optional: [string]) -> bool = match asObject(j) {
+ Some(_) => let ks = keys(j) in not any(\k. not contains(required, k) && not contains(optional, k), ks) && not any(\k. not contains(ks, k), required),
+ None => false
+}
+pure func percent(j: Json, k: string, fallback: int) -> Result[int, string] = match get(j, k) {
+ None => Ok(fallback),
+ Some(_) => match getInt(j, k) { Some(n) => if n >= 0 && n <= 100 then Ok(n) else Err("archive: ${k} must be 0..100"), None => Err("archive: ${k} must be an integer") }
+}
+@allow_empty_ok("fold seed: the five traits are appended one by one")
+pure func readOcean(j: Json) -> Result[[Value], string] = match get(j, "ocean") {
+ None => Ok(map(\id. {id: id, value: 50}, oceanIds())),
+ Some(o) => if not exactly(o, oceanIds(), []) then Err("archive: ocean must have the five traits") else
+  foldl(\acc id. match acc { Err(e) => Err(e), Ok(vs) => match percent(o, id, 50) { Err(e) => Err(e), Ok(v) => Ok(vs ++ [{id: id, value: v}]) } }, Ok([]), oceanIds())
+}
+
+-- The scenario's optional "archive" block, from its canonical JSON:
+-- {"id","name","integrity","confidence", "ocean"?, "trust"?, "coupling"?, "decay"?}.
+-- trust is every crew member's starting trust in it (default 50); decay is
+-- integrity lost per ship-year (0..20, default 0: events only).
+export pure func decodeArchivist(canonical: string, workers: [string], captain: string) -> Result[Option[Archivist], string] ! {}
+ensures { match result { Ok(Some(a)) => length(a.trust) == length(workers) && a.integrity >= 0 && a.integrity <= 100, _ => true } } = match decode(canonical) {
+ Err(e) => Err("archive: ${e}"),
+ Ok(top) => match get(top, "archive") {
+  None => Ok(None),
+  Some(j) => if not exactly(j, ["id","name","integrity","confidence"], ["ocean","trust","coupling","decay"]) then Err("archive: fields must be id, name, integrity, confidence, and optionally ocean, trust, coupling, decay") else
+   match (getString(j, "id"), getString(j, "name")) {
+    (Some(id), Some(name)) =>
+     if not validId(id) || stringLength(id) > 64 then Err("archive: id must be an id")
+     else if id == captain || contains(workers, id) then Err("archive: id must differ from the captain and the crew")
+     else if stringLength(name) < 1 || stringLength(name) > 64 then Err("archive: name must be 1..64 characters")
+     else match (percent(j, "integrity", 0 - 1), percent(j, "confidence", 0 - 1), percent(j, "trust", 50), readOcean(j)) {
+      (Ok(integrity), Ok(confidence), Ok(trust), Ok(ocean)) => {
+       let coupling = match getBool(j, "coupling") { Some(b) => b, None => false };
+       match (get(j, "coupling"), getBool(j, "coupling"), percent(j, "decay", 0)) {
+        (Some(_), None, _) => Err("archive: coupling must be true or false"),
+        (_, _, Err(e)) => Err(e),
+        (_, _, Ok(decay)) => if decay > 20 then Err("archive: decay must be 0..20 a year") else
+         Ok(Some({id: id, name: name, integrity: integrity, confidence: confidence, ocean: ocean,
+          trust: map(\w. {id: w, value: trust}, workers), regard: map(\w. {id: w, value: 50}, workers),
+          trusts: map(\w. {id: w, value: 50}, workers), regards: map(\w. {id: w, value: 50}, workers),
+          coupling: coupling, decay: decay, log: []}))
+       }
+      },
+      (Err(e), _, _, _) => Err(e), (_, Err(e), _, _) => Err(e), (_, _, Err(e), _) => Err(e), (_, _, _, Err(e)) => Err(e)
+     },
+    _ => Err("archive: id and name are required strings")
+   }
+ }
+}
+
+-- The design table (archive-crew-trust.md, on -100..100) halved onto 0..100:
+-- the mildest and the strongest change for each kind.
+pure func range(kind: string) -> {mild: int, strong: int} =
+ if kind == "answer_confirmed" then {mild: 3, strong: 7}
+ else if kind == "answer_contradicted" then {mild: 0 - 5, strong: 0 - 12}
+ else if kind == "crisis_help" then {mild: 5, strong: 10}
+ else if kind == "crisis_failure" then {mild: 0 - 10, strong: 0 - 20}
+ else if kind == "confusion_witnessed" then {mild: 0 - 2, strong: 0 - 7}
+ else if kind == "repair" then {mild: 5, strong: 10}
+ else {mild: 0, strong: 0}
+
+-- Where in its range a witness lands, 0..100, from their traits: bad news
+-- weighs more on the disagreeable and the anxious, good news on the
+-- agreeable and the open.
+pure func lean(ocean: [Value], negative: bool) -> int =
+ if negative then (100 - valueOf(ocean, "agreeableness", 50) + valueOf(ocean, "neuroticism", 50)) / 2
+ else (valueOf(ocean, "agreeableness", 50) + valueOf(ocean, "openness", 50)) / 2
+
+-- One witness's change in trust in the Archive for an event.
+export pure func trustDelta(kind: string, ocean: [Value], trustNow: int) -> int ! {}
+ensures { result >= 0 - 20 && result <= 10 } =
+ if kind == "captain_backs" then (if trustNow >= 70 then 3 else if trustNow <= 30 then 0 - 3 else 0)
+ else { let r = range(kind); r.mild + (r.strong - r.mild) * lean(ocean, r.strong < 0) / 100 }
+
+-- How the Archive's own trust in a witness moves: they saw it proved right or
+-- helping (+1), or proved wrong (-1).
+pure func ownDelta(kind: string) -> int =
+ if kind == "answer_confirmed" || kind == "crisis_help" || kind == "repair" then 1
+ else if kind == "answer_contradicted" then 0 - 1 else 0
+
+-- Apply one event the game raised. oceans gives each witness's traits.
+-- amount (1..30) is the integrity change for repair and degraded.
+export pure func applyEvent(a: Archivist, id: string, kind: string, witnesses: [string], oceans: [{id: string, ocean: [Value]}], amount: int, at: int) -> Applied ! {}
+ensures { result.archivist.integrity >= 0 && result.archivist.integrity <= 100 && length(result.archivist.trust) == length(a.trust) } = {
+ let oceanOf = \w. match head(filter(\o. o.id == w, oceans)) { Some(o) => o.ocean, None => [] };
+ let trust = map(\t. if contains(witnesses, t.id) then {t | value: clamp(t.value + trustDelta(kind, oceanOf(t.id), t.value))} else t, a.trust);
+ let trusts = map(\t. if contains(witnesses, t.id) then {t | value: clamp(t.value + ownDelta(kind))} else t, a.trusts);
+ let integrity = if kind == "repair" then clamp(a.integrity + amount) else if kind == "degraded" then clamp(a.integrity - amount) else a.integrity;
+ let captain = if kind == "captain_backs" && a.coupling then flatMap(\w. { let d = trustDelta(kind, [], valueOf(a.trust, w, 50)); if d == 0 then [] else [{id: w, value: d}] }, witnesses) else [];
+ {archivist: {a | trust: trust, trusts: trusts, integrity: integrity, log: a.log ++ [{id: id, at: at}]}, captain: captain}
+}
+
+-- Integrity lost over ship time (the decay switch): `years` year turns.
+export pure func decayed(a: Archivist, years: int) -> Archivist ! {}
+requires { a.integrity >= 0 && a.integrity <= 100 }
+ensures { result.integrity <= a.integrity } = if a.decay <= 0 || years <= 0 then a else {a | integrity: clamp(a.integrity - a.decay * years)}
+
+-- Forget witnessed events at or before `before` (archiving with keep).
+export pure func forget(a: Archivist, before: int) -> Archivist ! {}
+ensures { length(result.log) <= length(a.log) } = {a | log: filter(\w. w.at > before, a.log)}
+
+-- Bands for descriptions; the numbers are never player-facing.
+export pure func trustBand(v: int) -> string ! {}
+ensures { result != "" } = if v >= 90 then "devoted" else if v >= 70 then "trusting" else if v >= 31 then "neutral" else if v >= 11 then "skeptical" else "hostile"
+export pure func integrityBand(v: int) -> string ! {}
+ensures { result != "" } = if v >= 80 then "healthy" else if v >= 50 then "degraded" else if v >= 20 then "compromised" else "critical"
+
+-- The Archive in the host snapshot (only when the scenario has one).
+export pure func archivistJson(a: Archivist) -> Json ! {}
+ensures { length(keys(result)) == 11 } =
+ jo([kv("id", js(a.id)), kv("name", js(a.name)), kv("integrity", jint(a.integrity)), kv("confidence", jint(a.confidence)),
+  kv("trust", jo(map(\v. kv(v.id, jint(v.value)), a.trust))), kv("regard", jo(map(\v. kv(v.id, jint(v.value)), a.regard))),
+  kv("trusts", jo(map(\v. kv(v.id, jint(v.value)), a.trusts))), kv("regards", jo(map(\v. kv(v.id, jint(v.value)), a.regards))),
+  kv("coupling", jb(a.coupling)), kv("decay", jint(a.decay)), kv("witnessed", ja(map(\w. jo([kv("id", js(w.id)), kv("at", jint(w.at))]), a.log)))])
+
+-- What a host shows, as bands for its words (the numbers stay internal).
+export type CrewView = {id: string, trust: int, band: string, regard: int} deriving (Eq)
+export type Readout = {id: string, name: string, integrity: int, integrityBand: string, confidence: int, crew: [CrewView]} deriving (Eq)
+export pure func readout(a: Archivist) -> Readout ! {}
+ensures { length(result.crew) == length(a.trust) } =
+ {id: a.id, name: a.name, integrity: a.integrity, integrityBand: integrityBand(a.integrity), confidence: a.confidence,
+  crew: map(\t. {id: t.id, trust: t.value, band: trustBand(t.value), regard: valueOf(a.regard, t.id, 50)}, a.trust)}
