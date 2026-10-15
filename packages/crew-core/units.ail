@@ -8,7 +8,8 @@ module sunholo/crew_core/units
 import std/result (Result, Ok, Err)
 import std/option (Option, Some, None)
 import std/list (map, filter, flatMap, head, any, length, contains)
-import std/json (Json, keys, asObject, getString, getInt, getArray)
+import std/json (Json, keys, asObject, getString, getNumber, getArray)
+import std/math (floatToInt, intToFloat)
 import std/string (length as stringLength)
 import ./scenario (Scenario, resourceKind)
 
@@ -28,15 +29,20 @@ pure func text(j: Json, k: string) -> Result[string, string] = match getString(j
  Some(s) => if stringLength(s) > 0 && stringLength(s) <= 64 then Ok(s) else Err("units: ${k} must be 1..64 characters"),
  None => Err("units: ${k} must be a string")
 }
+-- A whole number only: std/json's getInt truncates 1.5 to 1.
+pure func wholeInt(j: Json, k: string) -> Option[int] = match getNumber(j, k) {
+ Some(f) => if f >= 0.0 - 1.0e15 && f <= 1.0e15 && intToFloat(floatToInt(f)) == f then Some(floatToInt(f)) else None,
+ None => None
+}
 pure func readUnit(j: Json) -> Result[UnitDef, string] =
  if not exactly(j, ["id","kind","unit","physical","per"]) then Err("units: fields must be id, kind, unit, physical, per") else
- match (text(j, "id"), getString(j, "kind"), text(j, "unit"), text(j, "physical"), getInt(j, "per")) {
+ match (text(j, "id"), getString(j, "kind"), text(j, "unit"), text(j, "physical"), wholeInt(j, "per")) {
   (Ok(id), Some(kind), Ok(unit), Ok(physical), Some(per)) =>
    if kind != "stock" && kind != "capacity" then Err("units: ${id}: kind must be \"stock\" or \"capacity\"")
    else if per < 1 || per > 1000000000 then Err("units: ${id}: per must be 1..1000000000")
    else Ok({id: id, kind: kind, unit: unit, physical: physical, per: per}),
   (Err(e), _, _, _, _) => Err(e), (_, None, _, _, _) => Err("units: kind must be a string"), (_, _, Err(e), _, _) => Err(e), (_, _, _, Err(e), _) => Err(e),
-  (_, _, _, _, None) => Err("units: per must be an integer")
+  (_, _, _, _, None) => Err("units: per must be a whole number")
  }
 pure func readAll(js: [Json], acc: [UnitDef]) -> Result[[UnitDef], string] = match js {
  [] => Ok(acc),

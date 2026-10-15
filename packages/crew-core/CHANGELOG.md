@@ -11,6 +11,7 @@ scenarios.
   `decodeUnits` (crew_units/1), `unitOf`, `allocate`, `lintPack`,
   `lintAgainstShip`, `usedOf`. It reproduces the game's port exactly: the same
   rounding and the same lint messages, word for word, for Stapledon's table.
+  `decodeUnits` refuses a fractional `per` (std/json's `getInt` truncates).
   Tested on both engines and under the strict VM.
 - **Contract fix:** `cohorts.years` gains the precondition its callers
   already meet (at most ten non-negative decade counts). Without it, the

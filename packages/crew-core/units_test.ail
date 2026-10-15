@@ -25,6 +25,7 @@ test "unitOf finds a unit by id" { match (unitOf(bubble(), "water"), unitOf(bubb
 test "allocate: whole units rounded down, unknown and negative give nothing" {
  allocate(bubble(), [{id: "mass", value: 45}, {id: "water", value: 3500}, {id: "power", value: 149}, {id: "air", value: 9}, {id: "heat", value: 0 - 5}]) == [{id: "mass", value: 4}, {id: "water", value: 3}, {id: "power", value: 2}]
 }
+test "allocate keeps a zero amount and a partial unit as zero units" { allocate(bubble(), [{id: "mass", value: 0}, {id: "water", value: 999}]) == [{id: "mass", value: 0}, {id: "water", value: 0}] }
 test "usedOf: crew units back to physical amounts" { usedOf(bubble(), [{id: "mass", value: 2}]) == [{id: "mass", units: 2, amount: 20, physical: "kg"}] }
 -- The example scenario's three resources (archive_compute, replacement_modules,
 -- diagnostic_cartridges; all stocks; 3, 3 and 4 units) are none of the eight.
@@ -47,5 +48,8 @@ test "decodeUnits refuses duplicate ids, bad kinds and per below 1" {
  && bad("{\"schema\":\"crew_units/1\",\"name\":\"x\",\"units\":[{\"id\":\"a\",\"kind\":\"flow\",\"unit\":\"u\",\"physical\":\"p\",\"per\":1}]}")
  && bad("{\"schema\":\"crew_units/1\",\"name\":\"x\",\"units\":[{\"id\":\"a\",\"kind\":\"stock\",\"unit\":\"u\",\"physical\":\"p\",\"per\":0}]}")
  && bad("{\"schema\":\"crew_units/2\",\"name\":\"x\",\"units\":[]}")
+ && bad("{\"schema\":\"crew_units/1\",\"name\":\"x\",\"units\":[{\"id\":\"a\",\"kind\":\"stock\",\"unit\":\"u\",\"physical\":\"p\",\"per\":1.5}]}")
+ && bad("{\"schema\":\"crew_units/1\",\"units\":[]}")
+ && bad("{\"schema\":\"crew_units/1\",\"name\":\"\",\"units\":[]}")
  && bad("{\"schema\":\"crew_units/1\",\"name\":\"x\",\"units\":[{\"id\":\"a\",\"kind\":\"stock\",\"unit\":\"u\",\"physical\":\"p\",\"per\":1,\"extra\":1}]}")
 }
