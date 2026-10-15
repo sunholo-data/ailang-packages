@@ -6,7 +6,7 @@
 - **OQ3:** trust in the Archive only. Captain–Archive coupling is built behind a switch that is **off** by default.
 - **OQ4:** integrity changes **only from events**. Decay with ship time is built behind a switch that is **off** by default.
 
-**Authorization:** awaiting Mark's approval of this plan.
+**Authorization:** Mark, attended 2026-10-15: "yes use same scale for trust for all. and bear in mind the numbers arent player facing, but influence descriptions. and do your recommendation for archive events". Recorded in stapledons-design's decision log (#25).
 **AILANG prompt version loaded:** v0.16.7 (runtime v0.54.8).
 **Registry reuse:** none (inside crew_core and the lab).
 **Depends on:** crew_core 0.5.0 (#146).
@@ -38,6 +38,8 @@
   - `archive.coupling` (default off): when on, `captain_backs` moves each witness's trust in the captain by their trust in the Archive. Loyalists rise; skeptics fall.
   - `archive.decay` (default 0 per year): when non-zero, integrity falls at each year turn.
 - **Readouts.** `archiveOf(session)` returns integrity, confidence, and trust and regard by crew member, for the game's Archive card ("Ligaya trusts it; Andrei doubts it").
+  - **The numbers are never player-facing** (Mark). They choose descriptions, so the readout also gives each value's **band**: `trustBand(v)` is devoted (90+), trusting (70–89), neutral (31–69), skeptical (11–30) or hostile (0–10), and integrity has its own bands (healthy 80+, degraded 50–79, compromised 20–49, critical under 20). The game words from the bands.
+- **Refusals** (the integration agent's request): an `archive_event` with an unknown kind, an unknown witness, a stale revision, or no Archive in the scenario comes back in the host's `blocked:<code>:<detail>` form.
 
 ## Milestones
 
@@ -49,10 +51,10 @@
 | X4 | Lab: last-messages-home gains the Archive; claims on v3 | claims: trust moves by the table; integrity is constant without events (OQ4); captain trust is unmoved by backing (OQ3); the 0.4.1 gate still has 0 errors |
 | X5 | 0.6.0: changelog, AGENT.md, independent evaluation (score of 70 or more), PR, publish, sha to the integration agent | CI green; publish |
 
-## Questions for Mark
+## Questions for Mark (answered 2026-10-15)
 
-1. **The trust scale.** The design table is written on −100..100, while crew_core's trust is 0..100 with 50 neutral. Plan: halve the ranges onto 0..100 (for example, "prediction wrong −10 to −25" becomes −5 to −12) and map the levels the same way (Devoted 90+, Trusting 70–89, Neutral 31–69, Skeptical 11–30, Hostile 0–10). Recommended, since crew and Archive trust then share one scale.
-2. **Who raises events.** The game raises them from what happens, and crew_core only applies them. Recommended: it keeps AI words out of decisions, and the game already owns the Archive voice.
+1. **The trust scale.** The design table is written on −100..100, while crew_core's trust is 0..100 with 50 neutral. Plan: halve the ranges onto 0..100 (for example, "prediction wrong −10 to −25" becomes −5 to −12) and map the levels the same way (Devoted 90+, Trusting 70–89, Neutral 31–69, Skeptical 11–30, Hostile 0–10). Recommended, since crew and Archive trust then share one scale. **Answer: yes, one scale for all trust; the numbers aren't player-facing but influence descriptions.**
+2. **Who raises events.** The game raises them from what happens, and crew_core only applies them. Recommended: it keeps AI words out of decisions, and the game already owns the Archive voice. **Answer: yes.**
 
 ## Not in scope
 
