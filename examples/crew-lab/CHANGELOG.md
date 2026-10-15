@@ -4,6 +4,14 @@
 
 Local only; never published.
 
+- **The Archive aboard (crew_core 0.6.0, 2026-10-15).**
+  - last-messages-home (the game's scenario) carries the Archive (integrity
+    75, confidence 60).
+  - crew-sim skip rows report `archive {integrity, trust_min, trust_max}`,
+    and claims accept `archive.*` metrics.
+  - `auto/archive-year.claims.json`: with no Archive events, a year's skip
+    leaves integrity and trust where they started, with 0 errors, under
+    both captains (8 of 8 at cadence 1 and 30).
 - **Resource units from data (crew_core 0.5.0, 2026-10-15).**
   - `bubble.ail` is gone. Stapledon's eight bubble resources are now
     `scenarios/stapledon/resources.json` (crew_units/1), which the game syncs

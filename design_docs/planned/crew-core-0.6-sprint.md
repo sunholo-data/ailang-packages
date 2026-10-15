@@ -45,16 +45,23 @@
 
 | ID | What | Gate |
 |---|---|---|
-| X1 | The scenario's `archive` actor: decoder, engine actor, relationships, refused as a worker | tests on both engines; a scenario without `archive` gives byte-identical sessions, so the six parity recordings replay unchanged |
-| X2 | `archive_event`: journalled, replayed, evidence to witnesses, trust deltas by traits, integrity from `repair`/`degraded` only | tests for each kind; a seeded mutation (wrong delta sign) is caught; interpreter == strict VM |
-| X3 | Switches `archive.coupling` (off) and `archive.decay` (0) in the policy | tests: with defaults, `captain_backs` leaves captain trust unchanged and integrity is constant over a year with no events; with them on, both move |
-| X4 | Lab: last-messages-home gains the Archive; claims on v3 | claims: trust moves by the table; integrity is constant without events (OQ4); captain trust is unmoved by backing (OQ3); the 0.4.1 gate still has 0 errors |
+| ✅ X1 | The scenario's `archive` actor: decoder, engine actor, relationships, refused as a worker | tests on both engines; a scenario without `archive` gives byte-identical sessions, so the six parity recordings replay unchanged |
+| ✅ X2 | `archive_event`: journalled, replayed, evidence to witnesses, trust deltas by traits, integrity from `repair`/`degraded` only | tests for each kind; a seeded mutation (wrong delta sign) is caught; interpreter == strict VM |
+| ✅ X3 | Switches `archive.coupling` (off) and `archive.decay` (0) in the policy | tests: with defaults, `captain_backs` leaves captain trust unchanged and integrity is constant over a year with no events; with them on, both move |
+| ✅ X4 | Lab: last-messages-home gains the Archive; claims on v3 | claims: trust moves by the table; integrity is constant without events (OQ4); captain trust is unmoved by backing (OQ3); the 0.4.1 gate still has 0 errors |
 | X5 | 0.6.0: changelog, AGENT.md, independent evaluation (score of 70 or more), PR, publish, sha to the integration agent | CI green; publish |
 
 ## Questions for Mark (answered 2026-10-15)
 
 1. **The trust scale.** The design table is written on −100..100, while crew_core's trust is 0..100 with 50 neutral. Plan: halve the ranges onto 0..100 (for example, "prediction wrong −10 to −25" becomes −5 to −12) and map the levels the same way (Devoted 90+, Trusting 70–89, Neutral 31–69, Skeptical 11–30, Hostile 0–10). Recommended, since crew and Archive trust then share one scale. **Answer: yes, one scale for all trust; the numbers aren't player-facing but influence descriptions.**
 2. **Who raises events.** The game raises them from what happens, and crew_core only applies them. Recommended: it keeps AI words out of decisions, and the game already owns the Archive voice. **Answer: yes.**
+
+## Deviations from the plan
+
+- The switches sit in the scenario's `archive` block, not the response
+  policy: they belong to the Archive, and a game sets them per scenario.
+- The Archive is a sidecar, not an engine actor. That keeps the engine
+  configuration, and so every scenario without an Archive, byte-identical.
 
 ## Not in scope
 

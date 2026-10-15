@@ -1,5 +1,50 @@
 # Changelog
 
+## 0.6.0
+
+The Archive as a crew actor (stapledons-godot archive-npc A1;
+stapledons-design archive-crew-trust.md). Mark's rulings, 2026-10-15:
+- one trust scale for all trust, 0..100 with 50 neutral;
+- the numbers are never shown to the player, they choose descriptions;
+- the game raises Archive events, and crew_core only applies them;
+- captain coupling is off (OQ3), and integrity changes only from events (OQ4).
+
+- **New module `archivist`, a sidecar like personalities and cohorts.** The
+  engine configuration is unchanged, so a scenario without `archive` runs
+  byte-identically: the saved recordings replay and parity holds.
+- **Scenario: an optional `archive` block**: `{id, name, integrity,
+  confidence, ocean?, trust?, coupling?, decay?}`. The Archive is never a
+  worker; offers to it are refused.
+- **Trust both ways with each crew member.** Each crew member trusts and
+  regards the Archive, and the Archive them, all starting at 50 (crew trust
+  in it can start elsewhere with `trust`).
+- **Host command `archive_event`**: `{id, kind, witnesses, amount?,
+  revision?}`.
+  - Kinds: answer_confirmed, answer_contradicted, crisis_help,
+    crisis_failure, confusion_witnessed, captain_backs, repair, degraded.
+  - Witnesses hear it as captain evidence `ar-<id>`, and their trust in the
+    Archive moves by the archive-crew-trust table, halved onto 0..100. Where
+    each witness lands in the range depends on their traits: bad news weighs
+    more on the disagreeable and anxious, good news on the agreeable and
+    open. There are no rolls.
+  - `repair` and `degraded` change integrity by `amount` (1..30, default
+    10); nothing else does.
+  - `captain_backs` moves loyalists' trust in the Archive up and skeptics'
+    down. With `coupling` on, their trust in the captain moves too.
+  - Refusals are social errors (`unknown_id`, `invalid_schema`,
+    `stale_revision`, `altered_duplicate`), which a host shows as
+    `blocked:<code>:<detail>`.
+  - Ids starting `ar-` are reserved.
+- **Decay switch.** `decay` (0..20 a year, default 0) takes integrity at
+  each year turn.
+- **Archiving** forgets Archive events and their `ar-` evidence older than
+  `keep`.
+- **Readout.** `session.archiveOf(s)` gives integrity, confidence, and each
+  crew member's trust and regard, with **bands for descriptions**:
+  - `trustBand`: devoted, trusting, neutral, skeptical, hostile;
+  - `integrityBand`: healthy, degraded, compromised, critical.
+- The snapshot carries `archivist` only when the scenario has one.
+
 ## 0.5.0
 
 Resource units as data (Mark's repo-use review, 2026-10-15). The game had a

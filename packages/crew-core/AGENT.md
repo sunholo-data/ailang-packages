@@ -77,6 +77,18 @@ at least 1). Every function takes the table first:
 crew_core never builds a table in. Stapledon's eight bubble resources live
 with its scenarios (crew lab `scenarios/stapledon/resources.json`).
 
+## The Archive (`archivist`, 0.6.0)
+
+A scenario may add `"archive": {"id","name","integrity","confidence",
+"ocean"?, "trust"?, "coupling"?, "decay"?}`: a ship's mind that never works
+but that crew trust and regard, and it them, on the same 0..100 scale as all
+trust. The host raises what happens with `{"command":"archive_event","id",
+"kind","witnesses","amount"?,"revision"?}`; crew_core applies it by a fixed
+table and the witnesses' traits. Read it back with `session.archiveOf(s)`
+and word it by `trustBand` and `integrityBand`: the numbers are not meant for
+players. Coupling to trust in the captain and integrity decay over time are
+off unless the block switches them on.
+
 ## Driving a session
 
 ```ailang

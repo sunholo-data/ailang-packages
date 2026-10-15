@@ -36,6 +36,7 @@ ensures { not result || size(path) > 0 } = match split(path, ".") {
  ["crew", w, "replies", x] => contains(sc.workers, w) && contains(replyLabels(), x),
  ["escalations", x] => contains(["refusal_under_orders", "breakdown", "trust_floor", "major", "argument", "uncovered", "cohort", "stuck"], x) || (startsWith(x, "cohort:") && contains(cohortIds(sc), substringFrom(x, 7))),
  ["population", x] => length(cohortIds(sc)) > 0 && contains(["total", "births", "deaths", "year", "groups"], x),
+ ["archive", x] => contains(["integrity", "trust_min", "trust_max"], x),
  ["cohorts", c, f] => contains(cohortIds(sc), c) && contains(["headcount", "pressure", "division", "mood", "trust"], f),
  ["resources", r, f] => any(\x. x.id == r, sc.resources) && contains(["min", "zero_ticks", "stockouts", "in", "out"], f),
  _ => false
