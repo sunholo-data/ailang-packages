@@ -1,0 +1,99 @@
+module sunholo/crew_core/archive_session_test
+-- 0.6.0: the Archive in a host session (archivist sidecar + archive_event).
+import ./session (Session, HostError, HostFailure, start, input, snapshot, archiveOf, encodeHostError)
+import ./scenario (decodeScenario)
+import ./example (firstContactJson)
+import std/result (Result, Ok, Err)
+import std/option (Some, None)
+import std/list (head, filter, any, length)
+import std/string (replace, contains)
+
+pure func withArchive(extra: string) -> string = replace(firstContactJson(), "{\"schema\"", "{\"archive\":{\"id\":\"archive\",\"name\":\"The Archive\",\"integrity\":70,\"confidence\":60${extra}},\"schema\"")
+pure func begin(body: string, profile: string) -> Result[Session, HostError] = match decodeScenario(body) {
+ Err(e) => Err(HostFailure(e)),
+ Ok(sc) => match start(sc, "{\"command\":\"start\",\"policy\":\"consent\",\"scenario\":\"${profile}\",\"keep\":5}") { Ok(o) => Ok(o.session), Err(e) => Err(e) }
+}
+pure func trustIn(s: Session, w: string) -> int = match archiveOf(s) { Some(r) => match head(filter(\c. c.id == w, r.crew)) { Some(c) => c.trust, None => 0 - 1 }, None => 0 - 2 }
+pure func ev(id: string, kind: string, ws: string) -> string = "{\"command\":\"archive_event\",\"id\":\"${id}\",\"kind\":\"${kind}\",\"witnesses\":[${ws}]}"
+pure func code(r: Result[{session: Session, trace: string, failed: bool}, HostError], c: string) -> bool = match r { Err(e) => contains(encodeHostError(e), "\"code\":\"${c}\""), Ok(_) => false }
+
+test "a scenario without an Archive has none, and its snapshot has no archivist" {
+ match begin(firstContactJson(), "watch-v3") { Ok(s) => archiveOf(s) == None && not contains(snapshot(s), "archivist"), Err(_) => false }
+}
+test "the Archive starts neutral with every crew member and is in the snapshot" {
+ match begin(withArchive(""), "watch-v3") { Ok(s) => trustIn(s, "medic") == 50 && contains(snapshot(s), "\"archivist\""), Err(_) => false }
+}
+test "the Archive is not crew: offers to it are refused" {
+ match begin(withArchive(""), "watch-v3") { Ok(s) => match input(s, "{\"command\":\"offer\",\"worker\":\"archive\",\"recipe\":\"x\",\"id\":\"o1\"}") { Err(_) => true, Ok(o) => o.failed }, Err(_) => false }
+}
+test "an event moves witnesses' trust and they hear it as ar- evidence" {
+ match begin(withArchive(""), "watch-v3") {
+  Err(_) => false,
+  Ok(s) => match input(s, ev("e1", "answer_contradicted", "\"medic\",\"pilot\"")) {
+   Err(_) => false,
+   Ok(o) => trustIn(o.session, "medic") < 50 && trustIn(o.session, "pilot") < 50 && trustIn(o.session, "engineer") == 50
+    && any(\e. e.id == "ar-e1", o.session.state.evidence) && any(\k. k.observer == "medic" && k.evidence == "ar-e1", o.session.state.knowledge) && not any(\k. k.observer == "engineer" && k.evidence == "ar-e1", o.session.state.knowledge)
+  }
+ }
+}
+test "refusals are social errors (blocked:<code>:<detail> for a host)" {
+ match begin(withArchive(""), "watch-v3") {
+  Err(_) => false,
+  Ok(s) => code(input(s, ev("e1", "sings", "\"medic\"")), "invalid_schema")
+   && code(input(s, ev("e1", "repair", "\"nobody\"")), "unknown_id")
+   && code(input(s, "{\"command\":\"archive_event\",\"id\":\"e1\",\"kind\":\"repair\",\"witnesses\":[],\"revision\":999}"), "stale_revision")
+   && (match input(s, ev("e1", "repair", "")) { Ok(o) => code(input(o.session, ev("e1", "repair", "")), "altered_duplicate"), Err(_) => false })
+   && (match begin(firstContactJson(), "watch-v3") { Ok(n) => code(input(n, ev("e1", "repair", "")), "unknown_id"), Err(_) => false })
+ }
+}
+test "repair raises integrity; nothing else does (OQ4)" {
+ match begin(withArchive(""), "watch-v3") {
+  Err(_) => false,
+  Ok(s) => match (input(s, "{\"command\":\"archive_event\",\"id\":\"r1\",\"kind\":\"repair\",\"witnesses\":[],\"amount\":12}"), input(s, ev("c1", "confusion_witnessed", "\"medic\""))) {
+   (Ok(a), Ok(b)) => (match archiveOf(a.session) { Some(r) => r.integrity == 82, None => false }) && (match archiveOf(b.session) { Some(r) => r.integrity == 70, None => false }),
+   _ => false
+  }
+ }
+}
+test "a year passes: no decay by default, decay when switched on" {
+ let year = "{\"command\":\"advance\",\"tick\":365,\"budget\":64}";
+ let after = \body. match begin(body, "watch-v2") { Ok(s) => match input(s, year) { Ok(o) => match archiveOf(o.session) { Some(r) => r.integrity, None => 0 - 1 }, Err(_) => 0 - 2 }, Err(_) => 0 - 3 };
+ after(withArchive("")) == 70 && after(withArchive(",\"decay\":4")) == 66
+}
+pure func captainTrust(s: Session, w: string) -> int = match head(filter(\r. r.from == w && r.to == "captain" && r.dimension == "trust", s.state.relationships)) { Some(r) => r.value, None => 0 - 1 }
+test "backing moves trust in the Archive only by default (OQ3); coupling also moves trust in the captain" {
+ let back = \body. match begin(body, "watch-v3") { Ok(s) => match input(s, ev("b1", "captain_backs", "\"medic\"")) { Ok(o) => {before: captainTrust(s, "medic"), after: captainTrust(o.session, "medic"), archive: trustIn(o.session, "medic")}, Err(_) => {before: 0, after: 0 - 9, archive: 0} }, Err(_) => {before: 0, after: 0 - 9, archive: 0} };
+ let off = back(withArchive(",\"trust\":80"));
+ let on = back(withArchive(",\"trust\":80,\"coupling\":true"));
+ off.after == off.before && off.archive == 83 && on.after == on.before + 3 && on.archive == 83
+}
+test "archiving forgets Archive events older than keep, so they stay bounded" {
+ match begin(withArchive(""), "watch-v2") {
+  Err(_) => false,
+  Ok(s) => match input(s, ev("e1", "crisis_help", "\"medic\"")) {
+   Err(_) => false,
+   Ok(o) => match input(o.session, "{\"command\":\"advance\",\"tick\":10,\"budget\":64}") {
+    Err(_) => false,
+    Ok(p) => any(\e. e.id == "ar-e1", o.session.state.evidence) && not any(\e. e.id == "ar-e1", p.session.state.evidence) && not any(\k. k.evidence == "ar-e1", p.session.state.knowledge) && trustIn(p.session, "medic") > 50
+   }
+  }
+ }
+}
+test "witnesses must be unique crew: not the captain, not the Archive, at most 15, and some for trust events" {
+ match begin(withArchive(""), "watch-v3") {
+  Err(_) => false,
+  Ok(s) => code(input(s, ev("w1", "crisis_help", "\"medic\",\"medic\"")), "invalid_schema")
+   && code(input(s, ev("w2", "crisis_help", "\"captain\"")), "unknown_id")
+   && code(input(s, ev("w3", "crisis_help", "\"archive\"")), "unknown_id")
+   && code(input(s, ev("w4", "crisis_help", "")), "invalid_schema")
+   && code(input(s, ev("w5", "crisis_help", "\"medic\",\"medic\",\"medic\",\"medic\",\"medic\",\"medic\",\"medic\",\"medic\",\"medic\",\"medic\",\"medic\",\"medic\",\"medic\",\"medic\",\"medic\",\"medic\"")), "invalid_schema")
+ }
+}
+test "amount must be 1..30 with or without a revision; a current revision is accepted" {
+ match begin(withArchive(""), "watch-v3") {
+  Err(_) => false,
+  Ok(s) => code(input(s, "{\"command\":\"archive_event\",\"id\":\"a1\",\"kind\":\"repair\",\"witnesses\":[],\"amount\":31}"), "invalid_schema")
+   && code(input(s, "{\"command\":\"archive_event\",\"id\":\"a2\",\"kind\":\"repair\",\"witnesses\":[],\"amount\":0,\"revision\":${show(s.state.revision)}}"), "invalid_schema")
+   && (match input(s, "{\"command\":\"archive_event\",\"id\":\"a3\",\"kind\":\"degraded\",\"witnesses\":[],\"amount\":5,\"revision\":${show(s.state.revision)}}") { Ok(o) => match archiveOf(o.session) { Some(r) => r.integrity == 65, None => false }, Err(_) => false })
+ }
+}

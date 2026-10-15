@@ -1,5 +1,96 @@
 # Changelog
 
+## 0.6.0
+
+The Archive as a crew actor (stapledons-godot archive-npc A1;
+stapledons-design archive-crew-trust.md). Mark's rulings, 2026-10-15:
+- one trust scale for all trust, 0..100 with 50 neutral;
+- the numbers are never shown to the player, they choose descriptions;
+- the game raises Archive events, and crew_core only applies them;
+- captain coupling is off (OQ3), and integrity changes only from events (OQ4).
+
+- **New module `archivist`, a sidecar like personalities and cohorts.** The
+  engine configuration is unchanged, so a scenario without `archive` runs
+  byte-identically: the saved recordings replay and parity holds.
+- **Scenario: an optional `archive` block**: `{id, name, integrity,
+  confidence, ocean?, trust?, coupling?, decay?}`. The Archive is never a
+  worker; offers to it are refused.
+- **Trust both ways with each crew member.** Each crew member trusts and
+  regards the Archive, and the Archive them, all starting at 50 (crew trust
+  in it can start elsewhere with `trust`).
+- **Host command `archive_event`**: `{id, kind, witnesses, amount?,
+  revision?}`.
+  - Kinds: answer_confirmed, answer_contradicted, crisis_help,
+    crisis_failure, confusion_witnessed, captain_backs, repair, degraded.
+  - Witnesses hear it as captain evidence `ar-<id>`, and their trust in the
+    Archive moves by the archive-crew-trust table, halved onto 0..100. Where
+    each witness lands in the range depends on their traits: bad news weighs
+    more on the disagreeable and anxious, good news on the agreeable and
+    open. There are no rolls.
+  - `repair` and `degraded` change integrity by `amount` (1..30, default
+    10); nothing else does.
+  - `captain_backs` moves loyalists' trust in the Archive up and skeptics'
+    down. With `coupling` on, their trust in the captain moves too.
+  - Refusals are social errors (`unknown_id`, `invalid_schema`,
+    `stale_revision`, `altered_duplicate`), which a host shows as
+    `blocked:<code>:<detail>`.
+  - Ids starting `ar-` are now reserved for every host command id. A host
+    that used such ids before would now be refused.
+- **Decay switch.** `decay` (0..20 a year, default 0) takes integrity at
+  each year turn.
+- **Archiving** forgets Archive events and their `ar-` evidence older than
+  `keep`.
+- **Readout.** `session.archiveOf(s)` gives integrity, confidence, and each
+  crew member's trust and regard, with **bands for descriptions**:
+  - `trustBand`: devoted, trusting, neutral, skeptical, hostile;
+  - `integrityBand`: healthy, degraded, compromised, critical.
+- The snapshot carries `archivist` only when the scenario has one.
+- `regard` (both ways) is carried and shown but no event moves it yet. It is
+  there for later releases (archive-npc's disputes).
+- `captain_backs` with coupling off moves only trust in the Archive:
+  loyalists (70 or more) rise by 3, skeptics (30 or less) fall by 3. That is
+  how "trust in the Archive only" (OQ3) is read; with coupling on, trust in
+  the captain also moves.
+
+## 0.5.0
+
+Resource units as data (Mark's repo-use review, 2026-10-15). The game had a
+port of the crew lab's bubble table, made because the lab is never
+published. The logic now lives here, and the table stays with each game's
+scenarios.
+
+- **New module `units`:** `UnitDef`, `UnitTable`, `Amount`, `Used`,
+  `decodeUnits` (crew_units/1), `unitOf`, `allocate`, `lintPack`,
+  `lintAgainstShip`, `usedOf`. It reproduces the game's port exactly: the same
+  rounding and the same lint messages, word for word, for Stapledon's table.
+  `decodeUnits` refuses a fractional `per` (std/json's `getInt` truncates).
+  Tested on both engines and under the strict VM.
+- **Contract fix:** `cohorts.years` gains the precondition its callers
+  already meet (at most ten non-negative decade counts). Without it, the
+  contract's sum claim was false for longer or negative lists. A generated
+  property test found it.
+- **Archiving no longer waits for the bank to fill.** An answered request
+  stays in the bank for idempotent retries until it expires (one turn), and
+  then can never be applied again. 0.4.x still counted it as holding its
+  task, so with `keep` nothing answered was archived until the bank reached
+  its limit of 64. Every request carries its crew member's visible evidence,
+  so each auto-run decision grew with the session.
+  - Found by the R2-CREW integration agent as step timeouts on a 1,201-tick
+    leg: monthly decisions reached 750 ms.
+  - Lab probe (last-messages-home, orders, cadence 30, keep 30), at day 300:
+    evidence went from 203 to 23, knowledge from 332 to 32, tasks from 50 to
+    5, and the bank from 60 to 6.
+  - The cost per decision is now flat (about 21 ms to 730 days, where it
+    grew from 20 to 64 ms), and a 292-day skip drops from 3.1 s to 1.7 s,
+    with the same decisions.
+  - `held` ignores expired bank entries, and archiving drops the bank
+    entries of the tasks it archives. A retry of such an answer reports
+    "unknown request", as for a bank entry that was already compacted.
+  - New test: `archive_test` "answered work is folded away once its request
+    expires". It fails on 0.4.1.
+- Nothing else changes: the host wire, the journal and the saved recordings
+  replay identically.
+
 ## 0.4.1
 
 Auto-captain fixes for Stapledon's game profile (`watch-v3`). Found by the

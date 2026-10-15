@@ -154,8 +154,10 @@ pure func onlyKeys(j: Json, required: [string], optional: [string]) -> bool = ma
 pure func goodId(id: string) -> bool = stringLength(id) > 0 && stringLength(id) <= 48 && all(\i. { let c = charCode(substring(id, i, i + 1)); (c >= 97 && c <= 122) || (c >= 48 && c <= 57) || c == 45 || c == 95 }, range(0, stringLength(id)))
 
 -- Ten decade counts spread over a hundred single years, remainders to the
--- youngest years of each decade.
+-- youngest years of each decade. Callers pass at most ten non-negative
+-- counts (the cohort decoder checks them).
 export pure func years(decades: [int]) -> [int]
+requires { length(decades) <= 10 && not any(\d. d < 0, decades) }
 ensures { length(result) == 100 && sum(result) == sum(decades) } = flatMap(\d. map(\y. d / 10 + (if y < d % 10 then 1 else 0), range(0, 10)), take(10, decades ++ [0,0,0,0,0,0,0,0,0,0]))
 export pure func decades(ys: [int]) -> [int] ensures { length(result) == 10 } = map(\d. span(ys, d * 10, d * 10 + 10), range(0, 10))
 

@@ -3,8 +3,8 @@ import std/result (Result, Ok, Err)
 import std/option (Option, Some, None)
 import std/list (length, map, filter, head, any, sortBy, foldl, contains, flatMap, drop)
 import std/string (join, startsWith, length as stringLength)
-import std/json (Json, encode, get, getString, getInt, getBool, js, jint, jnum, jo, kv, ja, asObject)
-import pkg/sunholo/social_dynamics/model (Config, State, Error, InvalidSchema, Step, Event, Operation, Source, Authored, ActorInput, ActorPrincipal, Host, OfferTask, OfferCommitment, AcceptCommitment, AcceptTask, RaiseConcern, RequestRelief, ResolveRelief, Offered, Working, Completed, Task, Appraisal, Effect, BoundedIndicatorDelta, RelationshipDelta, Value, validId, sorted, numericLimit, Applied, Done, Pending, Blocked)
+import std/json (Json, encode, get, getString, getInt, getBool, js, jint, jnum, jo, kv, ja, asObject, getStringArrayStrict)
+import pkg/sunholo/social_dynamics/model (Config, State, Error, InvalidSchema, Step, Event, Operation, Source, Authored, ActorInput, ActorPrincipal, Host, OfferTask, OfferCommitment, AcceptCommitment, AcceptTask, RaiseConcern, RequestRelief, ResolveRelief, Offered, Working, Completed, Task, Appraisal, Effect, BoundedIndicatorDelta, RelationshipDelta, Value, validId, sorted, numericLimit, Applied, Done, Pending, Blocked, UnknownId, StaleRevision, AlteredDuplicate, PendingAdvance)
 import pkg/sunholo/social_dynamics/engine (init, advance, continueAdvance, abortAdvance)
 import pkg/sunholo/social_dynamics/proposals (apply)
 import pkg/sunholo/social_dynamics/tasks (findTask, halt)
@@ -13,6 +13,7 @@ import pkg/sunholo/social_dynamics/relationships (appraisalContext, deliver)
 import pkg/sunholo/social_dynamics/wire (encodeState, encodeEvents, encodeError, encodeConfig)
 import ./scenario (Scenario, ShipEvent, Transfer, decodeShipEvent, config as scenarioConfig, workerRecipe, projectName, resourceName, purpose, yieldsOf)
 import ./flows (Applied, transferAll)
+import ./archivist (Archivist, Readout, decodeArchivist, applyEvent, decayed, forget, eventKinds, archivistJson, readout)
 import ./cohorts (Population, Signal, decodePopulation, populationJson, hear, drift, yearsTo, setBirthPolicy, promote)
 import ./host_policy (policies)
 import ./example (firstContact)
@@ -37,7 +38,7 @@ export type Report = { id: string, task: string, agreement: string, worker: stri
 export type Tally = { id: string, count: int } deriving (Eq)
 export type Archive = { keep: int, tasks: int, evidence: int, knowledge: int, accepted: int, completed: [Tally], events: [string] } deriving (Eq)
 
-export type Session = { scenario: Scenario, policy: string, command: string, archive: Archive, config: Config, state: State, bindings: [TaskAgreement], pending: [Request], bank: [Bank], reports: [Report], chat: ConversationStore, personalities: [Personality], population: Option[Population], traced: bool } deriving (Eq)
+export type Session = { scenario: Scenario, policy: string, command: string, archive: Archive, config: Config, state: State, bindings: [TaskAgreement], pending: [Request], bank: [Bank], reports: [Report], chat: ConversationStore, personalities: [Personality], population: Option[Population], traced: bool, archivist: Option[Archivist] } deriving (Eq)
 
 export type Output = { session: Session, trace: string, failed: bool } deriving (Eq)
 
@@ -58,7 +59,7 @@ pure func reportJson(r: Report) -> Json =
 
 export pure func snapshot(s: Session) -> string
 ensures { stringLength(result) > 0 } =
-  encode(jo([kv("state", js(encodeState(s.state))), kv("policy", js(s.policy))] ++ (if s.command != s.policy then [kv("command", js(s.command))] else []) ++ (if s.archive.keep > 0 then [kv("archived", archiveJson(s.archive))] else []) ++ (match s.population { Some(p) => [kv("population", populationJson(p))], None => [] }) ++ [kv("bindings", ja(map(\b. jo([kv("task", js(b.task)), kv("agreement", js(b.agreement)), kv("captain", js(b.captain)), kv("worker", js(b.worker)), kv("recipe", js(b.recipe))]), s.bindings))), kv("pending", ja(map(requestJson, s.pending))), kv("bank", ja(map(bankJson, s.bank))), kv("reports", ja(map(reportJson, s.reports)))] ++ (if s.chat.version == 1 then [kv("conversations", conversationJson(s.chat)),kv("personalities",personalitiesJson(s.personalities))] else [])))
+  encode(jo([kv("state", js(encodeState(s.state))), kv("policy", js(s.policy))] ++ (if s.command != s.policy then [kv("command", js(s.command))] else []) ++ (if s.archive.keep > 0 then [kv("archived", archiveJson(s.archive))] else []) ++ (match s.population { Some(p) => [kv("population", populationJson(p))], None => [] }) ++ (match s.archivist { Some(a) => [kv("archivist", archivistJson(a))], None => [] }) ++ [kv("bindings", ja(map(\b. jo([kv("task", js(b.task)), kv("agreement", js(b.agreement)), kv("captain", js(b.captain)), kv("worker", js(b.worker)), kv("recipe", js(b.recipe))]), s.bindings))), kv("pending", ja(map(requestJson, s.pending))), kv("bank", ja(map(bankJson, s.bank))), kv("reports", ja(map(reportJson, s.reports)))] ++ (if s.chat.version == 1 then [kv("conversations", conversationJson(s.chat)),kv("personalities",personalitiesJson(s.personalities))] else [])))
 
 -- Untraced sessions (batch runs) skip the per-call state encoding; their
 -- outputs carry an empty trace. Journals require traced sessions.
@@ -70,7 +71,7 @@ ensures { not result.traced && result.state == s.state } = {s | traced: false}
 
 -- Ids the host makes for ship flows ("ev-", "yd-" evidence, "hear-" and
 -- "ship-" deliveries and operations) are reserved, so no caller id collides.
-pure func reservedId(id: string) -> bool = any(\p. startsWith(id, p), ["ev-", "yd-", "sf-", "hear-", "ship-"])
+pure func reservedId(id: string) -> bool = any(\p. startsWith(id, p), ["ev-", "yd-", "sf-", "hear-", "ship-", "ar-"])
 pure func checkedId(id: string) -> bool = validId(id) && stringLength(id) <= 64 && not reservedId(id)
 
 pure func owned(s: Session, worker: string, recipe: string) -> bool = workerRecipe(s.scenario, worker, recipe)
@@ -363,7 +364,7 @@ pure func delivered(s: Session, observer: string, evidence: string, id: string) 
   }
 
 pure func advanceOutput(s0:Session,state:State,events:[Event])->Result[Output,HostError] = {
- let s = {s0 | population: match s0.population { Some(p) => Some(populationAt(s0, p, state)), None => None }};
+ let s = {s0 | population: match s0.population { Some(p) => Some(populationAt(s0, p, state)), None => None }, archivist: match s0.archivist { Some(a) => Some(decayed(a, state.tick / 365 - s0.state.tick / 365)), None => None }};
  advanceOutput2(s,state,events)
 }
 pure func advanceOutput2(s:Session,state:State,events:[Event])->Result[Output,HostError] =
@@ -372,9 +373,9 @@ pure func advanceOutput2(s:Session,state:State,events:[Event])->Result[Output,Ho
  }
 
 @allow_empty_ok("Legacy hosts intentionally have no personality sidecar; only watch-v3 initializes profiles")
-pure func initialized(scenario:Scenario,policy:string,c:Config,state:State,version:int,keep:int,pop:Option[Population])->Result[Output,HostError] =
+pure func initialized(scenario:Scenario,policy:string,c:Config,state:State,version:int,keep:int,pop:Option[Population],arch:Option[Archivist])->Result[Output,HostError] =
  match (if version==1 then initializeShip(state) else Ok([])) {
-  Err(e)=>Err(HostFailure("personality initialization: ${e}")),Ok(ps)=>Ok(output({scenario:scenario,policy:policy,command:policy,archive:{keep:keep,tasks:0,evidence:0,knowledge:0,accepted:0,completed:[],events:[]},config:c,state:state,bindings:[],pending:[],bank:[],reports:[],chat:emptyConversation(version),personalities:ps,population:pop,traced:true},[]))
+  Err(e)=>Err(HostFailure("personality initialization: ${e}")),Ok(ps)=>Ok(output({scenario:scenario,policy:policy,command:policy,archive:{keep:keep,tasks:0,evidence:0,knowledge:0,accepted:0,completed:[],events:[]},config:c,state:state,bindings:[],pending:[],bank:[],reports:[],chat:emptyConversation(version),personalities:ps,population:pop,traced:true,archivist:arch},[]))
  }
 
 pure func majorDeliveries(s:Session,observers:[string],evidence:string,events:[Event])->Result[{session:Session,events:[Event]},HostError] = match observers {
@@ -604,7 +605,7 @@ pure func archiveJson(a: Archive) -> Json = jo([kv("keep", jint(a.keep)), kv("ta
 pure func tallied(xs: [Tally], id: string) -> [Tally] = if any(\t. t.id == id, xs) then map(\t. if t.id == id then {t | count: t.count + 1} else t, xs) else xs ++ [{id: id, count: 1}]
 
 pure func held(s: Session, t: Task) -> bool =
- any(\r. r.task == t.id, s.pending) || any(\b. b.request.task == t.id, s.bank) || any(\r. r.task == t.id && not r.resolved, s.state.reliefs) || any(\i. i.task == t.id && i.status == "open" && not moot(s, i), s.chat.issues)
+ any(\r. r.task == t.id, s.pending) || any(\b. b.request.task == t.id && b.request.expires > s.state.tick, s.bank) || any(\r. r.task == t.id && not r.resolved, s.state.reliefs) || any(\i. i.task == t.id && i.status == "open" && not moot(s, i), s.chat.issues)
 
 -- A captain can answer a concern only about a live offer (captain_reply).
 -- One about work already running or finished (a check-in reply of defer
@@ -634,14 +635,15 @@ ensures { length(result.state.tasks) <= length(s.state.tasks) && length(result.s
  if s.archive.keep <= 0 then s else {
   let gone = filter(\t. archivable(s, t), s.state.tasks);
   let oldEvents = filter(\e. e.at <= s.state.tick - s.archive.keep && seen(s, "ev-${e.id}") && not contains(s.archive.events, "ev-${e.id}"), s.scenario.events);
-  if length(gone) == 0 && length(oldEvents) == 0 && length(s.state.accepted) <= 512 && not any(\p. overdue(p, s.state.tick - s.archive.keep), s.personalities) then s else {
+  let oldAr = match s.archivist { Some(a) => map(\w. "ar-${w.id}", filter(\w. w.at <= s.state.tick - s.archive.keep, a.log)), None => [] };
+  if length(gone) == 0 && length(oldEvents) == 0 && length(oldAr) == 0 && length(s.state.accepted) <= 512 && not any(\p. overdue(p, s.state.tick - s.archive.keep), s.personalities) then s else {
    let ids = map(\t. t.id, gone);
    let agreements = map(\b. b.agreement, filter(\b. contains(ids, b.task), s.bindings));
    let reports = map(\r. r.id, filter(\r. contains(ids, r.task), s.reports));
    let reliefs = map(\r. r.id, filter(\r. contains(ids, r.task), s.state.reliefs));
    let evIds = map(\e. "ev-${e.id}", oldEvents);
    let sfPre = map(\e. "sf-${e.id}-", oldEvents);
-   let marks = ids ++ agreements ++ reports ++ reliefs ++ map(\i. "yd-${i}", ids) ++ evIds;
+   let marks = ids ++ agreements ++ reports ++ reliefs ++ map(\i. "yd-${i}", ids) ++ evIds ++ oldAr;
    let dropE = \e. contains(marks, e.id) || any(\p. startsWith(e.id, p), sfPre) || (e.kind == "task_completed" && contains(ids, e.text)) || any(\c. contains(marks, c), e.causes);
    let evidence = filter(\e. not dropE(e), s.state.evidence);
    let goneE = map(\e. e.id, filter(dropE, s.state.evidence));
@@ -649,8 +651,8 @@ ensures { length(result.state.tasks) <= length(s.state.tasks) && length(result.s
    let n = length(s.state.accepted);
    let accepted = if n > 512 then drop(n - 512, s.state.accepted) else s.state.accepted;
    let a = s.archive;
-   {s | personalities: map(\p. trimmed(p, s.state.tick - s.archive.keep), s.personalities), state: {s.state | tasks: filter(\t. not contains(ids, t.id), s.state.tasks), evidence: evidence, knowledge: knowledge, reliefs: filter(\r. not contains(ids, r.task), s.state.reliefs), commitments: filter(\c. not contains(agreements, c.id), s.state.commitments), accepted: accepted},
-        bindings: filter(\b. not contains(ids, b.task), s.bindings), reports: filter(\r. not contains(ids, r.task), s.reports),
+   {s | archivist: match s.archivist { Some(x) => Some(forget(x, s.state.tick - s.archive.keep)), None => None }, personalities: map(\p. trimmed(p, s.state.tick - s.archive.keep), s.personalities), state: {s.state | tasks: filter(\t. not contains(ids, t.id), s.state.tasks), evidence: evidence, knowledge: knowledge, reliefs: filter(\r. not contains(ids, r.task), s.state.reliefs), commitments: filter(\c. not contains(agreements, c.id), s.state.commitments), accepted: accepted},
+        bindings: filter(\b. not contains(ids, b.task), s.bindings), reports: filter(\r. not contains(ids, r.task), s.reports), bank: filter(\b. not contains(ids, b.request.task), s.bank),
         chat: {s.chat | issues: filter(\i. not contains(ids, i.task), s.chat.issues), speech: filter(\x. not contains(ids, x.task), s.chat.speech)},
         archive: {a | tasks: a.tasks + length(gone), evidence: a.evidence + length(goneE), knowledge: a.knowledge + length(s.state.knowledge) - length(knowledge), accepted: a.accepted + (n - length(accepted)), completed: foldl(\acc t. tallied(acc, t.recipe), a.completed, filter(\t. t.status == Completed, gone)), events: sorted(a.events ++ evIds)}}
   }
@@ -706,7 +708,10 @@ ensures { match result {
         Err(e) => Err(DomainFailure(e)),
         Ok(state) => match decodePopulation(scenario.canonical, scenario.workers, map(\r. r.id, scenario.resources)) {
           Err(e) => Err(HostFailure(e)),
-          Ok(pop) => initialized(scenario,policy,c,state,if getString(j, "scenario") == Some("watch-v3") then 1 else 0,match getInt(j, "keep") { Some(k) => k, None => 0 },pop)
+          Ok(pop) => match decodeArchivist(scenario.canonical, scenario.workers, scenario.captain) {
+            Err(e) => Err(HostFailure(e)),
+            Ok(arch) => initialized(scenario,policy,c,state,if getString(j, "scenario") == Some("watch-v3") then 1 else 0,match getInt(j, "keep") { Some(k) => k, None => 0 },pop,arch)
+          }
         }
       }
     },
@@ -833,9 +838,70 @@ pure func shipEventCommand(s: Session, j: Json) -> Result[Output, HostError] =
     }
   }
 
+-- ------------------------------------------------------------ the Archive (0.6.0)
+
+-- An Archive event the game raised: {"command":"archive_event","id","kind",
+-- "witnesses", "amount"?, "revision"?}. Witnesses hear it as captain
+-- evidence ar-<id>; their trust in the Archive moves by the table and their
+-- traits (archivist.applyEvent). Refusals are social errors, so a host shows
+-- them as blocked:<code>:<detail>.
+pure func archiveEventCommand(s: Session, j: Json) -> Result[Output, HostError] = match s.archivist {
+ None => Err(DomainFailure(UnknownId("archive"))),
+ Some(a) => if not (fields(j, ["command","id","kind","witnesses"]) || fields(j, ["command","id","kind","witnesses","amount"]) || fields(j, ["command","id","kind","witnesses","revision"]) || fields(j, ["command","id","kind","witnesses","amount","revision"])) then Err(DomainFailure(InvalidSchema("archive_event fields: command, id, kind, witnesses, and optionally amount, revision"))) else
+  match (getString(j, "id"), getString(j, "kind"), getStringArrayStrict(j, "witnesses")) {
+   (Some(id), Some(kind), Some(ws)) =>
+    if not idle(s) then Err(DomainFailure(PendingAdvance("archive_event")))
+    else if not checkedId(id) then Err(DomainFailure(InvalidSchema("archive_event id")))
+    else if any(\w. w.id == id, a.log) || seen(s, "ar-${id}") then Err(DomainFailure(AlteredDuplicate(id)))
+    else if not contains(eventKinds(), kind) then Err(DomainFailure(InvalidSchema("archive_event kind ${kind}")))
+    else match head(filter(\w. not contains(s.scenario.workers, w), ws)) {
+     Some(w) => Err(DomainFailure(UnknownId(w))),
+     None => if length(ws) > 15 || length(filter(\w. length(filter(\x. x == w, ws)) != 1, ws)) > 0 then Err(DomainFailure(InvalidSchema("archive_event witnesses must be unique crew ids")))
+      else if (kind != "repair" && kind != "degraded") && length(ws) == 0 then Err(DomainFailure(InvalidSchema("archive_event needs witnesses")))
+      else match (get(j, "amount"), getInt(j, "amount"), get(j, "revision"), getInt(j, "revision")) {
+       (Some(_), None, _, _) => Err(DomainFailure(InvalidSchema("archive_event amount"))),
+       (_, Some(n), _, _) => if n < 1 || n > 30 then Err(DomainFailure(InvalidSchema("archive_event amount 1..30"))) else archiveAt(s, a, id, kind, ws, n, get(j, "revision"), getInt(j, "revision")),
+       _ => archiveAt(s, a, id, kind, ws, 10, get(j, "revision"), getInt(j, "revision"))
+      }
+    },
+   _ => Err(DomainFailure(InvalidSchema("archive_event types")))
+  }
+}
+-- The Archive card's readout: integrity and trust by crew member, with bands
+-- for descriptions. None when the scenario has no Archive.
+export pure func archiveOf(s: Session) -> Option[Readout] ! {}
+ensures { match result { Some(r) => r.integrity >= 0 && r.integrity <= 100, None => true } } = match s.archivist { Some(a) => Some(readout(a)), None => None }
+
+-- An optional revision must be the session's current one.
+pure func archiveAt(s: Session, a: Archivist, id: string, kind: string, ws: [string], amount: int, given: Option[Json], revision: Option[int]) -> Result[Output, HostError] = match (given, revision) {
+ (None, _) => archiveApplied(s, a, id, kind, ws, amount),
+ (Some(_), None) => Err(DomainFailure(InvalidSchema("archive_event revision"))),
+ (Some(_), Some(r)) => if r != s.state.revision then Err(DomainFailure(StaleRevision("archive_event"))) else archiveApplied(s, a, id, kind, ws, amount)
+}
+
+pure func oceanOfWorker(s: Session, w: string) -> [Value] = match head(filter(\x. x.id == w, s.state.actors)) { Some(x) => x.attributes, None => [] }
+pure func captainTrust(s: Session, w: string) -> int = match head(filter(\r. r.from == w && r.to == s.scenario.captain && r.dimension == "trust", s.state.relationships)) { Some(r) => r.value, None => 50 }
+
+pure func archiveApplied(s: Session, a: Archivist, id: string, kind: string, ws: [string], amount: int) -> Result[Output, HostError] = {
+ let applied = applyEvent(a, id, kind, ws, map(\w. {id: w, ocean: oceanOfWorker(s, w)}, ws), amount, s.state.tick);
+ let header = [kv("schema", js("crew_archive_event/1")), kv("event", js(id)), kv("kind", js(kind))];
+ let heard = if length(ws) == 0 then Ok({session: s, events: []}) else flow(s, "ar-${id}", ws, header, [], "", []);
+ match heard {
+  Err(e) => Err(e),
+  Ok(h) => {
+   let effects = flatMap(\c. { let now = captainTrust(h.session, c.id); let d = if now + c.value < 0 then 0 - now else if now + c.value > 100 then 100 - now else c.value; if d == 0 then [] else [RelationshipDelta(c.id, h.session.scenario.captain, "trust", d)] }, applied.captain);
+   if length(effects) == 0 then Ok(output({h.session | archivist: Some(applied.archivist)}, h.events)) else match applyEffects(h.session.config, h.session.state, effects) {
+    Err(e) => Err(DomainFailure(e)),
+    Ok(state) => Ok(output({h.session | state: state, archivist: Some(applied.archivist)}, h.events))
+   }
+  }
+ }
+}
+
 pure func dispatch(s: Session, j: Json) -> Result[Output, HostError] = match getString(j, "command") {
   Some("policy") => policyCommand(s, j),
   Some("ship_event") => shipEventCommand(s, j),
+  Some("archive_event") => archiveEventCommand(s, j),
   Some("birth_policy") => birthPolicyCommand(s, j),
   Some("depart") => departCommand(s, j),
   Some("lab_major")=>if not fields(j,["command","id","kind"]) then Err(HostFailure("lab report schema")) else match (text(j,"id"),text(j,"kind")){(Ok(id),Ok(kind))=>labMajor(s,id,kind),_=>Err(HostFailure("lab report types"))},

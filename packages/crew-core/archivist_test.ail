@@ -1,0 +1,72 @@
+module sunholo/crew_core/archivist_test
+import ./archivist (Archivist, decodeArchivist, applyEvent, trustDelta, decayed, forget, trustBand, integrityBand, eventKinds)
+import std/result (Ok, Err)
+import std/option (Some, None)
+import std/list (map, filter, head, length, any)
+import pkg/sunholo/social_dynamics/model (Value)
+
+pure func block(extra: string) -> string = "{\"crew\":[],\"archive\":{\"id\":\"archive\",\"name\":\"The Archive\",\"integrity\":70,\"confidence\":60${extra}}}"
+pure func one(extra: string) -> Archivist = match decodeArchivist(block(extra), ["ana", "ben"], "captain") {
+ Ok(Some(a)) => a,
+ _ => {id: "", name: "", integrity: 0, confidence: 0, ocean: [], trust: [], regard: [], trusts: [], regards: [], coupling: false, decay: 0, log: []}
+}
+pure func trustOf(a: Archivist, w: string) -> int = match head(filter(\v. v.id == w, a.trust)) { Some(v) => v.value, None => 0 - 1 }
+pure func ocean(a: int, n: int) -> [Value] = [{id: "openness", value: 50}, {id: "conscientiousness", value: 50}, {id: "extraversion", value: 50}, {id: "agreeableness", value: a}, {id: "neuroticism", value: n}]
+pure func oceans() -> [{id: string, ocean: [Value]}] = [{id: "ana", ocean: ocean(90, 10)}, {id: "ben", ocean: ocean(10, 90)}]
+
+test "no archive block, no Archive" { decodeArchivist("{\"crew\":[]}", ["ana"], "captain") == Ok(None) }
+test "defaults: trust 50 each way, no coupling, no decay" {
+ let a = one("");
+ a.id == "archive" && a.integrity == 70 && trustOf(a, "ana") == 50 && trustOf(a, "ben") == 50 && not a.coupling && a.decay == 0 && length(a.ocean) == 5
+}
+test "bad blocks are refused" {
+ let bad = \e. match decodeArchivist(block(e), ["ana"], "captain") { Err(_) => true, Ok(_) => false };
+ bad(",\"trust\":101") && bad(",\"decay\":21") && bad(",\"coupling\":1") && bad(",\"extra\":1") && bad(",\"ocean\":{\"openness\":50}")
+ && (match decodeArchivist("{\"archive\":{\"id\":\"ana\",\"name\":\"x\",\"integrity\":1,\"confidence\":1}}", ["ana"], "captain") { Err(_) => true, Ok(_) => false })
+ && (match decodeArchivist("{\"archive\":{\"id\":\"archive\",\"name\":\"x\",\"confidence\":1}}", ["ana"], "captain") { Err(_) => true, Ok(_) => false })
+}
+-- The halved table: contradicted is -5 (mild) to -12 (strong).
+test "a contradicted answer costs the harsh more than the kind" {
+ let r = applyEvent(one(""), "e1", "answer_contradicted", ["ana", "ben"], oceans(), 0, 5).archivist;
+ trustOf(r, "ana") == 50 - 5 && trustOf(r, "ben") == 50 - 11
+}
+test "only witnesses move" {
+ let r = applyEvent(one(""), "e1", "crisis_failure", ["ben"], oceans(), 0, 5).archivist;
+ trustOf(r, "ana") == 50 && trustOf(r, "ben") < 50
+}
+test "good news moves the open and agreeable most" {
+ let r = applyEvent(one(""), "e1", "crisis_help", ["ana", "ben"], oceans(), 0, 5).archivist;
+ trustOf(r, "ana") > trustOf(r, "ben") && trustOf(r, "ben") > 50
+}
+test "integrity moves only by repair and degraded (OQ4)" {
+ let a = one("");
+ applyEvent(a, "e1", "repair", ["ana"], oceans(), 12, 5).archivist.integrity == 82
+ && applyEvent(a, "e1", "degraded", [], oceans(), 30, 5).archivist.integrity == 40
+ && applyEvent(a, "e1", "confusion_witnessed", ["ana"], oceans(), 30, 5).archivist.integrity == 70
+ && decayed(a, 3).integrity == 70
+}
+test "decay switch on: integrity falls each year" { decayed(one(",\"decay\":5"), 3).integrity == 55 }
+test "captain coupling is off by default (OQ3) and moves loyalists and skeptics when on" {
+ let loyal = {one("") | trust: [{id: "ana", value: 80}, {id: "ben", value: 20}]};
+ applyEvent(loyal, "e1", "captain_backs", ["ana", "ben"], oceans(), 0, 5).captain == []
+ && applyEvent({loyal | coupling: true}, "e1", "captain_backs", ["ana", "ben"], oceans(), 0, 5).captain == [{id: "ana", value: 3}, {id: "ben", value: 0 - 3}]
+}
+test "backing moves trust in the Archive itself: loyalists up, skeptics down" {
+ let r = applyEvent({one("") | trust: [{id: "ana", value: 80}, {id: "ben", value: 20}]}, "e1", "captain_backs", ["ana", "ben"], oceans(), 0, 5).archivist;
+ trustOf(r, "ana") == 83 && trustOf(r, "ben") == 17
+}
+test "trust stays inside 0..100" {
+ let low = {one("") | trust: [{id: "ana", value: 2}, {id: "ben", value: 99}]};
+ let r1 = applyEvent(low, "e1", "crisis_failure", ["ana"], oceans(), 0, 5).archivist;
+ let r2 = applyEvent(low, "e2", "crisis_help", ["ben"], oceans(), 0, 5).archivist;
+ trustOf(r1, "ana") == 0 && trustOf(r2, "ben") == 100
+}
+test "events are logged and forgotten past keep" {
+ let a = applyEvent(applyEvent(one(""), "e1", "repair", [], oceans(), 1, 5).archivist, "e2", "repair", [], oceans(), 1, 40).archivist;
+ length(a.log) == 2 && length(forget(a, 10).log) == 1
+}
+test "bands describe the numbers" {
+ map(trustBand, [95, 75, 50, 20, 5]) == ["devoted", "trusting", "neutral", "skeptical", "hostile"]
+ && map(integrityBand, [90, 60, 30, 10]) == ["healthy", "degraded", "compromised", "critical"]
+}
+test "every kind has a bounded delta" { not any(\k. trustDelta(k, [], 50) < 0 - 20 || trustDelta(k, [], 50) > 10, eventKinds()) }
