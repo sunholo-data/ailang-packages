@@ -58,6 +58,12 @@
 
 ## Deviations from the plan
 
+- `captain_backs` with coupling off still moves **trust in the Archive**
+  (loyalists +3, skeptics −3), reading OQ3's "trust in archive only" as
+  "backing moves trust in the Archive, not in the captain". The plan's table
+  had listed it under the coupling only. To confirm with Mark.
+- No event moves `regard` yet; it is carried for later releases.
+
 - The switches sit in the scenario's `archive` block, not the response
   policy: they belong to the Archive, and a game sets them per scenario.
 - The Archive is a sidecar, not an engine actor. That keeps the engine

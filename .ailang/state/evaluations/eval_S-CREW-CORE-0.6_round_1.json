@@ -1,0 +1,26 @@
+{
+ "sprint_id": "S-CREW-CORE-0.6",
+ "round": 1,
+ "evaluator_model": "claude-sonnet-5-5",
+ "score": 86,
+ "pass": true,
+ "breakdown": {"correctness": 25, "compatibility": 20, "tests": 22, "lab": 8, "release_hygiene": 11},
+ "findings": [
+  {"severity": "medium", "summary": "captain_backs moves witnesses' trust in the Archive even with coupling off; the plan table says captain_backs is only 'the coupling below'.", "evidence": "archivist.ail trustDelta: captain_backs returns +3/-3 by trustNow and applyEvent applies it to a.trust unconditionally. A test pins it (archivist_test 'backing moves trust in the Archive itself', archive_session_test OQ3 'off.archive == 83'), and CHANGELOG states it, but it is not listed under the sprint's Deviations, and the plan's X3 gate does not mention it. It is a self-reinforcing loop (trust >=70 rises, <=30 falls). Mark should confirm it; if unwanted, gate it on coupling."},
+  {"severity": "low", "summary": "Witness validation tests are thin.", "evidence": "Code rejects duplicates, non-crew ids (the archive and captain are not in scenario.workers), more than 15 witnesses, and empty witnesses for non-repair kinds. Tests only cover unknown id 'nobody'. Duplicate witnesses, the captain or archive as witness, and the empty-witness case are untested."},
+  {"severity": "low", "summary": "amount handling is inconsistent between paths.", "evidence": "session.ail archiveEventCommand: without revision, amount outside 1..30 is refused (invalid_schema); with revision, amountOf() silently clamps it. Untested."},
+  {"severity": "low", "summary": "regard and regards are never changed by any event.", "evidence": "applyEvent updates only trust, trusts and integrity. They are initialised to 50 and exposed in the snapshot and readout, so they are dead state today. The plan says backing the Archive moves it. Fine if intentionally deferred; say so."},
+  {"severity": "low", "summary": "With keep=0 the Archive log and ar- evidence grow without bound.", "evidence": "archiveNow returns early when keep<=0; forget() is never called. This matches how the rest of the session behaves with keep=0, but the log is duplicated in the snapshot's 'witnessed' array."},
+  {"severity": "low", "summary": "examples/crew-lab/ailang.lock records crew_core 0.5.0 (path source) while the package is now 0.6.0.", "evidence": "The lock diff shows version 0.5.0 with a new content_hash. It was locked before the version bump, so re-run ailang lock."},
+  {"severity": "low", "summary": "Lab claims cover only the no-event year, but the plan's X4 gate also says 'trust moves by the table' and 'captain trust unmoved by backing'.", "evidence": "archive-year.claims.json has 8 claims, all on integrity and trust_min/max with no events. Those behaviours are covered only by the unit/session tests. The archive-year claims check passes 8/8 (seeds 1..3, ~11 s)."},
+  {"severity": "info", "summary": "The 'ar-' reserved prefix applies to all host command ids.", "evidence": "reservedId feeds checkedId, so a host that already uses ids starting 'ar-' for offers or asks would now be refused. This is unlikely, but it is a small compatibility change not flagged in the CHANGELOG as breaking."}
+ ],
+ "verification": {
+  "tests": "archivist_test 14/14 and archive_session_test 9/9 on interpreter, --bytecode and --strict-bytecode",
+  "quality": "ailang pkg quality --strict .: no gates, 220 tests passed, 0 contracts refuted",
+  "compat": "make -f examples/crew-lab/Makefile replay: 'Saved host recordings replay identically'; parity: 'Interpreter and strict-VM host traces identical'",
+  "mutations": "Four mutants were each caught by exactly one failing test in both test files: flipped answer_contradicted sign, decayed ignoring the switch, coupling applied when off, confusion_witnessed lowering integrity. The tree was restored with git checkout.",
+  "no_archive_snapshot": "The archive_session_test no-Archive check only asserts that 'archivist' is absent from the snapshot. Byte-identity is really proved by the recordings replay, which is acceptable."
+ },
+ "verdict": "PASS (86/100). Rulings are honoured: one 0..100 scale, bands for descriptions, events only from the game with no rolls, coupling and decay off by default, integrity moving only on repair/degraded, refusals as social errors, and byte-identical behaviour without an archive block. The main open question is the captain_backs effect on Archive trust with coupling off. The remaining issues are low-severity test and hygiene gaps (stale lock, thin witness-validation tests)."
+}

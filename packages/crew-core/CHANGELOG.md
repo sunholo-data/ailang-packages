@@ -34,7 +34,8 @@ stapledons-design archive-crew-trust.md). Mark's rulings, 2026-10-15:
   - Refusals are social errors (`unknown_id`, `invalid_schema`,
     `stale_revision`, `altered_duplicate`), which a host shows as
     `blocked:<code>:<detail>`.
-  - Ids starting `ar-` are reserved.
+  - Ids starting `ar-` are now reserved for every host command id. A host
+    that used such ids before would now be refused.
 - **Decay switch.** `decay` (0..20 a year, default 0) takes integrity at
   each year turn.
 - **Archiving** forgets Archive events and their `ar-` evidence older than
@@ -44,6 +45,12 @@ stapledons-design archive-crew-trust.md). Mark's rulings, 2026-10-15:
   - `trustBand`: devoted, trusting, neutral, skeptical, hostile;
   - `integrityBand`: healthy, degraded, compromised, critical.
 - The snapshot carries `archivist` only when the scenario has one.
+- `regard` (both ways) is carried and shown but no event moves it yet. It is
+  there for later releases (archive-npc's disputes).
+- `captain_backs` with coupling off moves only trust in the Archive:
+  loyalists (70 or more) rise by 3, skeptics (30 or less) fall by 3. That is
+  how "trust in the Archive only" (OQ3) is read; with coupling on, trust in
+  the captain also moves.
 
 ## 0.5.0
 

@@ -79,3 +79,21 @@ test "archiving forgets Archive events older than keep, so they stay bounded" {
   }
  }
 }
+test "witnesses must be unique crew: not the captain, not the Archive, at most 15, and some for trust events" {
+ match begin(withArchive(""), "watch-v3") {
+  Err(_) => false,
+  Ok(s) => code(input(s, ev("w1", "crisis_help", "\"medic\",\"medic\"")), "invalid_schema")
+   && code(input(s, ev("w2", "crisis_help", "\"captain\"")), "unknown_id")
+   && code(input(s, ev("w3", "crisis_help", "\"archive\"")), "unknown_id")
+   && code(input(s, ev("w4", "crisis_help", "")), "invalid_schema")
+   && code(input(s, ev("w5", "crisis_help", "\"medic\",\"medic\",\"medic\",\"medic\",\"medic\",\"medic\",\"medic\",\"medic\",\"medic\",\"medic\",\"medic\",\"medic\",\"medic\",\"medic\",\"medic\",\"medic\"")), "invalid_schema")
+ }
+}
+test "amount must be 1..30 with or without a revision; a current revision is accepted" {
+ match begin(withArchive(""), "watch-v3") {
+  Err(_) => false,
+  Ok(s) => code(input(s, "{\"command\":\"archive_event\",\"id\":\"a1\",\"kind\":\"repair\",\"witnesses\":[],\"amount\":31}"), "invalid_schema")
+   && code(input(s, "{\"command\":\"archive_event\",\"id\":\"a2\",\"kind\":\"repair\",\"witnesses\":[],\"amount\":0,\"revision\":${show(s.state.revision)}}"), "invalid_schema")
+   && (match input(s, "{\"command\":\"archive_event\",\"id\":\"a3\",\"kind\":\"degraded\",\"witnesses\":[],\"amount\":5,\"revision\":${show(s.state.revision)}}") { Ok(o) => match archiveOf(o.session) { Some(r) => r.integrity == 65, None => false }, Err(_) => false })
+ }
+}

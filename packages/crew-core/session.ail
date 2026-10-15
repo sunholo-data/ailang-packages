@@ -858,11 +858,10 @@ pure func archiveEventCommand(s: Session, j: Json) -> Result[Output, HostError] 
      Some(w) => Err(DomainFailure(UnknownId(w))),
      None => if length(ws) > 15 || length(filter(\w. length(filter(\x. x == w, ws)) != 1, ws)) > 0 then Err(DomainFailure(InvalidSchema("archive_event witnesses must be unique crew ids")))
       else if (kind != "repair" && kind != "degraded") && length(ws) == 0 then Err(DomainFailure(InvalidSchema("archive_event needs witnesses")))
-      else match (get(j, "revision"), getInt(j, "revision"), get(j, "amount"), getInt(j, "amount")) {
-       (Some(_), Some(r), _, _) => if r != s.state.revision then Err(DomainFailure(StaleRevision("archive_event"))) else archiveApplied(s, a, id, kind, ws, amountOf(j)),
-       (Some(_), None, _, _) => Err(DomainFailure(InvalidSchema("archive_event revision"))),
-       (_, _, Some(_), None) => Err(DomainFailure(InvalidSchema("archive_event amount"))),
-       _ => match getInt(j, "amount") { Some(n) => if n < 1 || n > 30 then Err(DomainFailure(InvalidSchema("archive_event amount 1..30"))) else archiveApplied(s, a, id, kind, ws, n), None => archiveApplied(s, a, id, kind, ws, 10) }
+      else match (get(j, "amount"), getInt(j, "amount"), get(j, "revision"), getInt(j, "revision")) {
+       (Some(_), None, _, _) => Err(DomainFailure(InvalidSchema("archive_event amount"))),
+       (_, Some(n), _, _) => if n < 1 || n > 30 then Err(DomainFailure(InvalidSchema("archive_event amount 1..30"))) else archiveAt(s, a, id, kind, ws, n, get(j, "revision"), getInt(j, "revision")),
+       _ => archiveAt(s, a, id, kind, ws, 10, get(j, "revision"), getInt(j, "revision"))
       }
     },
    _ => Err(DomainFailure(InvalidSchema("archive_event types")))
@@ -873,7 +872,12 @@ pure func archiveEventCommand(s: Session, j: Json) -> Result[Output, HostError] 
 export pure func archiveOf(s: Session) -> Option[Readout] ! {}
 ensures { match result { Some(r) => r.integrity >= 0 && r.integrity <= 100, None => true } } = match s.archivist { Some(a) => Some(readout(a)), None => None }
 
-pure func amountOf(j: Json) -> int = match getInt(j, "amount") { Some(n) => if n < 1 then 1 else if n > 30 then 30 else n, None => 10 }
+-- An optional revision must be the session's current one.
+pure func archiveAt(s: Session, a: Archivist, id: string, kind: string, ws: [string], amount: int, given: Option[Json], revision: Option[int]) -> Result[Output, HostError] = match (given, revision) {
+ (None, _) => archiveApplied(s, a, id, kind, ws, amount),
+ (Some(_), None) => Err(DomainFailure(InvalidSchema("archive_event revision"))),
+ (Some(_), Some(r)) => if r != s.state.revision then Err(DomainFailure(StaleRevision("archive_event"))) else archiveApplied(s, a, id, kind, ws, amount)
+}
 
 pure func oceanOfWorker(s: Session, w: string) -> [Value] = match head(filter(\x. x.id == w, s.state.actors)) { Some(x) => x.attributes, None => [] }
 pure func captainTrust(s: Session, w: string) -> int = match head(filter(\r. r.from == w && r.to == s.scenario.captain && r.dimension == "trust", s.state.relationships)) { Some(r) => r.value, None => 50 }
