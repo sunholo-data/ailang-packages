@@ -76,7 +76,7 @@ Three are new findings:
 
 Mark asked for the misses to be fixed, for lost capacity to hit running work as
 a source of conflict ("crew argue it out"), and for trust to depend on
-personality. Design: `design_docs/planned/crew-strain.md`. Runs below use the
+personality. Design: `design_docs/implemented/crew-core/crew-strain.md`. Runs below use the
 pack's `policy.json` (strain on); claims are over 20 seeds.
 
 **What was actually wrong** (this corrects finding 2 above):

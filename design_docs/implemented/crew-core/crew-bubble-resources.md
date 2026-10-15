@@ -1,6 +1,6 @@
 # Crew resources that behave like the bubble's
 
-**Status:** Proposed (2026-10-13), awaiting Mark's approval.
+**Status:** Implemented 2026-10-13 (S-CREW-BUBBLE-RESOURCES, ailang-packages #134; approved by Mark as D-69).
 **Packages:** `sunholo/crew_core` (generic, unpublished) and `sunholo/crew_lab`
 (Stapledon pack, local only). `sunholo/social_dynamics` is not changed.
 **Game design:** stapledons-design `features/next/bubble-resources.md` (#20),

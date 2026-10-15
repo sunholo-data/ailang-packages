@@ -9,7 +9,7 @@
 | Grounded Strangeness | 0 | No content change. |
 | We Are Not Built For This | +1 | Strain thresholds become checkable statements instead of impressions. |
 
-**Status:** Planned 2026-10-12; Mark: "yes continue" to the proposed verification-loop sprint,
+**Status:** Implemented 2026-10-13 (S-CREW-VERIFY-LOOP, ailang-packages #132, crew-lab 0.7.0).
 with game integration to follow once the loop is good.
 **Target:** `sunholo/crew_core` 0.1.0 (still unpublished; amended before its first publish) and
 crew-lab 0.7.0 (local only). Stacked on PR #131 (crew-lab 0.6.0).

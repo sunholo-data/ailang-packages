@@ -11,7 +11,7 @@
 
 Scores are provisional; rescore with `game-vision-designer` before sprint planning.
 
-**Status:** Planned 2026-10-12; D1 and D2 answered by Mark the same day.
+**Status:** Implemented 2026-10-12 (S-CREW-CORE-SPLIT, ailang-packages #129, #130); crew_core first published as 0.3.0.
 **Target:** `sunholo/crew_core` 0.1.0 (new, published) and crew-lab 0.5.0 (stays local,
 never published). **Priority:** P1.
 **Direction (Mark, 2026-10-12):** a good way to make narrative and social games, with
