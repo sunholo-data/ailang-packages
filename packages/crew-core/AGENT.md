@@ -105,3 +105,42 @@ Limits: the captain's id must be `captain`; at most 16 pending requests; the ban
 keeps 64 answers and drops answers to expired requests when full (a retry of a
 dropped answer reports `unknown request`); finished tasks are not archived (256 task
 limit, runs slow as they grow); conversation prompts are keyed by role in code.
+
+## Stand down (0.6.0)
+
+At a check-in, a crew member under strain may ask to stand down, working or
+not. In host terms this is a **duty check-in**, a check-in without a task:
+
+- `{"command":"check_in","actor":W,"id":ID}`: the captain offers W's own rest
+  recipe as task `sd-ID` under a duty agreement `duty-ID` due at the next
+  tick, and asks W in the same call. The pending request has id `ID`, phase
+  `duty`, legal `carry_on`, `stand_down`, `defer`, and expires at the next
+  tick. Refused below the cooperation floor (trust under 20), for an unknown
+  crew member, or while W already has an open duty check-in.
+- Answer it as any request (`answer`). `carry_on` and `defer` change nothing;
+  the subject lapses and archiving folds it. `stand_down` is W's concern
+  `standdown-ID` to the captain. It opens no conversation issue.
+- `{"command":"resolve_stand_down","id":ID,"release":true|false}`, the same
+  tick: a grant has W accept the duty agreement, halts W's running work
+  (reason `stood_down`, reservations released), starts the rest and reports
+  `granted_stand_down` (+4 trust); a denial reports `denied_stand_down`
+  (−(2 + N/25) trust, no stress).
+- `session.checkIn` and `session.resolveStandDown` are the same calls as
+  functions.
+
+The response policy weighs phase `duty` with its `duty` rules. A policy with
+none borrows its working weights: `carry_on` from `continue`, `stand_down`
+from `request_relief` (and the strain shift applies to both).
+
+The auto-captain (`advanceAuto`, step 2b) makes duty check-ins at a cadence of
+2 or more when standing orders say `"stand_down":"on"` (the default; `"off"`
+runs as 0.5.1). A crew member is checked in when strained (stress or fatigue
+at the orders' tired line, or overextended), not resting, not asked about
+relief this turn, without an open concern, at or over the cooperation floor,
+and off cooldown: 30 days after a grant; 90, 180, then 360 after denials in
+a row (kept in `AutoState.raised` as `stand_down/<worker>:<tick>:<denials>`).
+The `relief` order decides. Acts: `reply` (label `stand_down`, `carry_on` or
+`defer`), `stand_down_asked` and `stand_down_decision` (`granted` or
+`denied`), detail `sd-<id>`. The opt-in escalation rule `stand_down` stops
+before the decision and leaves it to the player (`resolve_stand_down` with
+the escalation's detail as the id).

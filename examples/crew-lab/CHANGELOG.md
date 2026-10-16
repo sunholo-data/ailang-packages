@@ -4,6 +4,17 @@
 
 Local only; never published.
 
+- **Stand down at the check-in (crew_core 0.6.0, 2026-10-16).**
+  - `crew-sim --skip ... --stand-down on|off` (default on). With stand-downs
+    on, the `crew_skip/1` line counts `relief.*`, `stand_downs.*` and the live
+    `evidence`; with `off` it is 0.5.1's line byte for byte.
+  - Claims can measure `stand_downs.asked/granted/denied`, `evidence` and
+    `escalations.stand_down`. New `auto/stand-down-decade.claims.json`: 8 of 8.
+  - The tally counts the new Acts per crew member.
+  - `hands_on.json` gains `{"kind":"stand_down"}` (OQ3).
+  - New recording `recordings/stand-down.ndjson` (check_in, answer, a grant on
+    running work, a denial, carry_on, advance), under parity and replay.
+  - `review/*.claims.txt` regenerate byte for byte. See `REVIEW.md`.
 - **Check-ins from the work's start (crew_core 0.5.1, 2026-10-16).**
   - The random captain's check-in follows the package's new rule (every other
     day of the work, from the day after it starts), so the three captains

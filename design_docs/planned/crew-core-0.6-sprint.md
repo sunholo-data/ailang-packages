@@ -13,7 +13,7 @@ due after 20.
 **Status:** approved by Mark, attended 2026-10-16 ("yep agree with planners
 recommendations proceed"): OQ1 cadence ≥ 2 only; OQ2 trust only; OQ3 yes,
 opt-in `stand_down` escalation rule in `hands_on.json` only; OQ4 cooldowns as
-written. Executing.
+written. S1–S5 executed 2026-10-16; awaiting the independent evaluation.
 
 **AILANG prompt version loaded:** v0.16.7 (runtime v0.54.11, the game's
 pinned `stapledons-godot-attended/runtime/bin/ailang`).
@@ -76,3 +76,20 @@ pack, which the game then syncs.
 - Longer project agreements and weeks-long jobs (Mark's rejected options (b)
   and (c)).
 - Skip-speed work held on ailang#1827.
+
+## Progress (executor, 2026-10-16)
+
+- [x] S1 host duty subject (`stand_down_test.ail`, 11 tests; 9 fail on 0.5.1)
+- [x] S2 policy phase `duty` (3 inline tests)
+- [x] S3 auto-captain step 2b, cooldown, `stand_down` orders and rule (10 `auto_test` cases)
+- [x] S4 lab measurement: AC3 8/8 (consent 28, 29 asked, all granted; orders 17, 14, all denied; 0 errors), AC4 3/3 at cadence 1 and 30, AC5 byte-identical, AC6 cmp (VM twice; interpreter == VM), AC8 `off` == 0.5.1, AC9 0 errors, AC10 1.16× / 1.08×
+- [x] S5 recording, docs, version 0.6.0 `feature`; AC7, AC11, AC12
+- [ ] S6 evaluation (another agent), merge, publish: not the executor's
+- [x] S7 migration notes file only: `crew-core-0.6-game-migration.md` (merge sha pending)
+
+Deviations: the skip line prints the live evidence count at the end of the
+run (`evidence`), not a peak (a peak needs `AutoResult` to carry it); the
+new skip-line fields appear only with stand-downs on, so `off` is 0.5.1's
+line byte for byte; crew_sim/1 rows (daily, counting mode) gain no per-crew
+stand-down fields, since stand-downs never happen at cadence 1 (the tally
+counts them internally).

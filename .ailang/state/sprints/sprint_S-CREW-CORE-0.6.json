@@ -1,6 +1,6 @@
 {
   "sprint_id": "S-CREW-CORE-0.6",
-  "status": "approved",
+  "status": "completed_pending_evaluation",
   "plan": "design_docs/planned/crew-core-0.6-sprint.md",
   "design": "design_docs/planned/crew-core-0.6-stand-down.md",
   "base_branch": "main (100d8fd, #149 merged)",
@@ -35,10 +35,10 @@
         "session_test/codec_test cases for both verbs both ways fail on 0.5.1 and pass on 0.6",
         "make -f examples/crew-lab/Makefile core-tests (strict VM) and ailang test --package . on the interpreter pass"
       ],
-      "passes": null,
-      "started": null,
-      "completed": null,
-      "notes": null
+      "passes": true,
+      "started": "2026-10-16",
+      "completed": "2026-10-16",
+      "notes": "codec GrantedStandDown/DeniedStandDown; session checkIn/resolveStandDown + check_in/resolve_stand_down wire; stand_down answer -> worker concern standdown-<rid>, no conversation issue; host refuses check_in below cooperation floor (host_policy.cooperative exported). stand_down_test.ail 11 tests (9 fail on 0.5.1) + codec test. Both engines pass."
     },
     {
       "id": "S2",
@@ -48,10 +48,10 @@
       "acceptance_criteria": [
         "policy inline tests: fallback equals working weights; explicit duty rules win; existing policies decode unchanged"
       ],
-      "passes": null,
-      "started": null,
-      "completed": null,
-      "notes": null
+      "passes": true,
+      "started": "2026-10-16",
+      "completed": "2026-10-16",
+      "notes": "policy phase duty; ruleSource fallback carry_on<-continue, stand_down<-request_relief (working) when no duty rules; strain shift covers duty labels; 3 inline tests."
     },
     {
       "id": "S3",
@@ -65,10 +65,10 @@
         "auto_test: deny backoff check-in ticks [1, 91, 271, 631] at cadence 30; none at cadence 1; none when resting, unstrained or below the trust floor",
         "stand_down off gives an AutoResult identical to 0.5.1 on a fixture"
       ],
-      "passes": null,
-      "started": null,
-      "completed": null,
-      "notes": null
+      "passes": true,
+      "started": "2026-10-16",
+      "completed": "2026-10-16",
+      "notes": "Orders.standDown (stand_down on|off), step 2b gate, cooldown in AutoState.raised (stand_down/<w>:<tick>:<k>), grants decides, stale/busy ignore duty offers, opt-in escalation rule stand_down (OQ3), Acts stand_down_asked/decision. auto_test +10 tests incl. deny backoff [1,91,271,631]; odd-turn relief test moved to standDown off."
     },
     {
       "id": "S4",
@@ -81,10 +81,10 @@
         "AC3: 10-year monthly last-messages-home asks to stand down >0 and <=120 (consent) / <=60 (orders) per seed, seeds 1..2, 0 errors",
         "AC4 v3-skip 3/3 at cadence 1 and 30; AC5 daily results byte-identical; AC6 cmp; AC8 off == 0.5.1; AC10 <=1.25x wall time"
       ],
-      "passes": null,
-      "started": null,
-      "completed": null,
-      "notes": null
+      "passes": true,
+      "started": "2026-10-16",
+      "completed": "2026-10-16",
+      "notes": "crew_skip/1 relief{}, stand_downs{}, evidence (only when on); --stand-down; claims metrics; auto/stand-down-decade.claims.json 8/8. AC3 consent 28/29 granted, orders 17/14 denied, 0 errors. AC4 3/3 at cadence 1 and 30 (seeds 1..5). AC5 review/*.claims.txt byte-identical. AC6 VM rerun cmp equal; interpreter == VM. AC8 off == 0.5.1 byte for byte. AC10 24.13s/20.76s (1.16x) consent, 24.63s/22.90s (1.08x) orders. Deviation: skip line prints end-of-run live evidence, not peak."
     },
     {
       "id": "S5",
@@ -96,10 +96,10 @@
       "acceptance_criteria": [
         "make -f examples/crew-lab/Makefile parity replay quality validate pass"
       ],
-      "passes": null,
-      "started": null,
-      "completed": null,
-      "notes": null
+      "passes": true,
+      "started": "2026-10-16",
+      "completed": "2026-10-16",
+      "notes": "recordings/stand-down.ndjson; existing 5 recordings' traces byte-identical to 0.5.1; AGENT.md Stand down section; CHANGELOG 0.6.0; lab CHANGELOG; REVIEW.md; hands_on.json stand_down rule; ailang.toml 0.6.0 kind feature."
     },
     {
       "id": "S6",
@@ -114,9 +114,9 @@
         "published"
       ],
       "passes": null,
-      "started": null,
+      "started": "2026-10-16",
       "completed": null,
-      "notes": null
+      "notes": "Executor part only: PR #150 updated. Evaluation, merge and publish are NOT done by the executor (a different agent evaluates; Mark merges/publishes)."
     },
     {
       "id": "S7",
@@ -129,9 +129,9 @@
         "message sent with the merge sha"
       ],
       "passes": null,
-      "started": null,
+      "started": "2026-10-16",
       "completed": null,
-      "notes": null
+      "notes": "Migration notes file design_docs/planned/crew-core-0.6-game-migration.md written; merge sha pending; no message sent, game repo untouched (per instruction)."
     }
   ],
   "velocity": {
@@ -143,5 +143,11 @@
     "date": "2026-10-16",
     "channel": "attended session",
     "quote": "yep agree with planners recommendations proceed"
+  },
+  "executor": {
+    "agent": "Claude Opus 5.5 (sprint-executor)",
+    "date": "2026-10-16",
+    "ailang": "v0.54.11",
+    "prompt_version": "v0.16.7"
   }
 }

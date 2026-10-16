@@ -374,6 +374,24 @@ the pinned runtime, `~/dev/sunholo-data/stapledons-godot-attended/runtime/bin/ai
 | AC11 | Package hygiene: `pkg quality --strict` shows no gates, the CHANGELOG has a 0.6.0 entry, `ailang.toml` has version 0.6.0 and release kind `feature`, and AGENT.md has a "Stand down" section. | `$LAB quality` (crew-core `pkg quality --strict .`), plus `grep -n '^## 0.6.0' packages/crew-core/CHANGELOG.md` |
 | AC12 | The whole lab validates. | `$LAB validate` |
 
+## Implementation notes (executor, 2026-10-16)
+
+- The duty request's id is the check-in id: `check_in` with id `X` makes
+  task `sd-X`, agreement `duty-X`, request `X`, concern `standdown-X` and
+  report `report-standdown-X`.
+- AC9: the `crew_skip/1` line prints `evidence`, the live evidence count at
+  the end of the run, not a peak; a peak would need `AutoResult` to carry
+  it. The `errors == 0` claims cover `capacity_exceeded`.
+- AC8: the skip line's new fields (`relief`, `stand_downs`, `evidence`)
+  appear only with stand-downs on, so `--stand-down off` is 0.5.1's line
+  byte for byte.
+- §8: `crew_sim/1` rows (counting mode, always daily) gain no per-crew
+  stand-down fields, since no stand-down happens at cadence 1; the tally
+  counts the Acts so they are never mistaken for errors.
+- AC2's backoff test runs `start: agreed` under `relief: deny`: with
+  overridden refusals, two years of orders take the worker below the
+  cooperation floor before day 631, and then (rightly) no check-in is made.
+
 ## Risks
 
 - **#149 is not merged.** If review changes 0.5.1, rebase this branch onto it.
