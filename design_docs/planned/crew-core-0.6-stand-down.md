@@ -392,6 +392,14 @@ the pinned runtime, `~/dev/sunholo-data/stapledons-godot-attended/runtime/bin/ai
   overridden refusals, two years of orders take the worker below the
   cooperation floor before day 631, and then (rightly) no check-in is made.
 
+- Evaluation fix (round 1, D1): a stand-down handed to the player sets the
+  same cooldowns. The stop leaves `stand_down_pending/<worker>:<tick>:<id>`
+  in `AutoState.raised`; on resume it is settled from the host's
+  `report-standdown-<id>` before any duty check-in (a lapsed, undecided one
+  counts as a denial). The grant cooldown now counts 30 days from the end
+  of the granted rest (grant tick plus the rest's duration), in both paths.
+  AC3 consent moved 28 → 27 on seed 1.
+
 ## Risks
 
 - **#149 is not merged.** If review changes 0.5.1, rebase this branch onto it.

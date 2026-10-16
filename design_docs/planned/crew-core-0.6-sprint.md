@@ -82,7 +82,7 @@ pack, which the game then syncs.
 - [x] S1 host duty subject (`stand_down_test.ail`, 11 tests; 9 fail on 0.5.1)
 - [x] S2 policy phase `duty` (3 inline tests)
 - [x] S3 auto-captain step 2b, cooldown, `stand_down` orders and rule (10 `auto_test` cases)
-- [x] S4 lab measurement: AC3 8/8 (consent 28, 29 asked, all granted; orders 17, 14, all denied; 0 errors), AC4 3/3 at cadence 1 and 30, AC5 byte-identical, AC6 cmp (VM twice; interpreter == VM), AC8 `off` == 0.5.1, AC9 0 errors, AC10 1.16× / 1.08×
+- [x] S4 lab measurement: AC3 8/8 (consent 27, 29 asked, all granted; orders 17, 14, all denied; 0 errors), AC4 3/3 at cadence 1 and 30, AC5 byte-identical, AC6 cmp (VM twice; interpreter == VM), AC8 `off` == 0.5.1, AC9 0 errors, AC10 1.16× / 1.08×
 - [x] S5 recording, docs, version 0.6.0 `feature`; AC7, AC11, AC12
 - [ ] S6 evaluation (another agent), merge, publish: not the executor's
 - [x] S7 migration notes file only: `crew-core-0.6-game-migration.md` (merge sha pending)

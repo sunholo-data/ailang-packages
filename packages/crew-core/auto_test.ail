@@ -250,9 +250,12 @@ test "denials back off: check-ins on ticks 1, 91, 271 and 631" {
  }
 }
 
-test "after a grant the worker waits 30 days, and a cadence of 1 makes no duty check-ins" {
+-- The rest lasts 1 day: granted at tick 0 it ends at tick 1, so no ask comes
+-- before tick 31; with this seed the next is on tick 50 (0.6.0 counted the
+-- 30 days from the grant and asked on tick 30).
+test "after a grant the worker waits 30 days after the rest ends, and a cadence of 1 makes no duty check-ins" {
  match (duty(watchShip(64, 90, 95, 80), "consent", 0, [], {consentOrders() | cadence: 10}, [], 70), duty(watchShip(64, 90, 95, 80), "orders", 0, [], ordersOrders(), [], 40)) {
-  (Ok(g), Ok(daily)) => clean(g) && map(\x. x.tick, kinds(g, "stand_down_asked")) == [0, 30, 60] && not any(\x. x.label != "granted", kinds(g, "stand_down_decision"))
+  (Ok(g), Ok(daily)) => clean(g) && map(\x. x.tick, kinds(g, "stand_down_asked")) == [0, 50] && not any(\x. x.label != "granted", kinds(g, "stand_down_decision"))
    && dutyTicks(daily) == [] && length(kinds(daily, "stand_down_asked")) == 0,
   _ => false
  }
@@ -291,4 +294,38 @@ test "stand_down orders and the stand_down rule decode" {
  && (match decodeOrders("{\"schema\":\"crew_standing_orders/1\",\"start\":\"agreed\",\"rest\":\"tired\",\"relief\":\"grant\",\"stand_down\":\"maybe\"}") { Err(_) => true, Ok(_) => false })
  && consentOrders().standDown == "on" && ordersOrders().standDown == "on"
  && (match decodeEscalation("{\"schema\":\"crew_escalation/1\",\"rules\":[{\"kind\":\"stand_down\"}]}") { Ok(rs) => length(rs) == 1, Err(_) => false })
+}
+
+-- A stand-down handed to the player (the stand_down rule) gets the same
+-- cooldowns once the player decides (0.6.0 evaluation fix): the auto-captain
+-- reads the player's decision from the host's report when it resumes.
+pure func sdRule() -> [Rule] = [{kind: "stand_down", indicator: "", threshold: 0, kinds: []}]
+
+-- Resume after each stand_down stop, deciding it with `release`; returns the
+-- ticks of the stops.
+pure func playerDecides(a: AutoResult, p: Policy, o: Orders, release: bool, stops: [int], left: int) -> Result[[int], HostError] = match a.escalated {
+ None => Ok(stops),
+ Some(e) => if e.rule != "stand_down" || left <= 0 then Ok(stops ++ [e.tick]) else match input(a.session, "{\"command\":\"resolve_stand_down\",\"id\":\"${e.detail}\",\"release\":${if release then "true" else "false"}}") {
+  Err(x) => Err(x),
+  Ok(r) => match advanceAuto(r.session, a.state, p, o, sdRule(), 400 - a.session.state.tick) {
+   Err(x) => Err(x),
+   Ok(b) => playerDecides(b, p, o, release, stops ++ [e.tick], left - 1)
+  }
+ }
+}
+
+pure func playerRun(o: Orders, release: bool, stops: int) -> Result[[int], HostError] = match (duty(watchShip(64, 90, 95, 80), "orders", 0, [], o, sdRule(), 400), standingDown()) {
+ (Ok(a), Ok(p)) => playerDecides(a, p, o, release, [], stops),
+ (Err(e), _) => Err(e),
+ (_, Err(e)) => Err(HostFailure(e))
+}
+
+test "a player's denial starts the denial backoff: 90, then 180 days" {
+ match playerRun({ordersOrders() | cadence: 30, start: "agreed"}, false, 2) { Ok(ticks) => ticks == [0, 90, 270], Err(_) => false }
+}
+
+-- The longWatch rest lasts 1 day: granted at tick 0, it ends at tick 1, so
+-- the next ask may come at tick 31 at the earliest: tick 60 at cadence 30.
+test "after a player's grant the worker is not asked again until 30 days after the rest ends" {
+ match playerRun({consentOrders() | cadence: 30}, true, 1) { Ok(ticks) => ticks == [0, 60], Err(_) => false }
 }

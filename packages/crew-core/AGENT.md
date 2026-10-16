@@ -137,10 +137,14 @@ The auto-captain (`advanceAuto`, step 2b) makes duty check-ins at a cadence of
 runs as 0.5.1). A crew member is checked in when strained (stress or fatigue
 at the orders' tired line, or overextended), not resting, not asked about
 relief this turn, without an open concern, at or over the cooperation floor,
-and off cooldown: 30 days after a grant; 90, 180, then 360 after denials in
-a row (kept in `AutoState.raised` as `stand_down/<worker>:<tick>:<denials>`).
+and off cooldown: 30 days after a granted rest ends; 90, 180, then 360 after
+denials in a row (kept in `AutoState.raised` as
+`stand_down/<worker>:<tick>:<denials>`).
 The `relief` order decides. Acts: `reply` (label `stand_down`, `carry_on` or
 `defer`), `stand_down_asked` and `stand_down_decision` (`granted` or
 `denied`), detail `sd-<id>`. The opt-in escalation rule `stand_down` stops
 before the decision and leaves it to the player (`resolve_stand_down` with
-the escalation's detail as the id).
+the escalation's detail as the id). Resume with the returned `AutoState`:
+it carries a pending mark, settled from the host's `report-standdown-<id>`,
+so the player's grant or denial sets the same cooldown (an undecided one
+that lapsed counts as a denial).

@@ -33,15 +33,18 @@ fall due after 20. Design: `design_docs/planned/crew-core-0.6-stand-down.md`
   overextended), not resting, not asked about relief this turn, without an
   open concern, at or over the cooperation floor and off cooldown gets a
   duty check-in; the `relief` order decides. Cooldown (OQ4), in
-  `AutoState.raised`: 30 days after a grant, 90, 180, then 360 after
-  denials in a row. A duty offer never occupies the worker (`stale`), so
+  `AutoState.raised`: 30 days after a granted rest ends, 90, 180, then 360
+  after denials in a row. A stand-down handed to the player gets the same
+  cooldowns: on resume the auto-captain reads the player's decision from the
+  host's report `report-standdown-<id>` (one left to lapse counts as a
+  denial). A duty offer never occupies the worker (`stale`), so
   the orders still assign after a denial. Acts `stand_down_asked` and
   `stand_down_decision`. New opt-in escalation rule `stand_down` (OQ3)
   hands the request to the player. `AutoState`, `Act`, `Escalated` and the
   escalation schema keep their shape.
 - **Measured** (crew lab, last-messages-home, `--skip 3650 --cadence 30
   --archive 30 --concerns ask_advice`, seeds 1–2, AILANG v0.54.11):
-  - consent: 28 and 29 stand-downs asked, all granted; orders: 17 and 14,
+  - consent: 27 and 29 stand-downs asked, all granted; orders: 17 and 14,
     all denied; 0 relief requests (as 0.5.1), 0 errors, live evidence at
     the end 23–28;
   - `stand_down: off` reproduces 0.5.1's skip lines byte for byte;
@@ -50,7 +53,8 @@ fall due after 20. Design: `design_docs/planned/crew-core-0.6-stand-down.md`
   - daily-cadence lab results unchanged (OQ1).
 - **Tests:** `stand_down_test.ail` (11; 9 fail on 0.5.1), 3 policy inline
   tests, 1 codec test, 10 `auto_test` cases (including the denial backoff
-  on ticks 1, 91, 271 and 631). The 0.5.1 odd-turn relief test now runs
+  on ticks 1, 91, 271 and 631, and the cooldowns after a player's grant or
+  denial under the `stand_down` rule). The 0.5.1 odd-turn relief test now runs
   with `stand_down: off`, since its strained idle worker would otherwise
   stand down at tick 0.
 
@@ -66,7 +70,9 @@ fall due after 20. Design: `design_docs/planned/crew-core-0.6-stand-down.md`
    daily-cadence fixtures are unchanged.
 6. AI replies: a duty request lists the new labels.
 7. `hands_on.json` gains `{"kind":"stand_down"}`; `critical_only` decides by
-   the standing order.
+   the standing order. After a `stand_down` stop, answer with
+   `resolve_stand_down` and resume with the returned `AutoState`: the
+   cooldown follows the player's decision (a lapsed one counts as denied).
 
 ## 0.5.1
 

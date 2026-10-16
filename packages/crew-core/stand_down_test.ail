@@ -41,6 +41,10 @@ pure func ok[a](r: Result[a, HostError]) -> bool = match r { Ok(_) => true, Err(
 pure func rejected[a](r: Result[a, HostError]) -> bool = not ok(r)
 
 pure func trust(s: State, actor: string) -> int = match head(filter(\r. r.from == actor && r.to == "captain" && r.dimension == "trust", s.relationships)) { Some(r) => r.value, None => 0 - 999 }
+pure func ind(s: State, actor: string, id: string) -> int = match head(filter(\a. a.id == actor, s.actors)) {
+ Some(a) => match head(filter(\v. v.id == id, a.indicators)) { Some(v) => v.value, None => 0 - 999 },
+ None => 0 - 999
+}
 pure func statusOf(s: State, task: string) -> string = match head(filter(\t. t.id == task, s.tasks)) {
  Some(t) => if t.status == Offered then "offered" else if t.status == Working then "working" else if t.status == Stopped then "stopped" else "other",
  None => "none"
@@ -121,6 +125,7 @@ test "a denied stand-down reports a trust cost by neuroticism and leaves the wor
    Ok(d) => statusOf(d.state, "sd-d1") == "offered"
     && any(\r. r.id == "report-standdown-d1" && r.code == DeniedStandDown, d.reports)
     && trust(d.state, "scientist") == trust(s.state, "scientist") - 4
+    && ind(d.state, "scientist", "stress") == ind(s.state, "scientist", "stress") && ind(d.state, "scientist", "fatigue") == ind(s.state, "scientist", "fatigue")
     && ok(offer(d, "scientist", "work_scientist", "science"))
     && (match line(d, "{\"command\":\"advance\",\"tick\":1,\"budget\":64}") { Ok(a) => rejected(resolveSD(a, "d1", true)), Err(_) => false })
   }

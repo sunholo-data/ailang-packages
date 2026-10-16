@@ -42,12 +42,17 @@ changes, in order.
    `stand_down` (actor the crew member, task `sd-<id>`, detail `<id>`) before
    deciding. The hold card shows it like a relief hold, and the player's
    answer is `{"command":"resolve_stand_down","id":<detail>,"release":true|false}`
-   in the same tick. `critical_only` (`escalation.json`) has no such rule and
-   decides by the standing order.
+   in the same tick. Then resume `advanceAuto` with the `AutoState` the stop
+   returned: it holds a pending mark that is settled from the host's
+   `report-standdown-<id>`, so the player's decision sets the cooldown (grant:
+   30 days after the rest ends; denial: 90, 180, then 360). A stand-down left
+   undecided until it lapses counts as a denial. Do not drop or rebuild that
+   `AutoState` between the stop and the resume. `critical_only`
+   (`escalation.json`) has no such rule and decides by the standing order.
 9. **Unchanged:** `AutoState`, `Act`, `Escalated`, the escalation schema, the
    appraisal policy id `received-outcome-v1`, and every existing command,
    record and outcome code.
 
 **What to expect** (crew lab, last-messages-home, a 10-year monthly skip,
-seeds 1–2): 28 and 29 stand-downs under consent, all granted; 17 and 14 under
+seeds 1–2): 27 and 29 stand-downs under consent, all granted; 17 and 14 under
 orders, all denied; 0 errors.

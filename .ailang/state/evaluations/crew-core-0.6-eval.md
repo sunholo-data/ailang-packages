@@ -122,3 +122,24 @@ resume, assert no `stand_down` ask for at least 90 ticks.
 EVALUATION_RESULT: pass
 EVALUATION_SCORE: 93/100
 EVALUATION_ROUND: 1
+
+## Follow-up (executor, 2026-10-16): D1 and N4 fixed
+
+- **D1 fixed** (`auto.ail` `standDown`, `settlePending`). When the `stand_down` rule stops the run, the stop now leaves `stand_down_pending/<worker>:<tick>:<id>` in `AutoState.raised`. On resume, before any duty check-in, that mark is settled from the host's own record, `report-standdown-<id>`:
+  - `granted_stand_down` gives the 30-day cooldown;
+  - `denied_stand_down` gives the next step of the 90/180/360 backoff;
+  - if no report exists and the subject has lapsed, the stand-down counts as a denial.
+- **Why this option:**
+  - The cooldown follows the decision the player actually made, read from the host record, not from a provisional guess.
+  - Both inputs are caller-carried state (`AutoState` and `Session`), so a replay settles it identically.
+  - A plain scan of reports would not be enough. Archiving folds a lapsed denial's report about 31 ticks later, which would lose the 90-day wait. The pending mark names the one report to read, at the first decision after resume.
+- **Grant cooldown now counts from the end of the rest** (the grant tick plus the rest's duration) on both paths, as the evaluation asked for player grants.
+  - The existing grant test moved from asks on ticks [0, 30, 60] to [0, 50] (cadence 10, a 1-day rest).
+  - AC3 consent moved from 28/29 to 27/29; orders is unchanged at 17/14.
+- **Tests:**
+  - `auto_test`: "a player's denial starts the denial backoff" (stops on ticks [0, 90, 270]);
+  - `auto_test`: "after a player's grant the worker is not asked again until 30 days after the rest ends" (stops on ticks [0, 60]);
+  - both failed on 59fc9df;
+  - N4: the denial test in `stand_down_test` now asserts that stress and fatigue are unchanged.
+- **Docs:** the comment above the cooldown functions, AGENT.md, the CHANGELOG (game migration item 7), and item 8 of the migration notes.
+- **Gates:** see the commit message.

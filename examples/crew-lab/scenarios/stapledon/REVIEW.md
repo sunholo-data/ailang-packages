@@ -375,7 +375,7 @@ Mark's ruling (2026-10-16, option a): at each auto-run check-in a crew member
 under strain may ask to stand down, working or not. crew_core 0.6.0 makes
 this a duty check-in (a rest offer under a duty agreement that lapses at the
 next tick; see the package CHANGELOG). The auto-captain makes them at a
-cadence of 2 or more only (OQ1), with a cooldown of 30 days after a grant and
+cadence of 2 or more only (OQ1), with a cooldown of 30 days after a granted rest and
 90, 180, then 360 after denials (OQ4).
 
 The same 10-year monthly auto-run as above (last-messages-home, watch-v3,
@@ -385,7 +385,7 @@ run; the bands are the design's, not tuned to it):
 
 | captain | stand-downs asked | granted | denied | relief asked | errors |
 |---|---|---|---|---|---|
-| consent | 28, 29 | all | 0 | 0 | 0 |
+| consent | 27, 29 | all | 0 | 0 | 0 |
 | orders | 17, 14 | 0 | all | 0 | 0 |
 
 - Ceilings: 120 a decade for the ship under consent, 60 under orders. The
