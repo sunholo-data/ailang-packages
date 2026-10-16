@@ -4,6 +4,12 @@
 
 Local only; never published.
 
+- **Resource units from data (crew_core 0.5.0, 2026-10-15).**
+  - `bubble.ail` is gone. Stapledon's eight bubble resources are now
+    `scenarios/stapledon/resources.json` (crew_units/1), which the game syncs
+    like the scenarios.
+  - `crew-sim --bubble [--units FILE]` lints a scenario against that table
+    through crew_core's `units`.
 - **The game's profile (crew_core 0.4.1, 2026-10-14).**
   - `crew-sim --profile v2|v3` (v3 is the default with `--auto` or `--skip`)
     and `--concerns escalate|APPROACH`.
