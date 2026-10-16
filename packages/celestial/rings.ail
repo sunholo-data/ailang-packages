@@ -51,8 +51,15 @@ export pure func ringLitIF(w0: float, phaseP: float, tau: float, mu0: float, mu:
 --    difference share a sign because exp is monotone, so it is >= 0. (Round 1 used the product form
 --    everywhere; with tau/mu0 in ~(709.8, 745) its e^(-tau/mu0) is subnormal
 --    while e^x overflows, giving Inf: the Sun grazing the rings.)
+-- Domain (completed in 0.4.1; the generated contract failed on w0 < 0):
+-- w0 in [0, 1] (a single-scattering albedo), phaseP >= 0 (a phase-function
+-- value, normalised so isotropic = 1; no upper bound — it peaks at backscatter),
+-- tau >= 0, and mu0, mu the |sin| elevations in [0, 1] (mu > 0: edge-on has
+-- no unlit face). Both branches are then products and differences of
+-- nonnegative factors (the difference of exponentials shares the sign of
+-- mu - mu0 because exp is monotone), so I/F >= 0.
 export pure func ringUnlitIF(w0: float, phaseP: float, tau: float, mu0: float, mu: float) -> float
-  requires { tau >= 0.0 && mu0 >= 0.0 && mu > 0.0 }
+  requires { w0 >= 0.0 && w0 <= 1.0 && phaseP >= 0.0 && tau >= 0.0 && mu0 >= 0.0 && mu0 <= 1.0 && mu > 0.0 && mu <= 1.0 }
   ensures { result >= 0.0 }
 {
   if mu0 <= 0.0 || tau <= 0.0 then 0.0

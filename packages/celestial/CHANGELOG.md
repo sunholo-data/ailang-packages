@@ -1,5 +1,40 @@
 # Changelog
 
+## 0.4.1
+
+Fix (patch bump): the photometry contracts' input domains are completed. The
+generated contract checks (`ensures` properties under a seeded run) violated
+three exported functions whose `requires` admitted inputs outside the
+functions' physical domain, so a negative illuminance or I/F could be
+demonstrated although every physical input is fine. No signature, result or
+behaviour changes on the valid domain; the change narrows what callers may
+pass, and every in-package caller (tests, `_smoke.ail`) already stayed inside
+it.
+
+- `reflect.starIlluminanceAt`: now requires `e1AU >= 0.0` (an illuminance is
+  nonnegative) alongside `rAU > 0.0`; the `ensures result >= 0.0` contract
+  failed on e1AU = -628.86, rAU = 638.96 (seed -353163685464755012).
+- `reflect.discIlluminance`: the domain is now the complete physical one —
+  `e1AU >= 0`, `p >= 0` (geometric albedo can exceed 1, e.g. Enceladus 1.38),
+  `radius > 0`, `rAU > 0`, `d > 0`, `alpha` in `[0, pi]` (the phase-function
+  domain of `lambertPhase`/`minnaertPhase`) and `k > 0` — instead of just
+  `rAU > 0 && d > 0`; the contract failed on alpha = -774.05, k = -674.18
+  (seed -1857764562339015082).
+- `rings.ringUnlitIF`: now requires `w0 in [0, 1]` (single-scattering
+  albedo), `phaseP >= 0` (phase-function value, isotropic = 1), `tau >= 0`
+  and `mu0, mu in [0, 1]` with `mu > 0` (|sin| elevations) — the contract
+  failed on w0 = -210.91 (seed 5728653242854644233). Both evaluation branches
+  are products and differences of nonnegative factors on that domain.
+- Tests (3 more): the domains' edges are pinned by hand in
+  `reflect_test.ail` and `rings_test.ail` (e1AU = 0, alpha 0 and pi, a dark
+  star and a dark body; w0 = 0 and 1, phaseP = 0, mu0 = 0 and 1, mu = 1 and
+  the mu0 = mu = 1 corner against the textbook form). The seeded property
+  generator itself cannot reach the narrow domains (it reports "accepted 0 of
+  1000 generated inputs" and skips, as it already did for `elementsAt`,
+  `satelliteElementsAt` and `orbitRadius` since 0.1.0) — the named boundary
+  tests are the domain's coverage, and the generated properties no longer
+  find violations on it.
+
 ## 0.4.0
 
 Feature (minor bump, the repo's convention for new exports; stapledons ledger
