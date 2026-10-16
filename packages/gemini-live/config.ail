@@ -43,7 +43,9 @@ export pure func buildAffectiveConfig(enabled: bool) -> [{key: string, value: Js
 -- Thinking
 -- ============================================================
 -- Model reasons about responses with configurable token budget.
--- budget=0 disables thinking. includeThoughts=true returns summaries.
+-- budget=0 disables thinking. includeThoughts=true returns summaries. budget<0 emits
+-- nothing — use that on Vertex unless the project is allowlisted: since mid-October 2026
+-- any thinkingConfig closes the session (1007, measured 16 Oct 2026).
 
 export pure func buildThinkingConfig(budget: int, includeThoughts: bool) -> [{key: string, value: Json}] =
   if budget >= 0 then {
@@ -119,7 +121,8 @@ export pure func buildSpeechConfig(voice: string, languageCode: string) -> Json 
 -- generationConfig for a Live session: one response modality ("AUDIO", or
 -- "VIDEO" for a live avatar on gemini-3.8-live), the speech config, and —
 -- when thinkingBudget >= 0 — thinkingConfig INSIDE generationConfig, which is
--- where Vertex accepts it (at setup level it closes 1007, measured 25 Sept 2026).
+-- where Vertex accepts it (at setup level it closes 1007, measured 25 Sept 2026) —
+-- and, since mid-October 2026, only for allowlisted projects; pass -1 otherwise.
 export pure func buildGenerationConfig(modality: string, voice: string, languageCode: string, thinkingBudget: int)
   -> [{key: string, value: Json}] =
   [kv("generationConfig", jo(concat(

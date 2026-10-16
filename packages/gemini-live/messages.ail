@@ -42,7 +42,8 @@ export pure func buildSetup(model: string, voice: string, instruction: string) -
   ]))
 
 -- Setup with Gemini Live v2 features (proactive, affective, thinking).
--- thinkingBudget: -1 = skip, 0+ = set budget.
+-- thinkingBudget: -1 = skip (the only value a non-allowlisted Vertex project accepts
+-- since mid-October 2026), 0+ = set budget.
 export pure func buildSetupWithFeatures(model: string, voice: string, instruction: string,
     proactive: bool, affective: bool, thinkingBudget: int) -> string {
   let proactiveKvs = if proactive then
@@ -70,6 +71,9 @@ pure func tailKvs(instruction: string) -> [{key: string, value: Json}] =
 -- "en-GB" for British English), thinking budget (-1 to leave the model's default,
 -- 0 to turn thinking off — gemini-3.8-live thinks by default: 78 thought tokens on
 -- one sentence, first audio ~540 → ~350 ms with 0, measured 25 Sept 2026).
+-- Use -1 unless the project is allowlisted: since mid-October 2026 Vertex closes the
+-- session (1007, "not allowlisted to customize the thinking level") for any
+-- thinkingConfig, 0 included (measured 16 Oct 2026).
 export pure func buildSpeechSetup(model: string, voice: string, languageCode: string,
                                   instruction: string, thinkingBudget: int) -> string =
   encode(jo([kv("setup", jo(concat(concat([kv("model", js(model))],

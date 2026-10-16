@@ -12,7 +12,7 @@ Supports **two backends**:
 
 **Three things that surprised us, measured against Vertex on 25 Sept 2026:**
 - The prebuilt voices have **no accent of their own** — pass a `languageCode` (`britishEnglish()` = `"en-GB"`) and say the accent in the instruction or TTS style line. With neither, Charon was judged American English.
-- `gemini-3.8-live` **thinks by default** (78 thought tokens on one sentence). `thinkingBudget: 0` — inside `generationConfig`, which every 0.5.0 builder does — turns it off.
+- `gemini-3.8-live` **thinks by default** (78 thought tokens on one sentence). **Pass `-1` for the thinking budget unless your project is allowlisted:** since mid-October 2026 Vertex closes the session at setup (1007, *"Current project is not allowlisted to customize the thinking level for this model"*) for any `thinkingConfig` — `thinkingBudget: 0` and `thinkingLevel` alike (measured 16 Oct, `sunholo-daneel`, us-central1). With `-1` the builders leave it out and the model thinks; thoughts count inside `maxOutputTokens` (cap 60 → 5 spoken + 51 thought) and are reported as `usageOf(json).thoughts` — bill them at the text-output rate.
 - TTS `maxOutputTokens` is a real ceiling on spend, but a response cut at the cap still says `finishReason: STOP`. Use `tts.completeOk`, which also judges by the token count.
 
 **Availability is per region and changes.** List before assuming: `GET https://<region>-aiplatform.googleapis.com/v1beta1/publishers/google/models`. `global` lists the Live models but did not serve a Live session for them.
@@ -112,12 +112,12 @@ import pkg/sunholo/gemini_live/parsers (usageOf, mediaPartsOf, outputTranscriptO
 import pkg/sunholo/gemini_live/tts (buildTtsRequest, ttsAudioOf, outputTokensOf, finishReasonOf, completeOk)
 import pkg/sunholo/gemini_live/voices (vertexLive38, ttsFlash25, britishEnglish, defaultAvatar)
 
--- Live, British, no thinking:
+-- Live, British (-1: no thinkingConfig — Vertex refuses one unless the project is allowlisted):
 let model = vertexModelPath(project, "us-central1", vertexLive38());
-let setup = buildSpeechSetup(model, "Charon", britishEnglish(), "Speak in a calm British accent.", 0);
+let setup = buildSpeechSetup(model, "Charon", britishEnglish(), "Speak in a calm British accent.", -1);
 
 -- Live avatar (3.8 only): the reply streams as video/mp4 parts — concatenate them.
-let avatar = buildAvatarSetup(model, "Charon", britishEnglish(), defaultAvatar(), instruction, 0);
+let avatar = buildAvatarSetup(model, "Charon", britishEnglish(), defaultAvatar(), instruction, -1);
 
 -- Voice in: 100 ms chunks of 24 kHz PCM, then close the stream.
 transmit(conn, buildRealtimeAudio(b64, "audio/pcm;rate=24000")); transmit(conn, buildAudioStreamEnd());
@@ -134,7 +134,7 @@ let body = buildTtsRequest(script, "Charon", britishEnglish(), "Read this aloud 
 **Measured costs and rates (25 Sept 2026, us-central1):** audio is 25 tokens/s; avatar video
 6,192 tokens/s while speaking (idle not billed); TTS prose ran 8.7–10.2 audio tokens per word,
 a number-heavy script 18.2. First audio after the end of a spoken question: 350–670 ms
-(3.8 with thinking 0: 380 ms). Avatar first frame: ~2.5 s after the text turn.
+(3.8 with thinking 0: 380 ms, when that setting was still accepted). Avatar first frame: ~2.5 s after the text turn.
 
 | Module | Adds in 0.5.0 |
 |---|---|

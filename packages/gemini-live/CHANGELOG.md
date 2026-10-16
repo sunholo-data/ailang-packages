@@ -1,5 +1,19 @@
 # Changelog — sunholo/gemini_live
 
+## 0.5.1
+
+Docs only — no builder changes. Measured 16 Oct 2026 (project `sunholo-daneel`, us-central1):
+Vertex now closes a `gemini-3.8-live` session at setup for **any** `thinkingConfig` —
+`thinkingBudget: 0` and `thinkingLevel` alike — unless the project is allowlisted
+(close 1007, *"Current project is not allowlisted to customize the thinking level for this
+model"*). Leaving `thinkingConfig` out gives `setupComplete`.
+
+- The examples and the `buildSpeechSetup` / `buildAvatarSetup` / `buildSetupWithFeatures` /
+  `buildThinkingConfig` docs now say to pass `-1` (which emits no `thinkingConfig`).
+  0.5.0's advice — `0` turns thinking off — fails at setup on a non-allowlisted project.
+- With thinking on, thoughts count inside `maxOutputTokens` (cap 60 → 5 spoken + 51 thought)
+  and are reported as `usageOf(json).thoughts`; bill them at the text-output rate.
+
 ## 0.5.0
 
 Measured against Vertex AI on 25 Sept 2026 (project `sunholo-daneel`, us-central1),
