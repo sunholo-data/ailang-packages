@@ -1,8 +1,9 @@
 # crew_core 0.6: stand down at the check-in
 
-**Status:** Planned 2026-10-16. Awaiting Mark's approval (sprint S-CREW-CORE-0.6).
+**Status:** Approved 2026-10-16 by Mark, attended ("yep agree with planners
+recommendations proceed"). In progress (sprint S-CREW-CORE-0.6).
 **Packages:**
-- `sunholo/crew_core` 0.6.0 (minor; builds on 0.5.1, PR #149, not yet merged);
+- `sunholo/crew_core` 0.6.0 (minor; builds on 0.5.1, PR #149, merged as 100d8fd and published);
 - `sunholo/social_dynamics` 0.4.0, unchanged (no engine change);
 - `sunholo/crew_lab` (local only, never published).
 
@@ -392,6 +393,17 @@ the pinned runtime, `~/dev/sunholo-data/stapledons-godot-attended/runtime/bin/ai
   indicators.
 
 ## Open questions for Mark
+
+**Answered 2026-10-16 (Mark, attended: "yep agree with planners
+recommendations proceed"):**
+1. OQ1: stand-down check-ins only at a cadence of 2 days or more.
+2. OQ2: a denial costs trust only, no stress.
+3. OQ3: `hands_on` gets an opt-in `stand_down` escalation rule, listed only
+   in `hands_on.json`; `critical_only` keeps deciding by standing order.
+4. OQ4: the cooldowns stay as written: 30 days after a grant; 90, 180 and
+   360 after denials.
+
+The questions as asked:
 
 1. **OQ1: duty check-ins at a cadence of 2 or more only, or at every
    cadence?** *Recommendation: 2 or more only.* Daily play already asks about

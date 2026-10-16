@@ -8,13 +8,12 @@ working or not. #149 measured 0 relief requests in a 10-year monthly
 auto-run, because the game's work lasts 2–3 days and project agreements fall
 due after 20.
 
-**Base:** branch `fix/crew-core-0.5.1-checkin` (#149, crew_core 0.5.1,
-unmerged). This sprint merges after it.
+**Base:** `main` at 100d8fd (#149 merged, crew_core 0.5.1 published).
 
-**Status:** awaiting Mark's approval. Nothing is implemented. The open
-questions OQ1–OQ4 are at the end of the design doc. The plan assumes the
-recommended answers, and a different answer changes only the milestones
-named in the design.
+**Status:** approved by Mark, attended 2026-10-16 ("yep agree with planners
+recommendations proceed"): OQ1 cadence ≥ 2 only; OQ2 trust only; OQ3 yes,
+opt-in `stand_down` escalation rule in `hands_on.json` only; OQ4 cooldowns as
+written. Executing.
 
 **AILANG prompt version loaded:** v0.16.7 (runtime v0.54.11, the game's
 pinned `stapledons-godot-attended/runtime/bin/ailang`).
