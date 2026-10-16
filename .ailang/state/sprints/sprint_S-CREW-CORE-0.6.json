@@ -1,0 +1,88 @@
+{
+  "sprint_id": "S-CREW-CORE-0.6",
+  "status": "awaiting_approval",
+  "plan": "design_docs/planned/crew-core-0.6-sprint.md",
+  "design": "design_docs/planned/crew-core-0.6-stand-down.md",
+  "base_branch": "fix/crew-core-0.5.1-checkin",
+  "ruling": "Mark, attended 2026-10-16: option (a), a strained crew member may ask to stand down at each auto-run check-in, working or not",
+  "open_questions": ["OQ1 cadence >= 2 only (recommended)", "OQ2 denial costs trust only (recommended)", "OQ3 opt-in stand_down escalation rule in hands_on (recommended yes)", "OQ4 cooldown 30 / 90-180-360 (recommended as written)"],
+  "registry_reuse": [
+    {"milestone": "S1-S5", "package": "sunholo/crew_core", "action": "contribute", "reason": "the verbs and auto-captain step live in crew_core, imported by the game and the lab"},
+    {"milestone": "S1", "package": "sunholo/social_dynamics", "action": "depend", "reason": "halt, RaiseConcern, OfferTask, OfferCommitment already exist in 0.4.0; no engine change"}
+  ],
+  "features": [
+    {
+      "id": "S1",
+      "description": "Host duty subject: check_in and resolve_stand_down verbs, GrantedStandDown/DeniedStandDown outcomes, stand_down answer mapping, archiving",
+      "estimated_loc": 280,
+      "dependencies": [],
+      "acceptance_criteria": [
+        "session_test/codec_test cases for both verbs both ways fail on 0.5.1 and pass on 0.6",
+        "make -f examples/crew-lab/Makefile core-tests (strict VM) and ailang test --package . on the interpreter pass"
+      ],
+      "passes": null, "started": null, "completed": null, "notes": null
+    },
+    {
+      "id": "S2",
+      "description": "Response policy phase duty with fallback carry_on<-continue, stand_down<-request_relief",
+      "estimated_loc": 75,
+      "dependencies": [],
+      "acceptance_criteria": [
+        "policy inline tests: fallback equals working weights; explicit duty rules win; existing policies decode unchanged"
+      ],
+      "passes": null, "started": null, "completed": null, "notes": null
+    },
+    {
+      "id": "S3",
+      "description": "Auto-captain step 2b: Orders.standDown, strain gate, cooldown in AutoState.raised, grants, Acts stand_down_asked/stand_down_decision, stale/busy ignore duty subjects",
+      "estimated_loc": 200,
+      "dependencies": ["S1", "S2"],
+      "acceptance_criteria": [
+        "auto_test: deny backoff check-in ticks [1, 91, 271, 631] at cadence 30; none at cadence 1; none when resting, unstrained or below the trust floor",
+        "stand_down off gives an AutoResult identical to 0.5.1 on a fixture"
+      ],
+      "passes": null, "started": null, "completed": null, "notes": null
+    },
+    {
+      "id": "S4",
+      "description": "Lab measurement: crew_sim tallies, crew_skip/1 relief and stand_downs fields, --stand-down, auto/stand-down-decade.claims.json; record 0.5.1 baselines first",
+      "estimated_loc": 80,
+      "dependencies": ["S3"],
+      "acceptance_criteria": [
+        "AC3: 10-year monthly last-messages-home asks to stand down >0 and <=120 (consent) / <=60 (orders) per seed, seeds 1..2, 0 errors",
+        "AC4 v3-skip 3/3 at cadence 1 and 30; AC5 daily results byte-identical; AC6 cmp; AC8 off == 0.5.1; AC10 <=1.25x wall time"
+      ],
+      "passes": null, "started": null, "completed": null, "notes": null
+    },
+    {
+      "id": "S5",
+      "description": "stand-down.ndjson recording under parity/replay; AGENT.md, CHANGELOG 0.6.0 with game migration notes, lab CHANGELOG, REVIEW.md; version 0.6.0 kind feature",
+      "estimated_loc": 60,
+      "dependencies": ["S4"],
+      "acceptance_criteria": [
+        "make -f examples/crew-lab/Makefile parity replay quality validate pass"
+      ],
+      "passes": null, "started": null, "completed": null, "notes": null
+    },
+    {
+      "id": "S6",
+      "description": "Independent evaluation (different model, >=70), PR, merge after #149, publish 0.6.0",
+      "estimated_loc": 0,
+      "dependencies": ["S5"],
+      "acceptance_criteria": ["CI green", "evaluation >= 70 by a different model", "published"],
+      "passes": null, "started": null, "completed": null, "notes": null
+    },
+    {
+      "id": "S7",
+      "description": "Hand-off to the integration agent: design section 6 migration notes with the merge sha",
+      "estimated_loc": 0,
+      "dependencies": ["S6"],
+      "acceptance_criteria": ["message sent with the merge sha"],
+      "passes": null, "started": null, "completed": null, "notes": null
+    }
+  ],
+  "velocity": {
+    "estimated_total_loc": 695,
+    "estimated_days": 2
+  }
+}
