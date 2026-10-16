@@ -369,6 +369,39 @@ takes no check-in. A 10-year monthly auto-run on last-messages-home
 under either captain; a year at a daily cadence asks 34 times (consent, all
 granted) and 10 times (orders, all denied).
 
+## Update (crew_core 0.6.0): stand down at the check-in
+
+Mark's ruling (2026-10-16, option a): at each auto-run check-in a crew member
+under strain may ask to stand down, working or not. crew_core 0.6.0 makes
+this a duty check-in (a rest offer under a duty agreement that lapses at the
+next tick; see the package CHANGELOG). The auto-captain makes them at a
+cadence of 2 or more only (OQ1), with a cooldown of 30 days after a granted rest and
+90, 180, then 360 after denials (OQ4).
+
+The same 10-year monthly auto-run as above (last-messages-home, watch-v3,
+keep 30, concerns ask_advice, seeds 1–2), now
+`auto/stand-down-decade.claims.json`, 8 of 8 hold (claims written before the
+run; the bands are the design's, not tuned to it):
+
+| captain | stand-downs asked | granted | denied | relief asked | errors |
+|---|---|---|---|---|---|
+| consent | 27, 29 | all | 0 | 0 | 0 |
+| orders | 17, 14 | 0 | all | 0 | 0 |
+
+- Ceilings: 120 a decade for the ship under consent, 60 under orders. The
+  measured asks are about a quarter of each.
+- `--stand-down off` reproduces 0.5.1's skip lines byte for byte.
+- `v3-skip` holds 3 of 3 at cadence 1 and at cadence 30 (seeds 1..5).
+- **Nothing at a daily cadence moved.** `review/*.claims.txt` regenerate byte
+  for byte (seeds 1..20, 12 turns), and the counting-mode `auto/*` claims run
+  at cadence 1.
+- `hands_on.json` gains the opt-in `stand_down` rule (OQ3). Its claims run in
+  counting mode at a daily cadence, so they are unchanged. `escalation.json`
+  (`critical_only`) decides stand-downs by the standing order.
+- Under consent a stand-down is close to what `rest: tired` already did: the
+  numbers mostly change who gets the credit (the crew member asks), not the
+  indicators.
+
 ## Decisions for Mark
 
 - Which scenarios (if any) to import first, and as what: tutorial watches, voyage events, or test fixtures for the game's crew host.

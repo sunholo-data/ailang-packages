@@ -14,9 +14,9 @@ import pkg/sunholo/social_dynamics/wire (encodeState, encodeEvents, encodeError,
 import ./scenario (Scenario, ShipEvent, Transfer, decodeShipEvent, config as scenarioConfig, workerRecipe, projectName, resourceName, purpose, yieldsOf)
 import ./flows (Applied, transferAll)
 import ./cohorts (Population, Signal, decodePopulation, populationJson, hear, drift, yearsTo, setBirthPolicy, promote)
-import ./host_policy (policies)
+import ./host_policy (policies, cooperative)
 import ./example (firstContact)
-import ./codec (object, fields, text, integer, number, CrewOutcome, AgreedStart, CompliedStart, StrainedStart, RefusedOrder, GrantedRelief, DeniedRelief, encodeOutcome)
+import ./codec (object, fields, text, integer, number, CrewOutcome, AgreedStart, CompliedStart, StrainedStart, RefusedOrder, GrantedRelief, DeniedRelief, GrantedStandDown, DeniedStandDown, encodeOutcome)
 import ./actor_policy (evaluate, requestBody, encodeChoice)
 import pkg/sunholo/social_dynamics/personality (Personality,ReceiptEntry,MajorReceived,InteractionReceived)
 import ./personality_host (initializeShip, advanceShip, project as projectPersonalities, json as personalitiesJson, receiveSpeech, receiveMajor, majorKind)
@@ -219,8 +219,8 @@ ensures { match result {
   if not idle(s) || not identity(s) then Err(HostFailure("ask context")) else if not checkedId(id) || length(s.pending) >= 16 || any(\r. r.id == id, s.pending) || any(\b. b.request.id == id, s.bank) || s.state.tick >= numericLimit() then Err(HostFailure("request capacity/id/clock")) else if s.chat.version == 1 && (match issueLookup(s.chat, task) {Some(_)=>true,None=>false}) then Err(HostFailure("answer the existing concern before reconsideration")) else match binding(s, task) {
     Err(e) => Err(e),
     Ok(b) => if b.worker != actor then Err(HostFailure("self actor required")) else match (findTask(s.state, task), head(filter(\c. c.id == b.agreement, s.state.commitments)), appraisalContext(s.state, actor, b.agreement)) {
-      (Some(t), Some(c), Ok(context)) => if t.status != Offered && t.status != Working || c.due <= s.state.tick then Err(HostFailure("subject transition/expiry")) else {
-        let legal = if t.status == Offered then ["accept", "decline", "concern", "defer"] else ["continue", "request_relief", "defer"]
+      (Some(t), Some(c), Ok(context)) => if t.status != Offered && t.status != Working || c.due <= s.state.tick || (duty(b) && t.status != Offered) then Err(HostFailure("subject transition/expiry")) else {
+        let legal = if duty(b) then dutyLabels() else if t.status == Offered then ["accept", "decline", "concern", "defer"] else ["continue", "request_relief", "defer"]
         let baseContext = perception(context, task, b.recipe)
         let ctx = if s.chat.version == 1 then conversationContext(s, baseContext, task, actor, b.recipe) else baseContext
         let r: Request = { id: id, actor: actor, task: task, tick: s.state.tick, revision: s.state.revision, expires: if c.due < s.state.tick + 1 then c.due else s.state.tick + 1, configBody: s.state.configBody, policyId: if s.chat.version == 1 then "crew-conversation-v1" else "crew-choice-v1", threshold: 0.6, legal: legal, context: encode(ctx), body: requestBody(ctx, legal) }
@@ -231,7 +231,7 @@ ensures { match result {
   }
 
 pure func mapped(s: Session, r: Request, b: TaskAgreement, selected: string) -> Result[Step, HostError] =
-  if selected == "defer" || selected == "continue" then Ok({ state: s.state, events: [], disposition: Applied }) else if selected == "accept" then domain(s, "answer-${r.id}", r.actor, ActorInput, [AcceptCommitment(b.agreement)]) else if selected == "request_relief" then domain(s, "answer-${r.id}", r.actor, ActorInput, [RequestRelief("relief-${r.id}", r.task, [b.agreement])]) else if selected == "decline" || selected == "concern" then domain(s, "answer-${r.id}", r.actor, ActorInput, [RaiseConcern("concern-${r.id}", [b.agreement], ["captain"], selected)]) else Err(HostFailure("illegal response mapping"))
+  if selected == "stand_down" then domain(s, "answer-${r.id}", r.actor, ActorInput, [RaiseConcern("standdown-${r.id}", [b.agreement], ["captain"], selected)]) else if selected == "defer" || selected == "continue" || selected == "carry_on" then Ok({ state: s.state, events: [], disposition: Applied }) else if selected == "accept" then domain(s, "answer-${r.id}", r.actor, ActorInput, [AcceptCommitment(b.agreement)]) else if selected == "request_relief" then domain(s, "answer-${r.id}", r.actor, ActorInput, [RequestRelief("relief-${r.id}", r.task, [b.agreement])]) else if selected == "decline" || selected == "concern" then domain(s, "answer-${r.id}", r.actor, ActorInput, [RaiseConcern("concern-${r.id}", [b.agreement], ["captain"], selected)]) else Err(HostFailure("illegal response mapping"))
 
 -- The bank keeps answers for idempotent retries and id uniqueness. A request
 -- expires one turn after it is asked, after which no retry can be applied, so a
@@ -261,12 +261,12 @@ ensures { match result {
             Err(e) => Err(e),
             Ok(step) => {
               let staged = { s | state: step.state }
-              let observed = if choice.selected == "request_relief" || choice.selected == "decline" || choice.selected == "concern" then receipt(staged, "answer-receipt-${r.id}", "captain", if choice.selected == "request_relief" then "relief-${r.id}" else "concern-${r.id}") else Ok({ state: step.state, events: [], disposition: Applied })
+              let observed = if choice.selected == "request_relief" || choice.selected == "decline" || choice.selected == "concern" || choice.selected == "stand_down" then receipt(staged, "answer-receipt-${r.id}", "captain", if choice.selected == "request_relief" then "relief-${r.id}" else if choice.selected == "stand_down" then "standdown-${r.id}" else "concern-${r.id}") else Ok({ state: step.state, events: [], disposition: Applied })
               match observed {
                 Err(e) => Err(e),
                 Ok(received) => {
                   let entry: Bank = { request: r, status: "completed", body: body, roll: roll, rollKey: encode(jnum(roll)), choice: encode(encodeChoice(choice)), selected: choice.selected }
-                  Ok(output({ staged | state: received.state, pending: filter(\p. p.id != id, s.pending), bank: compacted(s.bank, s.state.tick) ++ [entry], chat: registerIssue(s.chat, r.task, r.actor, b.recipe, r.id, s.state.tick, choice.selected) }, step.events ++ received.events))
+                  Ok(output({ staged | state: received.state, pending: filter(\p. p.id != id, s.pending), bank: compacted(s.bank, s.state.tick) ++ [entry], chat: if duty(b) then s.chat else registerIssue(s.chat, r.task, r.actor, b.recipe, r.id, s.state.tick, choice.selected) }, step.events ++ received.events))
                 }
               }
             }
@@ -346,6 +346,87 @@ ensures { match result {
       }
     }
   }
+
+-- ------------------------------------------------- stand down (0.6.0)
+-- A duty check-in is a check-in without a task: the captain offers the
+-- worker's own rest recipe as task sd-<id> under a duty agreement duty-<id>
+-- that falls due at the next tick, and asks the worker (request id <id>,
+-- phase duty: carry_on, stand_down, defer). Both lapse at the next tick
+-- unless a stand-down is granted; archiving folds them as a lapsed offer.
+-- stand_down is the worker's concern standdown-<request> to the captain; it
+-- opens no conversation issue. resolve_stand_down grants (the worker accepts
+-- the duty agreement, their running work halts "stood_down", the rest starts)
+-- or denies; either way the captain reports the outcome to the worker.
+pure func duty(b: TaskAgreement) -> bool = startsWith(b.agreement, "duty-")
+
+export pure func dutyLabels() -> [string] ! {}
+ensures { length(result) == 3 } = ["carry_on", "stand_down", "defer"]
+
+-- A duty subject is live while its rest offer stands and its agreement is not due.
+pure func dutyLive(s: Session, b: TaskAgreement) -> bool = duty(b) && any(\t. t.id == b.task && t.status == Offered, s.state.tasks) && any(\c. c.id == b.agreement && c.due > s.state.tick, s.state.commitments)
+
+export pure func checkIn(s: Session, actor: string, id: string) -> Result[Output, HostError] ! {}
+ensures { match result {
+  Ok(o) => length(o.session.bindings) == length(s.bindings) + 1 && length(o.session.pending) == length(s.pending) + 1,
+  Err(_) => true
+} } =
+ if not idle(s) || not identity(s) then Err(HostFailure("check_in context"))
+ else if not checkedId(id) || stringLength(id) > 56 || not contains(s.scenario.workers, actor) || not owned(s, actor, "rest_${actor}") || s.state.tick >= numericLimit() - 1 then Err(HostFailure("check_in fields"))
+ else if any(\b. b.worker == actor && dutyLive(s, b), s.bindings) then Err(HostFailure("a duty check-in is already open for this crew member"))
+ else if not cooperative(s.state, actor) then Err(HostFailure("cooperation floor"))
+ else {
+  let b: TaskAgreement = { task: "sd-${id}", agreement: "duty-${id}", captain: "captain", worker: actor, recipe: "rest_${actor}" };
+  match domain(s, "checkin-${id}", "captain", Authored, [OfferTask(b.task, b.recipe, [actor], []), OfferCommitment(b.agreement, ["captain", actor], "Duty check-in ${id}", s.state.tick + 1, []), AcceptCommitment(b.agreement)]) {
+   Err(e) => Err(e),
+   Ok(step) => {
+    let staged = { s | state: step.state, bindings: s.bindings ++ [b] };
+    match receipt(staged, "checkin-task-${id}", actor, b.task) {
+     Err(e) => Err(e),
+     Ok(first) => match receipt({ staged | state: first.state }, "checkin-duty-${id}", actor, b.agreement) {
+      Err(e) => Err(e),
+      Ok(second) => match ask({ staged | state: second.state }, actor, b.task, id) {
+       Err(e) => Err(e),
+       Ok(asked) => Ok(output(asked.session, step.events ++ first.events ++ second.events))
+      }
+     }
+    }
+   }
+  }
+ }
+
+pure func haltFor(s: Session, tasks: [Task], reason: string, events: [Event]) -> Result[Flowed, HostError] = match tasks {
+ [] => Ok({session: s, events: events}),
+ t :: rest => match halt(s.config, s.state, Host, t.id, reason) {
+  Err(e) => Err(DomainFailure(e)),
+  Ok(step) => haltFor({s | state: step.state}, rest, reason, events ++ step.events)
+ }
+}
+
+pure func standDownGranted(s: Session, b: TaskAgreement, id: string) -> Result[Output, HostError] =
+ match domain(s, "standdown-accept-${id}", b.worker, ActorInput, [AcceptCommitment(b.agreement)]) {
+  Err(e) => Err(e),
+  Ok(accepted) => match haltFor({ s | state: accepted.state }, filter(\t. t.status == Working && contains(t.participants, b.worker), accepted.state.tasks), "stood_down", accepted.events) {
+   Err(e) => Err(e),
+   Ok(h) => if not consent(h.session, b) then Err(HostFailure("stand-down consent")) else match domain(h.session, "standdown-start-${id}", "captain", Authored, [AcceptTask(b.task)]) {
+    Err(e) => Err(e),
+    Ok(started) => report({ h.session | state: started.state }, b, GrantedStandDown, "report-standdown-${id}", h.events ++ started.events)
+   }
+  }
+ }
+
+export pure func resolveStandDown(s: Session, id: string, release: bool) -> Result[Output, HostError] ! {}
+ensures { match result {
+  Ok(o) => o.session.state.tick == s.state.tick && length(o.session.reports) == length(s.reports) + 1,
+  Err(_) => true
+} } =
+ if not idle(s) || not identity(s) then Err(HostFailure("resolve_stand_down context")) else match binding(s, "sd-${id}") {
+  Err(e) => Err(e),
+  Ok(b) => if b.agreement != "duty-${id}" then Err(HostFailure("not a duty check-in"))
+   else if any(\r. r.id == "report-standdown-${id}", s.reports) then Err(HostFailure("stand-down already resolved"))
+   else if not dutyLive(s, b) then Err(HostFailure("stand-down subject lapsed"))
+   else if not any(\e. e.author == b.worker && e.kind == "concern" && e.text == "stand_down" && e.causes == [b.agreement], s.state.evidence) then Err(HostFailure("no stand-down asked"))
+   else if release then standDownGranted(s, b, id) else report(s, b, DeniedStandDown, "report-standdown-${id}", [])
+ }
 
 pure func delivered(s: Session, observer: string, evidence: string, id: string) -> Result[Output, HostError] =
   match head(filter(\r. r.id == evidence, s.reports)) {
@@ -833,6 +914,18 @@ pure func shipEventCommand(s: Session, j: Json) -> Result[Output, HostError] =
     }
   }
 
+pure func checkInCommand(s: Session, j: Json) -> Result[Output, HostError] =
+  if not fields(j, ["command", "actor", "id"]) then Err(HostFailure("check_in fields")) else match (getString(j, "actor"), getString(j, "id")) {
+    (Some(a), Some(id)) => checkIn(s, a, id),
+    _ => Err(HostFailure("check_in types"))
+  }
+
+pure func resolveStandDownCommand(s: Session, j: Json) -> Result[Output, HostError] =
+  if not fields(j, ["command", "id", "release"]) then Err(HostFailure("resolve_stand_down fields")) else match (getString(j, "id"), getBool(j, "release")) {
+    (Some(id), Some(release)) => resolveStandDown(s, id, release),
+    _ => Err(HostFailure("resolve_stand_down types"))
+  }
+
 pure func dispatch(s: Session, j: Json) -> Result[Output, HostError] = match getString(j, "command") {
   Some("policy") => policyCommand(s, j),
   Some("ship_event") => shipEventCommand(s, j),
@@ -863,6 +956,8 @@ pure func dispatch(s: Session, j: Json) -> Result[Output, HostError] = match get
     Some(id) => startTask(s, id),
     _ => Err(HostFailure("start_task types"))
   },
+  Some("check_in") => checkInCommand(s, j),
+  Some("resolve_stand_down") => resolveStandDownCommand(s, j),
   Some("resolve_relief") => if not fields(j, ["command", "id", "release"]) then Err(HostFailure("resolve fields")) else match (getString(j, "id"), getBool(j, "release")) {
     (Some(id), Some(release)) => resolve(s, id, release),
     _ => Err(HostFailure("resolve types"))

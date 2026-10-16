@@ -1,5 +1,79 @@
 # Changelog
 
+## 0.6.0
+
+Feature: **stand down at the check-in.** Mark's ruling (attended 2026-10-16,
+"a is fine"): at each auto-run check-in, a crew member under strain may ask
+to stand down, working or not. On 0.5.1 a 10-year monthly auto-run never
+asked once, because Stapledon's jobs last 2 to 3 days and project agreements
+fall due after 20. Design: `design_docs/planned/crew-core-0.6-stand-down.md`
+(OQ1–OQ4 answered as recommended, 2026-10-16).
+
+- **Host: the duty check-in** (`session.checkIn`, `resolveStandDown`; wire
+  `check_in`, `resolve_stand_down`). The captain offers the worker's own rest
+  recipe as task `sd-<id>` under a duty agreement `duty-<id>` due at the next
+  tick and asks the worker (request `<id>`, phase `duty`: `carry_on`,
+  `stand_down`, `defer`). `stand_down` is the worker's concern
+  `standdown-<request>` to the captain; it opens no conversation issue.
+  A grant has the worker accept the duty agreement, halts their running work
+  (`stood_down`), starts the rest and reports `granted_stand_down`; a denial
+  reports `denied_stand_down`. Refused below the cooperation floor
+  (`host_policy.cooperative`, now exported). Archiving folds the subjects as
+  a lapsed offer or finished rest.
+- **Outcomes** (`codec`): `GrantedStandDown` +4 and `DeniedStandDown`
+  −(2 + N/25), as relief; trust only, no stress (OQ2). The appraisal policy
+  id `received-outcome-v1` is unchanged.
+- **Policy phase `duty`.** Rules may name phase `duty`. Without any, a duty
+  request borrows the working weights: `carry_on` from `continue`,
+  `stand_down` from `request_relief`; the strain shift covers both. Existing
+  policy files work unchanged.
+- **Auto-captain step 2b.** Standing orders gain `stand_down` (`on`, the
+  default, or `off`; `Orders.standDown`). At a cadence of 2 or more (OQ1) a
+  strained crew member (the orders' stress or fatigue line, or
+  overextended), not resting, not asked about relief this turn, without an
+  open concern, at or over the cooperation floor and off cooldown gets a
+  duty check-in; the `relief` order decides. Cooldown (OQ4), in
+  `AutoState.raised`: 30 days after a granted rest ends, 90, 180, then 360
+  after denials in a row. A stand-down handed to the player gets the same
+  cooldowns: on resume the auto-captain reads the player's decision from the
+  host's report `report-standdown-<id>` (one left to lapse counts as a
+  denial). A duty offer never occupies the worker (`stale`), so
+  the orders still assign after a denial. Acts `stand_down_asked` and
+  `stand_down_decision`. New opt-in escalation rule `stand_down` (OQ3)
+  hands the request to the player. `AutoState`, `Act`, `Escalated` and the
+  escalation schema keep their shape.
+- **Measured** (crew lab, last-messages-home, `--skip 3650 --cadence 30
+  --archive 30 --concerns ask_advice`, seeds 1–2, AILANG v0.54.11):
+  - consent: 27 and 29 stand-downs asked, all granted; orders: 17 and 14,
+    all denied; 0 relief requests (as 0.5.1), 0 errors, live evidence at
+    the end 23–28;
+  - `stand_down: off` reproduces 0.5.1's skip lines byte for byte;
+  - wall time 24.1 s (consent) and 24.6 s (orders) against 0.5.1's 20.8 s
+    and 22.9 s on the Studio: 1.16× and 1.08×;
+  - daily-cadence lab results unchanged (OQ1).
+- **Tests:** `stand_down_test.ail` (11; 9 fail on 0.5.1), 3 policy inline
+  tests, 1 codec test, 10 `auto_test` cases (including the denial backoff
+  on ticks 1, 91, 271 and 631, and the cooldowns after a player's grant or
+  denial under the `stand_down` rule). The 0.5.1 odd-turn relief test now runs
+  with `stand_down: off`, since its strained idle worker would otherwise
+  stand down at tick 0.
+
+**Migration for a game** (Stapledon):
+1. Pin `sunholo/crew_core = "0.6.0"`, then `ailang install` and `ailang lock`.
+2. Count Acts `stand_down_asked` and `stand_down_decision` (label `granted`
+   or `denied`) in the digest; moments: reply label `stand_down` is a relief
+   moment (as `request_relief`).
+3. Template lines for the reply labels `stand_down` and `carry_on`.
+4. Full `Orders` record literals need `standDown`; `{ base | ... }` updates
+   absorb it.
+5. Re-record every crew fixture at a cadence of 2 or more (monthly skips);
+   daily-cadence fixtures are unchanged.
+6. AI replies: a duty request lists the new labels.
+7. `hands_on.json` gains `{"kind":"stand_down"}`; `critical_only` decides by
+   the standing order. After a `stand_down` stop, answer with
+   `resolve_stand_down` and resume with the returned `AutoState`: the
+   cooldown follows the player's decision (a lapsed one counts as denied).
+
 ## 0.5.1
 
 Fix: the auto-captain's check-ins no longer depend on the caller's turn

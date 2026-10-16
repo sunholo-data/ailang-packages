@@ -8,7 +8,9 @@ import pkg/sunholo/social_dynamics/model (unique, sorted, Value)
 import pkg/sunholo/social_dynamics/wire (singleObject)
 
 -- These four experimental personal consequences are not a universal utility score.
-export type CrewOutcome = AgreedStart | CompliedStart | StrainedStart | RefusedOrder | GrantedRelief | DeniedRelief deriving (Eq)
+-- GrantedStandDown/DeniedStandDown (0.6.0): the captain's answer to a duty
+-- check-in where the crew member asked to stand down.
+export type CrewOutcome = AgreedStart | CompliedStart | StrainedStart | RefusedOrder | GrantedRelief | DeniedRelief | GrantedStandDown | DeniedStandDown deriving (Eq)
 
 export pure func fields(j: Json, required: [string]) -> bool
 ensures { not result || unique(required) && unique(keys(j)) && length(keys(j)) == length(required) } = match j {
@@ -60,14 +62,16 @@ ensures { match result {
 }
 
 export pure func encodeOutcome(o: CrewOutcome) -> string
-ensures { result == "agreed_start" || result == "complied_start" || result == "strained_start" || result == "refused_order" || result == "granted_relief" || result == "denied_relief" } =
+ensures { result == "agreed_start" || result == "complied_start" || result == "strained_start" || result == "refused_order" || result == "granted_relief" || result == "denied_relief" || result == "granted_stand_down" || result == "denied_stand_down" } =
   match o {
     AgreedStart => "agreed_start",
     CompliedStart => "complied_start",
     StrainedStart => "strained_start",
     RefusedOrder => "refused_order",
     GrantedRelief => "granted_relief",
-    DeniedRelief => "denied_relief"
+    DeniedRelief => "denied_relief",
+    GrantedStandDown => "granted_stand_down",
+    DeniedStandDown => "denied_stand_down"
   }
 
 export pure func decodeOutcome(code: string) -> Result[CrewOutcome, string]
@@ -75,7 +79,7 @@ ensures { match result {
   Ok(o) => encodeOutcome(o) == code,
   Err(_) => true
 } } =
-  if code == "agreed_start" then Ok(AgreedStart) else if code == "complied_start" then Ok(CompliedStart) else if code == "strained_start" then Ok(StrainedStart) else if code == "refused_order" then Ok(RefusedOrder) else if code == "granted_relief" then Ok(GrantedRelief) else if code == "denied_relief" then Ok(DeniedRelief) else Err("outcome_code")
+  if code == "agreed_start" then Ok(AgreedStart) else if code == "complied_start" then Ok(CompliedStart) else if code == "strained_start" then Ok(StrainedStart) else if code == "refused_order" then Ok(RefusedOrder) else if code == "granted_relief" then Ok(GrantedRelief) else if code == "denied_relief" then Ok(DeniedRelief) else if code == "granted_stand_down" then Ok(GrantedStandDown) else if code == "denied_stand_down" then Ok(DeniedStandDown) else Err("outcome_code")
 
 -- Trust change without traits (an actor with no OCEAN attributes).
 export pure func outcomeDelta(o: CrewOutcome) -> int
@@ -85,7 +89,9 @@ ensures { result >= 0 - 8 && result <= 4 } = match o {
   StrainedStart => 0 - 2,
   RefusedOrder => 0 - 8,
   GrantedRelief => 4,
-  DeniedRelief => 0 - 4
+  DeniedRelief => 0 - 4,
+  GrantedStandDown => 4,
+  DeniedStandDown => 0 - 4
 }
 
 pure func trait(ocean: [Value], id: string) -> int = match filter(\v. v.id == id, ocean) { [v, ..._] => v.value, [] => 50 }
@@ -95,6 +101,8 @@ pure func trait(ocean: [Value], id: string) -> int = match filter(\v. v.id == id
 -- strained (complied while overextended): also - round((N + 100 - A)/25)
 -- overridden refusal: -round(8 x (0.5 + (100 - A)/100)), -4 (A100) .. -12 (A0)
 -- denied relief: -(2 + round(N/25)); agreed under consent +2; relief granted +4
+-- stand-down (0.6.0) as relief: granted +4, denied -(2 + round(N/25)); trust
+-- only, no stress (Mark, OQ2 2026-10-16)
 export pure func traitDelta(o: CrewOutcome, ocean: [Value]) -> int ! {}
 ensures { result >= 0 - 12 && result <= 4 } =
  if length(ocean) == 0 then outcomeDelta(o) else {
@@ -109,6 +117,8 @@ ensures { result >= 0 - 12 && result <= 4 } =
    StrainedStart => if 2 - voice - strain < 0 - 12 then 0 - 12 else 2 - voice - strain,
    RefusedOrder => 0 - ((400 + 8 * (100 - a) + 50) / 100),
    GrantedRelief => 4,
-   DeniedRelief => 0 - (2 + (n + 12) / 25)
+   DeniedRelief => 0 - (2 + (n + 12) / 25),
+   GrantedStandDown => 4,
+   DeniedStandDown => 0 - (2 + (n + 12) / 25)
   }
  }

@@ -1,0 +1,13 @@
+{
+  "schema": "crew_claims/1",
+  "claims": [
+    {"id": "consent-crew-ask-to-stand-down", "captain": "consent", "metric": "stand_downs.asked", "stat": "min", "op": ">", "value": 0, "note": "crew_core 0.6.0 AC3 (Mark, 2026-10-16, option a): a decade at the monthly cadence on last-messages-home, where 0.5.1 never asked once"},
+    {"id": "consent-at-most-one-a-month", "captain": "consent", "metric": "stand_downs.asked", "stat": "max", "op": "<=", "value": 120, "note": "the whole ship asks at most about once a month on average (a target, not tuned to the measurement)"},
+    {"id": "consent-grants-every-stand-down", "captain": "consent", "metric": "stand_downs.denied", "stat": "max", "op": "==", "value": 0, "note": "relief: grant decides duty check-ins too"},
+    {"id": "consent-decade-clean", "captain": "consent", "metric": "errors", "stat": "max", "op": "==", "value": 0, "note": "no host errors, including capacity_exceeded with archive keep 30 (AC9)"},
+    {"id": "orders-crew-ask-to-stand-down", "captain": "orders", "metric": "stand_downs.asked", "stat": "min", "op": ">", "value": 0, "note": "under orders the strained crew still ask"},
+    {"id": "orders-backoff-bounds-asks", "captain": "orders", "metric": "stand_downs.asked", "stat": "max", "op": "<=", "value": 60, "note": "the denial backoff (90, 180, then 360 days) caps five crew at 60 asks a decade"},
+    {"id": "orders-grant-no-stand-down", "captain": "orders", "metric": "stand_downs.granted", "stat": "max", "op": "==", "value": 0, "note": "relief: deny decides duty check-ins too"},
+    {"id": "orders-decade-clean", "captain": "orders", "metric": "errors", "stat": "max", "op": "==", "value": 0, "note": "no host errors"}
+  ]
+}

@@ -73,7 +73,7 @@ pure func readInfluences(xs: [Json]) -> Result[[Influence], string] = match xs {
 }
 
 pure func ruleOK(r: ResponseRule) -> bool =
-  text(r.label) && contains(["any", "offered", "working"], r.phase) && text(r.recipe) && r.base >= 0 && r.base <= 1000 && length(r.influences) <= 16 && (if any(\i. if influenceOK(i) then false else true, r.influences) then false else true) && length(dedup(map(\i. "${i.source}/${i.id}/${i.to}", r.influences))) == length(r.influences)
+  text(r.label) && contains(["any", "offered", "working", "duty"], r.phase) && text(r.recipe) && r.base >= 0 && r.base <= 1000 && length(r.influences) <= 16 && (if any(\i. if influenceOK(i) then false else true, r.influences) then false else true) && length(dedup(map(\i. "${i.source}/${i.id}/${i.to}", r.influences))) == length(r.influences)
 
 pure func readRule(j: Json) -> Result[ResponseRule, string] =
   if not fields(j, ["label", "phase", "recipe", "base", "influences"]) || not integer(j, "base", 0, 1000) then Err("rule_schema") else match getArray(j, "influences") {
@@ -135,7 +135,7 @@ pure func strained(p: Policy, c: Json, ws: [WeightedLabel]) -> [WeightedLabel] =
     (Some(v), Some(n)) => if v < p.strain.threshold then ws else {
       let f = p.strain.shift * n / 100;
       let bound = \w. if w < 1 then 1 else if w > 1000 then 1000 else w;
-      map(\w. if w.label == "accept" || w.label == "continue" then { w | weight: bound(w.weight * (100 - f) / 100) } else if w.label == "decline" || w.label == "request_relief" then { w | weight: bound(w.weight * (100 + f) / 100) } else w, ws)
+      map(\w. if w.label == "accept" || w.label == "continue" || w.label == "carry_on" then { w | weight: bound(w.weight * (100 - f) / 100) } else if w.label == "decline" || w.label == "request_relief" || w.label == "stand_down" then { w | weight: bound(w.weight * (100 + f) / 100) } else w, ws)
     },
     _ => ws
   }
@@ -193,11 +193,25 @@ pure func score(rs: [ResponseRule], context: Json, total: int) -> Result[int, st
   }
 }
 
+-- Phase duty (0.6.0, a stand-down check-in: carry_on, stand_down, defer).
+-- A policy without duty rules weighs carry_on with its working `continue`
+-- rules and stand_down with its working `request_relief` rules, so existing
+-- policy files work unchanged; defer keeps its `any` rule. Any duty rule in
+-- the policy switches the fallback off.
+export type RuleSource = { label: string, phase: string } deriving (Eq)
+
+export pure func ruleSource(p: Policy, phase: string, label: string) -> RuleSource ! {}
+ensures { result.label != "" } =
+  if phase != "duty" || any(\r. r.phase == "duty", p.rules) then { label: label, phase: phase }
+  else if label == "carry_on" then { label: "continue", phase: "working" }
+  else if label == "stand_down" then { label: "request_relief", phase: "working" }
+  else { label: label, phase: phase }
+
 @allow_empty_ok("Recursive legal-label tail; public weights requires nonempty legal labels")
 pure func labels(ls: [string], p: Policy, c: Json, phase: string, recipe: string) -> Result[[WeightedLabel], string] =
   match ls {
     [] => Ok([]),
-    l :: rest => let rs = filter(\r. r.label == l && (r.phase == "any" || r.phase == phase) && (r.recipe == "*" || r.recipe == recipe), p.rules) in
+    l :: rest => let src = ruleSource(p, phase, l) in let rs = filter(\r. r.label == src.label && (r.phase == "any" || r.phase == src.phase) && (r.recipe == "*" || r.recipe == recipe), p.rules) in
     if length(rs) == 0 then Err("missing_label_rule_${l}") else match score(rs, c, 0) {
       Err(e) => Err(e),
       Ok(n) => match labels(rest, p, c, phase, recipe) {
@@ -214,7 +228,7 @@ ensures { match result {
 } } =
   if not policyOK(policy) || length(request.legal) == 0 || length(request.legal) > 8 || length(dedup(request.legal)) != length(request.legal) then Err("weight_inputs") else match object(request.context) {
     Err(e) => Err(e),
-    Ok(c) => if not fields(c, ["actor", "task", "recipe", "attributes", "values", "indicators", "relationships", "visible"] ++ (if request.policyId == "crew-conversation-v1" then ["conversation"] else [])) || str(c, "actor") != request.actor || str(c, "task") != request.task || not text(str(c, "recipe")) then Err("perception_binding") else if contains(request.legal, "accept") && contains(request.legal, "continue") then Err("ambiguous_phase") else let phase = if contains(request.legal, "accept") then "offered" else "working" in
+    Ok(c) => if not fields(c, ["actor", "task", "recipe", "attributes", "values", "indicators", "relationships", "visible"] ++ (if request.policyId == "crew-conversation-v1" then ["conversation"] else [])) || str(c, "actor") != request.actor || str(c, "task") != request.task || not text(str(c, "recipe")) then Err("perception_binding") else if contains(request.legal, "accept") && contains(request.legal, "continue") || contains(request.legal, "stand_down") && (contains(request.legal, "accept") || contains(request.legal, "continue")) then Err("ambiguous_phase") else let phase = if contains(request.legal, "stand_down") then "duty" else if contains(request.legal, "accept") then "offered" else "working" in
     match labels(request.legal, policy, c, phase, str(c, "recipe")) { Err(e) => Err(e), Ok(ws) => Ok(strained(policy, c, ws)) }
   }
 
@@ -266,3 +280,39 @@ test "policies without strain decode as before; strain is validated" {
   _ => false
  }
 }
+
+-- Phase duty (0.6.0): the fallback borrows the working weights, explicit duty
+-- rules win, and the strain shift moves carry_on to stand_down.
+pure func dutyCtx(fatigue: int, stress: int) -> string = "{\"actor\":\"w\",\"task\":\"sd-1\",\"recipe\":\"rest_w\",\"attributes\":[{\"id\":\"openness\",\"value\":50},{\"id\":\"conscientiousness\",\"value\":60},{\"id\":\"extraversion\",\"value\":50},{\"id\":\"agreeableness\",\"value\":50},{\"id\":\"neuroticism\",\"value\":70}],\"values\":[],\"indicators\":[{\"id\":\"fatigue\",\"value\":${show(fatigue)}},{\"id\":\"stress\",\"value\":${show(stress)}},{\"id\":\"morale\",\"value\":40}],\"relationships\":[{\"to\":\"captain\",\"dimension\":\"trust\",\"value\":55}],\"visible\":[]}"
+pure func dutyRequest(legal: [string], fatigue: int, stress: int) -> Request = { id: "d1", actor: "w", task: "sd-1", tick: 0, revision: 0, expires: 1, configBody: "", policyId: "crew-choice-v1", threshold: 0.6, legal: legal, context: dutyCtx(fatigue, stress), body: "" }
+
+test "duty fallback weighs carry_on as continue and stand_down as request_relief" {
+ match decodePolicy(watchPolicyBody()) {
+  Err(_) => false,
+  Ok(p) => match (weights(p, dutyRequest(["carry_on", "stand_down", "defer"], 80, 60)), weights(p, dutyRequest(["continue", "request_relief", "defer"], 80, 60))) {
+   (Ok(d), Ok(w)) => map(\x. x.weight, d) == map(\x. x.weight, w) && map(\x. x.label, d) == ["carry_on", "stand_down", "defer"],
+   _ => false
+  }
+ }
+}
+
+test "explicit duty rules win over the fallback, and duty is a valid phase" {
+ match decodePolicy(replace(watchPolicyBody(), "\"rules\":[", "\"rules\":[{\"label\":\"carry_on\",\"phase\":\"duty\",\"recipe\":\"*\",\"base\":7,\"influences\":[]},{\"label\":\"stand_down\",\"phase\":\"duty\",\"recipe\":\"*\",\"base\":9,\"influences\":[]},")) {
+  Err(_) => false,
+  Ok(p) => match weights(p, dutyRequest(["carry_on", "stand_down", "defer"], 80, 60)) {
+   Ok(ws) => map(\x. x.weight, ws) == [7, 9, 120],
+   _ => false
+  }
+ }
+}
+
+test "the strain shift moves weight from carry_on to stand_down" {
+ match (decodePolicy(watchPolicyBody()), decodePolicy(replace(watchPolicyBody(), "\"callLimit\":12", "\"callLimit\":12,\"strain\":{\"indicator\":\"stress\",\"threshold\":70,\"shift\":50}"))) {
+  (Ok(p0), Ok(p1)) => match (weights(p0, dutyRequest(["carry_on", "stand_down", "defer"], 40, 90)), weights(p1, dutyRequest(["carry_on", "stand_down", "defer"], 40, 90)), weights(p1, dutyRequest(["continue", "request_relief", "defer"], 40, 90))) {
+   (Ok([c0, s0, _]), Ok([c1, s1, _]), Ok(w)) => c1.weight < c0.weight && s1.weight > s0.weight && map(\x. x.weight, [c1, s1]) == map(\x. x.weight, filter(\x. x.label != "defer", w)),
+   _ => false
+  },
+  _ => false
+ }
+}
+

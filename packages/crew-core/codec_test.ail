@@ -1,7 +1,7 @@
 module sunholo/crew_core/codec_test
 import std/list (map)
 import pkg/sunholo/social_dynamics/model (Value)
-import ./codec (fields, text, integer, number, object, CrewOutcome, AgreedStart, RefusedOrder, GrantedRelief, DeniedRelief, CompliedStart, StrainedStart, traitDelta, encodeOutcome, decodeOutcome, outcomeDelta)
+import ./codec (fields, text, integer, number, object, CrewOutcome, AgreedStart, RefusedOrder, GrantedRelief, DeniedRelief, CompliedStart, StrainedStart, GrantedStandDown, DeniedStandDown, traitDelta, encodeOutcome, decodeOutcome, outcomeDelta)
 import std/json (Json, JArray, ja, jo, kv, js, jint, jnum)
 import std/result (Result, Ok, Err)
 import std/math (sqrt, pow)
@@ -110,3 +110,14 @@ test "trust by personality: the crew-strain design table" {
 }
 
 test "complied and strained starts round-trip" { decodeOutcome(encodeOutcome(CompliedStart)) == Ok(CompliedStart) && decodeOutcome(encodeOutcome(StrainedStart)) == Ok(StrainedStart) }
+
+-- crew_core 0.6.0: a stand-down costs and earns trust as relief does (OQ2:
+-- trust only), from -2 at N0 to -6 at N100.
+test "stand-down outcomes round-trip and cost trust by neuroticism" {
+ encodeOutcome(GrantedStandDown) == "granted_stand_down" && encodeOutcome(DeniedStandDown) == "denied_stand_down"
+ && decodeOutcome("granted_stand_down") == Ok(GrantedStandDown) && decodeOutcome("denied_stand_down") == Ok(DeniedStandDown)
+ && outcomeDelta(GrantedStandDown) == 4 && outcomeDelta(DeniedStandDown) == 0 - 4
+ && traitDelta(GrantedStandDown, ocean(50, 50, 50, 50, 0)) == 4
+ && traitDelta(DeniedStandDown, ocean(50, 50, 50, 50, 0)) == 0 - 2 && traitDelta(DeniedStandDown, ocean(50, 50, 50, 50, 100)) == 0 - 6
+ && traitDelta(DeniedStandDown, ocean(55, 55, 80, 80, 25)) == traitDelta(DeniedRelief, ocean(55, 55, 80, 80, 25))
+}

@@ -1,0 +1,199 @@
+module sunholo/crew_core/stand_down_test
+import std/result (Result, Ok, Err)
+import std/option (Option, Some, None)
+import std/list (head, filter, length, any, map)
+import pkg/sunholo/social_dynamics/model (State, Offered, Working, Stopped)
+import ./session (Session, Output, HostError, HostFailure, Request, start as startWith, input, offer, ask, complete, startTask)
+import ./example (firstContact)
+import ./codec (GrantedStandDown, DeniedStandDown, encodeOutcome)
+import ./policy (fixtureBody)
+
+-- crew_core 0.6.0: a stand-down is a duty check-in. check_in stages a rest
+-- offer sd-<id> under a duty agreement duty-<id> due next tick and asks the
+-- worker (phase duty: carry_on, stand_down, defer); resolve_stand_down
+-- grants (the worker accepts, running work halts, rest starts) or denies.
+
+pure func begin(policy: string, profile: string) -> Result[Session, HostError] = match firstContact() {
+ Err(e) => Err(HostFailure(e)),
+ Ok(sc) => match startWith(sc, "{\"command\":\"start\",\"policy\":\"${policy}\",\"scenario\":\"${profile}\"}") { Err(e) => Err(e), Ok(o) => Ok(o.session) }
+}
+
+pure func line(s: Session, l: string) -> Result[Session, HostError] = match input(s, l) { Err(e) => Err(e), Ok(o) => Ok(o.session) }
+
+pure func checkIn(s: Session, actor: string, id: string) -> Result[Session, HostError] = line(s, "{\"command\":\"check_in\",\"actor\":\"${actor}\",\"id\":\"${id}\"}")
+
+pure func resolveSD(s: Session, id: string, release: bool) -> Result[Session, HostError] = line(s, "{\"command\":\"resolve_stand_down\",\"id\":\"${id}\",\"release\":${if release then "true" else "false"}}")
+
+pure func pendingOf(s: Session, id: string) -> Option[Request] = head(filter(\r. r.id == id, s.pending))
+
+-- Answer the pending request `id` with exactly `label`.
+pure func say(s: Session, id: string, label: string) -> Result[Session, HostError] = match pendingOf(s, id) {
+ None => Err(HostFailure("no pending ${id}")),
+ Some(r) => match complete(s, id, fixtureBody(r, label), 0.5) { Err(e) => Err(e), Ok(o) => Ok(o.session) }
+}
+
+pure func asked(policy: string, profile: string, label: string) -> Result[Session, HostError] = match begin(policy, profile) {
+ Err(e) => Err(e),
+ Ok(s) => match checkIn(s, "scientist", "d1") { Err(e) => Err(e), Ok(c) => say(c, "d1", label) }
+}
+
+pure func ok[a](r: Result[a, HostError]) -> bool = match r { Ok(_) => true, Err(_) => false }
+pure func rejected[a](r: Result[a, HostError]) -> bool = not ok(r)
+
+pure func trust(s: State, actor: string) -> int = match head(filter(\r. r.from == actor && r.to == "captain" && r.dimension == "trust", s.relationships)) { Some(r) => r.value, None => 0 - 999 }
+pure func ind(s: State, actor: string, id: string) -> int = match head(filter(\a. a.id == actor, s.actors)) {
+ Some(a) => match head(filter(\v. v.id == id, a.indicators)) { Some(v) => v.value, None => 0 - 999 },
+ None => 0 - 999
+}
+pure func statusOf(s: State, task: string) -> string = match head(filter(\t. t.id == task, s.tasks)) {
+ Some(t) => if t.status == Offered then "offered" else if t.status == Working then "working" else if t.status == Stopped then "stopped" else "other",
+ None => "none"
+}
+pure func hasEvidence(s: State, id: string, author: string) -> bool = any(\e. e.id == id && e.author == author, s.evidence)
+pure func knows(s: State, observer: string, id: string) -> bool = any(\k. k.observer == observer && k.evidence == id, s.knowledge)
+
+test "check_in stages a duty subject and asks the worker in one call" {
+ match begin("consent", "watch-v2") {
+  Err(_) => false,
+  Ok(s) => match checkIn(s, "scientist", "d1") {
+   Err(_) => false,
+   Ok(c) => statusOf(c.state, "sd-d1") == "offered"
+    && any(\t. t.id == "sd-d1" && t.recipe == "rest_scientist" && t.participants == ["scientist"], c.state.tasks)
+    && any(\x. x.id == "duty-d1" && x.due == c.state.tick + 1 && x.accepted == ["captain"], c.state.commitments)
+    && knows(c.state, "scientist", "sd-d1") && knows(c.state, "scientist", "duty-d1")
+    && (match pendingOf(c, "d1") { Some(r) => r.task == "sd-d1" && r.actor == "scientist" && r.legal == ["carry_on", "stand_down", "defer"] && r.expires == c.state.tick + 1, None => false })
+    && any(\b. b.task == "sd-d1" && b.agreement == "duty-d1" && b.recipe == "rest_scientist", c.bindings)
+  }
+ }
+}
+
+test "check_in refuses reused ids, unknown crew, and a second open duty check-in" {
+ match begin("consent", "watch-v2") {
+  Err(_) => false,
+  Ok(s) => match checkIn(s, "scientist", "d1") {
+   Err(_) => false,
+   Ok(c) => rejected(checkIn(c, "engineer", "d1")) && rejected(checkIn(c, "scientist", "d2")) && rejected(checkIn(s, "nobody", "d3")) && rejected(checkIn(s, "captain", "d3"))
+  }
+ }
+}
+
+test "below the cooperation floor the host refuses a duty check-in" {
+ match begin("orders", "watch-v2") {
+  Err(_) => false,
+  Ok(s) => rejected(checkIn({ s | state: { s.state | relationships: map(\r. if r.from == "scientist" then { r | value: 19 } else r, s.state.relationships) } }, "scientist", "d1"))
+ }
+}
+
+test "answering stand_down raises the worker's concern to the captain and opens no conversation issue" {
+ match asked("consent", "watch-v3", "stand_down") {
+  Err(_) => false,
+  Ok(s) => hasEvidence(s.state, "standdown-d1", "scientist") && any(\e. e.id == "standdown-d1" && e.causes == ["duty-d1"] && e.text == "stand_down", s.state.evidence)
+   && knows(s.state, "captain", "standdown-d1") && length(s.chat.issues) == 0 && length(s.pending) == 0
+ }
+}
+
+test "carry_on and defer change no engine state and open no issue" {
+ match (begin("consent", "watch-v3"), asked("consent", "watch-v3", "carry_on"), asked("consent", "watch-v3", "defer")) {
+  (Ok(s0), Ok(a), Ok(b)) => match checkIn(s0, "scientist", "d1") {
+   Ok(c) => a.state == c.state && b.state == c.state && length(a.chat.issues) == 0 && length(b.chat.issues) == 0,
+   Err(_) => false
+  },
+  _ => false
+ }
+}
+
+test "a granted stand-down starts the worker's rest under consent and reports +4" {
+ match asked("consent", "watch-v2", "stand_down") {
+  Err(_) => false,
+  Ok(s) => match resolveSD(s, "d1", true) {
+   Err(_) => false,
+   Ok(g) => statusOf(g.state, "sd-d1") == "working"
+    && any(\x. x.id == "duty-d1" && x.accepted == ["captain", "scientist"], g.state.commitments)
+    && any(\r. r.id == "report-standdown-d1" && r.code == GrantedStandDown && r.task == "sd-d1", g.reports)
+    && any(\e. e.id == "report-standdown-d1" && e.text == encodeOutcome(GrantedStandDown), g.state.evidence)
+    && trust(g.state, "scientist") == trust(s.state, "scientist") + 4
+    && rejected(resolveSD(g, "d1", true)) && rejected(resolveSD(g, "d1", false))
+  }
+ }
+}
+
+test "a denied stand-down reports a trust cost by neuroticism and leaves the worker free" {
+ match asked("orders", "watch-v2", "stand_down") {
+  Err(_) => false,
+  Ok(s) => match resolveSD(s, "d1", false) {
+   Err(_) => false,
+   Ok(d) => statusOf(d.state, "sd-d1") == "offered"
+    && any(\r. r.id == "report-standdown-d1" && r.code == DeniedStandDown, d.reports)
+    && trust(d.state, "scientist") == trust(s.state, "scientist") - 4
+    && ind(d.state, "scientist", "stress") == ind(s.state, "scientist", "stress") && ind(d.state, "scientist", "fatigue") == ind(s.state, "scientist", "fatigue")
+    && ok(offer(d, "scientist", "work_scientist", "science"))
+    && (match line(d, "{\"command\":\"advance\",\"tick\":1,\"budget\":64}") { Ok(a) => rejected(resolveSD(a, "d1", true)), Err(_) => false })
+  }
+ }
+}
+
+test "resolve_stand_down needs a stand_down answer for that check-in" {
+ match (begin("consent", "watch-v2"), asked("consent", "watch-v2", "carry_on")) {
+  (Ok(s), Ok(c)) => rejected(resolveSD(s, "d1", true)) && rejected(resolveSD(c, "d1", true)) && rejected(resolveSD(c, "d1", false)),
+  _ => false
+ }
+}
+
+test "a duty request expires at the next tick" {
+ match begin("consent", "watch-v2") {
+  Err(_) => false,
+  Ok(s) => match checkIn(s, "scientist", "d1") {
+   Err(_) => false,
+   Ok(c) => match line(c, "{\"command\":\"advance\",\"tick\":1,\"budget\":64}") { Ok(a) => rejected(say(a, "d1", "stand_down")), Err(_) => false }
+  }
+ }
+}
+
+-- Work started under orders, then a duty check-in: a grant halts the work,
+-- releases its reservation and starts the rest.
+test "a grant on running work halts it and releases its reservation" {
+ match begin("orders", "watch-v2") {
+  Err(_) => false,
+  Ok(s) => match offer(s, "scientist", "work_scientist", "science") {
+   Err(_) => false,
+   Ok(o) => match startTask(o.session, "science") {
+    Err(_) => false,
+    Ok(w) => match checkIn(w.session, "scientist", "d1") {
+     Err(_) => false,
+     Ok(c) => match say(c, "d1", "stand_down") {
+      Err(_) => false,
+      Ok(a) => match resolveSD(a, "d1", true) {
+       Err(_) => false,
+       Ok(g) => statusOf(w.session.state, "science") == "working" && statusOf(g.state, "science") == "stopped" && statusOf(g.state, "sd-d1") == "working"
+        && any(\r. r.id == "archive_compute" && r.reserved == 0, g.state.resources)
+      }
+     }
+    }
+   }
+  }
+ }
+}
+
+-- Archiving folds a denied duty subject as a lapsed offer, and a granted one
+-- with its finished rest: the task, its agreement, the concern and the report.
+pure func archivedAfter(release: bool) -> Result[Session, HostError] = match firstContact() {
+ Err(e) => Err(HostFailure(e)),
+ Ok(sc) => match startWith(sc, "{\"command\":\"start\",\"policy\":\"consent\",\"scenario\":\"watch-v2\",\"keep\":2}") {
+  Err(e) => Err(e),
+  Ok(o) => match checkIn(o.session, "scientist", "d1") {
+   Err(e) => Err(e),
+   Ok(c) => match say(c, "d1", "stand_down") {
+    Err(e) => Err(e),
+    Ok(a) => match resolveSD(a, "d1", release) { Err(e) => Err(e), Ok(r) => line(r, "{\"command\":\"advance\",\"tick\":8,\"budget\":64}") }
+   }
+  }
+ }
+}
+
+test "archiving folds stand-down subjects, granted or denied" {
+ match (archivedAfter(true), archivedAfter(false)) {
+  (Ok(g), Ok(d)) => map(\s. statusOf(s.state, "sd-d1") == "none" && not any(\c. c.id == "duty-d1", s.state.commitments) && not hasEvidence(s.state, "standdown-d1", "scientist") && not any(\e. e.id == "report-standdown-d1", s.state.evidence) && length(s.bindings) == 0 && length(s.reports) == 0, [g, d]) == [true, true]
+   && g.archive.tasks == 1 && d.archive.tasks == 1,
+  _ => false
+ }
+}

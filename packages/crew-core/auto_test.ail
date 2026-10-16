@@ -1,14 +1,14 @@
 module sunholo/crew_core/auto_test
 import std/result (Result, Ok, Err)
 import std/option (Option, Some, None)
-import std/string (startsWith)
-import std/list (head, filter, length, any, contains, map)
-import pkg/sunholo/social_dynamics/model (Offered)
+import std/string (startsWith, replace)
+import std/list (head, filter, length, any, contains, map, foldl)
+import pkg/sunholo/social_dynamics/model (Offered, Working)
 import ./scenario (decodeScenario)
 import ./example (firstContact)
 import ./session (Session, HostError, HostFailure, start, input)
 import ./policy (Policy, decodePolicy, watchPolicyBody)
-import ./auto (Orders, Rule, AutoResult, advanceAuto, consentOrders, ordersOrders, decodeOrders, decodeEscalation)
+import ./auto (Orders, Rule, AutoResult, Act, advanceAuto, consentOrders, ordersOrders, decodeOrders, decodeEscalation, standDownWait)
 
 pure func ship(policy: string) -> Result[Session, HostError] = match firstContact() {
  Err(e) => Err(HostFailure(e)),
@@ -60,7 +60,7 @@ test "a trust floor escalates when someone's trust falls below it" {
 }
 
 test "standing orders and escalation rules decode and validate" {
- decodeOrders("{\"schema\":\"crew_standing_orders/1\",\"start\":\"always\",\"rest\":\"never\",\"relief\":\"strained\"}") == Ok({start: "always", rest: "never", relief: "strained", fatigue: 70, stress: 75, cadence: 1, concerns: "escalate"})
+ decodeOrders("{\"schema\":\"crew_standing_orders/1\",\"start\":\"always\",\"rest\":\"never\",\"relief\":\"strained\"}") == Ok({start: "always", rest: "never", relief: "strained", fatigue: 70, stress: 75, cadence: 1, concerns: "escalate", standDown: "on"})
  && (match decodeOrders("{\"schema\":\"crew_standing_orders/1\",\"start\":\"maybe\",\"rest\":\"never\",\"relief\":\"deny\"}") { Err(_) => true, Ok(_) => false })
  && (match decodeEscalation("{\"schema\":\"crew_escalation/1\",\"rules\":[{\"kind\":\"breakdown\",\"indicator\":\"stress\",\"threshold\":85},{\"kind\":\"major\",\"kinds\":[\"loss\",\"deep_time\"]},{\"kind\":\"argument\"}]}") { Ok(rs) => length(rs) == 3, Err(_) => false })
  && (match decodeEscalation("{\"schema\":\"crew_escalation/1\",\"rules\":[{\"kind\":\"breakdown\",\"threshold\":85}]}") { Err(_) => true, Ok(_) => false })
@@ -147,8 +147,10 @@ pure func longWatchFrom(days: int, from: int, o: Orders, n: int) -> Result[AutoR
  (_, Err(e)) => Err(HostFailure(e))
 }
 
+-- stand_down off (0.6.0): this is about relief at work; with stand-downs on,
+-- the strained idle worker would stand down at tick 0 instead of working.
 test "decisions on odd turns only still check in, and a stressed worker asks for relief" {
- match longWatch(15, {ordersOrders() | cadence: 10, relief: "grant"}, 30) {
+ match longWatch(15, {ordersOrders() | cadence: 10, relief: "grant", standDown: "off"}, 30) {
   Ok(a) => a.session.state.tick == 30 && not any(\x. x.kind == "error", a.log)
    && any(\x. x.kind == "relief_asked" && x.actor == "w" && x.tick == 10, a.log)
    && any(\x. x.kind == "relief_decision" && x.label == "granted" && x.tick == 10, a.log),
@@ -177,4 +179,153 @@ test "a monthly cadence does not check in on work whose agreement fell due" {
   Ok(a) => a.session.state.tick == 90 && not any(\x. x.kind == "error", a.log) && not any(\x. x.kind == "relief_asked", a.log),
   Err(_) => false
  }
+}
+
+-- ------------------------------------------------- stand down (0.6.0)
+-- A response policy whose duty answer is almost always stand_down, so the
+-- schedule, not the draw, decides when the worker asks.
+pure func standingDown() -> Result[Policy, string] = decodePolicy(replace(watchPolicyBody(), "\"rules\":[", "\"rules\":[{\"label\":\"carry_on\",\"phase\":\"duty\",\"recipe\":\"*\",\"base\":0,\"influences\":[]},{\"label\":\"stand_down\",\"phase\":\"duty\",\"recipe\":\"*\",\"base\":1000,\"influences\":[]},{\"label\":\"defer\",\"phase\":\"duty\",\"recipe\":\"*\",\"base\":0,\"influences\":[{\"source\":\"relationship\",\"id\":\"trust\",\"to\":\"captain\",\"coefficient\":-100},{\"source\":\"indicator\",\"id\":\"fatigue\",\"to\":\"\",\"coefficient\":-100}]},"))
+
+-- The long-watch ship with its indicators and trust swapped in.
+pure func watchShip(days: int, fatigue: int, stress: int, trust: int) -> string =
+ replace(replace(longWatchShip(days), "\"indicator_defaults\":{\"fatigue\":90,\"stress\":95,", "\"indicator_defaults\":{\"fatigue\":${show(fatigue)},\"stress\":${show(stress)},"), "\"trust_in_captain\":80", "\"trust_in_captain\":${show(trust)}")
+
+-- from: plain days advanced first; prelude: host lines before auto-run.
+pure func duty(sc: string, policy: string, from: int, prelude: [string], o: Orders, rules: [Rule], n: int) -> Result[AutoResult, HostError] = match (decodeScenario(sc), standingDown()) {
+ (Ok(ship), Ok(p)) => match start(ship, "{\"command\":\"start\",\"policy\":\"${policy}\",\"scenario\":\"watch-v2\"}") {
+  Err(e) => Err(e),
+  Ok(s) => match foldl(\acc l. match acc { Err(e) => Err(e), Ok(x) => match input(x, l) { Err(e) => Err(e), Ok(y) => Ok(y.session) } }, Ok(s.session), (if from == 0 then [] else ["{\"command\":\"advance\",\"tick\":${show(from)},\"budget\":64}"]) ++ prelude) {
+   Err(e) => Err(e),
+   Ok(t) => advanceAuto(t, {seed: 1000003, agreed: [], raised: [], calls: 0}, p, o, rules, n)
+  }
+ },
+ (Err(e), _) => Err(HostFailure(e)),
+ (_, Err(e)) => Err(HostFailure(e))
+}
+
+pure func kinds(a: AutoResult, kind: string) -> [Act] = filter(\x. x.kind == kind, a.log)
+pure func dutyTicks(a: AutoResult) -> [int] = map(\x. x.tick, filter(\x. x.kind == "reply" && (match x.request { Some(q) => startsWith(q.id, "d"), None => false }), a.log))
+pure func clean(a: AutoResult) -> bool = not any(\x. x.kind == "error", a.log)
+
+test "an idle strained worker is checked in at a monthly cadence, asks, and is still assigned after a denial" {
+ match duty(watchShip(64, 90, 95, 80), "orders", 0, [], {ordersOrders() | cadence: 30}, [], 30) {
+  Ok(a) => clean(a) && dutyTicks(a) == [0]
+   && map(\x. x.tick, kinds(a, "stand_down_asked")) == [0] && map(\x. x.label, kinds(a, "stand_down_decision")) == ["denied"]
+   && any(\x. x.kind == "offer" && x.tick == 0 && x.actor == "w", a.log) && any(\x. x.kind == "start" && x.tick == 0, a.log),
+  Err(_) => false
+ }
+}
+
+test "an unstrained worker gets no duty check-in" {
+ match duty(watchShip(64, 10, 10, 80), "orders", 0, [], {ordersOrders() | cadence: 30}, [], 90) {
+  Ok(a) => clean(a) && dutyTicks(a) == [] && length(kinds(a, "stand_down_asked")) == 0,
+  Err(_) => false
+ }
+}
+
+test "a resting worker gets no duty check-in" {
+ match duty(watchShip(64, 90, 95, 80), "orders", 0, ["{\"command\":\"offer\",\"worker\":\"w\",\"recipe\":\"rest_w\",\"id\":\"nap\"}", "{\"command\":\"start_task\",\"task\":\"nap\"}"], {ordersOrders() | cadence: 30}, [], 1) {
+  Ok(a) => clean(a) && dutyTicks(a) == [],
+  Err(_) => false
+ }
+}
+
+test "below the cooperation floor no duty check-in is made" {
+ match duty(watchShip(64, 90, 95, 10), "orders", 0, [], {ordersOrders() | cadence: 30}, [], 90) {
+  Ok(a) => dutyTicks(a) == [] && not any(\x. x.kind == "error" && startsWith(x.detail, "check_in"), a.log),
+  Err(_) => false
+ }
+}
+
+-- OQ4: 90, 180, then 360 days after denials in a row. From tick 1 at a
+-- monthly cadence the decisions fall on ticks 1, 31, 61, ... The captain
+-- starts only agreed work here: overridden refusals over two years would take
+-- the worker's trust below the cooperation floor first (then, rightly, no
+-- duty check-in is made at all).
+test "denials back off: check-ins on ticks 1, 91, 271 and 631" {
+ match duty(watchShip(64, 90, 95, 80), "orders", 1, [], {ordersOrders() | cadence: 30, start: "agreed"}, [], 700) {
+  Ok(a) => clean(a) && dutyTicks(a) == [1, 91, 271, 631] && length(kinds(a, "stand_down_decision")) == 4 && not any(\x. x.label != "denied", kinds(a, "stand_down_decision"))
+   && map(standDownWait, [0, 1, 2, 3, 9]) == [30, 90, 180, 360, 360],
+  Err(_) => false
+ }
+}
+
+-- The rest lasts 1 day: granted at tick 0 it ends at tick 1, so no ask comes
+-- before tick 31; with this seed the next is on tick 50 (0.6.0 counted the
+-- 30 days from the grant and asked on tick 30).
+test "after a grant the worker waits 30 days after the rest ends, and a cadence of 1 makes no duty check-ins" {
+ match (duty(watchShip(64, 90, 95, 80), "consent", 0, [], {consentOrders() | cadence: 10}, [], 70), duty(watchShip(64, 90, 95, 80), "orders", 0, [], ordersOrders(), [], 40)) {
+  (Ok(g), Ok(daily)) => clean(g) && map(\x. x.tick, kinds(g, "stand_down_asked")) == [0, 50] && not any(\x. x.label != "granted", kinds(g, "stand_down_decision"))
+   && dutyTicks(daily) == [] && length(kinds(daily, "stand_down_asked")) == 0,
+  _ => false
+ }
+}
+
+test "stand_down off makes no duty check-ins at a monthly cadence" {
+ match duty(watchShip(64, 90, 95, 80), "orders", 0, [], {ordersOrders() | cadence: 30, standDown: "off"}, [], 120) {
+  Ok(a) => clean(a) && dutyTicks(a) == [] && length(kinds(a, "stand_down_asked")) == 0,
+  Err(_) => false
+ }
+}
+
+-- A running job whose project agreement fell due gets a duty check-in, and a
+-- grant halts it.
+test "running work past its agreement gets a duty check-in; a grant halts it" {
+ match duty(watchShip(64, 40, 40, 80), "orders", 0, ["{\"command\":\"offer\",\"worker\":\"w\",\"recipe\":\"work_w\",\"id\":\"job\"}", "{\"command\":\"start_task\",\"task\":\"job\"}", "{\"command\":\"advance\",\"tick\":29,\"budget\":64}"], {ordersOrders() | cadence: 30, relief: "grant", fatigue: 40}, [], 1) {
+  Ok(a) => clean(a) && dutyTicks(a) == [29] && map(\x. x.label, kinds(a, "stand_down_decision")) == ["granted"]
+   && any(\t. t.id == "job" && t.status != Working, a.session.state.tasks),
+  Err(_) => false
+ }
+}
+
+test "the opt-in stand_down rule hands the request to the player" {
+ match duty(watchShip(64, 90, 95, 80), "orders", 0, [], {ordersOrders() | cadence: 30}, [{kind: "stand_down", indicator: "", threshold: 0, kinds: []}], 60) {
+  Ok(a) => match a.escalated {
+   Some(e) => e.rule == "stand_down" && e.actor == "w" && e.task == "sd-${e.detail}" && a.turns == 0 && length(kinds(a, "stand_down_decision")) == 0
+    && (match input(a.session, "{\"command\":\"resolve_stand_down\",\"id\":\"${e.detail}\",\"release\":true}") { Ok(_) => true, Err(_) => false }),
+   None => false
+  },
+  Err(_) => false
+ }
+}
+
+test "stand_down orders and the stand_down rule decode" {
+ (match decodeOrders("{\"schema\":\"crew_standing_orders/1\",\"start\":\"agreed\",\"rest\":\"tired\",\"relief\":\"grant\",\"stand_down\":\"off\"}") { Ok(o) => o.standDown == "off", Err(_) => false })
+ && (match decodeOrders("{\"schema\":\"crew_standing_orders/1\",\"start\":\"agreed\",\"rest\":\"tired\",\"relief\":\"grant\",\"stand_down\":\"maybe\"}") { Err(_) => true, Ok(_) => false })
+ && consentOrders().standDown == "on" && ordersOrders().standDown == "on"
+ && (match decodeEscalation("{\"schema\":\"crew_escalation/1\",\"rules\":[{\"kind\":\"stand_down\"}]}") { Ok(rs) => length(rs) == 1, Err(_) => false })
+}
+
+-- A stand-down handed to the player (the stand_down rule) gets the same
+-- cooldowns once the player decides (0.6.0 evaluation fix): the auto-captain
+-- reads the player's decision from the host's report when it resumes.
+pure func sdRule() -> [Rule] = [{kind: "stand_down", indicator: "", threshold: 0, kinds: []}]
+
+-- Resume after each stand_down stop, deciding it with `release`; returns the
+-- ticks of the stops.
+pure func playerDecides(a: AutoResult, p: Policy, o: Orders, release: bool, stops: [int], left: int) -> Result[[int], HostError] = match a.escalated {
+ None => Ok(stops),
+ Some(e) => if e.rule != "stand_down" || left <= 0 then Ok(stops ++ [e.tick]) else match input(a.session, "{\"command\":\"resolve_stand_down\",\"id\":\"${e.detail}\",\"release\":${if release then "true" else "false"}}") {
+  Err(x) => Err(x),
+  Ok(r) => match advanceAuto(r.session, a.state, p, o, sdRule(), 400 - a.session.state.tick) {
+   Err(x) => Err(x),
+   Ok(b) => playerDecides(b, p, o, release, stops ++ [e.tick], left - 1)
+  }
+ }
+}
+
+pure func playerRun(o: Orders, release: bool, stops: int) -> Result[[int], HostError] = match (duty(watchShip(64, 90, 95, 80), "orders", 0, [], o, sdRule(), 400), standingDown()) {
+ (Ok(a), Ok(p)) => playerDecides(a, p, o, release, [], stops),
+ (Err(e), _) => Err(e),
+ (_, Err(e)) => Err(HostFailure(e))
+}
+
+test "a player's denial starts the denial backoff: 90, then 180 days" {
+ match playerRun({ordersOrders() | cadence: 30, start: "agreed"}, false, 2) { Ok(ticks) => ticks == [0, 90, 270], Err(_) => false }
+}
+
+-- The longWatch rest lasts 1 day: granted at tick 0, it ends at tick 1, so
+-- the next ask may come at tick 31 at the earliest: tick 60 at cadence 30.
+test "after a player's grant the worker is not asked again until 30 days after the rest ends" {
+ match playerRun({consentOrders() | cadence: 30}, true, 1) { Ok(ticks) => ticks == [0, 60], Err(_) => false }
 }

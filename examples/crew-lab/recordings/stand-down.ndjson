@@ -1,0 +1,12 @@
+{"command":"start","policy":"orders","scenario":"watch-v2"}
+{"command":"offer","worker":"scientist","recipe":"work_scientist","id":"science"}
+{"command":"start_task","task":"science"}
+{"command":"check_in","actor":"scientist","id":"d1"}
+{"command":"answer","request":"d1","body":"{\"model\":\"synthetic:jev\",\"id\":\"synthetic-d1\",\"usage\":{\"input_tokens\":0,\"output_tokens\":0,\"cost\":0},\"answers\":{\"response\":{\"type\":\"choice\",\"choice\":\"stand_down\",\"confidence\":0.8,\"probabilities\":{\"carry_on\":0.05,\"defer\":0.05,\"stand_down\":0.9}}}}","roll":0.5}
+{"command":"resolve_stand_down","id":"d1","release":true}
+{"command":"check_in","actor":"engineer","id":"d2"}
+{"command":"answer","request":"d2","body":"{\"model\":\"synthetic:jev\",\"id\":\"synthetic-d2\",\"usage\":{\"input_tokens\":0,\"output_tokens\":0,\"cost\":0},\"answers\":{\"response\":{\"type\":\"choice\",\"choice\":\"stand_down\",\"confidence\":0.8,\"probabilities\":{\"carry_on\":0.05,\"defer\":0.05,\"stand_down\":0.9}}}}","roll":0.5}
+{"command":"resolve_stand_down","id":"d2","release":false}
+{"command":"check_in","actor":"medic","id":"d3"}
+{"command":"answer","request":"d3","body":"{\"model\":\"synthetic:jev\",\"id\":\"synthetic-d3\",\"usage\":{\"input_tokens\":0,\"output_tokens\":0,\"cost\":0},\"answers\":{\"response\":{\"type\":\"choice\",\"choice\":\"carry_on\",\"confidence\":0.8,\"probabilities\":{\"carry_on\":0.9,\"defer\":0.05,\"stand_down\":0.05}}}}","roll":0.5}
+{"command":"advance","tick":3,"budget":64}
