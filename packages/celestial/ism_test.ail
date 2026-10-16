@@ -15,7 +15,7 @@ import std/math (sin, cos, sqrt, intToFloat, floatToInt, log)
 import std/list (sortBy, length, nth_or)
 import ./kepler (Vec3, absf)
 import ./frames (unitFromAngles)
-import ./ism (Interval, GrainDist, realSphericalHarmonic, realSphericalHarmonicAt, starSurfaceRadius, insideStarSurface, starSurfaceCrossings, starSurfaceChords, rayExitDistance, coneShellChord, insideConeShell, ellipsoidChord, slabChord, nHFromExtinction, healpixRingVec, grainDist, grainsAbove, grainRadiusAt, grainMass, grainMassDensity, grainTailMassFraction, poissonDraw)
+import ./ism (Interval, GrainDist, healpixNestVec, realSphericalHarmonic, realSphericalHarmonicAt, starSurfaceRadius, insideStarSurface, starSurfaceCrossings, starSurfaceChords, rayExitDistance, coneShellChord, insideConeShell, ellipsoidChord, slabChord, nHFromExtinction, healpixRingVec, grainDist, grainsAbove, grainRadiusAt, grainMass, grainMassDensity, grainTailMassFraction, poissonDraw)
 
 type Row = { l: float, b: float, d: float }
 type HpRow = { nside: int, pix: int, v: Vec3 }
@@ -391,3 +391,47 @@ pure func checkPoissonU1() -> bool {
 }
 
 test "poissonDraw at u = 1 in the normal branch stays finite (clamped); NaN v gives 0" { checkPoissonU1() }
+
+-- 0.5.0: NESTED pixel centres, rows from healpy 1.20.1 pix2vec(nest=True) (an independent
+-- C++ implementation).
+pure func nestRows() -> [HpRow] = [
+  { nside: 1, pix: 0, v: { x: 0.5270462766947299, y: 0.5270462766947298, z: 0.6666666666666666 } },
+  { nside: 1, pix: 5, v: { x: 6.123233995736766e-17, y: 1.0, z: 0.0 } },
+  { nside: 1, pix: 11, v: { x: 0.5270462766947298, y: -0.52704627669473, z: -0.6666666666666666 } },
+  { nside: 2, pix: 7, v: { x: -0.28259708263021954, y: 0.2825970826302196, z: 0.9166666666666666 } },
+  { nside: 2, pix: 30, v: { x: -0.38268343236509034, y: -0.9238795325112865, z: 0.0 } },
+  { nside: 4, pix: 100, v: { x: -0.9109575040515916, y: -0.37733095292371227, z: -0.16666666666666666 } },
+  { nside: 16, pix: 1234, v: { x: 0.957766037388293, y: 0.1420711709866822, z: 0.25 } },
+  { nside: 64, pix: 40000, v: { x: -0.6335698992634549, y: 0.5199573788329687, z: -0.5729166666666666 } },
+  { nside: 256, pix: 0, v: { x: 0.7071043834951005, y: 0.7071043834951004, z: 0.0026041666666666665 } },
+  { nside: 256, pix: 123456, v: { x: -0.22182330234634148, y: 0.46300578275244086, z: 0.8581492106119792 } },
+  { nside: 256, pix: 500000, v: { x: -0.5212903044878926, y: -0.8460006410633264, z: -0.11197916666666666 } },
+  { nside: 256, pix: 786431, v: { x: 0.7071043834951003, y: -0.7071043834951006, z: -0.0026041666666666665 } },
+  { nside: 256, pix: 393216, v: { x: -0.7476770667164735, y: 9.156403265502113e-17, z: -0.6640625 } }
+]
+
+pure func nestOk(rows: [HpRow]) -> bool = match rows {
+  [] => true,
+  r :: rest => {
+    let v = healpixNestVec(r.nside, r.pix);
+    near(v.x, r.v.x, 0.00000000000001) && near(v.y, r.v.y, 0.00000000000001) && near(v.z, r.v.z, 0.00000000000001) && nestOk(rest)
+  }
+}
+
+test "HEALPix NESTED pixel centres equal healpy's on 13 rows, Nside 1 .. 256 (1e-14)" { nestOk(nestRows()) }
+
+pure func nestSameSet(nside: int, p: int, acc: float) -> float =
+  if p >= 12 * nside * nside then acc
+  else {
+    let v = healpixNestVec(nside, p);
+    nestSameSet(nside, p + 1, acc + v.x * 3.0 + v.y * 5.0 + v.z * 7.0)
+  }
+
+pure func ringSum(nside: int, p: int, acc: float) -> float =
+  if p >= 12 * nside * nside then acc
+  else {
+    let v = healpixRingVec(nside, p);
+    ringSum(nside, p + 1, acc + v.x * 3.0 + v.y * 5.0 + v.z * 7.0)
+  }
+
+test "NEST and RING enumerate the same pixel centres at Nside 8 (weighted sums agree to 1e-10)" { near(nestSameSet(8, 0, 0.0), ringSum(8, 0, 0.0), 0.0000000001) }

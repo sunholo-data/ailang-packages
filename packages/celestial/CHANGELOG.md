@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.5.0
+
+Feature (stapledons ledger D-60, D-61; R1-ISM-DUST PR B). Every 0.4.0 signature and result
+is unchanged; the addition is in `ism`.
+
+- `healpixNestVec(nside, pix)`: the centre of a NESTED-scheme HEALPix pixel (the HEALPix
+  C++ library's pix2loc for NEST: face, de-interleaved (ix, iy), ring and phase). The
+  Edenhofer et al. 2024 3D dust map (Zenodo 8187943) is NEST-ordered.
+- Tests (2 more): 13 rows against healpy 1.20.1 `pix2vec(nest=True)` to 1e-14, Nside 1 to
+  256; NEST and RING enumerate the same centres at Nside 8.
+
 ## 0.4.0
 
 Feature (minor bump, the repo's convention for new exports; stapledons ledger

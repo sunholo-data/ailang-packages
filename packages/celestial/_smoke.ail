@@ -31,7 +31,7 @@ import ./lighttime (retarded, secondsPerDay)
 import ./gravity (GravBody, accelerationAt, accelerationRelativeTo, gmSunNominal, gmEarthNominal, radiusSunNominal, radiusEarthNominal)
 import ./reflect (lambertPhase, minnaertRadiance, minnaertPhase, rhoFromGeometricAlbedo, bondAlbedo, discIlluminance, starIlluminanceAt)
 import ./rings (RingBand, ringLitIF, ringUnlitIF, ringTransmission, ringShadowTransmission, ringPlaneHit)
-import ./ism (Interval, rayExitDistance, starSurfaceCrossings, coneShellChord, ellipsoidChord, slabChord, healpixRingVec, grainDist, grainsAbove, grainRadiusAt, poissonDraw, nHFromExtinction)
+import ./ism (Interval, healpixNestVec, rayExitDistance, starSurfaceCrossings, coneShellChord, ellipsoidChord, slabChord, healpixRingVec, grainDist, grainsAbove, grainRadiusAt, poissonDraw, nHFromExtinction)
 
 pure func rad(d: float) -> float = d * 3.141592653589793 / 180.0
 
@@ -208,7 +208,9 @@ pure func ivs(is: [Interval], acc: [float]) -> [float] = match is { [] => acc, i
 pure func ismRows(k: int, n: int, acc: [float]) -> [float] =
   if k > n then acc
   else {
-    let u = healpixRingVec(2, k % 48);
+    let u0 = healpixRingVec(2, k % 48);
+    let w = healpixNestVec(16, (k * 37) % 3072);
+    let u = { x: u0.x + 0.000001 * w.x, y: u0.y + 0.000001 * w.y, z: u0.z + 0.000001 * w.z };
     let f = intToFloat(k) / intToFloat(n);
     let d = grainDist(0.0000000000000000000000021, 0.000000005, 0.00000025, 0.000008977026012029025, 2.9 + 0.4 * f, 3300.0);
     let b = { x: u.x * 20.0, y: u.y * 20.0, z: u.z * 20.0 };
