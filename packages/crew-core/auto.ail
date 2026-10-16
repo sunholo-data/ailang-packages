@@ -21,7 +21,8 @@ import ./cohorts (Cohort, division, pressure)
 --
 -- One turn, in this order (the crew lab's crew-sim captain loop):
 --  1. offered work: start it if the worker agreed earlier, else ask again;
---  2. every other turn, check in with working crew; answer relief requests;
+--  2. check in with working crew (every other day of the work at a daily
+--     cadence, every decision turn at a longer one); answer relief requests;
 --  3. each idle worker (scenario order): offer work (or rest when tired and
 --     the orders rest the tired), ask, start under the orders;
 --  4. advance one tick.
@@ -256,10 +257,31 @@ pure func grants(o: Orders, s: Session, worker: string) -> bool =
 
 -- The host takes no check-in while a concern about the task is open (even
 -- one the captain can no longer answer), so those are skipped.
+--
+-- When to check in (0.5.1) is counted from the task's start, never from the
+-- caller's turn numbers: `elapsed` is the days the work has run. At a daily
+-- cadence the captain checks in every other day of the work, starting the day
+-- after it began (days 1, 3, 5, ...). At a cadence of two days or more each
+-- decision turn is already that far apart, so every decision turn after the
+-- start checks in. 0.5.0 checked in only on even turn numbers, and a
+-- monthly schedule (decisions on turns 1, 31, 61, ...) never did.
+--
+-- The host asks only under a live project agreement, and an agreement falls
+-- due 20 days after the offer, so later work is not checked in with (the ask
+-- would be refused as "subject transition/expiry"). At a monthly cadence that
+-- is every decision turn: monthly relief needs a longer agreement.
+pure func checkInDue(o: Orders, elapsed: int) -> bool =
+ elapsed >= 1 && (o.cadence >= 2 || elapsed % 2 == 1)
+
+pure func agreementLive(s: Session, t: Task) -> bool = match head(filter(\b. b.task == t.id, s.bindings)) {
+ Some(b) => any(\c. c.id == b.agreement && c.due > s.state.tick, s.state.commitments),
+ None => false
+}
+
 pure func checkIn(r: Run, p: Policy, o: Orders, turn: int, t: Task) -> Run =
  if stopped(r) || any(\i. i.task == t.id && i.status == "open", r.session.chat.issues) then r else match head(t.participants) {
   None => r,
-  Some(worker) => if turn % 2 != 0 then r else {
+  Some(worker) => if not checkInDue(o, r.session.state.tick - t.started) || not agreementLive(r.session, t) then r else {
    let rid = "c${show(turn)}${r.salt}-${t.id}";
    let h = hear(r, p, worker, t.id, rid);
    if h.label != "request_relief" then h.run else {

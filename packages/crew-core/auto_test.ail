@@ -1,11 +1,12 @@
 module sunholo/crew_core/auto_test
 import std/result (Result, Ok, Err)
 import std/option (Option, Some, None)
-import std/list (head, filter, length, any, contains)
+import std/string (startsWith)
+import std/list (head, filter, length, any, contains, map)
 import pkg/sunholo/social_dynamics/model (Offered)
 import ./scenario (decodeScenario)
 import ./example (firstContact)
-import ./session (Session, HostError, HostFailure, start)
+import ./session (Session, HostError, HostFailure, start, input)
 import ./policy (Policy, decodePolicy, watchPolicyBody)
 import ./auto (Orders, Rule, AutoResult, advanceAuto, consentOrders, ordersOrders, decodeOrders, decodeEscalation)
 
@@ -122,4 +123,58 @@ test "resuming after a refusal stop reuses no ids and logs no errors" {
 
 test "a partial last cadence block still covers the whole span" {
  match run("consent", {consentOrders() | cadence: 4}, [], 10) { Ok(a) => a.turns == 10 && a.session.state.tick == 10, Err(_) => false }
+}
+
+-- Stapledon drives auto-run on an absolute schedule: from tick 0 at cadence c,
+-- decisions fall on turns 1, 1+c, 1+2c, ..., all odd when c is even (D-76's
+-- monthly skip is cadence 30). crew_core 0.5.0 checked in only on even turns,
+-- so on that schedule nobody was ever asked about relief. A worker on a
+-- 15-day job at stress 95, decided every 10 days (turns 1, 11, 21), must be
+-- checked in with on day 10 and ask for relief (0.5.1, found by stapledons-godot
+-- sprint R2-INTERLUDE I2).
+pure func longWatchShip(days: int) -> string =
+ "{\"schema\":\"crew_scenario/1\",\"id\":\"long-watch\",\"indicators\":[\"fatigue\",\"stress\",\"trust\",\"morale\"],\"indicator_defaults\":{\"fatigue\":90,\"stress\":95,\"morale\":50},\"captain\":{\"id\":\"captain\",\"values\":{\"mission\":80},\"start\":{}},\"crew\":[{\"id\":\"w\",\"role\":\"Watch keeper\",\"ocean\":{\"openness\":50,\"conscientiousness\":50,\"extraversion\":50,\"agreeableness\":50,\"neuroticism\":90},\"values\":{\"duty\":60},\"start\":{},\"work\":[{\"id\":\"work_w\",\"name\":\"Keep the long watch\",\"purpose\":\"Hold the course.\",\"duration\":${show(days)},\"costs\":[],\"effects\":{\"fatigue\":5}}]}],\"rest\":{\"purpose\":\"Recover.\",\"duration\":1,\"effects\":{\"fatigue\":-10}},\"overextended\":{\"indicator\":\"stress\",\"threshold\":70,\"recovery\":40,\"duration\":2,\"cooldown\":3},\"trust_in_captain\":80,\"resources\":[{\"id\":\"air\",\"name\":\"Air\",\"initial\":10}]}"
+
+pure func longWatch(days: int, o: Orders, n: int) -> Result[AutoResult, HostError] = longWatchFrom(days, 0, o, n)
+
+-- from: plain days advanced before auto-run starts.
+pure func longWatchFrom(days: int, from: int, o: Orders, n: int) -> Result[AutoResult, HostError] = match (decodeScenario(longWatchShip(days)), responses()) {
+ (Ok(sc), Ok(p)) => match start(sc, "{\"command\":\"start\",\"policy\":\"orders\",\"scenario\":\"watch-v2\"}") {
+  Err(e) => Err(e),
+  Ok(s) => match (if from == 0 then Ok(s) else input(s.session, "{\"command\":\"advance\",\"tick\":${show(from)},\"budget\":64}")) { Err(e) => Err(e), Ok(t) => advanceAuto(t.session, {seed: 7, agreed: [], raised: [], calls: 0}, p, o, [], n) }
+ },
+ (Err(e), _) => Err(HostFailure(e)),
+ (_, Err(e)) => Err(HostFailure(e))
+}
+
+test "decisions on odd turns only still check in, and a stressed worker asks for relief" {
+ match longWatch(15, {ordersOrders() | cadence: 10, relief: "grant"}, 30) {
+  Ok(a) => a.session.state.tick == 30 && not any(\x. x.kind == "error", a.log)
+   && any(\x. x.kind == "relief_asked" && x.actor == "w" && x.tick == 10, a.log)
+   && any(\x. x.kind == "relief_decision" && x.label == "granted" && x.tick == 10, a.log),
+  Err(_) => false
+ }
+}
+
+pure func checkInTicks(a: AutoResult) -> [int] = map(\x. x.tick, filter(\x. x.kind == "reply" && (match x.request { Some(q) => startsWith(q.id, "c"), None => false }), a.log))
+
+-- At a daily cadence check-ins come every other day of the work, counted from
+-- its start (its days 1 and 3), whatever the parity of the turn numbers: a
+-- 4-day job started on tick 0 is checked in with on ticks 1 and 3, one started
+-- on tick 1 on ticks 2 and 4 (0.5.0 gave only tick 3 for the second).
+test "a daily cadence checks in on the work's odd days, counted from its start" {
+ match (longWatch(4, {ordersOrders() | relief: "deny"}, 4), longWatchFrom(4, 1, {ordersOrders() | relief: "deny"}, 4)) {
+  (Ok(a), Ok(b)) => checkInTicks(a) == [1, 3] && checkInTicks(b) == [2, 4],
+  _ => false
+ }
+}
+
+-- A project agreement falls due 20 days after its offer, and the host takes no
+-- ask after that, so a monthly decision never checks in on long work: no host
+-- error each month either.
+test "a monthly cadence does not check in on work whose agreement fell due" {
+ match longWatch(64, {ordersOrders() | cadence: 30, relief: "grant"}, 90) {
+  Ok(a) => a.session.state.tick == 90 && not any(\x. x.kind == "error", a.log) && not any(\x. x.kind == "relief_asked", a.log),
+  Err(_) => false
+ }
 }

@@ -210,10 +210,13 @@ pure func persuade(sim: Sim, turn: int, t: Task) -> Sim = if contains(sim.agreed
  }
 }
 
--- Check in with working crew every other turn; relief requests get an answer.
+-- Check in with working crew every other day of the work, counted from its
+-- start (days 1, 3, 5, ...), as crew_core 0.5.1's auto-captain does at a daily
+-- cadence, so all three captains share one check-in rule. Relief requests get
+-- an answer.
 pure func checkIn(sim: Sim, turn: int, t: Task) -> Sim = match head(t.participants) {
  None => sim,
- Some(worker) => if turn % 2 != 0 then sim else {
+ Some(worker) => if not (sim.session.state.tick - t.started >= 1 && (sim.session.state.tick - t.started) % 2 == 1) then sim else {
   let rid = "c${show(turn)}-${t.id}";
   let heard = hear(sim, worker, t.id, rid);
   if heard.label != "request_relief" then heard.sim else {
