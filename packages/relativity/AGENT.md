@@ -40,6 +40,24 @@ Do NOT use it for:
   `kinematics.rapidityOfBeta` to convert. Everything is written in rapidity
   with the cancellations removed, so it stays accurate at γ in the millions.
   Never compute `1.0 - beta` yourself near c; use `oneMinusBeta(phi)`.
+- **Float64 domain bounds (0.13.0), documented in each function's
+  `requires`.** Rapidity-like arguments are bounded at ±700: float64 `exp`
+  saturates to +Inf at 709.78, and 700 leaves the products inside each
+  function (expm1's `(e^u − 1)·u` ratio, sinh's `e·(e+2)` — fixed — and
+  `T_CMB·D`) finite as well. So: `hyper.expm1` requires `u <= 700`
+  (very negative u underflows exp to 0 and returns exactly −1.0);
+  `hyper.sinhc` requires `|u| <= 700` (`sinh` is finite there, and
+  `sinh(u)/u >= 1` throughout); `kinematics.accelerate` requires dtau ≥ 0
+  and both `m.phi` and `m.phi + a·dtau` within ±700 (`coast` the same for
+  `m.phi`) — outside that, cosh/sinh return +Inf and t and x saturate;
+  `hyper.sinh` is `e^|u|/2` above |u| = 350 and saturates to +Inf exactly
+  where `exp` does (before 0.13.0 it returned +Inf past |u| = 355 and NaN
+  past 709.78). The optics Doppler/CMB functions (`doppler`,
+  `dopplerApparent`, `cmbSeenTemperature`, `cmbSeenTemperatureApparent`)
+  require `0 <= phi <= 700` AND unit directions — the dot product of `n`
+  (and `nSeen`) with `bh` must lie in [−1, 1], because that dot *is* the
+  cosine θ the formulas consume: pass `normalize(direction)`, never a
+  position or an offset.
 - **`n`:** unit vector from the observer **toward** the source, in the rest
   frame. `bh` is the unit direction of the observer's velocity.
 - **`D`:** Doppler factor ν_seen/ν_emitted. D > 1 means blueshift.

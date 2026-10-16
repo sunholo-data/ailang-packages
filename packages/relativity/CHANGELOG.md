@@ -1,5 +1,59 @@
 # Changelog
 
+## 0.13.0
+
+Fix: float64 domain bounds documented for the seven auto-generated property
+failures recorded as known under 0.10.1, and `hyper.sinh` no longer saturates
+355 rapids early. `ailang test --json --seed 0 .` (the whole-directory
+property suite) now reports 0 failures: the seven
+(`hyper.expm1`, `hyper.sinhc`, `kinematics.accelerate`,
+`optics.doppler`, `dopplerApparent`, `cmbSeenTemperature`,
+`cmbSeenTemperatureApparent`) either pass on their documented domain or
+discard out-of-domain inputs instead of reporting an Inf/NaN as a violated
+`ensures`.
+
+- **hyper (fix).** `sinh`'s `e (e + 2) / (2 (e + 1))` form overflowed once
+  `e^|u|` passed about 6e153, i.e. |u| = 355: it returned +Inf where the true
+  sinh is finite to |u| = 709.09 (e^709.5/2 = 6.8e307), and NaN past exp's
+  own saturation at 709.78. Above |u| = 350 it now returns `e^|u| / 2` — the
+  e^-u half is far below one ulp of e^|u|, so this is the correctly rounded
+  sinh — bit-identical below 355 and correctly saturated to +Inf past 709.78.
+  Every other export's values are unchanged bit for bit.
+- **Domain bounds (0.13.0, in each function's `requires`).** `expm1(u)`:
+  u <= 700.0 (exp saturates at 709.78; the Kahan ratio's numerator
+  (e^u - 1) u overflows past ~703.3; very negative u underflows exp to 0 and
+  returns exactly -1.0). `sinhc(u)`: |u| <= 700.0 (sinh is finite there and
+  sinh(u)/u >= 1 throughout). `kinematics.accelerate(m, a, dtau)`: dtau >= 0
+  as before, and BOTH rapicities `m.phi` and `m.phi + a dtau` within +-700.0
+  (cosh/sinh finite; mid, their midpoint, too; |a dtau| <= 1400 keeps
+  `sinhc(h/2)` finite; the old failure was sinhc's NaN at |a dtau| ~ 6.6e4).
+  For rapidities near the 700 bound with very long steps, t and x can still
+  saturate to +Inf — float64 exhaustion, the monotone-time ensures holds
+  throughout. `coast` carries the same incoming-rapidity bound (it forwards
+  to accelerate). `optics.doppler`, `dopplerApparent`,
+  `cmbSeenTemperature`, `cmbSeenTemperatureApparent`: 0 <= phi <= 700.0 and
+  the direction pair's dot product within [-1, 1] — n and bh are UNIT
+  vectors (AGENT.md conventions); an unnormalised pair's dot is not a cosine,
+  and the counterexamples passed dot products like -9847 into
+  `gammaOnePlusBetaCos` outside its own contract, where the c = -1 branch
+  multiplied a saturated sinh by 0 (NaN). The optics bounds also mean
+  `doppler` now calls `gammaOnePlusBetaCos` strictly inside its own
+  contract, and D lies in [e^-phi, e^phi], finite and positive throughout
+  (T_CMB D finite too, at most 2.76e304 K).
+- **kinematics**: `Motion` derives `Eq` (additive; for the boundary tests
+  below).
+- Tests: new `domain_bounds_test.ail` (10), values proved as float64
+  identities rather than oracle constants: expm1/sinh/cosh/tanh/sinhc at
+  their domain edges (expm1 = -1 exactly at -709 and finite at 700; sinh =
+  cosh = e^700/2 bit for bit at 700 and +Inf at 710 where it was NaN;
+  tanh = +-1 from 20 to 700), a zero-length accelerate/coast step as the
+  identity at rest and at the +-700 edge (would have been NaN at 709 with
+  the old sinh: sinh(700) * 0), an exact one-step burn across +-350 (x
+  unchanged, t = sinhc(350) ~ e^350/700), betaOf/gammaOf/oneMinusBeta at the
+  edge, and unit-vector doppler/dopplerApparent/cmbSeenTemperature(Apparent)
+  at rest (2.725 K) and at the 700 edge (D = e^phi ahead, e^-phi astern —
+  the astern edge is the NaN before the fix).
+
 ## 0.12.0
 
 Feature (stapledons ledger D-60, D-61, Mark attended 2026-10-09): the
