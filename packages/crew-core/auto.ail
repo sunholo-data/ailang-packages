@@ -1,9 +1,9 @@
 module sunholo/crew_core/auto
 import std/result (Result, Ok, Err)
 import std/option (Option, Some, None)
-import std/list (map, filter, foldl, length, head, any, contains, range, reverse)
+import std/list (map, filter, foldl, length, head, any, contains, range, reverse, flatMap)
 import std/json (Json, decode, getString, getInt, getArray, getStringArrayOrEmpty, keys)
-import std/string (startsWith)
+import std/string (startsWith, split, stringToInt)
 import pkg/sunholo/social_dynamics/model (Task, Offered, Working)
 import ./scenario (Scenario)
 import ./session (Session, Output, Request, HostError, HostFailure, TaskAgreement, input, encodeHostError, moot)
@@ -11,6 +11,7 @@ import ./conversations (Issue, approaches, suggestions as replySuggestions)
 import std/json (encode, jo, kv, js, jnum, jint, jb)
 import ./policy (Policy, authoredAnswer)
 import ./cohorts (Cohort, division, pressure)
+import ./host_policy (cooperative)
 
 -- Auto-captain (crew_core 0.3.0, Stapledon R2-CREW CI-0). Standing orders say
 -- what the captain would decide; escalation rules say which moments must go
@@ -23,6 +24,9 @@ import ./cohorts (Cohort, division, pressure)
 --  1. offered work: start it if the worker agreed earlier, else ask again;
 --  2. check in with working crew (every other day of the work at a daily
 --     cadence, every decision turn at a longer one); answer relief requests;
+--  2b. (0.6.0) duty check-ins: at a cadence of 2 or more, a strained crew
+--     member not asked about relief this turn may ask to stand down, working
+--     or not (see standDownDue);
 --  3. each idle worker (scenario order): offer work (or rest when tired and
 --     the orders rest the tired), ask, start under the orders;
 --  4. advance one tick.
@@ -47,7 +51,10 @@ import ./cohorts (Cohort, division, pressure)
 --    is not asked again or offered other work. A concern the worker reopens
 --    after that one reply is not answered again: it waits until the offer
 --    lapses (20 ticks), then the worker is offered work afresh.
-export type Orders = { start: string, rest: string, relief: string, fatigue: int, stress: int, cadence: int, concerns: string } deriving (Eq)
+--  stand_down (0.6.0): "on" (the default) or "off". On, at a cadence of 2 or
+--    more, strained crew get a duty check-in (step 2b); the relief order
+--    decides it. "off" runs as 0.5.1.
+export type Orders = { start: string, rest: string, relief: string, fatigue: int, stress: int, cadence: int, concerns: string, standDown: string } deriving (Eq)
 
 -- crew_escalation/1 rules. kind:
 --  "refusal_under_orders": a worker declines and the orders would start anyway
@@ -63,6 +70,10 @@ export type Orders = { start: string, rest: string, relief: string, fatigue: int
 --    times in one advanceAuto call, so a deadlocked crew cannot look calm
 --  Crossing rules (breakdown, trust_floor, cohort) re-arm only once the value
 --    is 10 back across the line (hysteresis, 0.4.1).
+--  "stand_down" (0.6.0, opt-in): a crew member asks to stand down at a duty
+--    check-in; the auto-captain stops before deciding, leaving the request
+--    for the player (resolve_stand_down). The escalation's task is the rest
+--    offer sd-<id> and its detail the check-in id <id>
 --  "cohort": a cohort's `indicator` ("pressure" or "division", 0..100)
 --    reaches threshold (each crossing once, until it falls back). The
 --    escalation's actor is the cohort's voice (may be empty) and its detail
@@ -70,7 +81,9 @@ export type Orders = { start: string, rest: string, relief: string, fatigue: int
 export type Rule = { kind: string, indicator: string, threshold: int, kinds: [string] } deriving (Eq)
 
 -- What happened, for callers that tally (crew-sim) or show (the game).
--- kind: offer | reply | start | refusal | relief_asked | relief_decision | error
+-- kind: offer | reply | start | refusal | relief_asked | relief_decision |
+-- stand_down_asked | stand_down_decision (0.6.0; label granted or denied,
+-- detail the rest offer sd-<id>) | captain_reply | error
 export type Act = { kind: string, actor: string, label: string, detail: string, request: Option[Request], tick: int, fatigue: int, stress: int, morale: int } deriving (Eq)
 
 export type Escalated = { rule: string, actor: string, task: string, tick: int, detail: string } deriving (Eq)
@@ -87,10 +100,10 @@ export type AutoState = { seed: int, agreed: [string], raised: [string], calls: 
 export type AutoResult = { session: Session, state: AutoState, turns: int, escalated: Option[Escalated], log: [Act], noted: [Escalated] } deriving (Eq)
 
 export pure func consentOrders() -> Orders ! {}
-ensures { result.start == "agreed" } = { start: "agreed", rest: "tired", relief: "grant", fatigue: 70, stress: 75, cadence: 1, concerns: "escalate" }
+ensures { result.start == "agreed" } = { start: "agreed", rest: "tired", relief: "grant", fatigue: 70, stress: 75, cadence: 1, concerns: "escalate", standDown: "on" }
 
 export pure func ordersOrders() -> Orders ! {}
-ensures { result.start == "always" } = { start: "always", rest: "never", relief: "deny", fatigue: 70, stress: 75, cadence: 1, concerns: "escalate" }
+ensures { result.start == "always" } = { start: "always", rest: "never", relief: "deny", fatigue: 70, stress: 75, cadence: 1, concerns: "escalate", standDown: "on" }
 
 -- --------------------------------------------------------------- decoding
 
@@ -100,24 +113,26 @@ export pure func decodeOrders(body: string) -> Result[Orders, string] ! {}
 ensures { match result { Ok(o) => o.start == "agreed" || o.start == "always", Err(_) => true } } = match decode(body) {
  Err(e) => Err("standing orders JSON: ${e}"),
  Ok(j) => if str(j, "schema") != "crew_standing_orders/1" then Err("standing orders: schema must be crew_standing_orders/1")
-  else if any(\k. not contains(["schema", "start", "rest", "relief", "fatigue", "stress", "cadence", "concerns"], k), keys(j)) then Err("standing orders: unknown field")
+  else if any(\k. not contains(["schema", "start", "rest", "relief", "fatigue", "stress", "cadence", "concerns", "stand_down"], k), keys(j)) then Err("standing orders: unknown field")
   else if not contains(["escalate"] ++ approaches(), concernsOf(j)) then Err("standing orders: concerns must be escalate or a reply approach")
   else if (match getInt(j, "cadence") { Some(c) => c < 1 || c > 365, None => false }) then Err("standing orders: cadence must be 1..365")
+  else if not contains(["on", "off"], standDownOf(j)) then Err("standing orders: stand_down must be on or off")
   else if not contains(["agreed", "always"], str(j, "start")) then Err("standing orders: start must be agreed or always")
   else if not contains(["tired", "never"], str(j, "rest")) then Err("standing orders: rest must be tired or never")
   else if not contains(["grant", "deny", "strained"], str(j, "relief")) then Err("standing orders: relief must be grant, deny or strained")
   else match (getInt(j, "fatigue"), getInt(j, "stress")) {
-   (Some(f), Some(s)) => if f < 0 || f > 100 || s < 0 || s > 100 then Err("standing orders: fatigue and stress must be 0..100") else Ok({ start: str(j, "start"), rest: str(j, "rest"), relief: str(j, "relief"), fatigue: f, stress: s, cadence: cadenceOf(j), concerns: concernsOf(j) }),
-   _ => Ok({ start: str(j, "start"), rest: str(j, "rest"), relief: str(j, "relief"), fatigue: 70, stress: 75, cadence: cadenceOf(j), concerns: concernsOf(j) })
+   (Some(f), Some(s)) => if f < 0 || f > 100 || s < 0 || s > 100 then Err("standing orders: fatigue and stress must be 0..100") else Ok({ start: str(j, "start"), rest: str(j, "rest"), relief: str(j, "relief"), fatigue: f, stress: s, cadence: cadenceOf(j), concerns: concernsOf(j), standDown: standDownOf(j) }),
+   _ => Ok({ start: str(j, "start"), rest: str(j, "rest"), relief: str(j, "relief"), fatigue: 70, stress: 75, cadence: cadenceOf(j), concerns: concernsOf(j), standDown: standDownOf(j) })
   }
 }
 
 pure func cadenceOf(j: Json) -> int = match getInt(j, "cadence") { Some(c) => c, None => 1 }
 pure func concernsOf(j: Json) -> string = match getString(j, "concerns") { Some(c) => c, None => "escalate" }
+pure func standDownOf(j: Json) -> string = match getString(j, "stand_down") { Some(c) => c, None => "on" }
 
 pure func readRule(j: Json) -> Result[Rule, string] = {
  let kind = str(j, "kind");
- if not contains(["refusal_under_orders", "breakdown", "trust_floor", "major", "argument", "uncovered", "cohort"], kind) then Err("escalation: unknown kind ${kind}")
+ if not contains(["refusal_under_orders", "breakdown", "trust_floor", "major", "argument", "uncovered", "cohort", "stand_down"], kind) then Err("escalation: unknown kind ${kind}")
  else {
   let threshold = match getInt(j, "threshold") { Some(n) => n, None => 0 - 1 };
   let kinds = getStringArrayOrEmpty(j, "kinds");
@@ -159,8 +174,11 @@ pure func threshold(s: Session, worker: string) -> int = match head(filter(\r. r
 -- longer occupies the worker and is not asked about again, at every cadence
 -- (0.4.1; 0.3.0 kept asking at cadence 1, which archiving turned into a host
 -- error every turn). Archiving folds lapsed offers away.
+-- A duty check-in's rest offer (0.6.0, agreement duty-<id>) never occupies
+-- the worker either: after a denial or carry_on the orders can still assign
+-- work on the same turn, and nobody is persuaded to take it.
 pure func stale(s: Session, t: Task) -> bool = t.status == Offered && (match head(filter(\b. b.task == t.id, s.bindings)) {
- Some(b) => any(\c. c.id == b.agreement && c.due <= s.state.tick, s.state.commitments),
+ Some(b) => startsWith(b.agreement, "duty-") || any(\c. c.id == b.agreement && c.due <= s.state.tick, s.state.commitments),
  None => false
 })
 
@@ -179,6 +197,8 @@ pure func ask(s: Session, actor: string, task: string, id: string) -> Result[Out
 pure func complete(s: Session, id: string, body: string, roll: float) -> Result[Output, HostError] = cmd(s, [kv("command", js("answer")), kv("request", js(id)), kv("body", js(body)), kv("roll", jnum(roll))])
 pure func startTask(s: Session, id: string) -> Result[Output, HostError] = cmd(s, [kv("command", js("start_task")), kv("task", js(id))])
 pure func resolve(s: Session, id: string, release: bool) -> Result[Output, HostError] = cmd(s, [kv("command", js("resolve_relief")), kv("id", js(id)), kv("release", jb(release))])
+pure func dutyCheckIn(s: Session, worker: string, id: string) -> Result[Output, HostError] = cmd(s, [kv("command", js("check_in")), kv("actor", js(worker)), kv("id", js(id))])
+pure func resolveStandDown(s: Session, id: string, release: bool) -> Result[Output, HostError] = cmd(s, [kv("command", js("resolve_stand_down")), kv("id", js(id)), kv("release", jb(release))])
 pure func cancel(s: Session, id: string) -> Result[Output, HostError] = cmd(s, [kv("command", js("cancel_request")), kv("id", js(id))])
 
 pure func act(r: Run, kind: string, actor: string, label: string, detail: string, request: Option[Request], s: Session) -> Run = {
@@ -278,6 +298,10 @@ pure func agreementLive(s: Session, t: Task) -> bool = match head(filter(\b. b.t
  None => false
 }
 
+-- Whether this turn checks in with the running task t about relief.
+pure func checkable(s: Session, o: Orders, t: Task) -> bool =
+ t.status == Working && not any(\i. i.task == t.id && i.status == "open", s.chat.issues) && checkInDue(o, s.state.tick - t.started) && agreementLive(s, t)
+
 pure func checkIn(r: Run, p: Policy, o: Orders, turn: int, t: Task) -> Run =
  if stopped(r) || any(\i. i.task == t.id && i.status == "open", r.session.chat.issues) then r else match head(t.participants) {
   None => r,
@@ -290,6 +314,88 @@ pure func checkIn(r: Run, p: Policy, o: Orders, turn: int, t: Task) -> Run =
     match resolve(asked.session, "relief-${rid}", go) {
      Err(e) => act(asked, "error", worker, "", "relief: ${encodeHostError(e)}", None, asked.session),
      Ok(x) => act({asked | session: x.session}, "relief_decision", worker, if go then "granted" else "denied", t.id, None, asked.session)
+    }
+   }
+  }
+ }
+
+-- ------------------------------------------------ stand down (0.6.0, 2b)
+-- At a cadence of 2 or more (OQ1), a crew member gets a duty check-in at a
+-- decision turn when they are strained (stress or fatigue at the orders'
+-- tired line, or overextended), not resting, not asked about relief this
+-- turn, without an open concern, at or over the cooperation floor, and off
+-- cooldown. If they ask to stand down the relief order decides (grants).
+--
+-- Cooldown (OQ4), in AutoState.raised as "stand_down/<worker>:<tick>:<k>",
+-- the tick of the last decided stand-down and the run of denials k: 30 days
+-- after a grant (k = 0), 90, 180, then 360 days after the k-th denial in a
+-- row. A carry_on or defer answer leaves it unchanged; so does a stand-down
+-- handed to the player (escalation rule stand_down).
+type Cooldown = { tick: int, denials: int, set: bool }
+
+pure func cooldownKey(worker: string) -> string = "stand_down/${worker}:"
+
+pure func cooldownOf(st: AutoState, worker: string) -> Cooldown = match head(filter(\k. startsWith(k, cooldownKey(worker)), st.raised)) {
+ None => { tick: 0, denials: 0, set: false },
+ Some(k) => match split(k, ":") {
+  [_, a, b] => match (stringToInt(a), stringToInt(b)) { (Some(t), Some(d)) => { tick: t, denials: d, set: true }, _ => { tick: 0, denials: 0, set: false } },
+  _ => { tick: 0, denials: 0, set: false }
+ }
+}
+
+export pure func standDownWait(denials: int) -> int ! {}
+ensures { result >= 30 && result <= 360 } = if denials <= 0 then 30 else if denials == 1 then 90 else if denials == 2 then 180 else 360
+
+pure func offCooldown(st: AutoState, worker: string, tick: int) -> bool = {
+ let c = cooldownOf(st, worker);
+ not c.set || tick - c.tick >= standDownWait(c.denials)
+}
+
+pure func remember(st: AutoState, worker: string, tick: int, denials: int) -> AutoState =
+ {st | raised: filter(\k. not startsWith(k, cooldownKey(worker)), st.raised) ++ ["${cooldownKey(worker)}${show(tick)}:${show(denials)}"]}
+
+pure func overextendedNow(s: Session, worker: string) -> bool = match head(filter(\r. r.id == "overextended_${worker}", s.scenario.rules)) {
+ None => false,
+ Some(r) => if r.above then indicator(s, worker, r.indicator) >= r.threshold else indicator(s, worker, r.indicator) <= r.threshold
+}
+
+pure func strainedNow(s: Session, o: Orders, worker: string) -> bool =
+ indicator(s, worker, "fatigue") >= o.fatigue || indicator(s, worker, "stress") >= o.stress || overextendedNow(s, worker)
+
+-- Resting: the worker's rest runs or is offered (a duty check-in's rest offer
+-- is stale, so it does not count, but it is open: they are not asked twice).
+pure func resting(s: Session, worker: string) -> bool =
+ any(\t. t.recipe == "rest_${worker}" && contains(t.participants, worker) && (t.status == Working || (t.status == Offered && not stale(s, t))), s.state.tasks)
+ || any(\b. b.worker == worker && startsWith(b.agreement, "duty-") && any(\t. t.id == b.task && t.status == Offered, s.state.tasks) && any(\c. c.id == b.agreement && c.due > s.state.tick, s.state.commitments), s.bindings)
+
+export pure func standDownOn(o: Orders) -> bool ! {}
+ensures { not result || o.cadence >= 2 } = o.standDown == "on" && o.cadence >= 2
+
+pure func standDownDue(r: Run, o: Orders, relieved: [string], worker: string) -> bool = {
+ let s = r.session;
+ standDownOn(o) && not contains(relieved, worker) && not resting(s, worker) && not any(\i. i.worker == worker, concernsOpen(s))
+ && strainedNow(s, o, worker) && cooperative(s.state, worker) && offCooldown(r.state, worker, s.state.tick)
+}
+
+pure func standDown(r: Run, p: Policy, o: Orders, rules: [Rule], turn: int, worker: string) -> Run =
+ if stopped(r) then r else {
+  let id = "d${show(turn)}${r.salt}-${worker}";
+  let task = "sd-${id}";
+  match dutyCheckIn(r.session, worker, id) {
+   Err(e) => act(r, "error", worker, "", "check_in: ${encodeHostError(e)}", None, r.session),
+   Ok(x) => {
+    let h = answerPending({r | session: x.session}, p, worker, task, id);
+    if h.label != "stand_down" then h.run else {
+     let asked = act(h.run, "stand_down_asked", worker, "", task, None, h.run.session);
+     if ruled(rules, "stand_down") && asked.halting then escalate(asked, "stand_down", worker, task, id) else {
+      let noted = if ruled(rules, "stand_down") then escalate(asked, "stand_down", worker, task, id) else asked;
+      let go = grants(o, noted.session, worker);
+      let tick = noted.session.state.tick;
+      match resolveStandDown(noted.session, id, go) {
+       Err(e) => act(noted, "error", worker, "", "stand_down: ${encodeHostError(e)}", None, noted.session),
+       Ok(y) => act({noted | session: y.session, state: remember(noted.state, worker, tick, if go then 0 else cooldownOf(noted.state, worker).denials + 1)}, "stand_down_decision", worker, if go then "granted" else "denied", task, None, noted.session)
+      }
+     }
     }
    }
   }
@@ -413,8 +519,10 @@ pure func decisions(r: Run, p: Policy, o: Orders, rules: [Rule], turn: int) -> R
  let offered = filter(\t. t.status == Offered && not stale(r0.session, t) && not waiting(r0.session, t.id), r0.session.state.tasks);
  let r1 = foldl(\acc t. persuade(acc, p, o, rules, turn, t), r0, offered);
  let working = filter(\t. t.status == Working, r1.session.state.tasks);
+ let relieved = if standDownOn(o) then flatMap(\t. if checkable(r1.session, o, t) then t.participants else [], working) else [];
  let r2 = foldl(\acc t. checkIn(acc, p, o, turn, t), r1, working);
- settle(foldl(\acc w. assign(acc, p, o, rules, turn, w), r2, r2.session.scenario.workers), p, o, rules, turn)
+ let r3 = if standDownOn(o) then foldl(\acc w. if not stopped(acc) && standDownDue(acc, o, relieved, w) then standDown(acc, p, o, rules, turn, w) else acc, r2, r2.session.scenario.workers) else r2;
+ settle(foldl(\acc w. assign(acc, p, o, rules, turn, w), r3, r3.session.scenario.workers), p, o, rules, turn)
 }
 
 pure func closing(r: Run, rules: [Rule], turn: int) -> Run = if stopped(r) then r else { let before = r.session; prune(watch(step(r, turn), rules, before)) }

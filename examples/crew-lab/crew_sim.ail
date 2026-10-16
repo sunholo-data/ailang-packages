@@ -257,6 +257,8 @@ pure func tallyAct(sim: Sim, a: Act) -> Sim =
  }
  else if a.kind == "relief_asked" then countRelief(sim, a.actor)
  else if a.kind == "relief_decision" then countDecision(sim, a.actor, a.label == "granted")
+ else if a.kind == "stand_down_asked" then { let t = sim.tally; withTally(sim, {t | byCrew: bump(t.byCrew, "${a.actor}/stand_down/asked")}) }
+ else if a.kind == "stand_down_decision" then { let t = sim.tally; withTally(sim, {t | byCrew: bump(t.byCrew, "${a.actor}/stand_down/${a.label}")}) }
  else failed(sim, errorKey(a.detail))
 
 pure func autoTurn(sim: Sim, turn: int) -> Sim = {

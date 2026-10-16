@@ -19,7 +19,7 @@ pure func str(j:Json, k:string) -> string = match getString(j, k) {Some(s) => s,
 -- Text fields that are present must be strings (a numeric note is an error, not "").
 pure func textField(j:Json, k:string) -> bool = match get(j, k) {None => true, Some(_) => match getString(j, k) {Some(_) => true, None => false}}
 pure func ops() -> [string] = ["<", "<=", ">", ">=", "=="]
-pure func scalars() -> [string] = ["tick", "offers", "starts", "refused", "stockouts", "errors", "shortfalls", "halts"]
+pure func scalars() -> [string] = ["tick", "offers", "starts", "refused", "stockouts", "errors", "shortfalls", "halts", "evidence"]
 pure func crewFields() -> [string] = ["fatigue", "stress", "morale", "readiness", "observations", "trust", "peak_stress", "peak_fatigue", "overextended_turns", "halted", "regard_min"]
 pure func replyLabels() -> [string] = ["accept", "decline", "concern", "defer", "continue", "request_relief"]
 
@@ -29,12 +29,13 @@ export pure func metricOK(sc:Scenario, path:string) -> bool ! {}
 ensures { not result || size(path) > 0 } = match split(path, ".") {
  [x] => contains(scalars(), x),
  ["relief", x] => contains(["asked", "granted", "denied"], x),
+ ["stand_downs", x] => contains(["asked", "granted", "denied"], x),
  ["replies", x] => contains(replyLabels(), x),
  ["refusal_reasons", x] => contains(refusalCodes(), x),
  ["completed", x] => any(\r. r.id == x, sc.recipes),
  ["crew", w, f] => contains(sc.workers, w) && (contains(crewFields(), f) || contains(["relief_asked", "relief_granted", "relief_denied"], f)),
  ["crew", w, "replies", x] => contains(sc.workers, w) && contains(replyLabels(), x),
- ["escalations", x] => contains(["refusal_under_orders", "breakdown", "trust_floor", "major", "argument", "uncovered", "cohort", "stuck"], x) || (startsWith(x, "cohort:") && contains(cohortIds(sc), substringFrom(x, 7))),
+ ["escalations", x] => contains(["refusal_under_orders", "breakdown", "trust_floor", "major", "argument", "uncovered", "cohort", "stuck", "stand_down"], x) || (startsWith(x, "cohort:") && contains(cohortIds(sc), substringFrom(x, 7))),
  ["population", x] => length(cohortIds(sc)) > 0 && contains(["total", "births", "deaths", "year", "groups"], x),
  ["cohorts", c, f] => contains(cohortIds(sc), c) && contains(["headcount", "pressure", "division", "mood", "trust"], f),
  ["resources", r, f] => any(\x. x.id == r, sc.resources) && contains(["min", "zero_ticks", "stockouts", "in", "out"], f),
