@@ -344,6 +344,31 @@ Claims: 5 of 6 claims hold (seeds 1..20, 12 turns). Failing:
 >
 > **diplomat** (concern, Draft a reply no one will read; stress 40): "I'm glad to take on the diplomatic work, though I'll admit some concern: a reply no one will read feels like speaking into an empty hall. If it's meant for the crew and whoever may come after, it still deserves care."
 
+## Update 2026-10-16 (crew_core 0.5.1): check-ins counted from the work's start
+
+The auto-captain checked in only on even turn numbers, so the game's monthly
+schedule (decisions on turns 1, 31, 61, ...) never asked anyone about relief.
+Check-ins now count from each job's start: every other day of the work at a
+daily cadence, every decision turn at a longer one. The random captain uses
+the same rule.
+
+`review/*.claims.txt` were re-recorded (seeds 1..20, 12 turns; the 0.5.0
+files reproduced byte for byte before the change). **No verdict changed:** the
+same claims pass and fail. Medians moved because check-ins fall on different
+days. Two are now at their line:
+- `navigator-models-margins` (ergosphere-question): median observations 50
+  → 25, against `>= 25`;
+- `messages-compete-for-the-window` (last-messages-home): median signal
+  stockouts 2 → 1, against `>= 1`.
+
+**Monthly relief still does not happen in this pack.** Every job lasts 2–3
+days, so nothing is working when the next monthly decision comes, and a
+project agreement falls due 20 days after its offer, after which the host
+takes no check-in. A 10-year monthly auto-run on last-messages-home
+(watch-v3, keep 30, concerns ask_advice, seeds 1–2) asks for relief 0 times
+under either captain; a year at a daily cadence asks 34 times (consent, all
+granted) and 10 times (orders, all denied).
+
 ## Decisions for Mark
 
 - Which scenarios (if any) to import first, and as what: tutorial watches, voyage events, or test fixtures for the game's crew host.

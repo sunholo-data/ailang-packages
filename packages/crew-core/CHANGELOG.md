@@ -1,5 +1,43 @@
 # Changelog
 
+## 0.5.1
+
+Fix: the auto-captain's check-ins no longer depend on the caller's turn
+numbers. Found by the stapledons-godot interlude sprint R2-INTERLUDE I2.
+
+- **The bug.** `checkIn` asked working crew only on even turn numbers. The
+  game decides on an absolute schedule: from tick 0 at cadence c, its
+  decision turns are 1, 1+c, 1+2c, ..., and all of them are odd when c is
+  even (D-76's monthly skip is cadence 30). So on that schedule nobody was
+  ever asked about relief, and relief never happened.
+- **The cadence now counts from the task's start** (`elapsed` = the session
+  tick minus `Task.started`), not from turn numbers:
+  - at a daily cadence, the captain checks in on the work's odd days
+    (the day after it starts, then every other day). That is the old rate
+    of one check-in every other day, with the phase set by the work rather
+    than by the caller;
+  - at a cadence of two days or more, the decision turns are already that
+    far apart, so every decision turn after the start checks in.
+- **No check-in on an expired agreement.** The host takes an ask only under
+  a live project agreement, which falls due 20 days after the offer. The
+  auto-captain now skips work whose agreement has fallen due instead of
+  logging the host's `subject transition/expiry` refusal. Before the fix the
+  even-turn rule hid this at monthly cadences; it is now reachable.
+  - **Limit for monthly play:** work older than 20 days is never checked in
+    with. At cadence 30 the first decision after a start is 30 days on, so a
+    monthly cadence still asks about relief only if the agreement is
+    extended (a host change, not part of this fix). Stapledon's work lasts
+    2 to 3 days and ends long before the next monthly decision.
+- **Tests (`auto_test.ail`):** decisions on odd turns only (cadence 10 from
+  tick 0) check in on day 10 and a stressed worker asks for, and is
+  granted, relief; at a daily cadence a 4-day job is checked in with on
+  ticks 1 and 3 when started on tick 0, and 2 and 4 when started on tick 1;
+  a monthly cadence over 64-day work logs no host errors. The first two fail
+  on 0.5.0.
+- Results at a daily cadence move: a job's check-ins can fall on different
+  days than in 0.5.0, so seeded runs differ. The crew lab's random captain
+  uses the same rule.
+
 ## 0.5.0
 
 Resource units as data (Mark's repo-use review, 2026-10-15). The game had a

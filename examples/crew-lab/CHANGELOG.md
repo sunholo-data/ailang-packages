@@ -4,6 +4,12 @@
 
 Local only; never published.
 
+- **Check-ins from the work's start (crew_core 0.5.1, 2026-10-16).**
+  - The random captain's check-in follows the package's new rule (every other
+    day of the work, from the day after it starts), so the three captains
+    share one rule.
+  - `scenarios/stapledon/review/*.claims.txt` re-recorded; no verdict
+    changed. See `REVIEW.md`.
 - **Resource units from data (crew_core 0.5.0, 2026-10-15).**
   - `bubble.ail` is gone. Stapledon's eight bubble resources are now
     `scenarios/stapledon/resources.json` (crew_units/1), which the game syncs
