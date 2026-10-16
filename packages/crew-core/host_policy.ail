@@ -11,8 +11,14 @@ import ./codec (decodeOutcome, traitDelta)
 -- by an amount that depends on their OCEAN traits (codec.traitDelta).
 -- Experimental tuning: neither the floor nor the deltas assert a human model.
 
+-- At or over the cooperation floor: the worker's trust in the captain is at
+-- least 20. Exported (0.6.0) so a duty check-in is refused below it too.
+export pure func cooperative(s: State, worker: string) -> bool ! {}
+ensures { result == any(\r. r.from == worker && r.to == "captain" && r.dimension == "trust" && r.value >= 20, s.relationships) } =
+  any(\r. r.from == worker && r.to == "captain" && r.dimension == "trust" && r.value >= 20, s.relationships)
+
 pure func authority(s: State, p: Principal, t: Task) -> Authority = match p {
-  ActorPrincipal("captain") => if any(\worker. not any(\r. r.from == worker && r.to == "captain" && r.dimension == "trust" && r.value >= 20, s.relationships), t.participants) then Refused("cooperation floor") else Allowed,
+  ActorPrincipal("captain") => if any(\worker. not cooperative(s, worker), t.participants) then Refused("cooperation floor") else Allowed,
   _ => Refused("captain assignment only")
 }
 
