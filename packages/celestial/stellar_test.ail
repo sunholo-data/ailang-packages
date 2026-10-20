@@ -1,0 +1,182 @@
+-- Check values for sunholo/celestial/stellar. Expected values are published or closed-form,
+-- never this module's output:
+--   Claret & Bloemen 2011 (A&A 529, A75), tableab.dat, Johnson V, least squares, [M/H] 0,
+--     xi 2 km/s: ATLAS (log g 4.50, 5,750 K) a 0.4650 b 0.2565; ATLAS (1.00, 4,000 K) a 0.9353
+--     b -0.0971; ATLAS (4.50, 6,000 K) and (4.50, 5,750 K) for the Teff midpoint; PHOENIX
+--     (3.50, 2,000 K) a 1.7743 b -0.7750 and (5.00, 2,600 K) read below.
+--   The disc mean of a quadratic law, 1 - a/3 - b/6, re-done here by Simpson quadrature.
+--   IAU 2015 nominal GM_sun and R_sun (Prsa et al. 2016): solar log g 4.43807.
+--   Aldebaran: Teff 3,927 K, log g 1.11 (Heiter et al. 2015, as tabulated in Jofre et al. 2015,
+--     A&A 582, A81, Table 3).
+--   Roudier & Muller 1986: the solar cell 1.76 arcsec = 1,276.5 km at 1 au.
+--   Danilovic et al. 2008: rms contrast 14.4 % at 630 nm; x = c2 / (lambda T) by hand.
+--   Howard, Harvey & Forgach 1990: 2.894 - 0.428 sin^2 - 0.370 sin^4 microrad/s.
+--   Baumbach 1937: 1e-6 (0.0532 r^-2.5 + 1.425 r^-7 + 2.565 r^-17).
+--   RS-25 (relativity-spec): D = sqrt(19) ahead and 0.22942 astern at 0.9c move H-alpha to
+--     150.6 nm and 2,860 nm, both outside the CIE 360-830 nm range.
+
+module sunholo/celestial/stellar_test
+
+import std/math (sqrt, pow, exp, log10, sin, intToFloat)
+import ./kepler (absf)
+import ./stellar_ld (LdRow, ldRows)
+import ./stellar (ldLinear, ldLinearMean, ldQuadratic, ldQuadraticMean, ldCoeffs, loggFromMassRadius, solarLogg, scaleHeightRatio, cellSizeKm, granulationLifetimeS, dLnIdLnT, granulationSigmaT, sunUmbraTeff, sunPenumbraTeff, diffRotation, solarCyclePhase, solarCycle25StartJd, sporerLatitudeDeg, activityLevel, baumbach, hAlphaNm, lineObservedNm, lineVisible)
+
+pure func near(got: float, want: float, tol: float) -> bool = absf(got - want) <= tol
+
+-- Simpson's rule for the flux-weighted disc mean of f over mu in [0, 1] (n even).
+pure func simpson(f: float -> float, n: int, i: int, acc: float) -> float =
+  if i > n then acc / (3.0 * intToFloat(n))
+  else {
+    let mu = intToFloat(i) / intToFloat(n);
+    let w = (if i == 0 || i == n then 1.0 else if i % 2 == 1 then 4.0 else 2.0);
+    simpson(f, n, i + 1, acc + w * 2.0 * mu * f(mu))
+  }
+
+-- ---------- limb darkening laws
+
+pure func checkLinear() -> bool =
+  ldLinear(0.6, 1.0) == 1.0 && near(ldLinear(0.6, 0.3), 0.58, 1e-15) && near(ldLinearMean(0.6), 0.8, 1e-15)
+  && near(simpson(\m. ldLinear(0.6, m), 2000, 0, 0.0), 0.8, 1e-12)
+
+test "linear u = 0.6 (today's Planets.limb_darkened): I(0.3) = 0.58, disc mean 0.8 (closed form and Simpson)" { checkLinear() }
+
+pure func checkQuadMean() -> bool =
+  near(simpson(\m. 1.0 - 0.4650 * (1.0 - m) - 0.2565 * (1.0 - m) * (1.0 - m), 2000, 0, 0.0), ldQuadraticMean(0.4650, 0.2565), 1e-12)
+  && near(ldQuadraticMean(0.4650, 0.2565), 1.0 - 0.4650 / 3.0 - 0.2565 / 6.0, 1e-15)
+
+test "quadratic disc mean 1 - a/3 - b/6 equals Simpson quadrature (1e-12)" { checkQuadMean() }
+
+-- ---------- Claret & Bloemen 2011 table
+
+pure func checkNodes() -> bool {
+  let sun = ldCoeffs(5750.0, 4.5);
+  let ald = ldCoeffs(4000.0, 1.0);
+  let cool = ldCoeffs(2000.0, 3.5);
+  near(sun.a, 0.4650, 1e-12) && near(sun.b, 0.2565, 1e-12) && sun.source == 0
+  && near(ald.a, 0.9353, 1e-12) && near(ald.b, 0.0 - 0.0971, 1e-12)
+  && near(cool.a, 1.7743, 1e-12) && near(cool.b, 0.0 - 0.7750, 1e-12) && cool.source == 1
+}
+
+test "ldCoeffs reproduces Claret & Bloemen 2011 V rows at grid nodes (ATLAS 5,750 K 4.5; 4,000 K 1.0; PHOENIX 2,000 K 3.5)" { checkNodes() }
+
+pure func rowAt(rs: [LdRow], g: float, t: float, model: int) -> LdRow = match rs {
+  [] => { logg: 0.0, teff: 0.0, a: 0.0 / 0.0, b: 0.0, model: 0 },
+  r :: rest => if r.logg == g && r.teff == t && r.model == model then r else rowAt(rest, g, t, model)
+}
+
+pure func checkMidpoints() -> bool {
+  let r0 = rowAt(ldRows(), 4.5, 5750.0, 0);
+  let r1 = rowAt(ldRows(), 4.5, 6000.0, 0);
+  let m = ldCoeffs(5875.0, 4.5);
+  let q0 = rowAt(ldRows(), 4.0, 5750.0, 0);
+  let g = ldCoeffs(5750.0, 4.25);
+  near(m.a, (r0.a + r1.a) / 2.0, 1e-12) && near(m.b, (r0.b + r1.b) / 2.0, 1e-12)
+  && near(g.a, (q0.a + r0.a) / 2.0, 1e-12) && near(g.b, (q0.b + r0.b) / 2.0, 1e-12)
+}
+
+test "ldCoeffs is linear between nodes in Teff and in log g (midpoints, 1e-12)" { checkMidpoints() }
+
+pure func checkCoolDwarfs() -> bool {
+  let t1 = ldCoeffs(2566.0, 5.24);
+  let bn = ldCoeffs(3200.0, 4.9);
+  t1.source == 1 && t1.loggUsed == 5.0 && t1.teffUsed == 2566.0 && t1.a > 1.0 && bn.source == 1
+}
+
+test "TRAPPIST-1 (2,566 K) reads PHOENIX, not a clamp from ATLAS's 3,500 K; its log g 5.24 is read at the 5.0 edge and reported" { checkCoolDwarfs() }
+
+pure func rowsOk(rs: [LdRow]) -> bool = match rs {
+  [] => true,
+  r :: rest => r.a == r.a && r.b == r.b && r.a >= 0.0 && r.a + 2.0 * r.b >= 0.0 && 1.0 - r.a - r.b > 0.0 - 0.02 && rowsOk(rest)
+}
+
+pure func countRows(rs: [LdRow], n: int) -> int = match rs { [] => n, _ :: rest => countRows(rest, n + 1) }
+
+test "all 508 rows are finite, darken monotonically toward the limb (a >= 0, a + 2b >= 0) and dip below 0 at the limb by < 0.02" { rowsOk(ldRows()) && countRows(ldRows(), 0) == 508 }
+
+pure func clampedOk(rs: [LdRow]) -> bool = match rs {
+  [] => true,
+  r :: rest => near(simpson(\m. ldQuadratic(r.a, r.b, m), 400, 0, 0.0), ldQuadraticMean(r.a, r.b), 0.0001) && ldQuadratic(r.a, r.b, 0.0) >= 0.0 && clampedOk(rest)
+}
+
+test "the clamped law never goes negative, and its disc mean differs from 1 - a/3 - b/6 by < 1e-4 for every row" { clampedOk(ldRows()) }
+
+-- ---------- gravity and convection
+
+pure func checkLogg() -> bool =
+  near(solarLogg(), 4.43807, 0.00001) && near(solarLogg(), log10(27420.0), 0.0001) && near(loggFromMassRadius(4.0, 2.0), solarLogg(), 1e-12)
+  && near(scaleHeightRatio(5772.0, solarLogg()), 1.0, 1e-12)
+
+test "solar log g 4.43807 from the IAU 2015 nominal values; scale-height ratio 1 at the Sun" { checkLogg() }
+
+pure func checkAldebaran() -> bool {
+  let want = (3927.0 / 5772.0) * pow(10.0, 4.43807 - 1.11);
+  near(scaleHeightRatio(3927.0, 1.11), want, 0.01 * want)
+  && near(cellSizeKm(5772.0, solarLogg()), 1276.5, 1e-9)
+  && cellSizeKm(3927.0, 1.11) > 1800000.0 && cellSizeKm(3927.0, 1.11) < 1900000.0
+  && near(granulationLifetimeS(5772.0, solarLogg()), 360.0, 1e-9)
+}
+
+test "Aldebaran (3,927 K, log g 1.11): H_p ratio within 1 % of (T/T_sun)/(g/g_sun); cells about 1.86 million km; the Sun 1,276.5 km and 360 s" { checkAldebaran() }
+
+pure func checkContrast() -> bool {
+  let x = 0.01438776877 / (630.0e-9 * 5772.0);
+  let want = x / (1.0 - exp(0.0 - x));
+  near(dLnIdLnT(630.0, 5772.0), want, 1e-12) && near(granulationSigmaT(), 0.144 / want, 1e-12)
+  && granulationSigmaT() > 0.035 && granulationSigmaT() < 0.036
+}
+
+test "Danilovic 2008's 14.4 % at 630 nm is a 3.57 % rms temperature fluctuation (x / (1 - e^-x), c2 CODATA 2018)" { checkContrast() }
+
+pure func checkSpots() -> bool {
+  let x = 0.01438776877 / (550.0e-9 * 5772.0);
+  let xu = 0.01438776877 / (550.0e-9 * sunUmbraTeff());
+  let xp = 0.01438776877 / (550.0e-9 * sunPenumbraTeff());
+  let iu = (exp(x) - 1.0) / (exp(xu) - 1.0);
+  let ip = (exp(x) - 1.0) / (exp(xp) - 1.0);
+  iu > 0.1 && iu < 0.3 && ip > 0.7 && ip < 0.85
+}
+
+test "spot temperatures give a V umbra 0.1-0.3 and penumbra 0.7-0.85 of the quiet Sun (Planck ratio at 550 nm)" { checkSpots() }
+
+-- ---------- rotation and cycle
+
+pure func checkRotation() -> bool {
+  let k = 86400.0 * 180.0 / 3.141592653589793 / 1000000.0;
+  near(diffRotation(0.0), 2.894 * k, 1e-12) && near(diffRotation(30.0), (2.894 - 0.428 * 0.25 - 0.370 * 0.0625) * k, 1e-9)
+  && near(diffRotation(60.0), (2.894 - 0.428 * 0.75 - 0.370 * 0.5625) * k, 1e-9)
+  && near(diffRotation(0.0), 14.3264, 0.0001)
+}
+
+test "differential rotation (Howard, Harvey & Forgach 1990): 14.3264 deg/day at the equator; 30 and 60 degrees by hand" { checkRotation() }
+
+pure func checkCycle() -> bool =
+  near(solarCyclePhase(solarCycle25StartJd()), 0.0, 1e-12)
+  && near(solarCyclePhase(solarCycle25StartJd() + 5.5 * 365.25), 0.5, 1e-12)
+  && near(solarCyclePhase(solarCycle25StartJd() + 11.0 * 365.25 + 1.0), 1.0 / (11.0 * 365.25), 1e-9)
+  && sporerLatitudeDeg(0.0) == 28.0 && sporerLatitudeDeg(1.0) == 8.0
+  && near(activityLevel(0.5), 1.0, 1e-15) && near(activityLevel(0.0), 0.0, 1e-15)
+
+test "cycle phase wraps every 11 years from December 2019; Spoerer band 28 -> 8 degrees" { checkCycle() }
+
+-- ---------- corona and lines
+
+pure func checkBaumbach() -> bool =
+  near(baumbach(1.0), 0.000001 * (0.0532 + 1.425 + 2.565), 1e-18)
+  && near(baumbach(1.5), 0.000001 * (0.0532 * pow(1.5, 0.0 - 2.5) + 1.425 * pow(1.5, 0.0 - 7.0) + 2.565 * pow(1.5, 0.0 - 17.0)), 1e-20)
+  && near(baumbach(2.0), 0.000001 * (0.0532 / pow(2.0, 2.5) + 1.425 / 128.0 + 2.565 / 131072.0), 1e-20)
+  && near(baumbach(4.0), 0.000001 * (0.0532 / 32.0 + 1.425 / 16384.0 + 2.565 / 17179869184.0), 1e-20)
+  && baumbach(2.0) < baumbach(1.5) && baumbach(4.0) < baumbach(2.0)
+
+test "Baumbach 1937 corona at r = 1, 1.5, 2, 4 solar radii, by hand; falls monotonically" { checkBaumbach() }
+
+pure func checkLines() -> bool {
+  let ahead = sqrt(19.0);
+  near(lineObservedNm(hAlphaNm(), 1.0), 656.28, 1e-12) && lineVisible(656.28)
+  && near(lineObservedNm(hAlphaNm(), ahead), 656.28 / ahead, 1e-12) && not lineVisible(lineObservedNm(hAlphaNm(), ahead))
+  && not lineVisible(lineObservedNm(hAlphaNm(), 0.22942)) && lineVisible(lineObservedNm(hAlphaNm(), 1.1))
+}
+
+test "H-alpha at rest is 656.28 nm and visible; ahead at 0.9c (D = sqrt 19) 150.6 nm and astern 2,860 nm, both black (RS-25 D values)" { checkLines() }
+
+test "pure: two calls are equal" { ldCoeffs(3927.0, 1.11).a == ldCoeffs(3927.0, 1.11).a && ldCoeffs(3927.0, 1.11).b == ldCoeffs(3927.0, 1.11).b && cellSizeKm(2566.0, 5.24) == cellSizeKm(2566.0, 5.24) }
