@@ -93,6 +93,107 @@ The run made 300+ embeddings in 16 s (768 dimensions).
 - **Determinism:** the domain journal never contains memory. Words, as
   before, are transport-only `wording` records.
 
+## Compaction: memories that change as they are remembered
+
+**Status:** proposed (Mark, 2026-10-14); the game design is stapledons-design semantic-memory §S2b.
+
+A voyage lasts decades, and the memory store above is capped. Rather than
+dropping the oldest lines, old memories are **compacted**: an AI pass
+rewrites a span of a crew member's memories into fewer, shorter ones, the way
+a long chat is summarised. Unlike a chat summary, compaction is meant to be
+unfaithful in human ways.
+
+### Game design (lives in the design repo)
+
+What compaction means for the game is specified in stapledons-design
+`features/next/semantic-memory.md` §S2b (#23): memories are coloured by the
+present and the past, memories of memories degrade, first-hand significant
+events last longer, the Archive misremembers by its Memory Health and crew by
+personality and state, and players only hear memories in dialogue (Mark's
+rulings, 2026-10-14). This doc is the lab's mechanism for that design.
+
+### Mechanism: numbers decide, AI only words
+
+The rule from R2-CREW holds: **AI text never decides anything.**
+
+- **A memory record:**
+  - `id`, `actor`, `sources` (event and memory ids), `span` (first..last
+    tick);
+  - `generation` (0 for a first-hand memory);
+  - `fidelity` and `salience`, 0..100;
+  - `tone` (−100..100, toward the captain or the people involved);
+  - `state` (the crew member's bands at compaction);
+  - `text`.
+- **Deterministic and pure (lab first, later crew_core):** integers and the
+  run's seed only.
+  - When to compact: at a year turn, when someone departs, at the end of a
+    skip, or when the store reaches its cap.
+  - Which records: the lowest salience among the oldest.
+  - The new numbers:
+    - fidelity = the parents' fidelity × a retention rate, less a stress
+      term. The rate is about 85/100 for ordinary memories and about 95/100
+      for first-hand memories of significant events (loss, first contact,
+      deep time, betrayal, a large trust or regard change), so those last for
+      decades (Mark, 2026-10-14);
+    - tone moves a bounded step toward current trust and regard
+      (reconsolidation);
+    - salience is the parents' maximum plus a recall bonus.
+  - Tested on both engines, and the same seed gives the same numbers.
+- **AI (the reply worker, never the watch or the game's core):** writes the
+  compacted text from the parent texts, the new numbers and the state.
+  - The numbers become instructions in the prompt. For example: "fidelity
+    40: keep the gist and the feeling, lose names and numbers; you now
+    distrust the captain".
+  - The model is local where possible (Ollama, as for embeddings).
+- **Checks on the words:**
+  - length;
+  - no identifiers;
+  - no people or events outside the sources;
+  - tone agrees in sign with `tone` (an embedding against valence anchors).
+
+  Misattribution (who did what, when, in what order) is allowed only below a
+  fidelity floor, by a seeded roll. Its chance comes from:
+  - **the Archive:** its memory health;
+  - **crew:** personality and state at compaction, with no separate trait.
+    - Low conscientiousness loosens details.
+    - High neuroticism pulls memories toward threat and blame.
+    - High openness fills gaps with plausible invention.
+    - High stress or fatigue raises the chance, and age raises it slowly.
+
+  Two crew members can then remember one event differently because of who
+  they are and what they were going through.
+- **Cache and offline:**
+  - Cached by a hash of the parent hashes, the numbers, the state, the prompt
+    version and the model, like the sampled words. Replays and offline play
+    reuse it.
+  - With no model, a template writes the gist from the numbers ("Years ago,
+    something about the reclaimer. Still bitter.").
+- **Where memories are used:** only in what crew and the Archive say
+  (dialogue prompts). Players hear memories; they never see a list of them
+  (Mark, 2026-10-14).
+  - Grievance, trust and regard stay as numbers in crew_core; behaviour never
+    reads memory text.
+
+### Acceptance (when planned)
+
+- **Pure tests:**
+  - fidelity never rises across generations;
+  - tone moves toward current trust and never past it;
+  - salience orders survival;
+  - the same seed and inputs give byte-identical records on both engines.
+- **Lab claims over a century skip** (founders, the v3 profile):
+  - no memory store exceeds its cap;
+  - memories over 30 years old have fidelity under 40;
+  - after a betrayal, the betrayed crew member's memories of the captain have
+    a lower median tone than a control run's.
+- **Words:**
+  - compacted text names no identifier;
+  - compacted text names no person absent from its sources (above the
+    misattribution floor);
+  - offline play gives the template text, and the run completes.
+
+Rulings and their rationale: design repo §S2b, not repeated here.
+
 ## Acceptance (for the sprint, when planned)
 
 - `make memory-test`: pure tests on both engines. A fixture memory with a
