@@ -1,7 +1,7 @@
 module sunholo/social_dynamics/wire
 import ./model (Error, Principal, Source, Disposition, Value, Actor, Indicator, Relationship, Resource, Cost, Effect, Recipe, Requirement, Authority, TaskStatus, Task, Relief, Commitment, Evidence, Knowledge, Appraisal, Rule, Condition, Limits, Config, Policies, Accepted, Token, State, Operation, Proposal, Delivery, EventKind, Event, Step, AdvanceResult, InvalidConfig, InvalidSchema, UnsupportedVersion, UnknownId, Unauthorized, UnseenEvidence, StaleRevision, Expired, AlteredDuplicate, InsufficientResource, CapacityExceeded, InvalidPolicyEffect, InvalidTransition, ClockRewind, InvalidBudget, NumericOverflow, PendingAdvance, InvalidContinuation, Host, ActorPrincipal, AI, Authored, ActorInput, Applied, Duplicate, BoundedIndicatorDelta, IndicatorDelta, RelationshipDelta, Allowed, Conditional, Refused, Offered, Working, Completed, Stopped, OfferTask, RaiseConcern, RequestRelief, OfferCommitment, AcceptTask, ResolveRelief, AcceptCommitment, TaskOffered, TaskAccepted, ConcernRaised, ReliefRequested, ReliefResolved, CommitmentOffered, CommitmentAccepted, TaskCompleted, ConditionEntered, ConditionRecovered, ObservationDelivered, ReactionApplied, TaskHalted, Done, Pending, Blocked, validId, unique, sorted, bounded)
 import std/json (Json, JNull, JString, JNumber, JBool, JArray, JObject, encode, decode, js, jint, jb, ja, jo, kv, getString, getInt, getNumber, getBool, getStringArrayStrict, getArray, keys)
-import std/list (map, any, length, sortBy)
+import std/list (map, any, length, sortBy, foldl)
 import std/string (length as stringLength, contains, chars, trim, startsWith, endsWith)
 import std/result (Result, Ok, Err)
 import std/option (Option, Some, None)
@@ -50,22 +50,33 @@ pure func readOperations(js: [Json]) -> Result[[Operation],Error] = match js { [
 
 export pure func encodeProposal(p: Proposal) -> string ensures { contains(result,"\"schema\":\"social_proposal/1\"") } = encode(jo([kv("schema",js("social_proposal/1")),kv("id",js(p.id)),kv("config_id",js(p.config)),kv("base_revision",jint(p.baseRevision)),kv("principal_id",js(p.principal)),kv("origin",js(source(p.origin))),kv("expires_tick",jint(p.expires)),kv("causes",strings(p.causes)),kv("operations",ja(map(operationJson,p.operations)))]))
 -- std/json accepts trailing data on this pinned runtime; check one complete object first.
-pure func oneObjectTail(xs: [string], depth: int, quoted: bool, escaped: bool) -> bool = match xs {
- [] => false,
- c::rest => if quoted then
-   if escaped then oneObjectTail(rest,depth,true,false)
-   else if c=="\\" then oneObjectTail(rest,depth,true,true)
-   else if c=="\"" then oneObjectTail(rest,depth,false,false)
-   else oneObjectTail(rest,depth,true,false)
- else if c=="\"" then oneObjectTail(rest,depth,true,false)
- else if c=="{" || c=="[" then oneObjectTail(rest,depth+1,false,false)
- else if c=="}" || c=="]" then if depth==1 then not any(\c. not (c==" " || c=="\n" || c=="\r" || c=="\t"),rest) else oneObjectTail(rest,depth-1,false,false)
- else oneObjectTail(rest,depth,false,false)
+-- One left fold over the characters (0.4.1): a cons walk copies the rest of
+-- the list at every step on the bytecode VM (ailang#1827), which made framing
+-- quadratic in the line's length. phase 0 is inside the object, 1 closed with
+-- only whitespace after it, 2 rejected.
+type Framing = {phase: int, depth: int, quoted: bool, escaped: bool}
+pure func frameStep(f: Framing, c: string) -> Framing =
+ if f.phase == 2 then f
+ else if f.phase == 1 then (if c==" " || c=="\n" || c=="\r" || c=="\t" then f else {f | phase: 2})
+ else if f.quoted then
+   if f.escaped then {f | escaped: false}
+   else if c=="\\" then {f | escaped: true}
+   else if c=="\"" then {f | quoted: false}
+   else f
+ else if c=="\"" then {f | quoted: true}
+ else if c=="{" || c=="[" then {f | depth: f.depth + 1}
+ else if c=="}" || c=="]" then (if f.depth==1 then {f | phase: 1, depth: 0} else {f | depth: f.depth - 1})
+ else f
+-- Syntax framing alone: the trimmed text is one object with nothing after it.
+export pure func framed(text: string) -> bool ! {}
+ensures { not result || startsWith(trim(text), "{") } = match chars(trim(text)) {
+ "{"::rest => foldl(frameStep, {phase: 0, depth: 1, quoted: false, escaped: false}, rest).phase == 1,
+ _ => false
 }
 -- Framing/syntax only: callers must additionally validate their object keys and schema.
 export pure func singleObject(text: string) -> bool ensures { not result || (stringLength(text)<=65536 && startsWith(trim(text),"{") && endsWith(trim(text),"}")) } =
  if stringLength(text)>65536 || not startsWith(trim(text),"{") || not endsWith(trim(text),"}") then false
- else match chars(trim(text)) { "{"::rest => oneObjectTail(rest,1,false,false) && match decode(text) {Ok(JObject(_))=>true,_=>false}, _=>false }
+ else framed(text) && match decode(text) {Ok(JObject(_))=>true,_=>false}
 export pure func decodeProposal(text: string) -> Result[Proposal, Error] ensures { match result {Ok(p)=>bounded(p.baseRevision) && bounded(p.expires) && validId(p.id) && validId(p.config) && validId(p.principal) && unique(p.causes) && length(p.operations)>0 && length(p.operations)<=16, Err(_)=>true} } =
  if stringLength(text)>65536 then Err(InvalidSchema("wire_size")) else if not singleObject(text) then Err(InvalidSchema("json")) else match decode(text) {
  Err(_) => Err(InvalidSchema("json")), Ok(j) =>

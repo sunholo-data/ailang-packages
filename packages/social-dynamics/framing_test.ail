@@ -1,0 +1,32 @@
+-- 0.4.1: singleObject frames in one linear pass. The 0.4.0 recursive framer
+-- is kept here as the oracle; the two must agree on every case.
+module sunholo/social_dynamics/framing_test
+import ./wire (singleObject, framed)
+import std/list (any)
+import std/string (chars, trim, repeat, concat)
+
+pure func oracleTail(xs: [string], depth: int, quoted: bool, escaped: bool) -> bool = match xs {
+ [] => false,
+ c::rest => if quoted then
+   if escaped then oracleTail(rest,depth,true,false)
+   else if c=="\\" then oracleTail(rest,depth,true,true)
+   else if c=="\"" then oracleTail(rest,depth,false,false)
+   else oracleTail(rest,depth,true,false)
+ else if c=="\"" then oracleTail(rest,depth,true,false)
+ else if c=="{" || c=="[" then oracleTail(rest,depth+1,false,false)
+ else if c=="}" || c=="]" then if depth==1 then not any(\c. not (c==" " || c=="\n" || c=="\r" || c=="\t"),rest) else oracleTail(rest,depth-1,false,false)
+ else oracleTail(rest,depth,false,false)
+}
+pure func oracleFramed(text: string) -> bool = match chars(trim(text)) { "{"::rest => oracleTail(rest,1,false,false), _ => false }
+
+pure func cases() -> [string] = [
+ "{}", " {} ", "{} {}", "{} junk", "{}x", "{]", "[{}]", "{bad}", "{", "}", "",
+ "{\"a\":\"}\"}", "{\"a\":\"\\\"}\"}", "{\"a\":\"\\\\\"}", "{\"a\":\"\\\\\"}}",
+ "{\"a\":[1,{\"b\":[]}]}", "{\"a\":[1,{\"b\":[]}]", "{\"a\":\"unterminated}",
+ "{\"q\":\"}\\\"[\",\"nested\":[{}]}", "{} \n\t", "{}\n{}", "{\"a\":1}}", "{{}}", "{\"x\":\"\\u007d\"}",
+ "  {\"quoted\":\"}\\\"[\",\"nested\":[{}]} \n"
+]
+
+test "linear framing agrees with the 0.4.0 framer on every case" { not any(\t. framed(t) != oracleFramed(t), cases()) }
+test "singleObject unchanged on the 0.4.0 cases" { singleObject("  {\"quoted\":\"}\\\"[\",\"nested\":[{}]} \n") && not singleObject("{} {}") && not singleObject("{} junk") && not singleObject("{]") && not singleObject("[{}]") && not singleObject("{bad}") }
+test "a 32 KB object frames" { let big = concat(["{\"text\":\"", repeat("a\\\"}", 8000), "\"}"]); framed(big) && oracleFramed(concat(["{\"text\":\"", repeat("a\\\"}", 20), "\"}"])) }
