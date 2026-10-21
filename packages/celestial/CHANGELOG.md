@@ -1,5 +1,35 @@
 # Changelog
 
+## 0.5.0
+
+Feature (minor bump, new exports; stapledons ledger D-105, stapledons-godot R2-STAR-SURFACES,
+stapledons-design physics/relativity-spec.md RS-24/RS-25): `stellar` and its data module
+`stellar_ld`, the numbers for a star's visible surface. Pure float64, no dependency on any other
+package (Doppler factors and colour stay in sunholo/relativity; pass D in).
+
+- `stellar_ld.ldRows`: 508 quadratic limb-darkening rows, Johnson V, least squares, [M/H] 0,
+  microturbulence 2 km/s, from Claret & Bloemen 2011 (A&A 529, A75; CDS tableab.dat, sha256
+  e68d1d67...5732): every ATLAS model (3,500-50,000 K) and the PHOENIX models below 3,500 K
+  (2,000-3,400 K, log g 3.5-5.0). The extraction (awk, sort) is recorded in the module header.
+- `ldLinear`, `ldLinearMean` (u = 0.6 reproduces the game's former GDScript-only solar law),
+  `ldQuadratic` (clamped at 0: the coolest PHOENIX fits dip to -0.019 at the limb) and
+  `ldQuadraticMean` (1 - a/3 - b/6); `ldCoeffs(teff, logg)` bilinear in log g, then Teff, PHOENIX
+  below 3,500 K, reporting the Teff and log g it read at after clamping (TRAPPIST-1's log g 5.24
+  is read at 5.0).
+- `loggFromMassRadius`, `solarLogg` (4.43807 from the IAU 2015 nominal GM and R),
+  `scaleHeightRatio`, `cellSizeKm` (the Sun's 1.76 arcsec cell, Roudier & Muller 1986, scaled by
+  the pressure scale height), `granulationLifetimeS` (6 minutes for the Sun; scaled, assumed),
+  `dLnIdLnT`, `granulationSigmaT` (14.4 % at 630 nm, Danilovic et al. 2008, as 3.57 % in
+  temperature).
+- `sunUmbraTeff`, `sunPenumbraTeff`, `mDwarfSpotRatio`, `faculaSigmaT` (cited or labelled
+  assumed in the source).
+- `diffRotation` (Howard, Harvey & Forgach 1990), `solarCycleYears`, `solarCycle25StartJd`,
+  `solarCyclePhase`, `sporerLatitudeDeg`, `activityLevel` (assumed sin^2 shape).
+- `baumbach` (the mean corona, Baumbach 1937), `hAlphaNm`, `lineObservedNm` (lambda0 / D) and
+  `lineVisible` (360-830 nm).
+- Tests: `stellar_test.ail`, 16 checks against the table, Simpson quadrature and hand-computed
+  closed forms (no module output used as an expected value).
+
 ## 0.4.1
 
 Fix (patch bump): the photometry contracts' input domains are completed. The

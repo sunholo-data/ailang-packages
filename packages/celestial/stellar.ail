@@ -1,0 +1,217 @@
+-- sunholo/celestial/stellar — what a star's visible surface looks like, as numbers: limb
+-- darkening per effective temperature and surface gravity, the size, contrast and lifetime of
+-- its convection cells, the temperatures of spots, the Sun's differential rotation and
+-- activity band, the mean corona, and where a spectral line lands under a Doppler factor.
+--
+-- Pure, float64, no relativity (sunholo/relativity owns Doppler factors, Planck spectra and
+-- colour; pass D in). Units: K, cm/s^2 as log g (cgs), km, seconds, degrees per day, nm.
+-- Every number is either cited where it is defined or labelled "assumed" with the reason;
+-- stapledons-godot design_docs/planned/r2/star-surfaces.md section D1 says which is which.
+-- Check values: stellar_test.ail; stapledons-design physics/relativity-spec.md RS-24, RS-25.
+
+module sunholo/celestial/stellar
+
+import std/math (exp, pow, log10, sin, floor)
+import std/list (filter)
+import ./kepler (absf)
+import ./stellar_ld (LdRow, ldRows)
+
+-- ---------------------------------------------------------------- limb darkening
+
+-- The linear law, I(mu)/I(1) = 1 - u (1 - mu), mu = cos of the angle from the disc centre.
+export pure func ldLinear(u: float, mu: float) -> float = 1.0 - u * (1.0 - mu)
+
+-- Its disc mean (flux-weighted, the integral of 2 mu I(mu)/I(1) over mu in [0, 1]).
+export pure func ldLinearMean(u: float) -> float = 1.0 - u / 3.0
+
+-- The quadratic law, I(mu)/I(1) = 1 - a (1 - mu) - b (1 - mu)^2, clamped at 0: the least-squares
+-- fits for the coolest PHOENIX models (2,000-2,600 K) dip below zero by at most 0.019 at mu = 0
+-- (a fit artefact; a specific intensity is never negative).
+export pure func ldQuadratic(a: float, b: float, mu: float) -> float {
+  let s = 1.0 - mu;
+  let i = 1.0 - a * s - b * s * s;
+  if i < 0.0 then 0.0 else i
+}
+
+-- The unclamped law's disc mean in closed form: 1 - a/3 - b/6. Callers that need the clamped
+-- law's exact mean integrate it (the difference is below 1e-4 for every tabulated row).
+export pure func ldQuadraticMean(a: float, b: float) -> float = 1.0 - a / 3.0 - b / 6.0
+
+-- Quadratic coefficients for (Teff, log g): source 0 ATLAS, 1 PHOENIX; the Teff and log g the
+-- table was actually read at (after clamping to the family's range), so a caller can say so.
+export type LdQuad = { a: float, b: float, source: int, teffUsed: float, loggUsed: float }
+
+pure func clampF(x: float, lo: float, hi: float) -> float = if x < lo then lo else if x > hi then hi else x
+
+pure func rowsOf(model: int) -> [LdRow] = filter(\r. r.model == model, ldRows())
+
+-- Distinct Teff nodes in ascending order (the rows are sorted by Teff, then log g).
+pure func teffNodes(rs: [LdRow], last: float) -> [float] = match rs {
+  [] => [],
+  r :: rest => if r.teff == last then teffNodes(rest, last) else r.teff :: teffNodes(rest, r.teff)
+}
+
+pure func firstF(xs: [float], d: float) -> float = match xs { [] => d, x :: _ => x }
+pure func lastF(xs: [float], d: float) -> float = match xs { [] => d, x :: rest => lastF(rest, x) }
+
+type Pair = { lo: float, hi: float }
+
+-- The bracketing nodes (lo, hi) of t in an ascending list, t already inside [first, last].
+pure func bracket(xs: [float], t: float) -> Pair = match xs {
+  [] => { lo: t, hi: t },
+  x :: rest => match rest {
+    [] => { lo: x, hi: x },
+    y :: _ => if t <= y then { lo: x, hi: y } else bracket(rest, t)
+  }
+}
+
+-- (a, b) at one Teff node, linear in log g between that node's models (clamped to its range).
+type Ab = { a: float, b: float }
+
+pure func atNode(rs: [LdRow], teff: float, g: float) -> Ab {
+  let col = filter(\r. r.teff == teff, rs);
+  let gs = loggs(col);
+  let gc = clampF(g, firstF(gs, g), lastF(gs, g));
+  let br = bracket(gs, gc);
+  let r0 = firstRow(filter(\r. r.logg == br.lo, col));
+  let r1 = firstRow(filter(\r. r.logg == br.hi, col));
+  let w = (if br.hi == br.lo then 0.0 else (gc - br.lo) / (br.hi - br.lo));
+  { a: r0.a + w * (r1.a - r0.a), b: r0.b + w * (r1.b - r0.b) }
+}
+
+pure func firstRow(rs: [LdRow]) -> LdRow = match rs { [] => { logg: 0.0, teff: 0.0, a: 0.0, b: 0.0, model: 0 }, r :: _ => r }
+
+pure func loggs(rs: [LdRow]) -> [float] = match rs { [] => [], r :: rest => r.logg :: loggs(rest) }
+
+-- Claret & Bloemen 2011 (stellar_ld): PHOENIX below 3,500 K, ATLAS from 3,500 K. Bilinear: in
+-- log g within each bracketing Teff node, then in Teff. Teff and log g are clamped to the
+-- family's range (PHOENIX log g 3.5-5.0, ATLAS 0-5 where a model exists); loggUsed and
+-- teffUsed report the clamp (TRAPPIST-1's log g 5.24 is read at 5.0).
+export pure func ldCoeffs(teff: float, logg: float) -> LdQuad {
+  let model = (if teff < 3500.0 then 1 else 0);
+  let rs = rowsOf(model);
+  let ts = teffNodes(rs, 0.0 - 1.0);
+  let tc = clampF(teff, firstF(ts, teff), lastF(ts, teff));
+  let br = bracket(ts, tc);
+  let n0 = atNode(rs, br.lo, logg);
+  let n1 = atNode(rs, br.hi, logg);
+  let w = (if br.hi == br.lo then 0.0 else (tc - br.lo) / (br.hi - br.lo));
+  let gMin = (if model == 1 then 3.5 else 0.0);
+  { a: n0.a + w * (n1.a - n0.a), b: n0.b + w * (n1.b - n0.b), source: model, teffUsed: tc, loggUsed: clampF(logg, gMin, 5.0) }
+}
+
+-- ---------------------------------------------------------------- gravity and convection
+
+-- log g (cgs) of a star of m solar masses and r solar radii, from the IAU 2015 nominal values
+-- GM_sun = 1.3271244e20 m^3 s^-2 and R_sun = 6.957e8 m (Prsa et al. 2016, AJ 152, 41). The Sun:
+-- 4.43807.
+export pure func loggFromMassRadius(mSun: float, rSun: float) -> float =
+  log10(1.3271244e20 * mSun / (6.957e8 * rSun * 6.957e8 * rSun) * 100.0)
+
+export pure func solarLogg() -> float = loggFromMassRadius(1.0, 1.0)
+
+-- The IAU 2015 nominal solar effective temperature (K).
+export pure func solarTeff() -> float = 5772.0
+
+-- Pressure scale height relative to the Sun's, H_p ~ T / g at the same mean molecular weight.
+export pure func scaleHeightRatio(teff: float, logg: float) -> float =
+  teff / solarTeff() * pow(10.0, solarLogg() - logg)
+
+-- A granulation cell's size, including half its dark lanes, at disc centre: 1.76 arcsec for the
+-- Sun (Roudier & Muller 1986, Sol. Phys. 107, 11), 1,276.5 km at 1 au (725.27 km per arcsec);
+-- other stars scaled by the pressure scale height (cell sizes track H_p in 3D convection models,
+-- Trampedach et al. 2013, ApJ 769, 18). Aldebaran (3,927 K, log g 1.11): about 1.86 million km.
+export pure func cellSizeKm(teff: float, logg: float) -> float = 1276.5 * scaleHeightRatio(teff, logg)
+
+-- A granule's lifetime (s): the Sun's intensity pattern decays to 1/e in about 6 minutes
+-- (Title et al. 1989, ApJ 336, 475), 360 s. Other stars: assumed to scale with the cell size at
+-- the Sun's convective velocity (assumed; a giant's cells then live days).
+export pure func granulationLifetimeS(teff: float, logg: float) -> float = 360.0 * scaleHeightRatio(teff, logg)
+
+-- d ln I / d ln T of a blackbody at wavelength lambda (nm) and temperature t (K): x / (1 - e^-x),
+-- x = c2 / (lambda T), c2 = 1.438776877e7 nm K (CODATA 2018). Turns a temperature contrast into
+-- an intensity contrast at a wavelength.
+export pure func dLnIdLnT(lambdaNm: float, t: float) -> float {
+  let x = 1.438776877e7 / (lambdaNm * t);
+  x / (1.0 - exp(0.0 - x))
+}
+
+-- The rms relative temperature fluctuation of the Sun's granulation: the 3D MHD simulation's rms
+-- continuum contrast at 630 nm before instrumental degradation, 14.4 % (Danilovic et al. 2008,
+-- A&A 484, L17), divided by d ln I / d ln T at 630 nm and 5,772 K: 0.0357. Used for every star
+-- (assumed: 3D models give somewhat higher contrast for giants, Chiavassa et al. 2010; not
+-- tabulated here).
+export pure func granulationSigmaT() -> float = 0.144 / dLnIdLnT(630.0, solarTeff())
+
+-- ---------------------------------------------------------------- spots and faculae
+
+-- Sunspot umbra and penumbra temperatures (K): umbrae 3,900-4,500 K (Solanki 2003, A&ARv 11,
+-- 153); 4,100 K chosen inside that range. Penumbra 5,400 K chosen so its V intensity is about
+-- 0.75 of the quiet Sun's (observed 0.75-0.85).
+export pure func sunUmbraTeff() -> float = 4100.0
+export pure func sunPenumbraTeff() -> float = 5400.0
+
+-- Spot temperature as a fraction of Teff for M dwarfs: assumed 0.86 (about -360 K for
+-- TRAPPIST-1), inside the cooler-spot range Rackham et al. 2018 (ApJ 853, 122) consider for it.
+export pure func mDwarfSpotRatio() -> float = 0.86
+
+-- Facular brightening toward the limb, as a relative temperature excess at mu -> 0: assumed 0.02
+-- (white-light facular contrast reaches ~10 % near the limb, which this gives in V at 5,772 K).
+export pure func faculaSigmaT() -> float = 0.02
+
+-- ---------------------------------------------------------------- the Sun's rotation and cycle
+
+-- Sidereal angular velocity (degrees per day) at heliographic latitude latDeg: Howard, Harvey &
+-- Forgach 1990 (Sol. Phys. 130, 295), small magnetic features, 2.894 - 0.428 sin^2 - 0.370 sin^4
+-- microradians per second; 1 microrad/s = 4.950355 deg/day.
+export pure func diffRotation(latDeg: float) -> float {
+  let s = sin(latDeg * 3.141592653589793 / 180.0);
+  let s2 = s * s;
+  (2.894 - 0.428 * s2 - 0.370 * s2 * s2) * 86400.0 * 180.0 / 3.141592653589793 / 1000000.0
+}
+
+-- The Sun's mean cycle length (years) and the start of cycle 25 (Julian date of December 2019,
+-- the minimum named by the NOAA/NASA Solar Cycle 25 Prediction Panel, 2020).
+export pure func solarCycleYears() -> float = 11.0
+export pure func solarCycle25StartJd() -> float = 2458818.5
+
+-- Phase in [0, 1) of the Sun's activity cycle at Julian date jd.
+export pure func solarCyclePhase(jd: float) -> float {
+  let c = (jd - solarCycle25StartJd()) / (solarCycleYears() * 365.25);
+  c - floor(c)
+}
+
+-- Spoerer's law: the active latitudes start near 28 degrees and drift to about 8 degrees by
+-- the end of a cycle (Hathaway 2015, Living Rev. Sol. Phys. 12, 4, section 4.6); linear here.
+export pure func sporerLatitudeDeg(phase: float) -> float = 28.0 - 20.0 * clampF(phase, 0.0, 1.0)
+
+-- Relative activity (0..1) over a cycle: assumed sin^2(pi phase) (the real rise is faster than
+-- the fall, Hathaway 2015 section 4.3; not modelled).
+export pure func activityLevel(phase: float) -> float {
+  let s = sin(3.141592653589793 * clampF(phase, 0.0, 1.0));
+  s * s
+}
+
+-- ---------------------------------------------------------------- corona and lines
+
+-- The mean K+F corona's radiance relative to the disc centre's, at r solar radii from the
+-- centre (r >= 1): Baumbach 1937 (Astron. Nachr. 263, 121), smoothed over ten eclipses.
+export pure func baumbach(r: float) -> float
+  requires { r >= 1.0 }
+{
+  0.000001 * (0.0532 * pow(r, 0.0 - 2.5) + 1.425 * pow(r, 0.0 - 7.0) + 2.565 * pow(r, 0.0 - 17.0))
+}
+
+-- H-alpha, the chromosphere's and prominences' colour (nm, in air).
+export pure func hAlphaNm() -> float = 656.28
+
+-- Where a spectral line emitted at lambda0 lands for an observer seeing Doppler factor d
+-- (d = received / emitted frequency; sunholo/relativity computes it): lambda0 / d.
+export pure func lineObservedNm(lambda0Nm: float, d: float) -> float
+  requires { d > 0.0 }
+{
+  lambda0Nm / d
+}
+
+-- Inside the CIE 1931 observer's range (360-830 nm); outside it a line is black.
+export pure func lineVisible(lambdaNm: float) -> bool = lambdaNm >= 360.0 && lambdaNm <= 830.0

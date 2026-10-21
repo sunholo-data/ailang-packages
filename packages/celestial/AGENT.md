@@ -123,6 +123,8 @@ Inner planets (Mercury-Mars) have b = c = s = f = 0.
 | `rings` | `ringLitIF`, `ringUnlitIF`, `ringLitRadiance`, `ringUnlitRadiance` (all `(w0, phaseP, tau, mu0, mu[, lux])`), `ringTransmission(tau, mu)`, `RingBand {rIn, rOut, tau, w0}`, `bandAt(bands, r)`, `RingHit {hits, radius, mu}`, `ringPlaneHit(p, dir, pole)`, `ringShadowTransmission(bands, p, sunDir, pole)` |
 | `ism` | 0.4.0. `Interval {t0, t1}`, `realSphericalHarmonicAt(l, m, u)`, `realSphericalHarmonic(l, m, theta, phi)`, `starSurfaceRadius(coeffs, dir)`, `insideStarSurface(centre, coeffs, p)`, `starSurfaceCrossings(centre, coeffs, a, b)`, `starSurfaceChords(...)`, `rayExitDistance(centre, coeffs, u, sMax)`, `chordsOf(boundaries, inside, a, b)`, `coneShellChord(axis, cosHalf, rIn, rOut, a, b)`, `insideConeShell(...)`, `ellipsoidChord(centre, u1, u2, u3, s1, s2, s3, a, b)`, `insideEllipsoid(...)`, `slabChord(normal, d0, d1, a, b)`, `nHFromExtinction(avPerPc, nhPerEbv, rV)`, `healpixRingVec(nside, pix)`, `GrainDist {k, aMin, aBreak, aMax, q, rhoGrain}`, `grainDist(rhoDust, aMin, aBreak, aMax, q, rhoGrain)`, `grainMassDensity(d)`, `grainTailMassFraction(d)`, `grainMass(d, a)`, `grainsAbove(d, a)`, `grainRadiusAt(d, a0, u)`, `poissonDraw(mean, u, v)` |
 | `frames` | `obliquityJ2000`, `eclipticToEquatorial`, `equatorialToEcliptic`, `equatorialToGalactic`, `eclipticToGalactic`, `unitFromAngles(lon, lat)`, `LonLat {lon, lat}`, `lonLat(v)`, `PoleTerm {phase0, rate, ra, dec, w}`, `PoleModel {ra0, ra1, dec0, dec1, w0, w1, w2, terms}`, `Spin {pole, ra, dec, w}`, `poleAndSpin(model, jd)`, `rotationPeriod(model)` |
+| `stellar` | 0.5.0. `ldLinear(u, mu)`, `ldLinearMean(u)`, `ldQuadratic(a, b, mu)`, `ldQuadraticMean(a, b)`, `LdQuad {a, b, source, teffUsed, loggUsed}`, `ldCoeffs(teff, logg)`, `loggFromMassRadius(m, r)`, `solarLogg`, `solarTeff`, `scaleHeightRatio(teff, logg)`, `cellSizeKm(teff, logg)`, `granulationLifetimeS(teff, logg)`, `dLnIdLnT(lambdaNm, t)`, `granulationSigmaT`, `sunUmbraTeff`, `sunPenumbraTeff`, `mDwarfSpotRatio`, `faculaSigmaT`, `diffRotation(latDeg)`, `solarCycleYears`, `solarCycle25StartJd`, `solarCyclePhase(jd)`, `sporerLatitudeDeg(phase)`, `activityLevel(phase)`, `baumbach(r)`, `hAlphaNm`, `lineObservedNm(lambda0, d)`, `lineVisible(lambda)` |
+| `stellar_ld` | 0.5.0. `LdRow {logg, teff, a, b, model}`, `ldRows()` (508 Claret & Bloemen 2011 V-band rows) |
 
 ## Kepler
 
@@ -375,6 +377,28 @@ Inner planets (Mercury-Mars) have b = c = s = f = 0.
   so a caller with a stateless stream (e.g. splitmix64 of a seed and a slot)
   gets replayable counts. Inversion below 30, a rounded Box-Muller normal from
   30 (u clamped below 1).
+
+## Stellar surfaces (`stellar`, `stellar_ld`; 0.5.0)
+
+What a resolved star's surface looks like, as numbers; the renderer draws it.
+
+- **Limb darkening.** `ldCoeffs(teff, logg)` returns Claret & Bloemen 2011 V-band quadratic
+  coefficients `{a, b}` (PHOENIX below 3,500 K, ATLAS above), bilinear in log g then Teff, with
+  `teffUsed`/`loggUsed` after clamping to the table (PHOENIX log g 3.5-5.0). Evaluate with
+  `ldQuadratic(a, b, mu)` (clamped at 0) and normalise flux with `ldQuadraticMean(a, b)` =
+  1 - a/3 - b/6 (the unclamped mean; within 1e-4 of the clamped one for every row).
+  `ldLinear(0.6, mu)` / `ldLinearMean(0.6)` is the classic solar law.
+- **Convection.** `cellSizeKm(teff, logg)` and `granulationLifetimeS(teff, logg)` scale the Sun's
+  1,276.5 km and 360 s by `scaleHeightRatio` = (T/T_sun) / (g/g_sun). `granulationSigmaT()` is
+  the rms relative temperature fluctuation (0.0357); turn it into an intensity contrast at a
+  wavelength with `dLnIdLnT(lambdaNm, t)`. Use `loggFromMassRadius(m, r)` when only mass and
+  radius are known.
+- **Spots and faculae.** `sunUmbraTeff()`, `sunPenumbraTeff()`, `mDwarfSpotRatio()` (a fraction
+  of Teff), `faculaSigmaT()`.
+- **The Sun.** `diffRotation(latDeg)` (deg/day sidereal), `solarCyclePhase(jd)`,
+  `sporerLatitudeDeg(phase)`, `activityLevel(phase)`.
+- **Eclipse layers.** `baumbach(r)` (r >= 1, relative to the disc centre); `lineObservedNm(656.28,
+  D)` with `lineVisible` for H-alpha under a Doppler factor D from sunholo/relativity.
 
 ## Validation
 
