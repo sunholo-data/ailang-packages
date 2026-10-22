@@ -1,0 +1,20 @@
+-- Checks for sunholo/audio/noise: determinism, range, and the documented spectra: `white` is
+-- uncorrelated at lag 1, the legacy `rampNoise` is not (if that ever changed, the sounds made with
+-- it would change too).
+module sunholo/audio/noise_test
+import std/list (map, range, foldl)
+import ./noise (rampNoise, white)
+
+pure func lag1(xs: [float]) -> float =
+  match foldl(\acc x. {prev: x, num: acc.num + x * acc.prev, den: acc.den + x * x}, {prev: 0.0, num: 0.0, den: 0.0}, xs) { r => r.num / r.den }
+pure func absF(x: float) -> float = if x < 0.0 then 0.0 - x else x
+pure func inRange(xs: [float]) -> bool = foldl(\ok x. ok && x >= -1.0 && x < 1.0, true, xs)
+
+test "both generators are deterministic and seed- and index-sensitive" {
+  rampNoise(5, 7) == rampNoise(5, 7) && rampNoise(5, 7) != rampNoise(6, 7) && rampNoise(5, 7) != rampNoise(5, 8)
+  && white(5, 7) == white(5, 7) && white(5, 7) != white(6, 7) && white(5, 7) != white(5, 8)
+}
+test "both stay in [-1, 1)" { inRange(map(\i. white(i, 3), range(0, 20000))) && inRange(map(\i. rampNoise(i, 3), range(0, 20000))) }
+test "white noise is uncorrelated at lag 1 (|r| < 0.03 over 20,000 samples)" { absF(lag1(map(\i. white(i, 3), range(0, 20000)))) < 0.03 }
+test "the legacy ramp keeps its documented correlation (|r| > 0.03)" { absF(lag1(map(\i. rampNoise(i, 3), range(0, 20000)))) > 0.03 }
+test "rampNoise(0, 1) is three affine LCG rounds from 12347 + 12345" { rampNoise(0, 1) == intToFloat(((((12347 + 12345) % 2147483648) * 1103515245 + 12345) % 2147483648 * 1103515245 + 12345) % 2147483648) / 1073741824.0 - 1.0 }

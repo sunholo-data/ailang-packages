@@ -1,0 +1,37 @@
+-- Checks for sunholo/audio/dsp against closed forms: 10^(-3/20), 1 - e^(-2 pi f / fs), the
+-- one-pole high-pass magnitude |H(w)| = (1 - a) sqrt(2 - 2 cos w) / |1 - (1 - a) e^(-jw)|.
+module sunholo/audio/dsp_test
+import std/list (map, range, drop, foldl, length as size)
+import std/math (sqrt, cos, sin, exp, log)
+import ./dsp (clamp16, dbToGain, gainToDb, centiDb, onePole, lowpass, highpass, sweepLowpass, softSat, normalisePeak, peakAbs, absF, twoPi)
+import ./reference (sineWave)
+
+pure func rms(xs: [float]) -> float = sqrt(foldl(\a x. a + x * x, 0.0, xs) / intToFloat(size(xs)))
+
+test "clamp16 keeps the int16 range" { clamp16(40000) == 32767 && clamp16(-40000) == -32768 && clamp16(12) == 12 }
+test "dbToGain(-3) = 10^(-3/20) and dbToGain(0) = 1" { absF(dbToGain(-3.0) - 0.7079457843841379) < 0.000000000000001 && dbToGain(0.0) == 1.0 }
+test "gainToDb: 0 dB at 1, -6.0206 at 0.5, the -120 floor at 1e-6" { gainToDb(1.0) == 0.0 && absF(gainToDb(0.5) + 6.020599913279624) < 0.000000001 && gainToDb(0.000001) == -120.0 && gainToDb(0.0) == -120.0 }
+test "centiDb rounds as snappedf: -27.0612 -> -2706, -2.825 -> -282 (floor(-282.5 + 0.5)), 0 -> 0" { centiDb(-27.0612) == -2706 && centiDb(-2.8255) == -283 && centiDb(0.0) == 0 && centiDb(1.004) == 100 }
+test "onePole(150, 48000) = 1 - e^(-2 pi 150 / 48000)" { absF(onePole(150.0, 48000.0) - (1.0 - exp(0.0 - 2.0 * 3.141592653589793 * 150.0 / 48000.0))) < 0.000000000000001 }
+
+pure func hpMag(a: float, w: float) -> float = (1.0 - a) * sqrt(2.0 - 2.0 * cos(w)) / sqrt((1.0 - (1.0 - a) * cos(w)) * (1.0 - (1.0 - a) * cos(w)) + (1.0 - a) * sin(w) * (1.0 - a) * sin(w))
+
+test "one-pole high-pass at 150 Hz passes a 1 kHz sine at the closed-form |H|" {
+  let a = onePole(150.0, 48000.0);
+  let x = sineWave(1000.0, 1.0, 48000);
+  let got = rms(drop(24000, highpass(a, x))) / rms(drop(24000, x));
+  absF(got - hpMag(a, twoPi() * 1000.0 / 48000.0)) < 0.0001
+}
+
+test "one-pole low-pass settles to a constant input" { absF(foldl(\l y. y, 0.0, lowpass(onePole(100.0, 48000.0), map(\i. 0.5, range(0, 48000)))) - 0.5) < 0.000001 }
+
+test "a sweep with c0 == c1 equals the fixed low-pass" {
+  let x = sineWave(700.0, 1.0, 2000);
+  sweepLowpass(500.0, 500.0, 2000, 48000.0, x) == lowpass(onePole(500.0, 48000.0), x)
+}
+
+test "softSat keeps 0 and +-1 fixed and compresses between" { softSat(3.0, 1.0) == 1.0 && softSat(3.0, -1.0) == -1.0 && softSat(3.0, 0.0) == 0.0 && softSat(3.0, 0.25) > 0.25 }
+
+test "normalisePeak puts the peak at the dB asked; silence stays silence" {
+  absF(peakAbs(normalisePeak(-6.0, [0.1, -0.4, 0.2])) - dbToGain(-6.0)) < 0.000000000000001 && normalisePeak(-6.0, [0.0, 0.0]) == [0.0, 0.0]
+}

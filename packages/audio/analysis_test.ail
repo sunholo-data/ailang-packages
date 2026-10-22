@@ -1,0 +1,33 @@
+-- Checks for sunholo/audio/analysis against closed forms. A full-scale 1 kHz sine at 48 kHz has
+-- RMS 1/sqrt(2) (-3.0103 dB); the |x| > 0.001 gate drops the two exact zero crossings in each
+-- 48-sample cycle, so the gated RMS is sqrt(24/46): -2.8255 dB, -283 centi-dB as snappedf rounds.
+-- The one-pole high-pass keep is the closed-form |H(1 kHz)|; four 120 Hz poles remove most of a
+-- 60 Hz sine (the teacup guard fails it) and almost all of a 2 kHz one.
+module sunholo/audio/analysis_test
+import std/list (map, range, take)
+import std/math (sqrt, cos, sin, log)
+import ./analysis (level, levelGain, peak, rmsGated, highpassKeepDb, lowbandDb, seam)
+import ./dsp (onePole, gainToDb, twoPi, absF, dbToGain)
+import ./reference (sineWave)
+
+test "gated RMS of a full-scale 1 kHz sine is -2.83 dB (sqrt(24/46)); peak 0 dB; 1 s" {
+  let lv = level(sineWave(1000.0, 1.0, 48000), 0.0, 48000);
+  lv.rmsCdb == -283 && lv.peakCdb == 0 && lv.seconds == 1.0
+}
+test "a gain shifts the level by the gain (-20 dB)" { level(sineWave(1000.0, 1.0, 48000), -20.0, 48000).peakCdb == -2000 }
+test "levelGain is exp(db ln10 / 20)" { absF(levelGain(-6.0) - dbToGain(-6.0)) < 0.000000000000001 && levelGain(0.0) == 1.0 }
+test "rmsGated with no gate is the plain RMS; silence gives 0" { absF(rmsGated([0.5, -0.5, 0.5, -0.5], -1.0) - 0.5) < 0.000000000000001 && rmsGated([0.0, 0.0], 0.001) == 0.0 && peak([0.1, -0.7, 0.3]) == 0.7 }
+
+pure func hpMag(a: float, w: float) -> float = (1.0 - a) * sqrt(2.0 - 2.0 * cos(w)) / sqrt((1.0 - (1.0 - a) * cos(w)) * (1.0 - (1.0 - a) * cos(w)) + (1.0 - a) * sin(w) * (1.0 - a) * sin(w))
+test "a 1 kHz sine keeps the closed-form |H| through a 150 Hz one-pole high-pass (to 0.01 dB)" {
+  absF(highpassKeepDb(sineWave(1000.0, 1.0, 48000), 150.0, 48000) - gainToDb(hpMag(onePole(150.0, 48000.0), twoPi() * 1000.0 / 48000.0))) < 0.01
+}
+test "the teacup guard: a 60 Hz sine keeps more than -20 dB under four 120 Hz poles, a 2 kHz sine far less (the start-up transient bounds it near -58 dB)" {
+  lowbandDb(sineWave(60.0, 1.0, 48000), 120.0, 4, 48000) > -20.0 && lowbandDb(sineWave(2000.0, 1.0, 48000), 120.0, 4, 48000) < -50.0
+}
+test "one pole is the plain one-pole low-pass: a 120 Hz sine keeps about -3 dB" { absF(lowbandDb(sineWave(120.0, 1.0, 48000), 120.0, 1, 48000) + 3.0) < 0.1 }
+test "a whole-cycle sine joins cleanly; a cut one does not" {
+  let ok = seam(sineWave(1000.0, 1.0, 4800));
+  let cut = seam(sineWave(1000.0, 1.0, 4810));
+  ok.seam <= ok.maxStep + 1 && cut.seam > cut.maxStep + 1
+}

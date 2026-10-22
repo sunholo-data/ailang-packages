@@ -1,0 +1,78 @@
+module sunholo/audio/dsp
+-- Pure DSP primitives for sunholo/audio: int16 clamping, dB conversions, one-pole filters (a
+-- high-pass is the input minus its own low-pass), an exponentially swept low-pass, soft saturation
+-- and peak normalisation. Every function is pure and gives the same bits on the strict bytecode VM
+-- and the interpreter. Expressions keep the operation order the shipped sounds were made with
+-- (render stability, AGENT.md): reorder nothing here without a `breaking` release.
+import std/list (map, zipWith, mapAccumL, maximumFloat)
+import std/array (fromList, toList, scale)
+import std/math (exp, log, pow, floor, floatToInt, PI)
+import std/option (Option, Some, None)
+
+export pure func twoPi() -> float = 2.0 * PI(())
+
+export func absF(x: float) -> float ! {}
+ensures { result >= 0.0 }
+{
+  if x < 0.0 then 0.0 - x else x
+}
+
+-- The int16 range: every sample is clamped into it before it becomes two bytes.
+export func clamp16(v: int) -> int ! {}
+ensures { result >= -32768 && result <= 32767 }
+tests [(0, 0), (40000, 32767), (-40000, -32768), (-5, -5), (32767, 32767), (-32768, -32768)]
+{
+  if v > 32767 then 32767 else if v < -32768 then -32768 else v
+}
+
+-- dB to a linear gain, as the renderer scales to a peak: 10^(db/20).
+export pure func dbToGain(db: float) -> float = pow(10.0, db / 20.0)
+
+-- A linear amplitude in dB with a -120 dB floor at or below 1e-6, written exactly as Godot-side
+-- loudness tools do (20 log(x) / log(10)), so measurements agree to the last bit.
+export func gainToDb(g: float) -> float ! {}
+ensures { result >= -120.0 }
+{
+  if g <= 0.000001 then -120.0 else 20.0 * log(g) / log(10.0)
+}
+
+-- A dB value in hundredths, rounded as Godot's snappedf(x, 0.01): floor(x / 0.01 + 0.5).
+export func centiDb(x: float) -> int ! {}
+requires { x > -1000000.0 && x < 1000000.0 }
+{
+  floatToInt(floor(x / 0.01 + 0.5))
+}
+
+-- The coefficient of a one-pole low-pass at cut Hz for a sample rate.
+export func onePole(cut: float, rate: float) -> float ! {}
+requires { cut > 0.0 && rate > 0.0 }
+{
+  1.0 - exp(0.0 - twoPi() * cut / rate)
+}
+
+-- One-pole low-pass with coefficient a, from rest.
+export pure func lowpass(a: float, xs: [float]) -> [float] =
+  match mapAccumL(\y x. { let y2 = y + a * (x - y); (y2, y2) }, 0.0, xs) { (out, _) => out }
+
+-- One-pole high-pass: the input minus its own low-pass.
+export pure func highpass(a: float, xs: [float]) -> [float] = zipWith(\x y. x - y, xs, lowpass(a, xs))
+
+-- A low-pass whose cutoff moves exponentially from c0 to c1 Hz over n samples (period n).
+export pure func sweepLowpass(c0: float, c1: float, n: int, rate: float, xs: [float]) -> [float] =
+  match mapAccumL(\st x. { let y = st.y + onePole(c0 * pow(c1 / c0, intToFloat(st.i % n) / intToFloat(n)), rate) * (x - st.y); (y, {y: y, i: st.i + 1}) }, {y: 0.0, i: 0}, xs) { (out, _) => out }
+
+-- Soft saturation with drive k: x (1 + k) / (1 + k |x|); keeps 0 and +-1 fixed.
+export pure func softSat(k: float, x: float) -> float = x * (1.0 + k) / (1.0 + k * absF(x))
+
+-- The largest |x|, 0 for an empty list.
+export func peakAbs(xs: [float]) -> float ! {}
+ensures { result >= 0.0 }
+{
+  match maximumFloat(map(absF, xs)) { Some(p) => p, None => 0.0 }
+}
+
+-- Scale xs so its peak sits at db dBFS; silence stays silence.
+export pure func normalisePeak(db: float, xs: [float]) -> [float] {
+  let peak = peakAbs(xs);
+  if peak <= 0.0 then xs else toList(scale(dbToGain(db) / peak, fromList(xs)))
+}

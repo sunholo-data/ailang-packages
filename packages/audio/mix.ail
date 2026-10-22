@@ -1,0 +1,30 @@
+module sunholo/audio/mix
+-- Mixing rendered sounds: place one over n samples with a linear gain (a loop tiles from sample 0;
+-- a one-shot plays at each start and is silent elsewhere, a later start cutting an earlier one
+-- short, like a single voice), and sum parts.
+import std/list (map, range, foldl, length as size)
+import std/array (fromList, toList, get, add, make)
+
+-- xs placed over n samples at gain g. starts: sample indices for a one-shot (empty = [0]).
+export func tile(xs: [float], loop: bool, g: float, n: int, starts: [int]) -> [float] ! {}
+requires { n >= 0 }
+{
+  let arr = fromList(xs);
+  let m = size(xs);
+  let st = if size(starts) == 0 then [0] else starts;
+  if m == 0 then map(\i. 0.0, range(0, n))
+  else map(\i. if loop then g * get(arr, i % m) else {
+      let k = foldl(\best s. if s <= i && i - s < m then s else best, 0 - 1, st);
+      if k < 0 then 0.0 else g * get(arr, i - k)
+    }, range(0, n))
+}
+
+-- The sample-wise sum of parts over n samples (parts shorter than n are padded with silence).
+export pure func sum(parts: [[float]], n: int) -> [float] =
+  toList(foldl(\acc p. add(acc, padTo(p, n)), make(n, 0.0), parts))
+
+pure func padTo(p: [float], n: int) -> Array[float] {
+  let m = size(p);
+  let a = fromList(p);
+  if m == n then a else fromList(map(\i. if i < m then get(a, i) else 0.0, range(0, n)))
+}

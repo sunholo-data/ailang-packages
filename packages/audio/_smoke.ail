@@ -1,0 +1,64 @@
+-- Boot probe for publish: prints "OK: ..." iff independent checks hold in a clean workdir: the
+-- reference loop's PCM sha256 (render stability, pin 1), a WAV round trip through wavInfo and
+-- pcm16Floats, the gated RMS of a full-scale 1 kHz sine (-2.83 dB, closed form sqrt(24/46)), and
+-- white noise uncorrelated at lag 1.
+--
+-- renderProbe, wavProbe and levelProbe are the VM-vs-interpreter probes: pure, and the strict
+-- bytecode VM must print the same bytes as the interpreter. From packages/audio:
+--   ailang run --quiet --relax-modules --bytecode --strict-bytecode --entry renderProbe --args-json 0 _smoke.ail
+--   ailang run --quiet --relax-modules --entry renderProbe --args-json 0 _smoke.ail
+--   (likewise wavProbe and levelProbe; compare with cmp)
+--   ailang run --quiet --relax-modules --caps IO --entry main _smoke.ail
+module sunholo/audio/_smoke
+
+import std/io (println)
+import std/crypto (sha256Bytes)
+import std/list (map, range, foldl, take, zipWith)
+import std/result (Result, Ok, Err)
+import ./recipe (render, frames)
+import ./pcm (pcm16, wav16, wavInfo, pcm16Floats)
+import ./analysis (level, highpassKeepDb, lowbandDb, seam)
+import ./noise (white, rampNoise)
+import ./mix (tile, sum)
+import ./reference (loopRecipe, shotRecipe, sineWave, loopPcmSha)
+
+-- The reference loop and one-shot as PCM hashes, and the first n samples of the one-shot as int16.
+export pure func renderProbe(n: int) -> string {
+  let shot = take(if n > 0 then n else 64, render(shotRecipe()));
+  "${sha256Bytes(pcm16(render(loopRecipe())))} ${sha256Bytes(pcm16(render(shotRecipe())))} ${show(frames(loopRecipe()))} ${show(shot)}"
+}
+
+-- A WAV built in memory, read back: header fields and the decoded samples.
+export pure func wavProbe(n: int) -> string {
+  let b = wav16(sineWave(441.0, 0.8, if n > 0 then n else 480), 48000);
+  match wavInfo(b) {
+    Ok(i) => "${show(i.rate)} ${show(i.channels)} ${show(i.bits)} ${show(i.frames)} ${show(i.dataOffset)} ${show(pcm16Floats(b, i))}",
+    Err(e) => "ERR ${e}"
+  }
+}
+
+-- The analysis over closed-form signals and a mix.
+export pure func levelProbe(n: int) -> string {
+  let s = sineWave(1000.0, 1.0, 48000);
+  let lv = level(s, 0.0, 48000);
+  let mixed = sum([tile(render(shotRecipe()), false, 0.5, 9600, [0, 4800]), tile(render(loopRecipe()), true, 0.25, 9600, [])], 9600);
+  let sm = seam(render(loopRecipe()));
+  "${show(lv.peakCdb)} ${show(lv.rmsCdb)} ${show(highpassKeepDb(s, 150.0, 48000))} ${show(lowbandDb(sineWave(60.0, 1.0, 48000), 120.0, 4, 48000))} ${show(level(mixed, 0.0, 48000))} ${show(sm.seam)} ${show(sm.maxStep)} ${show(white(n, 3))} ${show(rampNoise(n, 3))}"
+}
+
+pure func lag1(xs: [float]) -> float =
+  match foldl(\acc x. {prev: x, num: acc.num + x * acc.prev, den: acc.den + x * x}, {prev: 0.0, num: 0.0, den: 0.0}, xs) { r => r.num / r.den }
+pure func absF(x: float) -> float = if x < 0.0 then 0.0 - x else x
+
+export func main() -> () ! {IO} {
+  let pinOk = sha256Bytes(pcm16(render(loopRecipe()))) == loopPcmSha();
+  let xs = sineWave(997.0, 0.9, 480);
+  let b = wav16(xs, 48000);
+  let wavOk = match wavInfo(b) { Ok(i) => i.frames == 480 && foldl(\ok p. ok && p, true, zipWith(\x y. absF(x - y) <= 1.0 / 32767.0 + 1.0 / 32768.0, xs, pcm16Floats(b, i))), Err(_) => false };
+  let lv = level(sineWave(1000.0, 1.0, 48000), 0.0, 48000);
+  let rmsOk = lv.rmsCdb == -283 && lv.peakCdb == 0;
+  let whiteOk = absF(lag1(map(\i. white(i, 3), range(0, 20000)))) < 0.03;
+  if pinOk && wavOk && rmsOk && whiteOk
+  then println("OK: audio reference loop PCM sha256 28ee281f...7467 (render stability), WAV round trip 480 frames, gated RMS of a full-scale 1 kHz sine -2.83 dB (sqrt(24/46)), white noise lag-1 |r| < 0.03")
+  else println("FAIL: pin ${show(pinOk)} wav ${show(wavOk)} rms ${show(lv.rmsCdb)} peak ${show(lv.peakCdb)} white ${show(whiteOk)}")
+}
