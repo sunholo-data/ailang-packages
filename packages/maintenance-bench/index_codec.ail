@@ -1,0 +1,35 @@
+module sunholo/maintenance_bench/index_codec
+import ./index_types (IndexSpec, IndexDecision)
+import ./codec (requiredText, requiredCount, requiredBool, requiredTexts, optionalCount, enumText, collectResults)
+import ./strict_json (decodeCountDocument)
+import std/json (Json, JArray, get)
+import std/result (Result, Ok, Err, flatMap)
+import std/option (Some, None)
+import std/list (map, length, contains, filter)
+import std/map as M
+
+func unique(xs: [string]) -> bool = M.size(M.fromList(map(\s. (s, true), xs))) == length(xs)
+
+func decision(j: Json) -> Result[IndexDecision, string] =
+  flatMap(\id. flatMap(\excluded. flatMap(\acceptance. flatMap(\acceptedMs. flatMap(\intent. flatMap(\labels. flatMap(\evidence. flatMap(\provenance. Ok({ id: id, excluded: excluded, acceptance: acceptance, acceptedMs: acceptedMs, intent: intent, labels: labels, evidence: evidence, provenance: provenance }), requiredText(j, "provenance")), enumText(j, "evidence", ["confirmed", "supported", "inferred", "unknown"])), requiredTexts(j, "labels")), enumText(j, "intent", ["feature", "repair", "migration", "mechanical", "infrastructure", "mixed", "unknown"])), optionalCount(j, "acceptedMs")), enumText(j, "acceptance", ["reviewed_exact", "commit_proxy", "interval", "unknown"])), requiredBool(j, "excluded")), requiredText(j, "id"))
+
+func decisions(j: Json) -> Result[[IndexDecision], string] = match get(j, "decisions") {
+  Some(JArray(xs)) => collectResults(map(\x. decision(x), xs)),
+  _ => Err("missing decisions array")
+}
+
+func valid(m: IndexSpec) -> Result[IndexSpec, string] {
+  let ids = map(\d. d.id, m.decisions)
+  let bad = filter(\d. not contains(m.selectedIds, d.id) || not unique(d.labels) || length(filter(\label. not contains(["feature", "repair", "migration", "mechanical", "infrastructure", "unknown"], label), d.labels)) > 0 || d.intent == "mixed" && length(d.labels) < 2 || d.intent != "mixed" && not contains(d.labels, d.intent) || (match d.acceptedMs {
+    Some(ms) => d.acceptance != "reviewed_exact" || ms > m.cutoffMs,
+    None => d.acceptance == "reviewed_exact"
+  }), m.decisions)
+  if not unique(m.selectedIds) || not unique(ids) then Err("duplicate index selection/decision") else if length(ids) != length(m.selectedIds) || length(bad) > 0 then Err("index decision membership or acceptance mismatch") else if m.windowDays != 30 && m.windowDays != 90 then Err("index window must be 30 or 90 days") else Ok(m)
+}
+
+export pure func decodeIndex(text: string) -> Result[IndexSpec, string]
+ensures { match result {
+  Ok(m) => m.schema == "maintenance.index/2" && (m.windowDays == 30 || m.windowDays == 90),
+  Err(e) => e != ""
+} } =
+  flatMap(\j. flatMap(\schema. flatMap(\cutoffMs. flatMap(\windowDays. flatMap(\sourceRef. flatMap(\selectedIds. flatMap(\rows. valid({ schema: schema, cutoffMs: cutoffMs, windowDays: windowDays, sourceRef: sourceRef, selectedIds: selectedIds, decisions: rows }), decisions(j)), requiredTexts(j, "selectedIds")), requiredText(j, "sourceRef")), requiredCount(j, "windowDays")), requiredCount(j, "cutoffMs")), enumText(j, "schema", ["maintenance.index/2"])), decodeCountDocument(text))

@@ -1,0 +1,59 @@
+module sunholo/maintenance_bench/scoped_metrics
+import ./types (Snapshot, Episode)
+import ./index_types (IndexSpec, IndexDecision, ScopedSummary)
+import ./index_codec (decodeIndex)
+import ./cohort (matureAt, validateLinks)
+import ./metrics (totalKnown)
+import std/result (Result, Ok, Err, flatMap)
+import std/option (Some, None)
+import std/list (map, filter, length, contains)
+import std/map as M
+
+func exact(d: IndexDecision) -> bool = not d.excluded && d.acceptance == "reviewed_exact"
+
+func mature(d: IndexDecision, m: IndexSpec) -> bool = match d.acceptedMs {
+  Some(ms) => exact(d) && matureAt(ms, m.cutoffMs, m.windowDays),
+  None => false
+}
+
+func unknown(r: Episode) -> bool = match r.outcome {
+  None => true,
+  Some(_) => false
+}
+
+func summarize(s: Snapshot, m: IndexSpec) -> Result[ScopedSummary, string] {
+  let ids = M.fromList(map(\r. (r.id, r), s.episodes))
+  if s.sourceRef != m.sourceRef || s.cutoffMs != m.cutoffMs then Err("index source/cutoff mismatch") else if length(filter(\id. not M.member(ids, id), m.selectedIds)) > 0 then Err("selected episode absent") else flatMap(\_. {
+    let selected = filter(\r. contains(m.selectedIds, r.id), s.episodes)
+    let eligible = filter(\d. not d.excluded, m.decisions)
+    let eligibleIds = map(\d. d.id, eligible)
+    let matureIds = map(\d. d.id, filter(\d. mature(d, m), m.decisions))
+    let touches = filter(\r. not contains(m.selectedIds, r.id) && length(filter(\original. contains(eligibleIds, original.id) && original.repo == r.repo && original.language == r.language && length(filter(\path. contains(original.files, path), r.files)) > 0 && length(filter(\d. d.id == original.id && (match d.acceptedMs {
+      Some(ms) => r.acceptedMs >= ms && r.acceptedMs - ms <= m.windowDays * 86400000,
+      None => false
+    }), m.decisions)) == 1, selected)) > 0, s.episodes)
+    let followup = filter(\r. match r.repairs {
+      Some(id) => contains(eligibleIds, id),
+      None => false
+    }, s.episodes)
+    let confirmed = filter(\r. r.purpose == "repair" && r.evidenceLevel == "confirmed" && r.canonical && (r.detectionStage == "production" || r.detectionStage == "post_acceptance") && (match (r.repairs, r.detectedMs) {
+      (Some(id), Some(ms)) => contains(matureIds, id) && length(filter(\d. d.id == id && (match d.acceptedMs {
+        Some(accepted) => ms >= accepted && ms - accepted <= m.windowDays * 86400000 && ms <= m.cutoffMs,
+        None => false
+      }), m.decisions)) == 1,
+      _ => false
+    }), followup)
+    let introductions = M.fromList(map(\r. (show(r.repairs), true), confirmed))
+    let known = filter(\r. match r.tokens {
+      Some(_) => true,
+      None => false
+    }, s.episodes)
+    flatMap(\sum. Ok({ indexSelected: length(selected), indexEligible: length(eligible), indexMature: length(matureIds), indexCensored: length(filter(\d. exact(d) && not mature(d, m), eligible)), indexUnresolved: length(filter(\d. not exact(d), eligible)), indexExcluded: length(m.decisions) - length(eligible), indexUnknownOutcomes: length(filter(\r. contains(eligibleIds, r.id) && unknown(r), selected)), followupTouches: length(touches), confirmedIntroductions: M.size(introductions), supportedRepairs: length(filter(\r. r.purpose == "repair" && r.evidenceLevel == "supported", followup)), canonicalWorkload: length(filter(\r. r.canonical, s.episodes)), totalWorkload: length(s.episodes), knownTokenRows: length(known), missingTokenRows: length(s.episodes) - length(known), recordedTokenSubtotal: sum }), totalKnown(map(\r. r.tokens, s.episodes)))
+  }, validateLinks(s))
+}
+
+export pure func scopedSummary(s: Snapshot, indexText: string) -> Result[ScopedSummary, string]
+ensures { match result {
+  Ok(x) => x.indexSelected == x.indexEligible + x.indexExcluded && x.indexEligible == x.indexMature + x.indexCensored + x.indexUnresolved && x.totalWorkload >= x.indexSelected,
+  Err(e) => e != ""
+} } = flatMap(\m. summarize(s, m), decodeIndex(indexText))

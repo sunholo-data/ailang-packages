@@ -1,0 +1,132 @@
+module sunholo/maintenance_bench/index_test
+import ./index_codec (decodeIndex)
+import ./scoped_metrics (scopedSummary)
+import ./index_reference (indexText)
+import ./reference (data, original)
+import std/result (Ok, Err)
+import std/list (reverse)
+import std/string (replace)
+import std/option (Some, None)
+import ./cohort (applyAnnotations)
+import ./reference (label)
+
+func indexCase1() -> bool {
+  let s = data()
+  match (decodeIndex(indexText()), scopedSummary(s, indexText())) {
+    (Ok(_), Ok(a)) => match scopedSummary({ s | episodes: s.episodes ++ [original("later", "project/a", "ailang")] }, indexText()) {
+      Ok(b) => a.indexSelected == b.indexSelected && a.indexUnknownOutcomes == b.indexUnknownOutcomes && b.totalWorkload == a.totalWorkload + 1,
+      _ => false
+    },
+    _ => false
+  }
+}
+
+test "selected index stays fixed when a followup is added" {
+  indexCase1()
+}
+
+func indexCase2() -> bool {
+  match decodeIndex("{\"schema\":\"maintenance.index/2\",\"cutoffMs\":10000000000,\"windowDays\":30,\"sourceRef\":\"hand-counted-v1\",\"decisions\":[],\"selectedIds\":[\"a1\",\"a1\"]}") {
+    Err(_) => true,
+    _ => false
+  }
+}
+
+test "duplicate index selection refused" {
+  indexCase2()
+}
+
+func indexCase3() -> bool {
+  let s = data()
+  match scopedSummary({ s | episodes: [] }, indexText()) {
+    Err(_) => true,
+    _ => false
+  }
+}
+
+test "missing selected episode refused" {
+  indexCase3()
+}
+
+func indexCase4() -> bool {
+  let s = data()
+  match (scopedSummary(s, indexText()), scopedSummary({ s | episodes: reverse(s.episodes) }, indexText())) {
+    (Ok(a), Ok(b)) => a.indexMature == b.indexMature && a.indexSelected == b.indexSelected,
+    _ => false
+  }
+}
+
+test "row order does not change index partitions" {
+  indexCase4()
+}
+
+func indexCase5() -> bool {
+  match scopedSummary(data(), indexText()) {
+    Ok(a) => a.indexSelected == 1 && a.indexMature == 1 && a.indexUnknownOutcomes == 1 && a.totalWorkload == 3,
+    _ => false
+  }
+}
+
+test "index unknowns do not include out of sample rows" {
+  indexCase5()
+}
+
+func indexCase6() -> bool {
+  let t = replace(replace(indexText(), "reviewed_exact", "commit_proxy"), "\"acceptedMs\":1", "\"acceptedMs\":null")
+  match scopedSummary(data(), t) {
+    Ok(x) => x.indexMature == 0 && x.indexUnresolved == 1,
+    _ => false
+  }
+}
+
+test "unknown acceptance remains unresolved" {
+  indexCase6()
+}
+
+func indexCase7() -> bool {
+  match decodeIndex(replace(indexText(), "[\"feature\"]", "[\"invented\"]")) {
+    Err(_) => true,
+    _ => false
+  }
+}
+
+test "invalid secondary intent is rejected" {
+  indexCase7()
+}
+
+func indexCase8() -> bool {
+  match scopedSummary(data(), indexText()) {
+    Ok(x) => x.followupTouches == 2 && x.confirmedIntroductions == 0,
+    _ => false
+  }
+}
+
+test "feature file touches remain candidates not confirmed defects" {
+  indexCase8()
+}
+
+func indexCase9() -> bool {
+  match applyAnnotations(data(), [label("r1")]) {
+    Ok(s) => match scopedSummary(s, indexText()) {
+      Ok(x) => x.confirmedIntroductions == 1 && x.followupTouches == 2,
+      _ => false
+    },
+    _ => false
+  }
+}
+
+test "confirmed repair links one introduced change" {
+  indexCase9()
+}
+
+func indexCase10() -> bool {
+  let s = data()
+  match scopedSummary({ s | episodes: s.episodes ++ [original("other", "project/other", "ailang")] }, indexText()) {
+    Ok(x) => x.followupTouches == 2,
+    _ => false
+  }
+}
+
+test "same filename in another project is not a followup" {
+  indexCase10()
+}
