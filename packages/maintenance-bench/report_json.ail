@@ -4,12 +4,24 @@ import ./compare (PairComparison)
 import std/json (Json, JObject, JString, JNumber, JNull, kv, jint)
 import std/result (Result, Ok, Err)
 import std/option (Option, Some, None)
-export pure func optionalNumber(v: Option[float]) -> Json = match v {Some(n)=>JNumber(n),None=>JNull}
-export pure func integerResult(v: Result[int,string]) -> Json = match v {Ok(n)=>JObject([kv("status",JString("known_sum")),kv("value",jint(n))]),Err(e)=>JObject([kv("status",JString("unavailable")),kv("reason",JString(e))])}
-export pure func floatResult(v: Result[float,string]) -> Json = match v {Ok(n)=>JObject([kv("status",JString("reported_cost_only")),kv("value",JNumber(n))]),Err(e)=>JObject([kv("status",JString("unavailable")),kv("reason",JString(e))])}
-export pure func summaryJson(r: Summary) -> Json = JObject([
- kv("repo",JString(r.repo)),kv("language",JString(r.language)),kv("cluster",JString(r.cluster)),kv("eligible",jint(r.eligible)),kv("mature",jint(r.mature)),kv("censored",jint(r.censored)),kv("unlabelled",jint(r.unlabelled)),kv("linkedRepairChanges",jint(r.linkedRepairChanges)),kv("observedLinkedRepairRate",optionalNumber(rate(r.linkedRepairChanges,r.mature))),kv("repairEpisodes",jint(r.repairEpisodes)),kv("knownRepairDefects",jint(r.repairDefects)),kv("knownRepairRounds",jint(r.repairRounds)),kv("unattributedRepairs",jint(r.unattributedRepairs)),kv("interceptedRepairs",jint(r.interceptedRepairs)),kv("mechanicalChanges",jint(r.mechanicalChanges)),kv("compilerRepairs",jint(r.compilerRepairs)),kv("canonicalFiles",jint(r.canonicalFiles)),kv("knownTokenRows",jint(r.knownTokenRows)),kv("totalKnownTokens",integerResult(r.totalTokens)),kv("knownCostRows",jint(r.knownCostRows)),kv("totalKnownCostMicros",integerResult(r.totalCostMicros)),kv("knownDurationRows",jint(r.knownDurationRows)),kv("totalKnownDurationMs",integerResult(r.totalDurationMs)),kv("medianKnownDurationMs",optionalNumber(r.medianDurationMs)),kv("verifiedOutcomes",jint(r.successes)),kv("unknownOutcomes",jint(r.unknownOutcomes)),kv("reportedCostPerSuccessMicros",floatResult(r.costPerSuccessMicros))
-])
-export pure func pairJson(c: PairComparison) -> Json = JObject([
- kv("matched",jint(c.matched)),kv("knownPairs",jint(c.knownPairs)),kv("unmatchedLeft",jint(c.unmatchedLeft)),kv("unmatchedRight",jint(c.unmatchedRight)),kv("unmappedLeft",jint(c.unmappedLeft)),kv("unmappedRight",jint(c.unmappedRight)),kv("bothPass",jint(c.bothPass)),kv("leftOnly",jint(c.leftOnly)),kv("rightOnly",jint(c.rightOnly)),kv("neither",jint(c.neither)),kv("unknownOutcomePairs",jint(c.unknownOutcomePairs)),kv("deltaPP",optionalNumber(c.deltaPP))
-])
+
+export pure func optionalNumber(v: Option[float]) -> Json = match v {
+  Some(n) => JNumber(n),
+  None => JNull
+}
+
+export pure func integerResult(v: Result[int, string]) -> Json = match v {
+  Ok(n) => JObject([kv("status", JString("known_sum")), kv("value", jint(n))]),
+  Err(e) => JObject([kv("status", JString("unavailable")), kv("reason", JString(e))])
+}
+
+export pure func floatResult(v: Result[float, string]) -> Json = match v {
+  Ok(n) => JObject([kv("status", JString("reported_cost_only")), kv("value", JNumber(n))]),
+  Err(e) => JObject([kv("status", JString("unavailable")), kv("reason", JString(e))])
+}
+
+export pure func summaryJson(r: Summary) -> Json =
+  JObject([kv("repo", JString(r.repo)), kv("language", JString(r.language)), kv("cluster", JString(r.cluster)), kv("eligible", jint(r.eligible)), kv("mature", jint(r.mature)), kv("censored", jint(r.censored)), kv("unlabelled", jint(r.unlabelled)), kv("linkedRepairChanges", jint(r.linkedRepairChanges)), kv("observedLinkedRepairRate", optionalNumber(rate(r.linkedRepairChanges, r.mature))), kv("repairEpisodes", jint(r.repairEpisodes)), kv("knownRepairDefects", jint(r.repairDefects)), kv("knownRepairRounds", jint(r.repairRounds)), kv("unattributedRepairs", jint(r.unattributedRepairs)), kv("interceptedRepairs", jint(r.interceptedRepairs)), kv("mechanicalChanges", jint(r.mechanicalChanges)), kv("compilerRepairs", jint(r.compilerRepairs)), kv("canonicalArtifacts", jint(r.canonicalFiles)), kv("knownTokenRows", jint(r.knownTokenRows)), kv("totalKnownTokens", integerResult(r.totalTokens)), kv("knownCostRows", jint(r.knownCostRows)), kv("totalKnownCostMicros", integerResult(r.totalCostMicros)), kv("knownDurationRows", jint(r.knownDurationRows)), kv("totalKnownDurationMs", integerResult(r.totalDurationMs)), kv("medianKnownDurationMs", optionalNumber(r.medianDurationMs)), kv("verifiedOutcomes", jint(r.successes)), kv("unknownOutcomes", jint(r.unknownOutcomes)), kv("reportedCostPerSuccessMicros", floatResult(r.costPerSuccessMicros))])
+
+export pure func pairJson(c: PairComparison) -> Json =
+  JObject([kv("matched", jint(c.matched)), kv("knownPairs", jint(c.knownPairs)), kv("unmatchedLeft", jint(c.unmatchedLeft)), kv("unmatchedRight", jint(c.unmatchedRight)), kv("unmappedLeft", jint(c.unmappedLeft)), kv("unmappedRight", jint(c.unmappedRight)), kv("bothPass", jint(c.bothPass)), kv("leftOnly", jint(c.leftOnly)), kv("rightOnly", jint(c.rightOnly)), kv("neither", jint(c.neither)), kv("unknownOutcomePairs", jint(c.unknownOutcomePairs)), kv("deltaPP", optionalNumber(c.deltaPP))])

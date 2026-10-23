@@ -1,0 +1,32 @@
+module sunholo/maintenance_bench/strict_json
+import std/json (Json, JObject, JArray, decode)
+import std/result (Result, Ok, Err)
+import std/option (Option, Some, None)
+import std/string (foldChars, chars, charCode, stringToInt)
+import std/list (foldl, map, length as size, filter)
+import std/regex as R
+import std/map as M
+
+func validToken(token: string) -> bool =
+  if token == "" || token == "true" || token == "false" || token == "null" then true else if not foldl(\ok c. ok && charCode(c) >= 48 && charCode(c) <= 57, true, chars(token)) then false else match stringToInt(token) {
+    Some(n) => n >= 0 && n <= 9007199254740991 && show(n) == token,
+    None => false
+  }
+
+export pure func uniqueObjectKeys(j: Json) -> bool = match j {
+  JObject(fields) => M.size(M.fromList(map(\f. (f.key, true), fields))) == size(fields) && foldl(\ok f. ok && uniqueObjectKeys(f.value), true, fields),
+  JArray(xs) => foldl(\ok x. ok && uniqueObjectKeys(x), true, xs),
+  _ => true
+}
+
+export pure func decodeCountDocument(raw: string) -> Result[Json, string] =
+  match (R.compile("\"(?:\\\\.|[^\"\\\\])*\""), R.compile("[\\[\\]{}:,\\s]+")) {
+    (Ok(strings), Ok(delimiters)) => {
+      let tokens = R.split(delimiters, R.replaceAll(strings, raw, ""))
+      if size(filter(\token. not validToken(token), tokens)) > 0 then Err("count lexeme must be a nonnegative exact decimal integer <=2^53-1") else match decode(raw) {
+        Err(e) => Err(e),
+        Ok(j) => if uniqueObjectKeys(j) then Ok(j) else Err("duplicate JSON object key")
+      }
+    },
+    _ => Err("internal JSON lexical validator pattern failed")
+  }

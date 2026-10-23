@@ -1,5 +1,6 @@
 module sunholo/maintenance_bench/codec_test
 import ./codec (countValue, requiredText)
+import ./strict_json (decodeCountDocument)
 import std/json (JNumber, JString, JObject, JBool, kv)
 import std/result (Ok, Err)
 import ./codec (decodeSnapshot, encodeSnapshot, decodeAnnotations, decodeManifest, optionalCount, optionalBool)
@@ -27,4 +28,8 @@ test "false is present not unknown" { match optionalBool(JObject([kv("outcome", 
 test "unknown annotation schema refused" { match decodeAnnotations("{\"schema\":\"x\"}") { Err(_) => true, Ok(_) => false } }
 test "unbounded manifest window refused" { match decodeManifest("{\"schema\":\"maintenance.cohort/1\",\"cutoffMs\":100,\"windowDays\":0,\"repositories\":[],\"authorship\":\"all\",\"requireComplete\":true,\"canonicalOnly\":true,\"metricVersion\":\"maintenance.metrics/1\",\"compilerId\":\"test\"}") { Err(_) => true, Ok(_) => false } }
 property "exact bounded count roundtrip" { forall(n: int) => if n >= 0 && n <= 1000000 then match countValue(JNumber(intToFloat(n))) { Ok(k) => k == n, Err(_) => false } else true }
-test "evidence body cannot change without hash" { match decodeSnapshot("{\"schema\":\"maintenance.snapshot/1\",\"source\":\"test\",\"sourceRef\":\"fixed\",\"cutoffMs\":100,\"complete\":true,\"evidence\":[{\"endpoint\":\"repo\",\"body\":\"tampered\",\"digest\":\"wrong\"}],\"episodes\":[]}") { Err(_) => true, Ok(_) => false } }
+test "evidence body cannot change without hash" { match decodeSnapshot("{\"schema\":\"maintenance.snapshot/1\",\"source\":\"test\",\"sourceRef\":\"fixed\",\"cutoffMs\":100,\"complete\":true,\"timeBasis\":\"acceptance\",\"evidence\":[{\"endpoint\":\"repo\",\"body\":\"tampered\",\"digest\":\"wrong\"}],\"episodes\":[]}") { Err(_) => true, Ok(_) => false } }
+test "rounded fractional raw lexeme is rejected before JSON float conversion" { match decodeCountDocument("{\"tokens\":9007199254740990.5}") {Err(_)=>true,_=>false} }
+test "fraction too small for float precision is still rejected" { match decodeCountDocument("{\"tokens\":1.0000000000000001}") {Err(_)=>true,_=>false} }
+test "ambiguous duplicate completeness is rejected" { match decodeCountDocument("{\"complete\":true,\"complete\":false}") {Err(_)=>true,_=>false} }
+test "numeric punctuation in quoted evidence is not a count" { match decodeCountDocument("{\"text\":\"1.2e-3\"}") {Ok(_)=>true,_=>false} }

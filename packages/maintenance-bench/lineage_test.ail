@@ -1,0 +1,14 @@
+module sunholo/maintenance_bench/lineage_test
+import ./types (Episode)
+import ./lineage (artifacts)
+import ./reference (original)
+import std/list (length, head, filter)
+import std/option (Some)
+func first() -> Episode = {original("first","project/a","ailang") | acceptedMs:1,files:["old.ail"],changes:[{status:"A",oldPath:"old.ail",path:"old.ail"}]}
+func renamed() -> Episode = {original("rename","project/a","ailang") | acceptedMs:2,files:["new.ail"],changes:[{status:"R",oldPath:"old.ail",path:"new.ail"}],purpose:"repair",evidenceLevel:"confirmed"}
+test "rename preserves one artifact and two touches" { let rows=artifacts([first(),renamed()]); match head(rows) {Some(a)=>length(rows)==1 && length(a.paths)==2 && a.touches==2 && a.repairTouches==1,_=>false} }
+test "input order does not change accepted chronology" { match (head(artifacts([first(),renamed()])),head(artifacts([renamed(),first()]))) {(Some(a),Some(b))=>a.id==b.id && a.paths==b.paths && a.touches==b.touches && a.repairTouches==b.repairTouches,_=>false} }
+test "path reuse after deletion creates a new artifact" { let deleted={first() | id:"delete",acceptedMs:2,changes:[{status:"D",oldPath:"old.ail",path:"old.ail"}]}; let created={first() | id:"new",acceptedMs:3}; length(artifacts([first(),deleted,created]))==2 }
+test "copy creates separate artifact" { let copied={renamed() | changes:[{status:"C",oldPath:"old.ail",path:"new.ail"}]}; length(artifacts([first(),copied]))==2 }
+test "simultaneous rename swap uses pre-episode aliases" { let a={first() | files:["a.ail","b.ail"],changes:[{status:"A",oldPath:"a.ail",path:"a.ail"},{status:"A",oldPath:"b.ail",path:"b.ail"}]}; let b={renamed() | files:["a.ail","b.ail"],changes:[{status:"R",oldPath:"b.ail",path:"a.ail"},{status:"R",oldPath:"a.ail",path:"b.ail"}]}; let xs=artifacts([a,b]); length(xs)==2 && length(filter(\r. r.touches==2 && r.repairTouches==1,xs))==2 }
+test "touch categories partition total touches" { match head(artifacts([first(),renamed()])) {Some(a)=>a.touches==a.repairTouches+a.featureTouches+a.otherTouches,_=>false} }

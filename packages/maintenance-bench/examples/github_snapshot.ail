@@ -4,7 +4,17 @@ import pkg/sunholo/maintenance_bench/codec (encodeSnapshot)
 import std/env (getArgs)
 import std/io (println, exit)
 import std/result (Ok, Err)
+
 export func main() -> () ! {IO, Env, Process} = match getArgs() {
- repo :: _ => match collectGithub(repo,"unknown",2000000000000,1,1) { Ok(s) => println(encodeSnapshot(s)), Err(e) => { println(e); exit(1) } },
- _ => { println("usage: github_snapshot <owner/repo>"); exit(2) }
+  repo :: _ => match collectGithub(repo, "unknown", 2000000000000, 1, 1) {
+    Ok(s) => println(encodeSnapshot(s)),
+    Err(e) => {
+      println(e)
+      exit(1)
+    }
+  },
+  _ => {
+    println("usage: github_snapshot <owner/repo>")
+    exit(2)
+  }
 }

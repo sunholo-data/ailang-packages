@@ -1,8 +1,11 @@
 module sunholo/maintenance_bench/observation
 import ./types (Episode, Snapshot)
+import std/list (map)
 import std/option (None)
+
 -- Acquisition records facts only; purpose and authorship remain explicitly unknown.
-export pure func observed(id: string, repo: string, language: string, acceptedMs: int, files: [string], provenance: string) -> Episode = {
- id:id,rootCause:"unknown",detectionStage:"unknown",evidenceLevel:"unknown",artifactRole:"canonical",repo:repo,language:language,cluster:repo,acceptedMs:acceptedMs,canonical:true,files:files,purpose:"uncertain",authorship:"unknown",defect:None,repairs:None,detectedMs:None,round:0,tokens:None,costMicros:None,durationMs:None,pair:None,model:None,harness:None,trial:None,outcome:None,provenance:provenance
-}
-export pure func snapshot(source: string, sourceRef: string, cutoffMs: int, complete: bool, episodes: [Episode]) -> Snapshot = {schema:"maintenance.snapshot/1",source:source,sourceRef:sourceRef,cutoffMs:cutoffMs,complete:complete,evidence:[],episodes:episodes}
+export pure func observed(id: string, repo: string, language: string, acceptedMs: int, files: [string], provenance: string) -> Episode =
+  { id: id, changes: map(\path. { status: "unknown", oldPath: path, path: path }, files), rootCause: "unknown", detectionStage: "unknown", evidenceLevel: "unknown", artifactRole: "canonical", repo: repo, language: language, cluster: repo, acceptedMs: acceptedMs, canonical: true, files: files, purpose: "uncertain", authorship: "unknown", defect: None, repairs: None, detectedMs: None, round: 0, tokens: None, costMicros: None, durationMs: None, pair: None, model: None, harness: None, trial: None, outcome: None, provenance: provenance }
+
+export pure func snapshot(source: string, sourceRef: string, cutoffMs: int, complete: bool, episodes: [Episode]) -> Snapshot =
+  { schema: "maintenance.snapshot/1", source: source, sourceRef: sourceRef, cutoffMs: cutoffMs, complete: complete, timeBasis: "acceptance", evidence: [], episodes: episodes }

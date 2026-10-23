@@ -1,0 +1,97 @@
+module sunholo/maintenance_bench/codec
+import ./strict_json (decodeCountDocument)
+import ./types (Episode, Snapshot, Manifest, Annotation, Evidence, FileChange)
+import std/result (Result, Ok, Err, flatMap, unwrap)
+import std/option (Option, Some, None)
+import std/json (Json, JNull, JNumber, JString, JBool, JArray, JObject, decode, encode, get, kv)
+import std/crypto (sha256Hex)
+import std/math (floor, floatToInt, intToFloat)
+import std/list (map, foldl, length as size, contains)
+import std/map as M
+
+-- Exact JSON counts are bounded by IEEE-754 integer precision, never truncated.
+export pure func countValue(j: Json) -> Result[int, string] = match j {
+  JNumber(n) => if n >= 0.0 && n <= 9007199254740991.0 && floor(n) == n then Ok(floatToInt(n)) else Err("count must be a nonnegative exact integer <= 2^53-1"),
+  _ => Err("expected count number")
+}
+export pure func requiredText(j: Json, key: string) -> Result[string, string] = match get(j,key) {
+  Some(JString(s)) => if s != "" then Ok(s) else Err("empty field: ${key}"), _ => Err("missing/non-string field: ${key}")
+}
+export pure func requiredCount(j: Json, key: string) -> Result[int, string] = match get(j,key) { Some(v) => countValue(v), None => Err("missing count: ${key}") }
+export pure func requiredBool(j: Json, key: string) -> Result[bool, string] = match get(j,key) { Some(JBool(b)) => Ok(b), _ => Err("missing/non-boolean field: ${key}") }
+export pure func optionalText(j: Json, key: string) -> Result[Option[string], string] = match get(j,key) {
+  Some(JNull) => Ok(None), Some(JString(s)) => if s != "" then Ok(Some(s)) else Err("empty optional text: ${key}"), _ => Err("expected explicit null or text: ${key}")
+}
+export pure func optionalCount(j: Json, key: string) -> Result[Option[int], string] = match get(j,key) {
+  Some(JNull) => Ok(None), Some(v) => flatMap(\n. Ok(Some(n)),countValue(v)), None => Err("expected explicit null or count: ${key}")
+}
+export pure func optionalBool(j: Json, key: string) -> Result[Option[bool], string] = match get(j,key) {
+  Some(JNull) => Ok(None), Some(JBool(b)) => Ok(Some(b)), _ => Err("expected explicit null or bool: ${key}")
+}
+-- unwrap is used only after validating EVERY Result in this immutable list.
+export pure func collectResults[a](items: [Result[a,string]]) -> Result[[a],string] {
+  let checked = foldl(\state r. match state { Err(e) => Err(e), Ok(_) => match r { Err(e) => Err(e), Ok(_) => Ok(()) } }, Ok(()), items);
+  match checked { Err(e) => Err(e), Ok(_) => Ok(map(\r. unwrap(r),items)) }
+}
+export pure func requiredTexts(j: Json, key: string) -> Result[[string],string] = match get(j,key) {
+  Some(JArray(xs)) => collectResults(map(\v. match v { JString(s) => if s != "" then Ok(s) else Err("empty member: ${key}"), _ => Err("non-string member: ${key}") },xs)),
+  _ => Err("missing/non-array field: ${key}")
+}
+export pure func enumText(j: Json, key: string, allowed: [string]) -> Result[string,string] = flatMap(\s. if contains(allowed,s) then Ok(s) else Err("invalid ${key}: ${s}"), requiredText(j,key))
+export pure func purposeText(j: Json) -> Result[string,string] = enumText(j,"purpose",["feature","repair","refactor","performance","migration","security","mechanical","tests_docs","mixed","uncertain"])
+export pure func authorText(j: Json) -> Result[string,string] = enumText(j,"authorship",["agent","human_confirmed","mixed","unknown"])
+export pure func uniqueIds(rows: [Episode]) -> bool = M.size(M.fromList(map(\r. (r.id,true),rows))) == size(rows)
+func decodeChange(j: Json) -> Result[FileChange,string] = flatMap(\status. flatMap(\oldPath. flatMap(\path. Ok({status:status,oldPath:oldPath,path:path}),requiredText(j,"path")),requiredText(j,"oldPath")),enumText(j,"status",["A","M","D","T","R","C","unknown"]))
+func changeRows(j: Json) -> Result[[FileChange],string] = match get(j,"changes") {Some(JArray(xs))=>collectResults(map(\x. decodeChange(x),xs)),_=>Err("missing changes array")}
+func episodeRows(j: Json) -> Result[[Episode],string] = match get(j,"episodes") {Some(JArray(xs))=>flatMap(\rows. if uniqueIds(rows) then Ok(rows) else Err("duplicate episode id"),collectResults(map(\x. decodeEpisode(x),xs))),_=>Err("missing episodes array")}
+export pure func decodeEpisode(j: Json) -> Result[Episode,string] =
+flatMap(\changes. flatMap(\rootCause. flatMap(\detectionStage. flatMap(\evidenceLevel. flatMap(\artifactRole. flatMap(\id. flatMap(\repo. flatMap(\language. flatMap(\cluster. flatMap(\acceptedMs. flatMap(\canonical. flatMap(\files. flatMap(\purpose. flatMap(\authorship. flatMap(\defect. flatMap(\repairs. flatMap(\detectedMs. flatMap(\round. flatMap(\tokens. flatMap(\costMicros. flatMap(\durationMs. flatMap(\pair. flatMap(\model. flatMap(\harness. flatMap(\trial. flatMap(\outcome. flatMap(\provenance. Ok({id: id, changes:changes, rootCause:rootCause, detectionStage:detectionStage, evidenceLevel:evidenceLevel, artifactRole:artifactRole,  repo: repo, language: language, cluster: cluster, acceptedMs: acceptedMs, canonical: canonical, files: files, purpose: purpose, authorship: authorship, defect: defect, repairs: repairs, detectedMs: detectedMs, round: round, tokens: tokens, costMicros: costMicros, durationMs: durationMs, pair: pair, model: model, harness: harness, trial: trial, outcome: outcome, provenance: provenance}), requiredText(j,"provenance")), optionalBool(j,"outcome")), optionalCount(j,"trial")), optionalText(j,"harness")), optionalText(j,"model")), optionalText(j,"pair")), optionalCount(j,"durationMs")), optionalCount(j,"costMicros")), optionalCount(j,"tokens")), requiredCount(j,"round")), optionalCount(j,"detectedMs")), optionalText(j,"repairs")), optionalText(j,"defect")), authorText(j)), purposeText(j)), requiredTexts(j,"files")), requiredBool(j,"canonical")), requiredCount(j,"acceptedMs")), requiredText(j,"cluster")), requiredText(j,"language")), requiredText(j,"repo")), requiredText(j,"id")), enumText(j,"artifactRole",["canonical", "derived", "generated_output", "tests", "dependency", "harness", "unknown"])), enumText(j,"evidenceLevel",["confirmed", "supported", "inferred", "unknown"])), enumText(j,"detectionStage",["local_compiler", "local_verifier", "local_tests", "ci", "review", "post_acceptance", "production", "unknown"])), enumText(j,"rootCause",["application", "requirement", "type_interface", "effects_authority", "dependency", "compiler_runtime", "harness_infrastructure", "build_deployment", "unknown"])),changeRows(j))
+func decodeEvidence(j: Json) -> Result[Evidence,string] = flatMap(\endpoint. flatMap(\body. flatMap(\digest. if sha256Hex(body)==digest then Ok({endpoint:endpoint,body:body,digest:digest}) else Err("evidence digest mismatch"),requiredText(j,"digest")),requiredText(j,"body")),requiredText(j,"endpoint"))
+func evidenceRows(j: Json) -> Result[[Evidence],string] = match get(j,"evidence") { Some(JArray(xs)) => collectResults(map(\x. decodeEvidence(x),xs)), _ => Err("missing evidence array") }
+export pure func decodeSnapshot(text: string) -> Result[Snapshot,string] = flatMap(\j. flatMap(\schema. flatMap(\source. flatMap(\sourceRef. flatMap(\cutoffMs. flatMap(\complete. flatMap(\timeBasis. flatMap(\evidence. flatMap(\episodes. Ok({schema:schema,source:source,sourceRef:sourceRef,cutoffMs:cutoffMs,complete:complete,timeBasis:timeBasis,evidence:evidence,episodes:episodes}),episodeRows(j)),evidenceRows(j)),enumText(j,"timeBasis",["acceptance","commit","mixed","unknown"])),requiredBool(j,"complete")),requiredCount(j,"cutoffMs")),requiredText(j,"sourceRef")),requiredText(j,"source")),enumText(j,"schema",["maintenance.snapshot/1"])),decodeCountDocument(text))
+export pure func decodeManifest(text: string) -> Result[Manifest,string] = flatMap(\j.
+flatMap(\schema. flatMap(\cutoffMs. flatMap(\windowDays. flatMap(\repositories. flatMap(\authorship. flatMap(\requireComplete. flatMap(\canonicalOnly. flatMap(\metricVersion. flatMap(\compilerId. if schema != "maintenance.cohort/1" || (windowDays != 30 && windowDays != 90) || (authorship != "all" && authorship != "agent") || metricVersion != "maintenance.metrics/1" then Err("unsupported manifest definition") else Ok({schema: schema, cutoffMs: cutoffMs, windowDays: windowDays, repositories: repositories, authorship: authorship, requireComplete: requireComplete, canonicalOnly: canonicalOnly, metricVersion: metricVersion, compilerId: compilerId}), requiredText(j,"compilerId")), requiredText(j,"metricVersion")), requiredBool(j,"canonicalOnly")), requiredBool(j,"requireComplete")), requiredText(j,"authorship")), requiredTexts(j,"repositories")), requiredCount(j,"windowDays")), requiredCount(j,"cutoffMs")), requiredText(j,"schema")),decodeCountDocument(text))
+export pure func decodeAnnotation(j: Json) -> Result[Annotation,string] = flatMap(\acceptedMs. flatMap(\rootCause. flatMap(\detectionStage. flatMap(\evidenceLevel. flatMap(\artifactRole. flatMap(\id. flatMap(\purpose. flatMap(\authorship. flatMap(\defect. flatMap(\repairs. flatMap(\detectedMs. flatMap(\round. flatMap(\provenance. Ok({id: id, acceptedMs:acceptedMs, rootCause:rootCause, detectionStage:detectionStage, evidenceLevel:evidenceLevel, artifactRole:artifactRole,  purpose: purpose, authorship: authorship, defect: defect, repairs: repairs, detectedMs: detectedMs, round: round, provenance: provenance}), requiredText(j,"provenance")), requiredCount(j,"round")), optionalCount(j,"detectedMs")), optionalText(j,"repairs")), optionalText(j,"defect")), authorText(j)), purposeText(j)), requiredText(j,"id")), enumText(j,"artifactRole",["canonical", "derived", "generated_output", "tests", "dependency", "harness", "unknown"])), enumText(j,"evidenceLevel",["confirmed", "supported", "inferred", "unknown"])), enumText(j,"detectionStage",["local_compiler", "local_verifier", "local_tests", "ci", "review", "post_acceptance", "production", "unknown"])), enumText(j,"rootCause",["application", "requirement", "type_interface", "effects_authority", "dependency", "compiler_runtime", "harness_infrastructure", "build_deployment", "unknown"])),optionalCount(j,"acceptedMs"))
+export pure func decodeAnnotations(text: string) -> Result[[Annotation],string] = flatMap(\j.
+  flatMap(\schema. if schema != "maintenance.annotations/1" then Err("unsupported annotation schema") else match get(j,"annotations") {
+    Some(JArray(xs)) => flatMap(\rows. if M.size(M.fromList(map(\r. (r.id,true),rows))) == size(rows) then Ok(rows) else Err("duplicate annotation id"),collectResults(map(\x. decodeAnnotation(x),xs))),
+    _ => Err("missing annotations array")
+  }, requiredText(j,"schema")), decodeCountDocument(text))
+export pure func textOption(x: Option[string]) -> Json = match x { Some(s) => JString(s), None => JNull }
+export pure func countOption(x: Option[int]) -> Json = match x { Some(n) => JNumber(intToFloat(n)), None => JNull }
+export pure func boolOption(x: Option[bool]) -> Json = match x { Some(b) => JBool(b), None => JNull }
+export pure func episodeJson(r: Episode) -> Json = JObject([
+ kv("changes",JArray(map(\c. JObject([kv("status",JString(c.status)),kv("oldPath",JString(c.oldPath)),kv("path",JString(c.path))]),r.changes))),
+  kv("rootCause",JString(r.rootCause)),
+  kv("detectionStage",JString(r.detectionStage)),
+  kv("evidenceLevel",JString(r.evidenceLevel)),
+  kv("artifactRole",JString(r.artifactRole)),
+
+  kv("id", JString(r.id)),
+  kv("repo", JString(r.repo)),
+  kv("language", JString(r.language)),
+  kv("cluster", JString(r.cluster)),
+  kv("acceptedMs", JNumber(intToFloat(r.acceptedMs))),
+  kv("canonical", JBool(r.canonical)),
+  kv("files", JArray(map(\s. JString(s),r.files))),
+  kv("purpose", JString(r.purpose)),
+  kv("authorship", JString(r.authorship)),
+  kv("defect", textOption(r.defect)),
+  kv("repairs", textOption(r.repairs)),
+  kv("detectedMs", countOption(r.detectedMs)),
+  kv("round", JNumber(intToFloat(r.round))),
+  kv("tokens", countOption(r.tokens)),
+  kv("costMicros", countOption(r.costMicros)),
+  kv("durationMs", countOption(r.durationMs)),
+  kv("pair", textOption(r.pair)),
+  kv("model", textOption(r.model)),
+  kv("harness", textOption(r.harness)),
+  kv("trial", countOption(r.trial)),
+  kv("outcome", boolOption(r.outcome)),
+  kv("provenance", JString(r.provenance))
+])
+export pure func encodeSnapshot(s: Snapshot) -> string = encode(JObject([
+  kv("schema",JString(s.schema)),kv("source",JString(s.source)),kv("sourceRef",JString(s.sourceRef)),kv("cutoffMs",JNumber(intToFloat(s.cutoffMs))),kv("complete",JBool(s.complete)),kv("timeBasis",JString(s.timeBasis)),kv("evidence",JArray(map(\e. JObject([kv("endpoint",JString(e.endpoint)),kv("body",JString(e.body)),kv("digest",JString(e.digest))]),s.evidence))),kv("episodes",JArray(map(\r. episodeJson(r),s.episodes)))
+]))
+export pure func encodeAnnotations(rows: [Annotation]) -> string = encode(JObject([kv("schema",JString("maintenance.annotations/1")),kv("annotations",JArray(map(\a. JObject([kv("id",JString(a.id)),kv("acceptedMs",countOption(a.acceptedMs)),kv("purpose",JString(a.purpose)),kv("authorship",JString(a.authorship)),kv("rootCause",JString(a.rootCause)),kv("detectionStage",JString(a.detectionStage)),kv("evidenceLevel",JString(a.evidenceLevel)),kv("artifactRole",JString(a.artifactRole)),kv("defect",textOption(a.defect)),kv("repairs",textOption(a.repairs)),kv("detectedMs",countOption(a.detectedMs)),kv("round",JNumber(intToFloat(a.round))),kv("provenance",JString(a.provenance))]),rows)))]))
+export pure func encodeManifest(m: Manifest) -> string = encode(JObject([kv("schema",JString(m.schema)),kv("cutoffMs",JNumber(intToFloat(m.cutoffMs))),kv("windowDays",JNumber(intToFloat(m.windowDays))),kv("repositories",JArray(map(\r. JString(r),m.repositories))),kv("authorship",JString(m.authorship)),kv("requireComplete",JBool(m.requireComplete)),kv("canonicalOnly",JBool(m.canonicalOnly)),kv("metricVersion",JString(m.metricVersion)),kv("compilerId",JString(m.compilerId))]))

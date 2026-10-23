@@ -1,21 +1,42 @@
 module sunholo/maintenance_bench/verify_snapshot
-import ./codec (requiredCount, requiredText)
+import ./codec (requiredCount, requiredText, collectResults)
+import ./strict_json (decodeCountDocument, uniqueObjectKeys)
 import std/result (Result, Ok, Err, flatMap)
-import std/json (decode, get, Json, JArray, JNumber, JString)
+import std/json (decode, encode, get, Json, JArray, JString)
 import std/option (Some, None)
-import std/list (foldl, filter, length as size)
-func equalCount(actual: Json, expected: Json, key: string) -> Result[(),string] = flatMap(\a. flatMap(\e. if a==e then Ok(()) else Err("expectation mismatch: ${key}; actual ${show(a)}, expected ${show(e)}"),requiredCount(expected,key)),requiredCount(actual,key))
-export pure func verifySnapshot(reportText: string, expectedText: string) -> Result[(),string] = flatMap(\actual. flatMap(\expected.
- flatMap(\schema. if schema!="maintenance.expectation/1" then Err("unsupported expectation schema") else
- match (get(actual,"groups"),get(expected,"groups")) {
-  (Some(JArray(groups)),Some(JArray(wanted)))=>
-  if size(groups)!=size(wanted) then Err("expectation mismatch: group count") else {
-   let totals=foldl(\state key. match state {Err(e)=>Err(e),Ok(_)=>equalCount(actual,expected,key)},Ok(()),["eligible","mature","censored","excluded"]);
-   match totals {Err(e)=>Err(e),Ok(_)=>foldl(\state target. match state {Err(e)=>Err(e),Ok(_)=>
-    flatMap(\repo. flatMap(\language. {
-     let matching=filter(\g. match (get(g,"repo"),get(g,"language")) {(Some(JString(r)),Some(JString(l)))=>r==repo && l==language,_=>false},groups);
-     match matching { [g]=>foldl(\acc key. match acc {Err(e)=>Err(e),Ok(_)=>equalCount(g,target,key)},Ok(()),["mature","linkedRepairChanges","knownRepairDefects","knownRepairRounds","interceptedRepairs"]), _=>Err("expectation group missing or duplicate") }
-    },requiredText(target,"language")),requiredText(target,"repo"))
-   },Ok(()),wanted)}
-  }, _=>Err("missing expected/actual groups")
- },requiredText(expected,"schema")),decode(expectedText)),decode(reportText))
+import std/list (foldl, map, length as size)
+import std/map as M
+
+func equalCount(actual: Json, expected: Json, key: string) -> Result[(), string] =
+  flatMap(\a. flatMap(\e. if a == e then Ok() else Err("expectation mismatch: ${key}; actual ${show(a)}, expected ${show(e)}"), requiredCount(expected, key)), requiredCount(actual, key))
+
+func identified(row: Json) -> Result[{ key: string, row: Json }, string] =
+  flatMap(\repo. flatMap(\language. flatMap(\cluster. Ok({ key: encode(JArray([JString(repo), JString(language), JString(cluster)])), row: row }), requiredText(row, "cluster")), requiredText(row, "language")), requiredText(row, "repo"))
+
+export pure func verifySnapshot(reportText: string, expectedText: string) -> Result[(), string] =
+  flatMap(\actual. flatMap(\expected. flatMap(\schema. if schema != "maintenance.expectation/1" || not uniqueObjectKeys(actual) then Err("unsupported expectation schema or ambiguous report") else match (get(actual, "groups"), get(expected, "groups")) {
+    (Some(JArray(groups)), Some(JArray(wanted))) => flatMap(\a. flatMap(\e. {
+      let ai = M.fromList(map(\r. (r.key, r.row), a))
+      let ei = M.fromList(map(\r. (r.key, r.row), e))
+      if M.size(ai) != size(a) || M.size(ei) != size(e) then Err("duplicate actual/expected group identity") else if M.keys(ai) != M.keys(ei) then Err("expectation group coverage mismatch") else {
+        let totals = foldl(\state key. match state {
+          Err(error) => Err(error),
+          Ok(_) => equalCount(actual, expected, key)
+        }, Ok(), ["eligible", "mature", "censored", "excluded"])
+        match totals {
+          Err(error) => Err(error),
+          Ok(_) => foldl(\state target. match state {
+            Err(error) => Err(error),
+            Ok(_) => match M.lookup(ai, target.key) {
+              None => Err("expected group missing"),
+              Some(g) => foldl(\acc key. match acc {
+                Err(error) => Err(error),
+                Ok(_) => equalCount(g, target.row, key)
+              }, Ok(), ["mature", "linkedRepairChanges", "knownRepairDefects", "knownRepairRounds", "interceptedRepairs"])
+            }
+          }, Ok(), e)
+        }
+      }
+    }, collectResults(map(\r. identified(r), wanted))), collectResults(map(\r. identified(r), groups))),
+    _ => Err("missing expected/actual groups")
+  }, requiredText(expected, "schema")), decodeCountDocument(expectedText)), decode(reportText))

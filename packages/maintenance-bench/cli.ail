@@ -6,18 +6,48 @@ import std/fs (readFileResult)
 import std/env (getArgs)
 import std/io (println, eprintln, exit)
 import std/result (Ok, Err)
-func fail(message: string, code: int) -> () ! {IO} { eprintln(message); exit(code) }
-func output(snapshot: string, annotations: string, manifest: string, path: string, markdown: bool, left: string, right: string) -> () ! {IO,FS} = match loadInputs(snapshot,annotations,manifest) {
- Err(e)=>fail(e,1),Ok(input)=>match analyse(input.snapshot,input.annotations,input.manifest,left,right) {
-  Err(e)=>fail(e,1),Ok(result)=>match writeNew(path,if markdown then result.markdown else "${result.json}\n") {Err(e)=>fail(e,1),Ok(_)=>println("wrote ${path}")}
- }
+
+func fail(message: string, code: int) -> () ! {IO} {
+  eprintln(message)
+  exit(code)
 }
-export func main() -> () ! {IO,FS,Env} = match getArgs() {
- ["analyse",s,a,m,out]=>output(s,a,m,out,false,"",""),
- ["report",s,a,m,out]=>output(s,a,m,out,true,"",""),
- ["compare",s,a,m,left,right,out]=>output(s,a,m,out,false,left,right),
- ["validate",s,a,m]=>match loadInputs(s,a,m) { Err(e)=>fail(e,1),Ok(input)=>match analyse(input.snapshot,input.annotations,input.manifest,"","") {Err(e)=>fail(e,1),Ok(_)=>println("valid snapshot, annotations and cohort")}},
- ["verify-snapshot",s,a,m,expected]=>match loadInputs(s,a,m) {Err(e)=>fail(e,1),Ok(input)=>match analyse(input.snapshot,input.annotations,input.manifest,"","") {Err(e)=>fail(e,1),Ok(report)=>match readFileResult(expected) {Err(e)=>fail(e,1),Ok(wanted)=>match verifySnapshot(report.json,wanted) {Err(e)=>fail(e,1),Ok(_)=>println("independent expectations verified")}}}},
- ["--help"]=>println("maintenance-bench analyse|report SNAPSHOT ANNOTATIONS MANIFEST NEW_OUTPUT\nmaintenance-bench compare SNAPSHOT ANNOTATIONS MANIFEST LEFT RIGHT NEW_JSON\nmaintenance-bench validate SNAPSHOT ANNOTATIONS MANIFEST\nmaintenance-bench verify-snapshot SNAPSHOT ANNOTATIONS MANIFEST EXPECTED\nOffline; no Process, Net or AI authority. Acquisition: maintenance-collect. Timing: maintenance-scale."),
- _=>fail("invalid arguments; use --help",2)
+
+func output(snapshot: string, annotations: string, manifest: string, path: string, markdown: bool, left: string, right: string) -> () ! {IO, FS} =
+  match loadInputs(snapshot, annotations, manifest) {
+    Err(e) => fail(e, 1),
+    Ok(input) => match analyse(input.snapshot, input.annotations, input.manifest, left, right) {
+      Err(e) => fail(e, 1),
+      Ok(result) => match writeNew(path, if markdown then result.markdown else "${result.json}\n") {
+        Err(e) => fail(e, 1),
+        Ok(_) => println("wrote ${path}")
+      }
+    }
+  }
+
+export func main() -> () ! {IO, FS, Env} = match getArgs() {
+  ["analyse", s, a, m, out] => output(s, a, m, out, false, "", ""),
+  ["report", s, a, m, out] => output(s, a, m, out, true, "", ""),
+  ["compare", s, a, m, left, right, out] => output(s, a, m, out, false, left, right),
+  ["validate", s, a, m] => match loadInputs(s, a, m) {
+    Err(e) => fail(e, 1),
+    Ok(input) => match analyse(input.snapshot, input.annotations, input.manifest, "", "") {
+      Err(e) => fail(e, 1),
+      Ok(_) => println("valid snapshot, annotations and cohort")
+    }
+  },
+  ["verify-snapshot", s, a, m, expected] => match loadInputs(s, a, m) {
+    Err(e) => fail(e, 1),
+    Ok(input) => match analyse(input.snapshot, input.annotations, input.manifest, "", "") {
+      Err(e) => fail(e, 1),
+      Ok(report) => match readFileResult(expected) {
+        Err(e) => fail(e, 1),
+        Ok(wanted) => match verifySnapshot(report.json, wanted) {
+          Err(e) => fail(e, 1),
+          Ok(_) => println("independent expectations verified")
+        }
+      }
+    }
+  },
+  ["--help"] => println("maintenance-bench analyse|report SNAPSHOT ANNOTATIONS MANIFEST NEW_OUTPUT\nmaintenance-bench compare SNAPSHOT ANNOTATIONS MANIFEST LEFT RIGHT NEW_JSON\nmaintenance-bench validate SNAPSHOT ANNOTATIONS MANIFEST\nmaintenance-bench verify-snapshot SNAPSHOT ANNOTATIONS MANIFEST EXPECTED\nOffline; no Process, Net or AI authority. Acquisition: maintenance-collect. Timing: maintenance-scale."),
+  _ => fail("invalid arguments; use --help", 2)
 }

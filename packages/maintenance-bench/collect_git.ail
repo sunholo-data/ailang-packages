@@ -7,58 +7,89 @@ import std/option (Some, None)
 import std/string (split, trim, startsWith, endsWith, stringToInt, contains)
 import std/list (map, filter, length as size, take)
 
-export type Change = {status:string,oldPath:string,path:string}
+export type Change = { status: string, oldPath: string, path: string }
+
 @allow_empty_ok("An exhausted valid status stream has zero changes; malformed statuses still return Err")
-func statusRows(parts: [string]) -> Result[[Change],string] = match parts {
- [] => Ok([]),
- raw :: rest => {
-  let status = trim(raw);
-  if status == "" then statusRows(rest) else
-  if startsWith(status,"R") || startsWith(status,"C") then match rest {
-   old :: path :: tail => if old == "" || path == "" then Err("empty rename path") else flatMap(\rows. Ok({status:status,oldPath:old,path:path} :: rows),statusRows(tail)),
-   _ => Err("incomplete rename status")
-  } else if status == "A" || status == "M" || status == "D" || status == "T" then match rest {
-   path :: tail => if path == "" then Err("missing changed path") else flatMap(\rows. Ok({status:status,oldPath:path,path:path} :: rows),statusRows(tail)),
-   _ => Err("missing changed path")
-  } else Err("unsupported Git status: ${status}")
- }
-}
-export pure func parseChanges(raw: string) -> Result[[Change],string] = statusRows(split(raw,"\0"))
-export pure func canonicalPath(path: string) -> bool =
- not (startsWith(path,"docs/") || startsWith(path,"vendor/") || startsWith(path,"node_modules/") || startsWith(path,"tests/") || startsWith(path,"test/") || contains(path,"/_namedtest_") || contains(path,"_test.") || endsWith(path,".test.ts")) &&
- (endsWith(path,".ail") || endsWith(path,".py") || endsWith(path,".go") || endsWith(path,".rs") || endsWith(path,".js") || endsWith(path,".ts") || endsWith(path,".cs"))
-export pure func validRef(ref: string) -> bool = ref != "" && not startsWith(ref,"-") && not contains(ref,"\0")
-func captureCommit(path: string, repo: string, language: string, sha: string) -> Result[Episode,string] ! {Process} = match readCommand("git",["-C",path,"show","--format=%ct%x00","--name-status","-z","--find-renames",sha,"--"]) {
- Err(e) => Err(e), Ok(raw) => match split(raw,"\0") {
-  seconds :: rest => match stringToInt(trim(seconds)) {
-   None => Err("invalid Git commit timestamp"), Some(sec) => {
-    -- parseChanges consumes the original bytes after the first timestamp token.
-    let changes = statusRows(rest);
-    match changes { Err(e) => Err(e), Ok(rows) => {
-     let paths = map(\r. r.path,rows);
-     let canonical = filter(\p. canonicalPath(p),paths);
-     let base = observed("${repo}@${sha}",repo,language,sec * 1000,if size(canonical)>0 then canonical else paths,"git:${sha}; raw-name-status:${raw}");
-     Ok({base | canonical:size(canonical)>0,artifactRole:if size(canonical)>0 then "canonical" else "derived"})
-    } }
-   }
-  }, _ => Err("missing Git timestamp")
- }
-}
-@allow_empty_ok("Recursion terminates with zero remaining commit records, not an acquisition fallback")
-func captureAll(path: string, repo: string, language: string, shas: [string]) -> Result[[Episode],string] ! {Process} = match shas {
- [] => Ok([]), sha :: rest => match captureCommit(path,repo,language,sha) { Err(e) => Err(e), Ok(row) => match captureAll(path,repo,language,rest) { Err(e) => Err(e), Ok(rows) => Ok(row :: rows) } }
-}
-export func collectGit(path: string, repo: string, language: string, ref: string, cutoffMs: int, limit: int) -> Result[Snapshot,string] ! {Process} {
- if not validRef(ref) || limit < 1 || limit > 1000 || cutoffMs < 0 then Err("invalid ref/cutoff/limit (1..1000)") else
- match readCommand("git",["-C",path,"rev-parse","--verify","--end-of-options","${ref}^{commit}"]) {
-  Err(e) => Err(e), Ok(resolved) => {
-   let sha = trim(resolved);
-   match readCommand("git",["-C",path,"log","--no-merges","--format=%H","--max-count=${show(limit+1)}","--until=@${show(cutoffMs / 1000)}",sha,"--"]) {
-    Err(e) => Err(e), Ok(raw) => {
-     let ids = filter(\s. s != "",split(trim(raw),"\n"));
-     match captureAll(path,repo,language,take(limit,ids)) { Err(e) => Err(e), Ok(rows) => Ok(snapshot("git:${repo}",sha,cutoffMs,size(ids)<=limit,rows)) }
-    }
-   }
+func statusRows(parts: [string]) -> Result[[Change], string] = match parts {
+  [] => Ok([]),
+  raw :: rest => {
+    let status = trim(raw)
+    if status == "" then statusRows(rest) else if startsWith(status, "R") || startsWith(status, "C") then match rest {
+      old :: path :: tail => if old == "" || path == "" then Err("empty rename path") else flatMap(\rows. Ok({ status: status, oldPath: old, path: path } :: rows), statusRows(tail)),
+      _ => Err("incomplete rename status")
+    } else if status == "A" || status == "M" || status == "D" || status == "T" then match rest {
+      path :: tail => if path == "" then Err("missing changed path") else flatMap(\rows. Ok({ status: status, oldPath: path, path: path } :: rows), statusRows(tail)),
+      _ => Err("missing changed path")
+    } else Err("unsupported Git status: ${status}")
   }
- }
+}
+
+export pure func parseChanges(raw: string) -> Result[[Change], string] = statusRows(split(raw, "\u{0}"))
+
+export pure func canonicalPath(path: string) -> bool =
+  not (startsWith(path, "docs/") || startsWith(path, "vendor/") || startsWith(path, "node_modules/") || startsWith(path, "tests/") || startsWith(path, "test/") || contains(path, "/_namedtest_") || contains(path, "_test.") || endsWith(path, ".test.ts")) && (endsWith(path, ".ail") || endsWith(path, ".py") || endsWith(path, ".go") || endsWith(path, ".rs") || endsWith(path, ".js") || endsWith(path, ".ts") || endsWith(path, ".cs"))
+
+-- Language is declared metadata; select canonical code in that language, not every bridge.
+export pure func canonicalForLanguage(path: string, language: string) -> bool =
+  canonicalPath(path) && (if language == "ailang" then endsWith(path, ".ail") else if language == "python" then endsWith(path, ".py") else if language == "go" then endsWith(path, ".go") else if language == "rust" then endsWith(path, ".rs") else if language == "javascript" then endsWith(path, ".js") else if language == "typescript" then endsWith(path, ".ts") else if language == "csharp" || language == "c#" then endsWith(path, ".cs") else false)
+
+export pure func roleFor(paths: [string], language: string) -> string =
+  if size(filter(\p. canonicalForLanguage(p, language), paths)) > 0 then "canonical" else if size(paths) > 0 && size(filter(\p. not (startsWith(p, "docs/ailang/") || startsWith(p, "vendor/") || startsWith(p, "node_modules/")), paths)) == 0 then "derived" else if size(paths) > 0 && size(filter(\p. not (startsWith(p, "tests/") || startsWith(p, "test/") || contains(p, "_test.")), paths)) == 0 then "tests" else "unknown"
+
+export pure func validRef(ref: string) -> bool = ref != "" && not startsWith(ref, "-") && not contains(ref, "\u{0}")
+
+func captureCommit(path: string, repo: string, language: string, sha: string) -> Result[Episode, string] ! {Process} =
+  match readCommand("git", ["-C", path, "show", "--format=%ct%x00", "--name-status", "-z", "--find-renames", sha, "--"]) {
+    Err(e) => Err(e),
+    Ok(raw) => match split(raw, "\u{0}") {
+      seconds :: rest => match stringToInt(trim(seconds)) {
+        None => Err("invalid Git commit timestamp"),
+        Some(sec) => {
+          -- parseChanges consumes the original bytes after the first timestamp token.
+          let changes = statusRows(rest)
+          match changes {
+            Err(e) => Err(e),
+            Ok(rows) => {
+              let paths = map(\r. r.path, rows)
+              let canonical = filter(\p. canonicalForLanguage(p, language), paths)
+              let base = observed("${repo}@${sha}", repo, language, sec * 1000, if size(canonical) > 0 then canonical else paths, "git:${sha}; raw-name-status:${raw}")
+              Ok({ base | changes: map(\c. { c | status: if startsWith(c.status, "R") then "R" else if startsWith(c.status, "C") then "C" else c.status }, rows), canonical: size(canonical) > 0, artifactRole: roleFor(paths, language) })
+            }
+          }
+        }
+      },
+      _ => Err("missing Git timestamp")
+    }
+  }
+
+@allow_empty_ok("Recursion terminates with zero remaining commit records, not an acquisition fallback")
+func captureAll(path: string, repo: string, language: string, shas: [string]) -> Result[[Episode], string] ! {Process} =
+  match shas {
+    [] => Ok([]),
+    sha :: rest => match captureCommit(path, repo, language, sha) {
+      Err(e) => Err(e),
+      Ok(row) => match captureAll(path, repo, language, rest) {
+        Err(e) => Err(e),
+        Ok(rows) => Ok(row :: rows)
+      }
+    }
+  }
+
+export func collectGit(path: string, repo: string, language: string, ref: string, cutoffMs: int, limit: int) -> Result[Snapshot, string] ! {Process} {
+  if not validRef(ref) || limit < 1 || limit > 1000 || cutoffMs < 0 then Err("invalid ref/cutoff/limit (1..1000)") else match readCommand("git", ["-C", path, "rev-parse", "--verify", "--end-of-options", "${ref}^{commit}"]) {
+    Err(e) => Err(e),
+    Ok(resolved) => {
+      let sha = trim(resolved)
+      match readCommand("git", ["-C", path, "log", "--no-merges", "--format=%H", "--max-count=${show(limit + 1)}", "--until=@${show(cutoffMs / 1000)}", sha, "--"]) {
+        Err(e) => Err(e),
+        Ok(raw) => {
+          let ids = filter(\s. s != "", split(trim(raw), "\n"))
+          match captureAll(path, repo, language, take(limit, ids)) {
+            Err(e) => Err(e),
+            Ok(rows) => Ok({ snapshot("git:${repo}", sha, cutoffMs, size(ids) <= limit, rows) | timeBasis: "commit" })
+          }
+        }
+      }
+    }
+  }
 }
