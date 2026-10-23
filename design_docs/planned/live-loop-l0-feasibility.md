@@ -1,7 +1,9 @@
 # Live-loop L0: host prototype and measurement plan
 
-Status: prototype implemented on 2026-10-23; one user-run Firefox synthetic check
-passed. Full browser/device acceptance remains open.
+Status: reference software host checks passed on 2026-10-23: user-run Firefox 158
+at 44.1 kHz, 100 exact-frame handoffs and 30 audio minutes including background
+intervals. Microphone/device, physical loopback and broader-platform acceptance
+remain open.
 This implements the first experiment in the [long-term instrument plan](live-loop-instrument.md),
 not a new registry audio release. [Loop Lab](../../examples/live-loop/README.md) is a
 buildless local application with its own package root and a path dependency on the
@@ -34,7 +36,9 @@ The supported prototype uses the strict local bridge, with no evaluator fallback
 for its pure planner. The offline generator retains bounded FS/IO effects and runs
 on the evaluator because the VM explicitly refuses its budget frame. An optional
 WASM worker probe loads the exact same planner source; a clean version-matched WASM
-binary works in Node, but browser worker/scheduling/transfer costs remain to measure.
+binary works in Node. The actual preparation-worker/hash/transfer and CLI path
+now has the full Firefox soak measurements below; the optional browser WASM
+measurement path still needs its own run.
 No core modification is needed to run this prototype. Keep the core team's WAV,
 resampler and verifier work independent; the reported bounded-effect VM limitation
 is not a prerequisite for live host playback.
@@ -42,12 +46,10 @@ is not a prerequisite for live host playback.
 ## Evidence and acceptance boundary
 
 [Full evidence](../../examples/live-loop/evidence/2026-10-23/README.md): 4 files compile;
-10 AILANG tests (9 VM named tests + 1 evaluator property/100 cases), 10 host-kernel
-tests and 6 real CLI/HTTP integration tests pass. Four additional waiter/statistics
-checks bring the Node suite to 14 passing tests. The current quality/native/integration
-checks also pass on clean v0.54.18. The host/orchestration suite now has 19 checks,
-including a real strict-planner reproduction of an activation clock mismatch. Quality: 3/6 contracts proved,
-3 skipped, 0 refuted/errors, 1 uncontracted effectful generator, smoke passed, no gates.
+10 AILANG tests (9 VM named tests + 1 evaluator property/100 cases), 19 host-kernel/
+orchestration/clock-regression checks and 6 CLI/HTTP integration checks pass on
+clean v0.54.18. Quality: 3/6 contracts proved, 3 skipped, 0 refuted/errors,
+1 uncontracted effectful generator, smoke passed, no gates.
 Only three integer-arithmetic helpers are proved. The lifecycle relies on executable
 guards and tests; raw sample arithmetic, audible quality and device timing are not
 formally proved.
@@ -70,10 +72,17 @@ main-thread/render-clock mismatch and records visibility instead of cancelling o
 hide. A subsequent user-run v2 short profile passed 8/8 handoffs across all four
 tracks, zero frame error and zero clamping. Its first activation recorded a 67-frame
 main-clock lag and used the confirmed render frame successfully. The run stayed
-foreground; background operation and the full soak remain open. A short profile
-cannot pass the soak. The
-UI follows the user-supplied Sunholo guide with original local AILANG/Montserrat
+foreground and was followed by the full user-run soak below. A short profile
+alone cannot pass the soak. The UI follows the user-supplied Sunholo guide with original local AILANG/Montserrat
 assets. The preview serves those assets successfully; visual review is still open.
+
+The user then supplied a [successful full runner-v2 soak](../../examples/live-loop/evidence/2026-10-23/browser-firefox158-runner-v2-soak.json):
+100/100 exact-frame handoffs (25 per track), 1800.34 audio seconds, zero clamping,
+16 visibility changes and 260.413 seconds hidden. Worker preparation/hash p95 was
+8 ms, worker round-trip p95 9 ms (first call max 185 ms), and server CLI processing
+p95 49.22 ms across 302 observations. The report's arrays/counts/statistics agree.
+This clears the reference software/background soak check, not physical/device
+acceptance. Its 28.84 ms output-latency value is browser-reported, not measured.
 
 Before accepting L0:
 
@@ -83,7 +92,9 @@ Before accepting L0:
   input/output loopback, distinguishing clocks, reported latency and measured latency.
 - Exercise microphone permission rejection, focus loss, key/pointer cancellation,
   disconnect, suspend/resume, repeated stop/reset, stale/late handoffs and page reload.
-- Record at least 100 actual handoffs and a 30-minute device/session soak.
+- Completed on the reference Firefox host: 100 real browser handoffs and a
+  30-minute software soak. Repeat as needed for additional supported platforms;
+  physical/device soak and loopback remain separate.
 
 Then prioritize `sunholo/audio` 0.3.0 block/state APIs from measured needs, with
 partition-invariance tests at 1/127/128/1024/full-block sizes. Introduce only the

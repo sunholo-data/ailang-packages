@@ -1,6 +1,6 @@
 # First class audio support in AILANG
 
-**Status:** Roadmap accepted in session, 2026-10-23. Hardening and mono/stereo clips/editing are implemented in the 0.2.0 feature group; see [hardening evidence](audio-hardening-0.1.1.md) and [clip milestone](audio-clips-0.2.0.md). The 0.2.0 group is merged and published. Core updates are assigned to another agent. A [live-loop L0 host prototype](live-loop-l0-feasibility.md) is now implemented; a user-run Firefox 158 synthetic check passed with zero activation-frame error. Broader browser/device acceptance is still open. Later milestones remain planned.
+**Status:** Roadmap accepted in session, 2026-10-23. Hardening and mono/stereo clips/editing are implemented in the 0.2.0 feature group; see [hardening evidence](audio-hardening-0.1.1.md) and [clip milestone](audio-clips-0.2.0.md). The 0.2.0 group is merged and published. Core updates were developed separately and are now released in v0.54.18; [consumer retesting](../implemented/audio-core-0.54.18/README.md) confirms the WAV fixes and resolves the imported-ADT verifier error. A [live-loop L0 host prototype](live-loop-l0-feasibility.md) is now implemented; user-run Firefox 158 passed 100 exact-frame handoffs and a 30-minute synthetic soak with background intervals. Physical/device and broader-platform acceptance remain open. Later milestones remain planned.
 **Scope:** `sunholo/audio`, `std/audio`, and the small runtime boundaries needed by their consumers. Stapledon's game port remains with that project.
 
 AILANG already supports deterministic sound generation, audio file output, offline measurements, and AI speech output. The next step should make these facilities safe to compose: validated formats, explicit channels and rates, bounded rendering, and evidence attached to the resulting bytes. Most sound processing should live in `sunholo/audio`; common file and sample conversions belong in `std/audio`. Runtime changes should serve a measured performance need or provide access to a host device.
@@ -19,6 +19,24 @@ minimum music/session timing model; then the L1 direct Audio capture workflow.
 The capabilities/audit tables below intentionally preserve the original 0.1.0
 baseline. For the shipped 0.2.0 checked clip/edit surface and current quality
 limitations, use the implementation links in the status line.
+
+## Released upstream support (v0.54.18)
+
+[AILANG v0.54.18](https://github.com/sunholo-data/ailang/releases/tag/v0.54.18)
+adds checked WAV metadata/writers, packed interleaved PCM16 conversion and fixed
+formatting; ordinary WAV padding/field/frame validation and imported-ADT verifier
+issues are fixed. [Consumer checks](../implemented/audio-core-0.54.18/README.md)
+on unchanged audio 0.2.0: 22 files compile, 116 package tests pass, 10/49 contracts
+prove, 39 skip, 0 errors (previously 9 proved and one constructor error). The
+checkSize contract now proves. Seven independent stdlib boundary probes pass on
+both evaluator and strict VM. The standalone DSP suite still has one skipped
+property due to its generator violating a precondition; see the raw report.
+
+Next-version adapters should reuse these stdlib boundaries with the package's
+smaller limits and typed errors. Standard PCM encoding uses nearest-even *32768;
+the package's legacy *32767 convention and recipe byte pins must remain explicit
+and unchanged. Resampling remains deferred. The original baseline tables below
+are historical and should not be read as the v0.54.18 stdlib surface.
 
 ## Current capabilities
 

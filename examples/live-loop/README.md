@@ -3,16 +3,17 @@
 A local L0 feasibility prototype for the [live-loop instrument](../../design_docs/planned/live-loop-instrument.md).
 Four original parts share a browser audio clock. Capture stays private until an
 explicit commit, and a pure AILANG planner authorizes the revision and loop boundary.
-**L0 acceptance is still open:** automated kernel/transport checks and a user-run
-Firefox 158 synthetic browser check pass. Physical loopback, the full device
-lifecycle matrix, 100 actual handoffs and a soak remain open.
+**Software host checks passed:** user-run Firefox 158 at 44.1 kHz completed
+100 exact-frame handoffs and 30 audio minutes, with zero clamping and 260.413
+seconds in background tabs. Automated kernel/transport checks pass. Physical
+loopback, microphone/device lifecycle and broader platform acceptance remain open.
 
 ## Run locally
 
 Requires AILANG >=0.54.17, Python 3 (tested 3.13.7), and a browser with AudioWorklet.
 Node (tested 26.12.1) is needed only for host-kernel tests and the optional WASM probe.
 No npm install, model service, microphone access or cloud deployment is required.
-The current planner/quality checks also pass on the installed v0.54.18-dirty CLI.
+The current planner/quality checks also pass on the released v0.54.18 CLI.
 
 ```sh
 cd examples/live-loop
@@ -64,7 +65,11 @@ in a later short run. Runner version 2 fixes that clock path and records visibil
 instead of cancelling merely because a tab is hidden. The user then completed
 its 8-handoff profile successfully in Firefox at 44.1 kHz, with zero frame errors
 and clamping. The first acknowledgement confirmed a 67-frame main-clock lag.
-The 100-handoff/30-minute soak and background-browser coverage are still open.
+The user then passed the full 100-handoff/30-minute profile, including 16
+visibility transitions and about 4 minutes 20 seconds hidden. Each track changed
+25 times with zero frame error or clamping. See the [full report](evidence/2026-10-23/browser-firefox158-runner-v2-soak.json).
+This validates the reference software path; physical microphone/device checks and
+other browsers/rates remain open.
 
 - Stop & reset Loop Lab first. The runner refuses to take over a running planner
   session. Background tabs are allowed; keep the machine awake.
@@ -199,7 +204,8 @@ HTTPS. No public route has been created for this prototype.
 
 Before L0 acceptance, broaden browser coverage and run real capture/playback on the
 reference hardware, listen to four parts/replacements, measure physical loopback and deadline
-misses, test permissions/device loss/focus/suspend/reset, run at least 100 actual
-handoffs, and a 30-minute soak. Then use the measured render/worker/transfer costs to
+misses, and test microphone permissions/device loss/focus/suspend/reset. The
+reference Firefox 100-handoff/30-minute synthetic soak has passed; extend it to
+other supported environments as needed. Then use the measured render/worker/transfer costs to
 prioritize `sunholo/audio` 0.3.0 block processing and the minimum `music_patterns`
 time/revision API. Notes extraction, controllers and AI remain later milestones.

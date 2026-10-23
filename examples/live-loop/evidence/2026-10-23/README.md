@@ -6,8 +6,10 @@ private HTTPS preview. The [supplied Firefox report](browser-firefox158-user-run
 is preserved as user-run evidence; the agent did not independently rerun it.
 A subsequent [runner v2 short profile](browser-firefox158-runner-v2-short.json)
 passed all eight full-path handoffs in Firefox; the scope is recorded below.
-Physical microphone/speaker loopback, the full lifecycle matrix, 100 actual host
-handoffs and a 30-minute soak remain open. No physical audio timing has been measured.
+The [full runner v2 soak](browser-firefox158-runner-v2-soak.json) then passed
+100/100 handoffs and 30 audio minutes with background intervals. Physical
+microphone/speaker loopback, the full lifecycle matrix and broader platform
+coverage remain open. No physical audio timing has been measured.
 
 ## User-run browser check
 
@@ -132,8 +134,8 @@ See the [example README](../../README.md) for commands. Raw reports are preserve
 next to this file. Repeat `/host-check.html` across the reference browsers/rates;
 it never opens the microphone. The user-run Firefox check above is the first real
 browser result. Next run real capture/playback and physical loopback checks, the
-device/lifecycle matrix, at least 100 actual handoffs, and a 30-minute soak before
-accepting L0.
+device/lifecycle matrix and broader browser/rate coverage before accepting full
+L0. The reference Firefox 100-handoff/30-minute software soak has now passed.
 
 ## Brand update and new browser runner
 
@@ -182,7 +184,8 @@ all intervals counted) without aborting synthetic audio. Page closure, manual St
 context suspension, deadline/activation failures and incomplete duration still fail
 or interrupt the run. The actual microphone capture UI still cancels on hide/focus
 loss. The subsequent user-run short profile below validates the activation fix;
-background-browser coverage and a complete soak remain open.
+the subsequent full soak below also validates background operation in the tested
+Firefox configuration. Broader platform/device checks remain open.
 
 ## Successful user-run runner v2 short profile
 
@@ -205,5 +208,45 @@ These are small-sample observations, not latency guarantees or physical measurem
 The stored summary values were recomputed from the supplied raw arrays and agree.
 
 Visibility remained foreground for this entire run (`hiddenMs=0`, no changes), so
-this does not validate background-tab operation. The 100-handoff/30-minute soak,
-background behavior, microphone/device lifecycle and physical loopback remain open.
+this short run alone does not validate background-tab operation. The full soak
+below supplies that reference-browser evidence. Microphone/device lifecycle,
+physical loopback and broader platform coverage remain open.
+
+## Successful user-run 100-handoff / 30-minute soak
+
+The [complete supplied Firefox 158 report](browser-firefox158-runner-v2-soak.json)
+started at 2026-10-23T13:41:36.038Z and finished at 14:11:37.869Z. This is user-run
+browser evidence, not an independent agent execution or a physical loopback test.
+The transcription preserves all 100 handoff records, 100 worker samples, 100 worker
+round-trip samples, 302 CLI bridge samples and all 17 visibility observations.
+
+| Observation | Result |
+|---|---|
+| Profile and verdict | Runner v2, 100 handoffs + 30-minute soak; passed/completed |
+| Audio context | 44100 Hz; 1800.3402267573697 audio seconds |
+| Track coverage | 25 confirmed replacements on each of four tracks |
+| Timing | All 100 planned/applied frames equal; zero activation error |
+| Minimum staging lead | 11588 frames, about 262.77 ms |
+| Output | 620577 render blocks; zero clamped frames |
+| Private routing | Input peak 1; program peak 0 before commit, nonzero after |
+| Clock correction | First main-clock observation lagged by 67 frames; acknowledged frame accepted |
+| Background | 260413 ms hidden, 16 transitions, zero dropped visibility records |
+| Worker preparation/hash | n=100; median 6 ms, p95 8 ms, max 10 ms |
+| Worker round trip | n=100; median 7 ms, p95 9 ms, max 185 ms (first call) |
+| CLI bridge processing | n=302; median 30.1395 ms, p95 49.22 ms, max 70.958 ms |
+
+Counts, per-track distribution, frame spacing/equality, clock-floor fields, staging
+lead, percentile summaries and visibility totals were checked from the supplied
+arrays. All reported statistics agree. Nearest-rank p95 includes the first cold
+worker sample; no observations were discarded. CLI `bridgeMs` measures the server's
+process/invocation interval; it excludes HTTP/network round trips. These are observed
+costs in one configuration, not universal latency guarantees.
+
+The measured background intervals sum to about 4 minutes 20.4 seconds within the
+30-minute software run. This clears the synthetic reference-host soak/background
+check. It does not establish physical output latency, microphone isolation through
+every device event, absence of hardware underruns, audible quality, or behavior on
+other browsers/rates. Next: actual microphone capture → private preparation → commit,
+permission rejection/cancel/focus/device-loss/reset, then physical loopback/listening
+before a live-performance claim. The full test does not invoke the optional WASM
+measurement worker; it uses the local AILANG bridge plus Web Audio/prepare workers.
