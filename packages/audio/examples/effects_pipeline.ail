@@ -1,0 +1,72 @@
+module sunholo/audio/examples/effects_pipeline
+-- A provider adapter could supply PCM bytes with rate/layout. This deterministic
+-- fixture exercises the processing boundary without inference or credentials.
+import std/result (Result, Ok, Err)
+import std/array (fromList)
+import std/list (map, range, foldl)
+import std/bytes (fromInts, length as byteLength)
+import std/crypto (sha256Bytes)
+import std/json (encode, jo, kv, js, jnum)
+import pkg/sunholo/audio/clip (Clip, Mono, Stereo, create, defaultClipLimits)
+import pkg/sunholo/audio/edit (pad)
+import pkg/sunholo/audio/clip_pcm (Reject, fromPcm16, toWav16, fromWav16)
+import pkg/sunholo/audio/levels (PeakSafe, prepare, measure, defaultConfig)
+import pkg/sunholo/audio/block (defaultBlockLimits)
+import pkg/sunholo/audio/automation (startGain, setGain, processGain)
+import pkg/sunholo/audio/delay (defaultDelayLimits, startDelay, processDelay)
+import pkg/sunholo/audio/safety (AudioError, InvalidClip)
+
+pure func encodeOutput(c: Clip) -> string {
+  let l = defaultClipLimits();
+  match prepare(c, defaultConfig(), PeakSafe(0.5), l) {
+    Err(e) => "ERR ${show(e)}", Ok(prepared) => match toWav16(prepared.clip, Reject, l) {
+      Err(e) => "ERR ${show(e)}", Ok(wav) => match fromWav16(wav, l) {
+        Err(e) => "ERR ${show(e)}", Ok(delivered) => match (measure(prepared.clip,defaultConfig(),l),measure(delivered,defaultConfig(),l)) {
+          (Ok(before),Ok(after)) => encode(jo([
+            kv("source",js("synthetic speech/model PCM fixture; no inference")),kv("rate",jnum(intToFloat(c.rate))),kv("frames",jnum(intToFloat(c.frames))),
+            kv("delayFrames",jnum(120.0)),kv("feedback",jnum(0.5)),kv("wet",jnum(0.5)),kv("dry",jnum(1.0)),kv("gainRampFrames",jnum(8.0)),
+            kv("preparedPeak",jnum(before.peak)),kv("deliveredPeak",jnum(after.peak)),kv("deliveredRms",jnum(after.rms)),
+            kv("wavBytes",jnum(intToFloat(byteLength(wav)))),kv("wavSha256",js(sha256Bytes(wav)))])),
+          _ => "ERR measurement"
+        }
+      }
+    }
+  }
+}
+
+export pure func demo(n: int) -> string {
+  let l = defaultClipLimits();let b = defaultBlockLimits();
+  match fromPcm16(fromInts([0,0,0,16,0,32,0,16,0,0,0,240,0,224,0,240]),24000,Mono,l) {
+    Err(e) => "ERR ${show(e)}", Ok(input) => match pad(input,0,720,l) {
+      Err(e) => "ERR ${show(e)}", Ok(padded) => match startGain(24000,Mono,0.0,b) {
+        Err(e) => "ERR ${show(e)}", Ok(gain) => match setGain(gain,1.0,8,b) {
+          Err(e) => "ERR ${show(e)}", Ok(ramp) => match processGain(ramp,padded,b) {
+            Err(e) => "ERR ${show(e)}", Ok(faded) => match startDelay(24000,Mono,{delayFrames:120,feedback:0.5,dry:1.0,wet:0.5},defaultDelayLimits()) {
+              Err(e) => "ERR ${show(e)}", Ok(delay) => match processDelay(delay,faded.clip,defaultDelayLimits()) {
+                Err(e) => "ERR ${show(e)}", Ok(out) => encodeOutput(out.clip)
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
+-- Descriptive throughput probe: 12 stereo blocks at 48 kHz, frames/block=4096.
+-- The CLI timing includes startup/compilation/validation; no callback claim.
+export pure func benchmark(delayFrames: int) -> string {
+  let l = defaultDelayLimits();
+  match create(48000,Stereo,[fromList(map(\i. intToFloat(i%17-8)/32.0,range(0,4096))),fromList(map(\i. intToFloat(i%13-6)/32.0,range(0,4096)))],defaultClipLimits()) {
+    Err(e) => "ERR ${show(e)}", Ok(input) => match startDelay(48000,Stereo,{delayFrames:delayFrames,feedback:0.5,dry:0.5,wet:0.5},l) {
+      Err(e) => "ERR ${show(e)}", Ok(initial) => {
+        let result: Result[Clip, AudioError] = match foldl(\acc i. match acc {
+          Err(e) => Err(e), Ok(s) => match processDelay(s,input,l) { Err(e) => Err(e), Ok(out) => Ok(out.state) }
+        }, Ok(initial),range(0,12)) {
+          Err(e) => Err(e), Ok(final) => if final.processedFrames == 49152 then Ok(input) else Err(InvalidClip("benchmark frame count"))
+        };
+        match result { Err(e) => "ERR ${show(e)}", Ok(_) => "OK: 49152 stereo frames at 48000 Hz; delayFrames=${show(delayFrames)}" }
+      }
+    }
+  }
+}

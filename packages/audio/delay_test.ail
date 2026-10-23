@@ -1,0 +1,178 @@
+module sunholo/audio/delay_test
+import std/array (fromList, toList)
+import std/list (map, range)
+import std/result (Ok, Err)
+import ./clip (Clip, Mono, Stereo, create, fromMono, defaultClipLimits)
+import ./edit (trim)
+import ./delay (DelayConfig, DelayState, DelayLimits, defaultDelayLimits, startDelay, processDelay, resetDelay)
+import ./safety (InvalidClip, InvalidSamples, ResourceLimit)
+
+pure func fixture(xs: [float]) -> Clip = match fromMono(8000, xs, defaultClipLimits()) {
+  Ok(c) => c, _ => {rate: 0, layout: Mono, frames: -1, planes: []}
+}
+pure func echo(d: int) -> DelayConfig = {delayFrames: d, feedback: 0.5, dry: 0.0, wet: 1.0}
+pure func values(c: Clip) -> [[float]] = map(toList, c.planes)
+pure func partition(c: Clip, expected: Clip, s: DelayState, final: DelayState, at: int, count: int, l: DelayLimits) -> bool =
+  if at >= c.frames then s.cursor == final.cursor && s.processedFrames == final.processedFrames && map(toList, s.history) == map(toList, final.history)
+  else {
+    let end = if count > c.frames - at then c.frames else at + count;
+    match (trim(c, at, end, defaultClipLimits()), trim(expected, at, end, defaultClipLimits())) {
+      (Ok(input), Ok(want)) => match processDelay(s, input, l) {
+        Ok(out) => values(out.clip) == values(want) && partition(c, expected, out.state, final, end, count, l), _ => false
+      }, _ => false
+    }
+  }
+
+test "delay impulse and explicit silence render the analytical feedback tail" {
+  let l = defaultDelayLimits();
+  match startDelay(8000, Mono, echo(2), l) {
+    Err(_) => false, Ok(s) => match processDelay(s, fixture([1.0,0.0,0.0,0.0,0.0,0.0,0.0]), l) {
+      Ok(out) => values(out.clip) == [[0.0,0.0,1.0,0.0,0.5,0.0,0.25]] && out.state.processedFrames == 7 && out.state.cursor == 1,
+      _ => false
+    }
+  }
+}
+test "one-frame delay reads before writing, including multiple wraps within a block" {
+  let l = defaultDelayLimits();
+  match startDelay(8000, Mono, echo(1), l) {
+    Ok(s) => match processDelay(s, fixture([1.0,0.0,0.0,0.0,0.0]), l) {
+      Ok(out) => values(out.clip) == [[0.0,1.0,0.5,0.25,0.125]], _ => false
+    }, _ => false
+  }
+}
+test "negative feedback alternates tail polarity and dry wet have independent gains" {
+  let l = defaultDelayLimits();
+  match startDelay(8000, Mono, {delayFrames: 1, feedback: -0.5, dry: 0.25, wet: 0.5}, l) {
+    Ok(s) => match processDelay(s, fixture([1.0,0.0,0.0,0.0]), l) {
+      Ok(out) => values(out.clip) == [[0.25,0.5,-0.25,0.125]], _ => false
+    }, _ => false
+  }
+}
+test "zero feedback is a pure integer delay, not an implicit loop or extra tail allocation" {
+  let l = defaultDelayLimits();
+  match startDelay(8000, Mono, {delayFrames: 3, feedback: 0.0, dry: 0.0, wet: 1.0}, l) {
+    Ok(s) => match processDelay(s, fixture([1.0,2.0,3.0,4.0,5.0,6.0,7.0]), l) {
+      Ok(out) => values(out.clip) == [[0.0,0.0,0.0,1.0,2.0,3.0,4.0]] && out.clip.frames == 7, _ => false
+    }, _ => false
+  }
+}
+test "stereo delay preserves independent channels, polarity and declared sample rate" {
+  let l = defaultDelayLimits();
+  match create(8000, Stereo, [fromList([1.0,0.0,0.0,0.0]),fromList([-0.5,0.0,0.0,0.0])], defaultClipLimits()) {
+    Err(_) => false, Ok(c) => match startDelay(8000, Stereo, echo(1), l) {
+      Ok(s) => match processDelay(s, c, l) {
+        Ok(out) => values(out.clip) == [[0.0,1.0,0.5,0.25],[0.0,-0.5,-0.25,-0.125]] && out.clip.layout == Stereo && out.clip.rate == 8000, _ => false
+      }, _ => false
+    }
+  }
+}
+test "empty block consumes no tail, history or cumulative frames" {
+  let l = defaultDelayLimits();
+  match startDelay(8000, Mono, echo(2), l) {
+    Ok(s) => match processDelay(s, fixture([1.0]), l) {
+      Ok(one) => match processDelay(one.state, fixture([]), l) {
+        Ok(out) => out.clip.frames == 0 && out.state.cursor == 1 && out.state.processedFrames == 1 && map(toList,out.state.history) == map(toList,one.state.history), _ => false
+      }, _ => false
+    }, _ => false
+  }
+}
+test "partitions 1 7 127 128 and whole yield identical stereo samples and final ring state" {
+  let l = defaultDelayLimits();
+  match create(8000, Stereo, [fromList(map(\i. intToFloat(i % 5) / 8.0, range(0,259))),fromList(map(\i. intToFloat(0-i%7) / 8.0, range(0,259)))], defaultClipLimits()) {
+    Err(_) => false, Ok(c) => match startDelay(8000, Stereo, echo(11), l) {
+      Err(_) => false, Ok(s) => match processDelay(s,c,l) {
+        Ok(out) => partition(c,out.clip,s,out.state,0,1,l) && partition(c,out.clip,s,out.state,0,7,l)
+          && partition(c,out.clip,s,out.state,0,127,l) && partition(c,out.clip,s,out.state,0,128,l), _ => false
+      }
+    }
+  }
+}
+test "reset drops history and starts a fresh logical budget without changing the old state" {
+  let l = defaultDelayLimits();
+  match startDelay(8000, Mono, echo(1), l) {
+    Ok(s) => match processDelay(s,fixture([1.0]),l) {
+      Ok(one) => match resetDelay(one.state,l) {
+        Ok(fresh) => fresh.processedFrames == 0 && fresh.cursor == 0 && fresh.config.delayFrames == one.state.config.delayFrames
+          && fresh.config.feedback == one.state.config.feedback && fresh.config.dry == one.state.config.dry && fresh.config.wet == one.state.config.wet
+          && map(toList,one.state.history) == [[1.0]] && (match processDelay(fresh,fixture([0.0]),l) { Ok(out) => values(out.clip) == [[0.0]], _ => false }), _ => false
+      }, _ => false
+    }, _ => false
+  }
+}
+test "delay allocation is guarded by frames and total channel samples before construction" {
+  let l = defaultDelayLimits();
+  (match startDelay(8000,Mono,echo(96001),l) { Err(ResourceLimit(_)) => true, _ => false })
+  && (match startDelay(8000,Stereo,echo(4),{l | maxDelaySamples: 7}) { Err(ResourceLimit(_)) => true, _ => false })
+  && (match startDelay(8000,Mono,echo(9223372036854775807),l) { Err(ResourceLimit(_)) => true, _ => false })
+  && (match startDelay(8000,Mono,echo(1),{l | maxDelayFrames: -1}) { Err(ResourceLimit(_)) => true, _ => false })
+}
+test "delay refuses zero or negative length, invalid rate, feedback and mix including nonfinite values" {
+  let l = defaultDelayLimits();let c = echo(1);
+  (match startDelay(8000,Mono,echo(0),l) { Err(InvalidClip(_)) => true, _ => false })
+  && (match startDelay(8000,Mono,echo(-1),l) { Err(InvalidClip(_)) => true, _ => false })
+  && (match startDelay(0,Mono,c,l) { Err(InvalidClip(_)) => true, _ => false })
+  && (match startDelay(8000,Mono,{c | feedback: 1.0},l) { Err(InvalidSamples(_)) => true, _ => false })
+  && (match startDelay(8000,Mono,{c | feedback: -1.0},l) { Err(InvalidSamples(_)) => true, _ => false })
+  && (match startDelay(8000,Mono,{c | dry: -0.1},l) { Err(InvalidSamples(_)) => true, _ => false })
+  && (match startDelay(8000,Mono,{c | wet: 1.1},l) { Err(InvalidSamples(_)) => true, _ => false })
+  && (match startDelay(8000,Mono,{c | feedback: 0.0/0.0},l) { Err(InvalidSamples(_)) => true, _ => false })
+  && (match startDelay(8000,Mono,{c | wet: 1.0/0.0},l) { Err(InvalidSamples(_)) => true, _ => false })
+}
+test "delay checks public cursor, history shape, nonfinite history and cumulative frame state" {
+  let l = defaultDelayLimits();
+  match startDelay(8000,Mono,echo(2),l) {
+    Err(_) => false, Ok(s) =>
+      (match processDelay({s | cursor: 1},fixture([0.0]),l) { Err(InvalidClip(_)) => true, _ => false })
+      && (match resetDelay({s | history: []},l) { Err(InvalidClip(_)) => true, _ => false })
+      && (match resetDelay({s | history: [fromList([0.0])]},l) { Err(InvalidClip(_)) => true, _ => false })
+      && (match resetDelay({s | history: [fromList([0.0,1.0/0.0])]},l) { Err(InvalidSamples(_)) => true, _ => false })
+      && (match resetDelay({s | processedFrames: -1},l) { Err(InvalidClip(_)) => true, _ => false })
+      && (match resetDelay({s | processedFrames: 9223372036854775807},l) { Err(ResourceLimit(_)) => true, _ => false })
+  }
+}
+test "delay rejects mismatched clips, bad dimensions and nonfinite samples" {
+  let l = defaultDelayLimits();let c = fixture([0.0]);
+  match startDelay(8000,Mono,echo(2),l) {
+    Err(_) => false, Ok(s) =>
+      (match processDelay(s,{c | rate: 44100},l) { Err(InvalidClip(_)) => true, _ => false })
+      && (match processDelay(s,{c | frames: 2},l) { Err(InvalidClip(_)) => true, _ => false })
+      && (match processDelay(s,{c | layout: Stereo, planes: c.planes ++ c.planes},l) { Err(InvalidClip(_)) => true, _ => false })
+      && (match processDelay(s,{c | planes: [fromList([0.0/0.0])]},l) { Err(InvalidSamples(_)) => true, _ => false })
+  }
+}
+test "delay enforces per-block and cumulative limits without changing caller state on failure" {
+  let l = {defaultDelayLimits() | block: {maxFrames: 2, maxSamples: 2, maxTotalFrames: 3}};
+  match startDelay(8000,Mono,echo(1),l) {
+    Err(_) => false, Ok(s) => match processDelay(s,fixture([1.0,0.0]),l) {
+      Err(_) => false, Ok(one) =>
+        (match processDelay(one.state,fixture([0.0,0.0]),l) { Err(ResourceLimit(_)) => true, _ => false })
+        && (match processDelay(s,fixture([0.0,0.0,0.0]),l) { Err(ResourceLimit(_)) => true, _ => false })
+        && one.state.processedFrames == 2 && s.processedFrames == 0
+    }
+  }
+}
+test "delay detects feedback storage overflow even when wet output is muted" {
+  let l = defaultDelayLimits();
+  match startDelay(8000,Mono,{delayFrames: 1,feedback: 0.99,dry: 0.0,wet: 0.0},l) {
+    Err(_) => false, Ok(s) => match processDelay(s,fixture([1.7e308,1.7e308]),l) { Err(InvalidSamples(_)) => true, _ => false }
+  }
+}
+test "finite headroom is preserved and mix overflow is a typed error" {
+  let l = defaultDelayLimits();
+  match startDelay(8000,Mono,{delayFrames: 1,feedback: 0.0,dry: 1.0,wet: 1.0},l) {
+    Err(_) => false, Ok(s) =>
+      (match processDelay(s,fixture([2.0,2.0]),l) { Ok(out) => values(out.clip) == [[2.0,4.0]], _ => false })
+      && (match processDelay(s,fixture([1.7e308,1.7e308]),l) { Err(InvalidSamples(_)) => true, _ => false })
+  }
+}
+
+property "arbitrary bounded delay signals agree across chunking including unit delay" {
+  forall(n: int) => {
+    let a = n % 31;let count = if a < 0 then 0-a else a;
+    let b = n % 7;let d = 1 + (if b < 0 then 0-b else b);
+    let c = fixture(map(\i. intToFloat(i%5-2)/4.0,range(0,count)));let l = defaultDelayLimits();
+    match startDelay(8000,Mono,echo(d),l) {
+      Ok(s) => match processDelay(s,c,l) { Ok(out) => partition(c,out.clip,s,out.state,0,3,l), _ => false }, _ => false
+    }
+  }
+}

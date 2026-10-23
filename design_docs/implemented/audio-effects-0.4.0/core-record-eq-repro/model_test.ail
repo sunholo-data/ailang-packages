@@ -1,0 +1,5 @@
+module repro/equality/model_test
+import ./model (Point, point)
+pure func same(a: Point,b: Point) -> bool = a == b
+test "named imported record equality" { same(point(1),point(1)) }
+property "property imported record equality" { forall(n: int) => same(point(n),point(n)) }
