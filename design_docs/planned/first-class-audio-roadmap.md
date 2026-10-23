@@ -110,6 +110,16 @@ The initial trust milestone is a reliable checked API and more useful proofs at 
 
 No new language syntax or compiler change is required for hardening, stereo clips, basic effects, or pure block processing. Native PCM kernels and a resampler are possible runtime optimizations, not prerequisites for designing those package APIs.
 
+## Musical priorities after the working prototype
+
+The user reports that the microphone workflow works and asks to prioritize auto-levels,
+humming as other instruments/sounds, and effects. The [next musical roadmap](live-loop-musical-roadmap.md)
+turns this into level planning and recovery first, a local hum-to-bass note workflow
+second, then sound patches and stateful effects. It reuses the block/state foundation
+below. Resampling remains coordinated/deferred and must not block level preparation.
+The earlier broad version ordering is a planning scaffold; the musical feature groups
+now guide delivery and candidate release boundaries.
+
 ## Proposed roadmap
 
 Version numbers below are release candidates for planning. Each milestone should be split further if its compatibility or performance evidence warrants it.

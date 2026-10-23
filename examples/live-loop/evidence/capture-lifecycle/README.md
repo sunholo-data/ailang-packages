@@ -67,7 +67,7 @@ three arithmetic helpers are proved. Node tests and device/user checks are separ
 from proofs. `toolchain.txt` identifies the installed compiler. Runtime contract
 execution is not claimed from the quality report.
 
-## Browser/device work still required
+## User feedback and remaining device evidence
 
 The guide `/microphone-check.html` requests no permissions itself. The user should
 exercise preflight/denial, private capture/discard, explicit commit, focus/tab/app
@@ -77,3 +77,14 @@ or attested these new browser flows. The earlier Firefox 100-handoff/30-minute
 synthetic report remains baseline evidence; it does not replace these new real-input
 checks or physical loopback/listening. Native implementation tests do not supply
 an operating-system microphone indicator guarantee for other apps sharing a device.
+
+The user subsequently reported that the microphone workflow "all worked nice";
+[user-feedback.json](user-feedback.json) preserves that general functional feedback.
+No per-scenario JSON, exact device setup or physical latency result accompanied it,
+so this does not turn every denial/unplug case into an individually attested pass.
+The prototype microphone workflow has user acceptance for continued musical-feature
+work. Full hardware/configuration evidence stays a live-release check.
+
+The [next musical roadmap](../../../../design_docs/planned/live-loop-musical-roadmap.md)
+prioritizes level planning/recovery, hum-to-bass note capture, sound patches and
+stateful effects. No runtime code or registry version changes accompany that plan.

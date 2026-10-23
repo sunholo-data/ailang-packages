@@ -54,8 +54,9 @@ perceptual loudness. Level is linear; live gain/pan smoothing is later work.
 ## Real microphone and device checks
 
 Open `/microphone-check.html` for the step-by-step guide before recording. This
-follow-up hardens input ownership after the passed synthetic soak; the new browser
-microphone path still needs user-run hardware checks.
+follow-up hardens input ownership after the passed synthetic soak. The user reports
+the microphone workflow working; detailed per-scenario device/physical evidence
+remains separate from that functional feedback.
 
 - Enable microphone access, verify its permission-probe stream is released, then
   mute all four parts before checking private input against a silent program bus.
@@ -244,3 +245,7 @@ reference Firefox 100-handoff/30-minute synthetic soak has passed; extend it to
 other supported environments as needed. Then use the measured render/worker/transfer costs to
 prioritize `sunholo/audio` 0.3.0 block processing and the minimum `music_patterns`
 time/revision API. Notes extraction, controllers and AI remain later milestones.
+
+The next [musical feature roadmap](../../design_docs/planned/live-loop-musical-roadmap.md)
+prioritizes auto-levels/recovery, local hum-to-bass note capture, instrument choices
+and stateful effects. These are planned features, not capabilities of this version.

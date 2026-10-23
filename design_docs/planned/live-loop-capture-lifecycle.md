@@ -1,7 +1,7 @@
 # Live-loop input ownership and microphone checks
 
-Status: implemented for review after merged PR 158; real browser/device acceptance
-pending. This follows the successful Firefox synthetic host soak, before extending
+Status: implemented after merged PR 158; the user reports the microphone workflow
+working. Per-scenario device evidence and physical latency measurements remain open. This follows the successful Firefox synthetic host soak, before extending
 L1 with quantized Audio windows, overdub/undo and local save.
 
 The previous input-open path used the shared held flag to validate asynchronous
@@ -28,3 +28,8 @@ and the real strict planner. App quality remains 4 files compiled; 3/6 arithmeti
 transport contracts proved, 3 skipped, 0 errors, 1 uncontracted generator; 10 package
 tests and smoke pass, no gates. Browser microphone/device execution and physical
 loopback remain open; the synthetic soak is baseline evidence for the earlier host.
+
+Next: [musical feature roadmap](live-loop-musical-roadmap.md), beginning with explicit
+level planning and recoverable takes, then local hum-to-bass notes and instrument/FX
+choices. General user feedback is recorded separately from automated and physical
+acceptance evidence.

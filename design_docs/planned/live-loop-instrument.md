@@ -1,6 +1,9 @@
 # AILANG live loop instrument
 
-**Status:** Proposed implementation design, 2026-10-23.
+**Status:** Long-term design, 2026-10-23. Prototype host soak passed; the user reports
+the microphone workflow working. Next priorities: [musical roadmap](live-loop-musical-roadmap.md)
+(auto-levels/recovery → hum-to-bass → instrument palette/effects). Broader hardware
+and physical latency acceptance remains separate.
 **Product direction:** An original live pattern instrument with private humming and instrument capture, keyboard and musical-controller operation, and optional AI-directed development.
 **Related work:** [First class audio support roadmap](first-class-audio-roadmap.md).
 
