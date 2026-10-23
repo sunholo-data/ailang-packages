@@ -1,0 +1,29 @@
+module sunholo/maintenance_bench/codec_test
+import ./codec (countValue, requiredText)
+import std/json (JNumber, JString, JObject, JBool, kv)
+import std/result (Ok, Err)
+import ./codec (decodeSnapshot, encodeSnapshot, decodeAnnotations, decodeManifest, optionalCount, optionalBool)
+import ./observation (observed, snapshot)
+import std/json (JNull)
+import std/option (Some, None)
+import std/math (intToFloat)
+test "fractional count refused" { match countValue(JNumber(1.5)) { Err(_) => true, Ok(_) => false } }
+test "negative count refused" { match countValue(JNumber(-1.0)) { Err(_) => true, Ok(_) => false } }
+test "whole count preserved" { match countValue(JNumber(7.0)) { Ok(n) => n == 7, Err(_) => false } }
+test "missing text never defaults" { match requiredText(JObject([]), "id") { Err(_) => true, Ok(_) => false } }
+test "large identifiers remain text" { match requiredText(JObject([kv("id", JString("9007199254740993"))]), "id") { Ok(s) => s == "9007199254740993", Err(_) => false } }
+func sample() -> string = encodeSnapshot(snapshot("test", "fixed", 1000000000000, true, [observed("abc", "owner/repo", "ailang", 1, ["source.ail"], "fixture")]))
+test "snapshot codec round trip" { match decodeSnapshot(sample()) { Ok(s) => encodeSnapshot(s) == sample(), Err(_) => false } }
+test "duplicate episode identity refused" {
+ let row = observed("same", "owner/repo", "ailang", 1, ["source.ail"], "fixture");
+ match decodeSnapshot(encodeSnapshot(snapshot("test","fixed",100,true,[row,row]))) { Err(_) => true, Ok(_) => false }
+}
+test "schema is mandatory" { match decodeSnapshot("{}") { Err(_) => true, Ok(_) => false } }
+test "unknown snapshot schema refused" { match decodeSnapshot("{\"schema\":\"maintenance.snapshot/9\"}") { Err(_) => true, Ok(_) => false } }
+test "count out of exact range refused" { match countValue(JNumber(9007199254740992.0)) { Err(_) => true, Ok(_) => false } }
+test "missing nullable count refused" { match optionalCount(JObject([]),"tokens") { Err(_) => true, Ok(_) => false } }
+test "explicit unknown preserved" { match optionalCount(JObject([kv("tokens",JNull)]),"tokens") { Ok(None) => true, _ => false } }
+test "false is present not unknown" { match optionalBool(JObject([kv("outcome", JBool(false))]),"outcome") { Ok(Some(b)) => not b, _ => false } }
+test "unknown annotation schema refused" { match decodeAnnotations("{\"schema\":\"x\"}") { Err(_) => true, Ok(_) => false } }
+test "unbounded manifest window refused" { match decodeManifest("{\"schema\":\"maintenance.cohort/1\",\"cutoffMs\":100,\"windowDays\":0,\"repositories\":[],\"authorship\":\"all\",\"requireComplete\":true,\"canonicalOnly\":true,\"metricVersion\":\"maintenance.metrics/1\",\"compilerId\":\"test\"}") { Err(_) => true, Ok(_) => false } }
+property "exact bounded count roundtrip" { forall(n: int) => if n >= 0 && n <= 1000000 then match countValue(JNumber(intToFloat(n))) { Ok(k) => k == n, Err(_) => false } else true }

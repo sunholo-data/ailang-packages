@@ -1,0 +1,29 @@
+module sunholo/maintenance_bench/types
+import std/option (Option)
+export type Episode = {
+  id: string,
+  repo: string,
+  language: string,
+  cluster: string,
+  acceptedMs: int,
+  canonical: bool,
+  files: [string],
+  purpose: string,
+  authorship: string,
+  defect: Option[string],
+  repairs: Option[string],
+  detectedMs: Option[int],
+  round: int,
+  tokens: Option[int],
+  costMicros: Option[int],
+  durationMs: Option[int],
+  pair: Option[string],
+  model: Option[string],
+  harness: Option[string],
+  trial: Option[int],
+  outcome: Option[bool],
+  provenance: string
+}
+export type Snapshot = { schema: string, source: string, sourceRef: string, cutoffMs: int, complete: bool, episodes: [Episode] }
+export type Manifest = { schema: string, cutoffMs: int, windowDays: int, repositories: [string], authorship: string, requireComplete: bool, canonicalOnly: bool, metricVersion: string, compilerId: string }
+export type Annotation = { id: string, purpose: string, authorship: string, defect: Option[string], repairs: Option[string], detectedMs: Option[int], round: int, provenance: string }
