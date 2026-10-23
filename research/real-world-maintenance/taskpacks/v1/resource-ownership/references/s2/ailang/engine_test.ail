@@ -1,0 +1,14 @@
+module study/resource_ownership/engine_test
+import ./engine (withinCap)
+
+test "cap equality is accepted" {
+  withinCap(3, 3)
+}
+
+test "one over cap rejected" {
+  not withinCap(4, 3)
+}
+
+test "negative input rejected" {
+  not withinCap(-1, 3)
+}

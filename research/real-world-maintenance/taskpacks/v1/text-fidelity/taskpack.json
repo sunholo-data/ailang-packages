@@ -1,0 +1,67 @@
+{
+  "schema": "maintenance.taskpack/1",
+  "family": "text-fidelity/v1",
+  "role": "public_development_control",
+  "confirmationEligible": false,
+  "sourceRequirements": [
+    "https://github.com/tafia/calamine/pull/671",
+    "https://github.com/tafia/calamine/pull/673"
+  ],
+  "contract": "stages/contract.md",
+  "contractDigest": "4fa21594c90b0e467338520af1d9faeea8cf7d4eaea04241d0984f4a5478f772",
+  "boundary": "already-decoded logical cell text; target does not parse XML bytes",
+  "languages": [
+    "ailang",
+    "python"
+  ],
+  "starterPaths": {
+    "ailang": "starter/ailang",
+    "python": "starter/python"
+  },
+  "referencePaths": {
+    "ailang": "reference/ailang",
+    "python": "reference/python"
+  },
+  "stageModes": [
+    "s1",
+    "s2",
+    "s3"
+  ],
+  "retention": "agent-owned-source-locks-public-tests-notes; no reference restoration",
+  "sessionTreatment": "fresh-session-per-stage",
+  "stages": [
+    {
+      "id": "s1",
+      "request": "stages/s1.md",
+      "requestDigest": "e45de719e2c2e95c445c50f01482bf29fee67533325ab0f858354f06824bad8e",
+      "input": "fixtures/s1.input.json",
+      "inputDigest": "1c46184326a7d2335f85befbdc07726b48c8d90e9535cb0d28416831da66f35b",
+      "expected": "fixtures/s1.expected.json",
+      "expectedDigest": "6d56722dec2dcc1d3accf127521d105f85a251ca484548dd2ead783a92162f80"
+    },
+    {
+      "id": "s2",
+      "request": "stages/s2.md",
+      "requestDigest": "2c18cc2b87988c91c49f3b3aa7a2a8fc74052e65ad16c369db1d080b08c934f4",
+      "input": "fixtures/s2.input.json",
+      "inputDigest": "a747fed3af561598ccf6bd76c8c0454f5a5bf963fe2ca29637ac31fc06b2af63",
+      "expected": "fixtures/s2.expected.json",
+      "expectedDigest": "7eef7800e4479f4d8afa974dfe18e2bef42daa806d166d6260c00a3270641dc2"
+    },
+    {
+      "id": "s3",
+      "request": "stages/s3.md",
+      "requestDigest": "f7ad1e59d9660b7f576d151e521583daa444f90238c88d376838485b6952022f",
+      "input": "fixtures/s3.input.json",
+      "inputDigest": "6bbecf7084ec490c3d086696729d0c3d0be2c1fa90411582e7b548036bac1a5e",
+      "expected": "fixtures/s3.expected.json",
+      "expectedDigest": "77c1e523530680d674f4d3824216ce95ae9c87623d1325cab5c1dff815b7397c"
+    }
+  ],
+  "qualificationCommand": [
+    "./qualify.sh",
+    "--output",
+    "NEW_OUTPUT_PATH"
+  ],
+  "runnerStatus": "offline-qualified-assets-only; existing core stage adapter not implemented by this taskpack"
+}

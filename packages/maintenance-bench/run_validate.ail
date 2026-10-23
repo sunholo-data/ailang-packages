@@ -1,0 +1,62 @@
+module sunholo/maintenance_bench/run_validate
+import ./run_types (RunBundle, RunPlan, TrajectoryPlan, TrajectoryRun, StagePlan, StageRun)
+import std/result (Result, Ok, Err)
+import std/option (Option, Some, None)
+import std/list (map, filter, foldl, length, contains, flatMap)
+import std/map as M
+import std/json (encode, JArray, JString)
+import std/string (chars, length as strLength)
+
+func digest(s: string) -> bool =
+  strLength(s) == 64 && length(filter(\c. not contains(["0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "a", "b", "c", "d", "e", "f"], c), chars(s))) == 0
+
+func unique(xs: [string]) -> bool = M.size(M.fromList(map(\x. (x, true), xs))) == length(xs)
+
+func arm(p: TrajectoryPlan) -> string =
+  encode(JArray(map(\s. JString(s), [p.family, p.variant, show(p.repeat), p.language])))
+
+func started(s: StageRun) -> bool = s.state != "blocked" && s.state != "not_started"
+
+func checkStage(p: StagePlan, r: StageRun, previous: Option[string]) -> Result[Option[string], string] {
+  let checked = r.oracle == "pass" || r.oracle == "fail"
+  if p.id != r.id || not digest(p.requirementDigest) || not digest(p.oracleDigest) then Err("stage identity/order mismatch") else if length(filter(\k. not contains(["parser", "type", "effect", "contract", "public", "oracle", "infrastructure"], k), r.checkKinds)) > 0 then Err("unknown check kind") else if match r.artifactDigest {
+    Some(d) => not digest(d),
+    None => false
+  } then Err("invalid artifact digest") else if r.state == "failed" && r.visible != "fail" && r.oracle != "fail" then Err("failed state lacks failed check") else if started(r) && (r.priorDigest != previous || r.artifactDigest == None || length(r.attempts) == 0) then Err("prior checkpoint/candidate/attempt mismatch") else if not started(r) && (r.artifactDigest != None || length(r.attempts) > 0 || r.visible != "not_run" || r.oracle != "not_run") then Err("unstarted stage has fabricated execution") else if r.state == "blocked" && r.priorDigest != previous then Err("blocked continuation lost last owned artifact") else if checked && (r.oracleDigest != Some(p.oracleDigest) || r.oracleArtifact != r.artifactDigest || not contains(r.checkKinds, "oracle")) then Err("oracle identity/artifact mismatch") else if not checked && (r.oracleDigest != None || r.oracleArtifact != None) then Err("unrun oracle claims evidence") else if r.state == "completed" && not checked then Err("completed stage missing independent oracle") else if r.state == "not_started" && r.priorDigest != None then Err("never-started stage has execution checkpoint") else Ok(match r.artifactDigest {
+    Some(d) => Some(d),
+    None => previous
+  })
+}
+
+func stages(ps: [StagePlan], rs: [StageRun], previous: Option[string]) -> Result[(), string] = match (ps, rs) {
+  ([], []) => Ok(),
+  (p :: pt, r :: rt) => match checkStage(p, r, previous) {
+    Err(e) => Err(e),
+    Ok(next) => stages(pt, rt, next)
+  },
+  _ => Err("missing/extra scheduled stage")
+}
+
+func trajectory(p: TrajectoryPlan, r: TrajectoryRun, config: RunPlan) -> Result[(), string] =
+  if not digest(p.starterDigest) || not digest(p.nativeToolDigest) || p.id != r.id || p.repeat < 1 || length(p.stages) != 3 || not unique(map(\s. s.id, p.stages)) then Err("invalid trajectory/stage plan") else if r.model != config.model || r.harness != config.harness || r.settingsDigest != config.settingsDigest then Err("observed model/harness/settings drift") else stages(p.stages, r.stages, Some(p.starterDigest))
+
+export pure func validateBundle(b: RunBundle) -> Result[RunBundle, string]
+ensures { match result {
+  Ok(x) => length(x.plan.trajectories) == length(x.runs),
+  Err(e) => e != ""
+} } {
+  let ps = b.plan.trajectories
+  let index = M.fromList(map(\r. (r.id, r), b.runs))
+  let attempts = flatMap(\r. flatMap(\s. s.attempts, r.stages), b.runs)
+  let receiptIds = flatMap(\a. a.receiptIds, attempts)
+  if not digest(b.plan.settingsDigest) then Err("invalid settings digest") else if b.plan.leftLanguage == b.plan.rightLanguage || length(filter(\p. p.language != b.plan.leftLanguage && p.language != b.plan.rightLanguage, ps)) > 0 then Err("unexpected language arm") else if length(ps) == 0 || length(ps) > 100 || length(ps) != length(b.runs) || M.size(index) != length(b.runs) || not unique(map(\p. p.id, ps)) then Err("trajectory membership/size mismatch") else if not unique(map(\p. arm(p), ps)) then Err("duplicate semantic arm") else if not unique(map(\a. a.id, attempts)) || not unique(receiptIds) then Err("duplicate attempt or receipt assignment") else match foldl(\state p. match state {
+    Err(e) => Err(e),
+    Ok(_) => match M.lookup(index, p.id) {
+      None => Err("missing trajectory"),
+      Some(r) => trajectory(p, r, b.plan)
+    }
+  }, Ok(), ps) {
+    Err(e) => Err(e),
+    Ok(_) => Ok(b)
+  }
+}

@@ -1,0 +1,32 @@
+module sunholo/maintenance_bench/examples/usage_accounting
+import pkg/sunholo/maintenance_bench/usage_codec (decodeReceipts)
+import pkg/sunholo/maintenance_bench/usage_normalize (normalize)
+import pkg/sunholo/maintenance_bench/usage_aggregate (aggregate)
+import std/result (Ok, Err)
+import std/io (println, exit)
+
+-- Synthetic accounting control, not measured language/model evidence.
+-- Pure contracts and native properties live in the imported owner modules.
+export func main() -> () ! {IO} {
+  let raw = "{\"schema\":\"maintenance.usage/2\",\"receipts\":[{\"id\":\"r1\",\"identity\":{\"source\":\"instrument-control\",\"version\":\"v1\",\"digest\":\"fixture-digest\",\"attemptId\":\"attempt1\",\"requestId\":\"request1\",\"provider\":\"provider1\",\"model\":\"model1\",\"harness\":\"fixture-harness\",\"settingsDigest\":\"fixed-settings\"},\"tokens\":{\"contract\":\"inclusive/1\",\"input\":150,\"cacheRead\":80,\"cacheWrite\":20,\"cacheReported\":true,\"output\":7,\"reasoning\":3,\"reasoningReported\":true,\"outputScheme\":\"separate\"},\"cost\":{\"amount\":\"0.010001\",\"currency\":\"USD\",\"basis\":\"metered\",\"priceVersion\":\"fixture-price\"},\"role\":\"leaf\",\"parentId\":null,\"childrenComplete\":false,\"purpose\":\"maintenance\",\"failed\":false}]}"
+  match decodeReceipts(raw) {
+    Err(e) => {
+      println(e)
+      exit(1)
+    },
+    Ok([row]) => match (normalize(row), aggregate([row, row])) {
+      (Ok(n), Ok(total)) => {
+        println("instrument-control: fresh=${show(n.fresh)} accounted=${show(n.accounted)} fresh+generated=${show(n.freshGenerated)}")
+        println("leaf receipts=${show(total.leafCount)} duplicate imports=${show(total.duplicateCount)} USD micros=${show(total.costMicros.total)}")
+      },
+      _ => {
+        println("usage accounting control failed")
+        exit(1)
+      }
+    },
+    _ => {
+      println("expected one accounting control")
+      exit(1)
+    }
+  }
+}

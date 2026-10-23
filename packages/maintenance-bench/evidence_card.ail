@@ -1,0 +1,56 @@
+module sunholo/maintenance_bench/evidence_card
+import ./codec (requiredText, requiredCount, requiredBool, requiredTexts, optionalText, enumText, collectResults)
+import ./strict_json (decodeCountDocument, hasExactKeys)
+import std/json (Json, get, JArray)
+import std/list (map, filter, length)
+import std/result (Result, Ok, Err, flatMap)
+import std/option (Option, Some, None)
+import std/map as M
+import std/string (chars, length as textLength)
+
+export type CardIdentity = { id: string, state: string, role: string, obligation: string, beforeId: string, afterId: string, oracleDigest: string }
+
+export type CardEvidence = { reproducer: Option[string], beforeCompiled: bool, afterCompiled: bool, beforeFails: bool, afterPasses: bool, mutationControls: int, usageStatus: string, claim: string }
+
+export type CardContext = { route: string, reuseAudit: Option[string], alternative: string, consumers: [string], severityException: Option[string], model: string, harness: string, toolchain: string, configDigest: string, scope: string }
+
+export type EvidenceCard = { identity: CardIdentity, evidence: CardEvidence, context: CardContext }
+
+func identity(j: Json) -> Result[CardIdentity, string] =
+  flatMap(\id. flatMap(\state. flatMap(\role. flatMap(\obligation. flatMap(\before. flatMap(\after. flatMap(\oracle. Ok({ id: id, state: state, role: role, obligation: obligation, beforeId: before, afterId: after, oracleDigest: oracle }), requiredText(j, "oracleDigest")), requiredText(j, "afterId")), requiredText(j, "beforeId")), requiredText(j, "obligation")), enumText(j, "role", ["development", "confirmation"])), enumText(j, "state", ["discovery", "reproduced", "candidate", "design_ready", "landed", "remeasured"])), requiredText(j, "id"))
+
+func evidence(j: Json) -> Result[CardEvidence, string] =
+  flatMap(\command. flatMap(\bc. flatMap(\ac. flatMap(\bf. flatMap(\ap. flatMap(\mutations. flatMap(\usage. flatMap(\claim. Ok({ reproducer: command, beforeCompiled: bc, afterCompiled: ac, beforeFails: bf, afterPasses: ap, mutationControls: mutations, usageStatus: usage, claim: claim }), enumText(j, "claim", ["reproduction", "economic", "language_advantage"])), enumText(j, "usageStatus", ["known", "partial", "unknown"])), requiredCount(j, "mutationControls")), requiredBool(j, "afterPasses")), requiredBool(j, "beforeFails")), requiredBool(j, "afterCompiled")), requiredBool(j, "beforeCompiled")), optionalText(j, "reproducer"))
+
+func routing(j: Json) -> Result[{ route: string, audit: Option[string], alternative: string, consumers: [string], exception: Option[string] }, string] =
+  flatMap(\route. flatMap(\audit. flatMap(\alternative. flatMap(\consumers. flatMap(\exception. Ok({ route: route, audit: audit, alternative: alternative, consumers: consumers, exception: exception }), optionalText(j, "severityException")), requiredTexts(j, "consumers")), requiredText(j, "alternative")), optionalText(j, "reuseAudit")), enumText(j, "route", ["application", "package", "stdlib", "ailang", "motoko_extension", "instrument", "investigation"]))
+
+func context(j: Json) -> Result[CardContext, string] =
+  flatMap(\r. flatMap(\model. flatMap(\harness. flatMap(\tools. flatMap(\config. flatMap(\scope. Ok({ route: r.route, reuseAudit: r.audit, alternative: r.alternative, consumers: r.consumers, severityException: r.exception, model: model, harness: harness, toolchain: tools, configDigest: config, scope: scope }), requiredText(j, "scope")), requiredText(j, "configDigest")), requiredText(j, "toolchain")), requiredText(j, "harness")), requiredText(j, "model")), routing(j))
+
+func immutableId(s: string, allowGit: bool) -> bool =
+  (textLength(s) == 64 || allowGit && textLength(s) == 40) && length(filter(\c. not M.member(M.fromList(map(\x. (x, true), ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "a", "b", "c", "d", "e", "f"])), c), chars(s))) == 0
+
+func ready(c: EvidenceCard) -> bool =
+  c.evidence.beforeCompiled && c.evidence.afterCompiled && c.evidence.beforeFails && c.evidence.afterPasses && c.evidence.reproducer != None
+
+export pure func qualifyCard(c: EvidenceCard) -> Result[EvidenceCard, string]
+ensures { match result {
+  Ok(x) => x.evidence.claim != "language_advantage" && (x.identity.state != "design_ready" || x.evidence.mutationControls > 0 && x.context.reuseAudit != None),
+  Err(e) => e != ""
+} } {
+  let consumers = M.size(M.fromList(map(\s. (s, true), c.context.consumers)))
+  if not immutableId(c.identity.beforeId, true) || not immutableId(c.identity.afterId, true) || not immutableId(c.identity.oracleDigest, false) || not immutableId(c.context.configDigest, false) then Err("card requires immutable source/oracle/config identities") else if c.identity.state != "discovery" && c.identity.beforeId == c.identity.afterId then Err("changed-candidate reproduction requires distinct before/after identities") else if c.evidence.claim == "economic" then Err("standalone cards cannot qualify economic claims; bind usage through a controlled run report") else if length(filter(\s. s == c.identity.state, ["discovery", "reproduced", "candidate", "design_ready", "landed", "remeasured"])) != 1 then Err("invalid card state") else if consumers != length(c.context.consumers) then Err("duplicate consumers are not independent recurrence") else if c.evidence.claim == "language_advantage" then Err("qualified language advantage is outside this development instrument") else if c.evidence.claim == "economic" && c.evidence.usageStatus != "known" then Err("economic claim lacks complete usage coverage") else if c.identity.state != "discovery" && not ready(c) then Err("reproduction requires compiled before/fix and actual failed/passed semantic assertions") else if (c.identity.state == "candidate" || c.identity.state == "design_ready" || c.identity.state == "landed" || c.identity.state == "remeasured") && c.context.reuseAudit == None then Err("candidate requires existing-capability audit") else if c.identity.state == "design_ready" && (c.evidence.mutationControls == 0 || consumers < 2 && c.context.severityException == None) then Err("design readiness requires mutation controls and independent recurrence or explicit severity exception") else if c.identity.state == "remeasured" && c.identity.role != "confirmation" then Err("general remeasurement requires new confirmation evidence") else Ok(c)
+}
+
+func card(j: Json) -> Result[EvidenceCard, string] =
+  if not hasExactKeys(j, ["id", "state", "role", "obligation", "beforeId", "afterId", "oracleDigest", "reproducer", "beforeCompiled", "afterCompiled", "beforeFails", "afterPasses", "mutationControls", "usageStatus", "claim", "route", "reuseAudit", "alternative", "consumers", "severityException", "model", "harness", "toolchain", "configDigest", "scope"]) then Err("unexpected or missing card fields") else flatMap(\i. flatMap(\e. flatMap(\c. qualifyCard({ identity: i, evidence: e, context: c }), context(j)), evidence(j)), identity(j))
+
+export pure func decodeCards(text: string) -> Result[[EvidenceCard], string]
+ensures { match result {
+  Ok(xs) => length(filter(\x. x.evidence.claim == "language_advantage", xs)) == 0,
+  Err(e) => e != ""
+} } = flatMap(\j. flatMap(\_. match get(j, "cards") {
+  Some(JArray(xs)) => flatMap(\cards. if M.size(M.fromList(map(\c. (c.identity.id, true), cards))) != length(cards) then Err("duplicate card id") else Ok(cards), collectResults(map(\x. card(x), xs))),
+  _ => Err("missing cards array")
+}, if hasExactKeys(j, ["schema", "cards"]) then enumText(j, "schema", ["maintenance.cards/2"]) else Err("unexpected cards fields")), decodeCountDocument(text))

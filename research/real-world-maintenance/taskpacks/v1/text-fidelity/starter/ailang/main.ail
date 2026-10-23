@@ -1,0 +1,36 @@
+module benchmark/text_fidelity/main
+import ./text (render)
+import std/env (getArgs)
+import std/fs (readFileResult)
+import std/io (println, eprintln, exit)
+import std/json (Json, JArray, decode, encode)
+import std/result (Result, Ok, Err)
+import std/list (foldl)
+
+func fail(message: string) -> () ! {IO} {
+  eprintln(message)
+  exit(2)
+}
+
+func run(path: string) -> () ! {IO, FS} = match readFileResult(path) {
+  Err(e) => fail(e),
+  Ok(text) => match decode(text) {
+    Err(e) => fail(e),
+    Ok(JArray(items)) => match foldl(\acc j. match acc {
+      Err(e) => Err(e),
+      Ok(xs) => match render(j) {
+        Ok(v) => Ok(xs ++ [v]),
+        Err(e) => Err(e)
+      }
+    }, Ok([]), items) {
+      Err(e) => fail(e),
+      Ok(results) => println(encode(JArray(results)))
+    },
+    _ => fail("expected request array")
+  }
+}
+
+export func main() -> () ! {IO, FS, Env} = match getArgs() {
+  ["baseline", file] => run(file),
+  _ => fail("baseline and input file required")
+}

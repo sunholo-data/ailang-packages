@@ -1,0 +1,146 @@
+module sunholo/maintenance_bench/usage_normalize
+import ./usage_types (UsageReceipt, NormalizedUsage, TokenCounters, CostEvidence)
+import std/option (Option, Some, None)
+import std/result (Result, Ok, Err)
+import std/string (chars, charCode, split, repeat, substring, length as textLength, stringToInt)
+import std/list (foldl, contains)
+
+func isCount(n: Option[int]) -> bool = match n {
+  Some(x) => x >= 0 && x <= 9007199254740991,
+  None => true
+}
+
+func sum(a: Option[int], b: Option[int]) -> Result[Option[int], string] = match (a, b) {
+  (Some(x), Some(y)) => if y > 9007199254740991 - x then Err("exact count overflow") else Ok(Some(x + y)),
+  _ => Ok(None)
+}
+
+func knownSum(a: Option[int], b: Option[int]) -> Option[int] = match sum(a, b) {
+  Ok(n) => n,
+  Err(_) => None
+}
+
+func digits(s: string) -> bool = s != "" && foldl(\ok c. ok && charCode(c) >= 48 && charCode(c) <= 57, true, chars(s))
+
+func leading(s: string) -> bool = s == "0" || textLength(s) > 0 && substring(s, 0, 1) != "0"
+
+func fraction(s: string) -> Result[string, string] =
+  if not digits(s) then Err("invalid decimal amount") else if textLength(s) <= 6 then Ok("${s}${repeat("0", 6 - textLength(s))}") else if foldl(\ok c. ok && c == "0", true, chars(substring(s, 6, textLength(s)))) then Ok(substring(s, 0, 6)) else Err("unsupported_money_precision")
+
+func parts(amount: string) -> Result[{ whole: string, frac: string }, string] = match split(amount, ".") {
+  [whole] => if digits(whole) && leading(whole) then Ok({ whole: whole, frac: "000000" }) else Err("invalid decimal amount"),
+  [whole, frac] => if digits(whole) && leading(whole) then match fraction(frac) {
+    Ok(f) => Ok({ whole: whole, frac: f }),
+    Err(e) => Err(e)
+  } else Err("invalid decimal amount"),
+  _ => Err("invalid decimal amount")
+}
+
+-- Fixed scale 6, exact, no floating conversion and no rounding.
+export pure func usdMicros(amount: string) -> Result[int, string]
+ensures { match result {
+  Ok(n) => n >= 0 && n <= 9007199254740991,
+  Err(_) => true
+} } {
+  match parts(amount) {
+    Err(e) => Err(e),
+    Ok(p) => if textLength(p.whole) > 10 then Err("money overflow") else match (stringToInt(p.whole), stringToInt(p.frac)) {
+      (Some(w), Some(f)) => if w > 9007199254 || w == 9007199254 && f > 740991 then Err("money overflow") else Ok(w * 1000000 + f),
+      _ => Err("invalid decimal amount")
+    }
+  }
+}
+
+func validTokens(t: TokenCounters) -> Result[(), string] =
+  if not contains(["inclusive/1", "exclusive/1", "legacy-total/1"], t.contract) then Err("unknown usage contract") else if not contains(["separate", "combined", "unknown"], t.outputScheme) then Err("unknown output scheme") else if not (isCount(t.input) && isCount(t.output) && isCount(t.cacheRead) && isCount(t.cacheWrite) && isCount(t.reasoning)) then Err("invalid usage count") else if t.cacheReported && (t.cacheRead == None || t.cacheWrite == None) then Err("cache reporting requires both buckets") else if t.reasoningReported && t.reasoning == None then Err("reported reasoning requires a count") else if not t.cacheReported && ((match t.cacheRead {
+    Some(n) => n > 0,
+    None => false
+  }) || (match t.cacheWrite {
+    Some(n) => n > 0,
+    None => false
+  })) then Err("positive cache counters contradict reporting flag") else if not t.reasoningReported && (match t.reasoning {
+    Some(n) => n > 0,
+    None => false
+  }) then Err("positive reasoning contradicts reporting flag") else if t.contract == "legacy-total/1" && (t.cacheReported || t.reasoningReported || t.outputScheme != "unknown") then Err("legacy total cannot attest split accounting") else Ok()
+
+func nonempty(s: Option[string]) -> bool = match s {
+  Some(v) => v != "",
+  None => true
+}
+
+func validReceipt(r: UsageReceipt) -> Result[(), string] {
+  let i = r.identity
+  let c = r.cost
+  if r.id == "" || i.source == "" || i.version == "" || i.digest == "" || i.attemptId == "" || i.harness == "" || i.settingsDigest == "" || not (nonempty(i.requestId) && nonempty(i.provider) && nonempty(i.model) && nonempty(r.parentId) && nonempty(c.currency) && nonempty(c.priceVersion)) then Err("missing usage identity") else if not contains(["leaf", "summary"], r.role) || not contains(["generation", "maintenance", "verification", "infrastructure", "preparation"], r.purpose) then Err("invalid usage role or purpose") else if r.role == "leaf" && r.childrenComplete || r.role == "summary" && r.parentId != None then Err("invalid parent/leaf coverage flags") else if not contains(["metered", "list_price", "local_free", "unknown"], c.basis) then Err("invalid cost basis") else match c.amount {
+    None => Ok(),
+    Some(amount) => match parts(amount) {
+      Err(e) => if e == "unsupported_money_precision" then Ok() else Err(e),
+      Ok(_) => if c.basis == "local_free" && (match usdMicros(amount) {
+        Ok(n) => n != 0,
+        Err(_) => true
+      }) then Err("local_free evidence cannot carry a nonzero charge") else Ok()
+    }
+  }
+}
+
+func output(t: TokenCounters) -> Result[{ visible: Option[int], reasoning: Option[int], generated: Option[int] }, string] {
+  let reasoning = if t.reasoningReported then t.reasoning else None
+  if t.outputScheme == "combined" then match (t.output, reasoning) {
+    (Some(g), Some(r)) => if r > g then Err("reasoning exceeds generated output") else Ok({ visible: Some(g - r), reasoning: reasoning, generated: t.output }),
+    _ => Ok({ visible: None, reasoning: reasoning, generated: t.output })
+  } else if t.outputScheme == "separate" then match sum(t.output, reasoning) {
+    Err(e) => Err(e),
+    Ok(g) => Ok({ visible: t.output, reasoning: reasoning, generated: g })
+  } else Ok({ visible: None, reasoning: None, generated: None })
+}
+
+func input(t: TokenCounters) -> Result[{ fresh: Option[int], inclusive: Option[int], read: Option[int], write: Option[int] }, string] {
+  let read = if t.cacheReported then t.cacheRead else None
+  let write = if t.cacheReported then t.cacheWrite else None
+  if t.contract == "legacy-total/1" then Ok({ fresh: None, inclusive: None, read: None, write: None }) else match sum(read, write) {
+    Err(e) => Err(e),
+    Ok(cache) => if t.contract == "inclusive/1" then match (t.input, cache) {
+      (Some(i), Some(c)) => if c > i then Err("cache buckets exceed inclusive input") else Ok({ fresh: Some(i - c), inclusive: t.input, read: read, write: write }),
+      _ => Ok({ fresh: None, inclusive: t.input, read: read, write: write })
+    } else match sum(t.input, cache) {
+      Err(e) => Err(e),
+      Ok(i) => Ok({ fresh: t.input, inclusive: i, read: read, write: write })
+    }
+  }
+}
+
+func cost(c: CostEvidence) -> { micros: Option[int], reason: Option[string] } = match (c.amount, c.currency) {
+  (Some(a), Some("USD")) => if c.basis == "unknown" then { micros: None, reason: Some("unknown_cost_basis") } else match usdMicros(a) {
+    Ok(n) => { micros: Some(n), reason: None },
+    Err(e) => { micros: None, reason: Some(e) }
+  },
+  (Some(_), Some(_)) => { micros: None, reason: Some("unsupported_currency") },
+  (Some(_), None) => { micros: None, reason: Some("unreported_currency") },
+  _ => { micros: None, reason: Some("unreported_cost") }
+}
+
+export pure func normalize(r: UsageReceipt) -> Result[NormalizedUsage, string]
+ensures { match result {
+  Ok(n) => isCount(n.fresh) && isCount(n.accounted) && isCount(n.generated) && isCount(n.costMicros),
+  Err(_) => true
+} } {
+  match validReceipt(r) {
+    Err(e) => Err(e),
+    Ok(_) => match validTokens(r.tokens) {
+      Err(e) => Err(e),
+      Ok(_) => match (input(r.tokens), output(r.tokens), sum(r.tokens.input, r.tokens.output)) {
+        (Err(e), _, _) => Err(e),
+        (_, Err(e), _) => Err(e),
+        (_, _, Err(e)) => Err(e),
+        (Ok(i), Ok(o), Ok(recorded)) => match (sum(i.inclusive, o.generated), sum(i.fresh, o.generated)) {
+          (Err(e), _) => Err(e),
+          (_, Err(e)) => Err(e),
+          (Ok(accounted), Ok(fg)) => {
+            let money = cost(r.cost)
+            Ok({ fresh: i.fresh, cacheRead: i.read, cacheWrite: i.write, visible: o.visible, reasoning: o.reasoning, generated: o.generated, accounted: accounted, freshGenerated: fg, recorded: recorded, costMicros: money.micros, costUnavailable: money.reason })
+          }
+        }
+      }
+    }
+  }
+}

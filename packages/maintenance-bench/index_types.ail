@@ -1,0 +1,8 @@
+module sunholo/maintenance_bench/index_types
+import std/option (Option)
+
+export type IndexDecision = { id: string, excluded: bool, acceptance: string, acceptedMs: Option[int], intent: string, labels: [string], evidence: string, provenance: string }
+
+export type IndexSpec = { schema: string, cutoffMs: int, windowDays: int, sourceRef: string, selectedIds: [string], decisions: [IndexDecision] }
+
+export type ScopedSummary = { indexSelected: int, indexEligible: int, indexMature: int, indexCensored: int, indexUnresolved: int, indexExcluded: int, indexUnknownOutcomes: int, followupTouches: int, confirmedIntroductions: int, supportedRepairs: int, canonicalWorkload: int, totalWorkload: int, knownTokenRows: int, missingTokenRows: int, recordedTokenSubtotal: int, indexFeatures: int, indexRepairs: int, indexMigrations: int, indexPerformance: int, indexMixed: int, indexUnknownIntent: int, indexOtherIntent: int, confirmedRepairTouches: int, featureFollowupTouches: int, unknownFollowupTouches: int }

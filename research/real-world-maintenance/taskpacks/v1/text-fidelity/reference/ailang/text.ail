@@ -1,0 +1,99 @@
+module benchmark/text_fidelity/text
+import std/result (Result, Ok, Err)
+import std/option (Some, None)
+import std/json (Json, JNull, JBool, JString, JArray, JObject, get, kv, jint)
+import std/string (length, charAt, substring, concat, replace)
+import std/list (map, foldl, filter)
+
+export pure func asciiEdge(s: string) -> bool
+ensures { result == (s == " " || s == "\t" || s == "\r" || s == "\n" || s == "\u{B}" || s == "\u{C}") } {
+  s == " " || s == "\t" || s == "\r" || s == "\n" || s == "\u{B}" || s == "\u{C}"
+}
+
+func left(s: string, i: int, n: int) -> int =
+  if i >= n then n else if asciiEdge(charAt(s, i)) then left(s, i + 1, n) else i
+
+func right(s: string, i: int, lower: int) -> int =
+  if i <= lower then lower else if asciiEdge(charAt(s, i - 1)) then right(s, i - 1, lower) else i
+
+export pure func trimAscii(s: string) -> string
+ensures { length(result) <= length(s) } {
+  let n = length(s)
+  let a = left(s, 0, n)
+  substring(s, a, right(s, n, a))
+}
+
+type Header = { cell: string, preserve: bool, invalid: bool, schema: string }
+
+type Content = { text: string, parts: [Json] }
+
+func header(j: Json) -> Result[Header, string] =
+  match (get(j, "cell"), get(j, "preserve"), get(j, "invalid"), get(j, "schema")) {
+    (Some(JString(cell)), Some(JBool(preserve)), Some(JBool(invalid)), Some(JString(schema))) => Ok({ cell: cell, preserve: preserve, invalid: invalid, schema: schema }),
+    _ => Err("invalid request header")
+  }
+
+func expectedSchema(stage: int) -> string =
+  if stage <= 1 then "cell.text/1" else if stage == 2 then "cell.events/2" else "cell.events/3"
+
+func eventContent(e: Json, stage: int, mutation: string) -> Result[Content, string] =
+  match (get(e, "kind"), get(e, "value"), get(e, "style")) {
+    (Some(JString(kind)), Some(JString(value)), Some(JString(style))) => if kind == "error" then Err("invalid_cell") else if not (kind == "text" || kind == "reference" || stage == 3 && (kind == "cdata" || kind == "run")) then Err("invalid_cell") else {
+      let text = if mutation == "chunk_trim" then trimAscii(value) else if mutation == "drop_cdata" && kind == "cdata" then "" else value
+      let part = JObject([kv("kind", JString(kind)), kv("text", JString(value)), kv("style", JString(if kind == "run" then style else ""))])
+      Ok({ text: text, parts: [part] })
+    },
+    _ => Err("invalid_cell")
+  }
+
+@allow_empty_ok("An empty event stream is a valid empty logical cell, distinct from invalid_cell")
+func content(j: Json, stage: int, mutation: string) -> Result[Content, string] =
+  if stage <= 1 then match get(j, "text") {
+    Some(JString(text)) => Ok({ text: text, parts: [] }),
+    _ => Err("invalid_cell")
+  } else match get(j, "events") {
+    Some(JArray(events)) => foldl(\acc event. match acc {
+      Err(e) => Err(e),
+      Ok(a) => match eventContent(event, stage, mutation) {
+        Err(e) => Err(e),
+        Ok(b) => Ok({ text: concat([a.text, b.text]), parts: a.parts ++ b.parts })
+      }
+    }, Ok({ text: "", parts: [] }), events),
+    _ => Err("invalid_cell")
+  }
+
+func record(cell: string, c: Result[Content, string], stage: int, preserve: bool, mutation: string) -> Json {
+  let good = match c {
+    Ok(_) => true,
+    Err(_) => false
+  }
+  let text = match c {
+    Err(_) => "",
+    Ok(v) => if mutation == "internal_drop" then replace(v.text, " ", "") else if stage > 0 && not preserve then trimAscii(v.text) else v.text
+  }
+  let basic = [kv("cell", JString(cell)), kv("ok", JBool(good)), kv("text", if good then JString(text) else JNull), kv("error", if good then JNull else JString("invalid_cell"))]
+  let parts = match c {
+    Ok(v) => v.parts,
+    Err(_) => []
+  }
+  let fields = if stage == 3 then basic ++ [kv("characters", if good then jint(length(text)) else JNull), kv("parts", JArray(parts))] else basic
+  JObject(if mutation == "drop_field" then filter(\field. field.key != "cell", fields) else fields)
+}
+
+export pure func render(j: Json, stage: int, mutation: string) -> Result[Json, string]
+requires { stage >= 0, stage <= 3 }
+ensures { match result {
+  Ok(v) => match get(v, "ok") {
+    Some(JBool(_)) => true,
+    _ => false
+  },
+  Err(_) => true
+} } {
+  match header(j) {
+    Err(e) => Err(e),
+    Ok(h) => {
+      let c = if h.invalid || h.schema != expectedSchema(stage) then Err("invalid_cell") else content(j, stage, mutation)
+      Ok(record(h.cell, c, stage, h.preserve, mutation))
+    }
+  }
+}

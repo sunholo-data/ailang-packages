@@ -3,6 +3,8 @@ import ./report (analyse)
 import ./verify_snapshot (verifySnapshot)
 import ./codec (encodeSnapshot, encodeAnnotations, encodeManifest)
 import ./reference (data, label, manifest)
+import ./scoped_metrics (scopedSummary)
+import ./index_reference (indexText)
 import std/result (Ok, Err)
 import std/io (println, exit)
 
@@ -17,6 +19,15 @@ export func main() -> () ! {IO} =
         println(e)
         exit(1)
       },
-      Ok(_) => println("OK: independent maintenance counts verified; offline smoke")
+      Ok(_) => match scopedSummary(data(), indexText()) {
+        Err(e) => {
+          println(e)
+          exit(1)
+        },
+        Ok(s) => if s.indexSelected == 1 && s.indexMature == 1 && s.totalWorkload == 3 then println("OK: independent v1 counts and v2 scoped index verified; offline smoke") else {
+          println("scoped smoke count mismatch")
+          exit(1)
+        }
+      }
     }
   }

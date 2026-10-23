@@ -1,0 +1,43 @@
+module benchmark/text_fidelity/main
+import ./text (render)
+import std/env (getArgs)
+import std/fs (readFileResult)
+import std/io (println, eprintln, exit)
+import std/json (Json, JArray, decode, encode)
+import std/result (Result, Ok, Err)
+import std/list (foldl)
+
+func fail(message: string) -> () ! {IO} {
+  eprintln(message)
+  exit(2)
+}
+
+func run(stage: int, mutation: string, path: string) -> () ! {IO, FS} = match readFileResult(path) {
+  Err(e) => fail(e),
+  Ok(text) => match decode(text) {
+    Err(e) => fail(e),
+    Ok(JArray(items)) => match foldl(\acc j. match acc {
+      Err(e) => Err(e),
+      Ok(xs) => match render(j, stage, mutation) {
+        Ok(v) => Ok(xs ++ [v]),
+        Err(e) => Err(e)
+      }
+    }, Ok([]), items) {
+      Err(e) => fail(e),
+      Ok(results) => println(encode(JArray(results)))
+    },
+    _ => fail("expected request array")
+  }
+}
+
+export func main() -> () ! {IO, FS, Env} = match getArgs() {
+  ["baseline", file] => run(0, "", file),
+  ["s1", file] => run(1, "", file),
+  ["s2", file] => run(2, "", file),
+  ["s3", file] => run(3, "", file),
+  ["internal_drop", file] => run(1, "internal_drop", file),
+  ["chunk_trim", file] => run(2, "chunk_trim", file),
+  ["drop_cdata", file] => run(3, "drop_cdata", file),
+  ["drop_field", file] => run(3, "drop_field", file),
+  _ => fail("mode and input file required")
+}

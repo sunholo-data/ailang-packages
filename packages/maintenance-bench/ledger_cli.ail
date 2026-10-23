@@ -1,0 +1,74 @@
+module sunholo/maintenance_bench/ledger_cli
+import ./ledger_report (analyseIndex, analyseRuns, analyseCards)
+import ./report (Analysis)
+import ./snapshot_io (writeNew)
+import std/fs (readFileResult)
+import std/env (getArgs)
+import std/io (println, eprintln, exit)
+import std/result (Result, Ok, Err)
+
+func fail(e: string) -> () ! {IO} {
+  eprintln(e)
+  exit(1)
+}
+
+func pair(a: string, b: string) -> Result[{ a: string, b: string }, string] ! {FS} = match readFileResult(a) {
+  Err(e) => Err(e),
+  Ok(x) => match readFileResult(b) {
+    Err(e) => Err(e),
+    Ok(y) => Ok({ a: x, b: y })
+  }
+}
+
+func triple(a: string, b: string, c: string) -> Result[{ a: string, b: string, c: string }, string] ! {FS} =
+  match pair(a, b) {
+    Err(e) => Err(e),
+    Ok(x) => match readFileResult(c) {
+      Err(e) => Err(e),
+      Ok(y) => Ok({ a: x.a, b: x.b, c: y })
+    }
+  }
+
+func output(r: Result[Analysis, string], path: string, md: bool) -> () ! {IO, FS} = match r {
+  Err(e) => fail(e),
+  Ok(a) => match writeNew(path, if md then a.markdown else "${a.json}\n") {
+    Err(e) => fail(e),
+    Ok(_) => println("wrote ${path}")
+  }
+}
+
+func index(s: string, i: string, c: string, o: string, md: bool) -> () ! {IO, FS} = match pair(s, i) {
+  Err(e) => fail(e),
+  Ok(x) => output(analyseIndex(x.a, x.b, c), o, md)
+}
+
+func runs(p: string, r: string, u: string, c: string, o: string, md: bool) -> () ! {IO, FS} = match triple(p, r, u) {
+  Err(e) => fail(e),
+  Ok(x) => output(analyseRuns(x.a, x.b, x.c, c), o, md)
+}
+
+func cards(path: string, c: string, o: string, md: bool) -> () ! {IO, FS} = match readFileResult(path) {
+  Err(e) => fail(e),
+  Ok(x) => output(analyseCards(x, c), o, md)
+}
+
+export func main() -> () ! {IO, FS, Env} = match getArgs() {
+  ["index", s, i, c, o] => index(s, i, c, o, false),
+  ["index-md", s, i, c, o] => index(s, i, c, o, true),
+  ["runs", p, r, u, c, o] => runs(p, r, u, c, o, false),
+  ["runs-md", p, r, u, c, o] => runs(p, r, u, c, o, true),
+  ["cards", p, c, o] => cards(p, c, o, false),
+  ["cards-md", p, c, o] => cards(p, c, o, true),
+  ["validate", p, r, u] => match triple(p, r, u) {
+    Err(e) => fail(e),
+    Ok(x) => match analyseRuns(x.a, x.b, x.c, "validation-only") {
+      Err(e) => fail(e),
+      Ok(_) => println("valid trajectory, usage and evidence associations")
+    }
+  },
+  ["--help"] => println("maintenance-ledger index|index-md SNAPSHOT INDEX DECLARED_COMPILER NEW_OUTPUT\nmaintenance-ledger runs|runs-md PLAN RUNS RECEIPTS DECLARED_COMPILER NEW_OUTPUT\nmaintenance-ledger cards|cards-md CARDS DECLARED_COMPILER NEW_OUTPUT\nmaintenance-ledger validate PLAN RUNS RECEIPTS\nOffline analysis and draft evidence cards; IO/FS/Env only."),
+  _ => {
+    eprintln("invalid arguments; use --help")
+    exit(2)
+  }
+}

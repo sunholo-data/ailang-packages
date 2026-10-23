@@ -1,0 +1,366 @@
+{
+  "sprint_id": "M-MAINTENANCE-EVAL-FOUNDATION",
+  "evaluation_round": 1,
+  "timestamp": "2026-10-23T14:46:44.128956+00:00",
+  "design_doc": "design_docs/planned/m-maintenance-bench-evidence-ledger.md",
+  "companion_design_docs": [
+    "design_docs/planned/m-maintenance-eval-taskpack.md"
+  ],
+  "sprint_plan": "design_docs/planned/m-maintenance-eval-foundation-sprint-plan.md",
+  "evaluated_head": "162db5255f3b75d7d3ee2a309607b9ea0bf3c649",
+  "implementation_source_revision": "40e1e74932a6e6860030d8fca5d78bba2b49248f",
+  "pr_url": "https://github.com/sunholo-data/ailang-packages/pull/160",
+  "gate_source": "ci",
+  "ci_url": "https://github.com/sunholo-data/ailang-packages/actions/runs/39971346946",
+  "ci_head_match": true,
+  "ci_conclusion": "success",
+  "total_score": 90,
+  "pass_threshold": 70,
+  "result": "pass",
+  "score_breakdown": {
+    "tests_pass": 20,
+    "lint_clean": 5,
+    "acceptance_criteria": 30,
+    "code_quality": 11,
+    "documentation": 15,
+    "design_fidelity": 9
+  },
+  "hard_fails": [],
+  "automated_checks": {
+    "tests_pass": true,
+    "tests_passed": 185,
+    "tests_failed": 0,
+    "tests_skipped": 0,
+    "generated_property_cases": 500,
+    "compiled_files": 62,
+    "regular_quality_gates": [],
+    "strict_quality_passed": false,
+    "strict_gate": "PUB011",
+    "uncontracted_exports": 75,
+    "smt_verified": 3,
+    "smt_total": 20,
+    "smt_skipped_unsupported": 17,
+    "smt_counterexamples": 0,
+    "smt_errors": 0,
+    "runtime_contract_coverage": "not_measured",
+    "formatter_excluded_legacy_test_modules": 4,
+    "file_sizes_ok": true,
+    "todo_hack_count": 0
+  },
+  "acceptance_criteria": [
+    {
+      "feature_id": "M1_INDEX_BOUNDARY",
+      "criterion": "Reject duplicate or absent selected IDs, duplicate keys, invalid enums, fractional/exponent counts and unknown schemas; explicit null remains unknown.",
+      "met": true,
+      "evidence": "index_codec/index_test: strict selected membership, reviewed acceptance, intent labels, duplicate/count/shape controls."
+    },
+    {
+      "feature_id": "M1_INDEX_BOUNDARY",
+      "criterion": "A feature that introduces a confirmed defect remains feature-intent with a separate causal outcome. A feature-only follow-up is not a repair.",
+      "met": true,
+      "evidence": "index_codec/index_test: strict selected membership, reviewed acceptance, intent labels, duplicate/count/shape controls."
+    },
+    {
+      "feature_id": "M1_INDEX_BOUNDARY",
+      "criterion": "Commit-proxy or interval-ambiguous acceptance cannot silently enter an exact-window mature stratum. Reviewed disposition and provenance survive round trip.",
+      "met": true,
+      "evidence": "index_codec/index_test: strict selected membership, reviewed acceptance, intent labels, duplicate/count/shape controls."
+    },
+    {
+      "feature_id": "M2_SCOPED_METRICS",
+      "criterion": "Selected index partitions account for every selected row; an out-of-index follow-up or excluded smoke cannot change index denominator/outcomes.",
+      "met": true,
+      "evidence": "scoped_metrics/index_test: index partition property, workload/missingness, bounded supported repair and rename/post-rename identity probes; real Parse v2 replay."
+    },
+    {
+      "feature_id": "M2_SCOPED_METRICS",
+      "criterion": "The same added row changes the correctly labelled workload count and known usage subtotal, with missingness retained.",
+      "met": true,
+      "evidence": "scoped_metrics/index_test: index partition property, workload/missingness, bounded supported repair and rename/post-rename identity probes; real Parse v2 replay."
+    },
+    {
+      "feature_id": "M2_SCOPED_METRICS",
+      "criterion": "A touch, five files and three repair rounds do not become equivalent defect counts; zero denominator is unavailable. Order-invariance and partition properties execute.",
+      "met": true,
+      "evidence": "scoped_metrics/index_test: index partition property, workload/missingness, bounded supported repair and rename/post-rename identity probes; real Parse v2 replay."
+    },
+    {
+      "feature_id": "M3_USAGE_BOUNDARY",
+      "criterion": "A legacy chain scalar retains only its recorded known total; missing split/model/billing cannot become zero or a fresh-token claim.",
+      "met": true,
+      "evidence": "usage_codec/usage_codec_test: strict neutral receipts, raw count lexemes, exact decimal money and unavailable currency/precision."
+    },
+    {
+      "feature_id": "M3_USAGE_BOUNDARY",
+      "criterion": "Wrong types, duplicate IDs/keys, invalid or negative counts, unknown contracts and unsupported precision are rejected or explicitly unavailable under the field policy.",
+      "met": true,
+      "evidence": "usage_codec/usage_codec_test: strict neutral receipts, raw count lexemes, exact decimal money and unavailable currency/precision."
+    },
+    {
+      "feature_id": "M3_USAGE_BOUNDARY",
+      "criterion": "Money remains decimal text. Exact USD micro-unit aggregation uses scale 6 without rounding; excess nonzero precision/overflow is unavailable, trailing zero precision is accepted. Other currencies remain recorded but cannot silently join USD.",
+      "met": true,
+      "evidence": "usage_codec/usage_codec_test: strict neutral receipts, raw count lexemes, exact decimal money and unavailable currency/precision."
+    },
+    {
+      "feature_id": "M4_USAGE_RECONCILE",
+      "criterion": "Independent fixtures: inclusive input 150 minus cache 80+20 gives fresh 50; visible 7 plus reasoning 3 gives accounted total 160 and fresh+generated 60. Exclusive-input fixture agrees.",
+      "met": true,
+      "evidence": "usage_normalize/usage_aggregate/usage_test: independent150/80/20/7/3 arithmetic, request dedup, parent integrity, overlap, failed cost, cost basis and missing generation controls."
+    },
+    {
+      "feature_id": "M4_USAGE_RECONCILE",
+      "criterion": "Combined generated 10 with reasoning 3 yields visible 7, never generated 13. Impossible cache splits fail; unknown reason/cache reporting never becomes proven zero.",
+      "met": true,
+      "evidence": "usage_normalize/usage_aggregate/usage_test: independent150/80/20/7/3 arithmetic, request dedup, parent integrity, overlap, failed cost, cost basis and missing generation controls."
+    },
+    {
+      "feature_id": "M4_USAGE_RECONCILE",
+      "criterion": "Parent plus leaf costs are charged once; conflicting duplicate identities fail; possible cross-source overlap is unavailable. Costly failed attempts remain charged.",
+      "met": true,
+      "evidence": "usage_normalize/usage_aggregate/usage_test: independent150/80/20/7/3 arithmetic, request dedup, parent integrity, overlap, failed cost, cost basis and missing generation controls."
+    },
+    {
+      "feature_id": "M4_USAGE_RECONCILE",
+      "criterion": "Mixed metered/list-price/local/unknown cost bases are separated. Known subtotal and coverage are distinct from total expenditure and cost per success.",
+      "met": true,
+      "evidence": "usage_normalize/usage_aggregate/usage_test: independent150/80/20/7/3 arithmetic, request dedup, parent integrity, overlap, failed cost, cost basis and missing generation controls."
+    },
+    {
+      "feature_id": "M5_LEDGER_STATES",
+      "criterion": "A synthetic 8-trajectory/24-stage schedule accounts for started, completed, failed, blocked, invalid, budget-stopped and never-started rows without counting non-launch as a model error.",
+      "met": true,
+      "evidence": "run_validate/run_test: complete8/24 control, own prior/candidate identity, oracle provenance, duplicate attempts and blocked/invalid/not-started states."
+    },
+    {
+      "feature_id": "M5_LEDGER_STATES",
+      "criterion": "Check prior/output checkpoint identities and the fixed stage schedule; a broken S1 remains the trajectory source for S2 rather than receiving a gold replacement.",
+      "met": true,
+      "evidence": "run_validate/run_test: complete8/24 control, own prior/candidate identity, oracle provenance, duplicate attempts and blocked/invalid/not-started states."
+    },
+    {
+      "feature_id": "M5_LEDGER_STATES",
+      "criterion": "Missing stage, duplicate attempt, wrong checkpoint and forged oracle provenance fail. Usage stays attached to spent attempts even if the terminal artifact fails.",
+      "met": true,
+      "evidence": "run_validate/run_test: complete8/24 control, own prior/candidate identity, oracle provenance, duplicate attempts and blocked/invalid/not-started states."
+    },
+    {
+      "feature_id": "M6_LEDGER_PAIRS",
+      "criterion": "Reject duplicate arm keys and unintended config changes; preserve unmatched and invalid arms plus their spend. Never relabel language to call core PairArms.",
+      "met": true,
+      "evidence": "run_compare/run_compare_test: semantic stage/provider/config pairing, unconditional success, missingness and failed/unmatched/overhead spend; exact edit-bound probes."
+    },
+    {
+      "feature_id": "M6_LEDGER_PAIRS",
+      "criterion": "Chain success requires every mandatory stage and retained invariant to pass independent checks. Visible-green hidden-regression is reported separately.",
+      "met": true,
+      "evidence": "run_compare/run_compare_test: semantic stage/provider/config pairing, unconditional success, missingness and failed/unmatched/overhead spend; exact edit-bound probes."
+    },
+    {
+      "feature_id": "M6_LEDGER_PAIRS",
+      "criterion": "All failed work contributes to matched-cohort economic totals; unmatched/invalid overhead remains separately visible. Zero success, incomplete oracle outcomes or missing usage makes affected economic comparisons unavailable.",
+      "met": true,
+      "evidence": "run_compare/run_compare_test: semantic stage/provider/config pairing, unconditional success, missingness and failed/unmatched/overhead spend; exact edit-bound probes."
+    },
+    {
+      "feature_id": "M6_LEDGER_PAIRS",
+      "criterion": "Two repeated families remain two clusters. Reports publish descriptive paired counts, never an unsupported population significance or representative-working-day claim.",
+      "met": true,
+      "evidence": "run_compare/run_compare_test: semantic stage/provider/config pairing, unconditional success, missingness and failed/unmatched/overhead spend; exact edit-bound probes."
+    },
+    {
+      "feature_id": "M7_EVIDENCE_CARDS",
+      "criterion": "A missing reproducer, weakened oracle, unsupported causal link or all-pass tiny sample cannot emit a qualified language win or design_ready recommendation.",
+      "met": true,
+      "evidence": "evidence_card/evidence_card_test: immutable/distinct identities, reproduction/mutation/reuse/recurrence requirements, standalone economic/language wins refused."
+    },
+    {
+      "feature_id": "M7_EVIDENCE_CARDS",
+      "criterion": "A reproduction can support an investigation card with unknown cost, while an economic claim requires its own coverage. A single severe case requires an explicit severity exception.",
+      "met": true,
+      "evidence": "evidence_card/evidence_card_test: immutable/distinct identities, reproduction/mutation/reuse/recurrence requirements, standalone economic/language wins refused."
+    },
+    {
+      "feature_id": "M7_EVIDENCE_CARDS",
+      "criterion": "Seed discovery/reproduced cards cite the merged ownership/text cases; current application fixes remain recorded. No automatic stdlib deficiency, agent message, dispatch, approval or implementation is generated.",
+      "met": true,
+      "evidence": "evidence_card/evidence_card_test: immutable/distinct identities, reproduction/mutation/reuse/recurrence requirements, standalone economic/language wins refused."
+    },
+    {
+      "feature_id": "M8_REPORT_CLI",
+      "criterion": "Same frozen inputs give identical JSON/Markdown/card bytes. Changed index, receipt, protocol or comparison direction changes the report identity.",
+      "met": true,
+      "evidence": "ledger_report/ledger_report_test/ledger_cli plus installed integration: stable bytes and input-bound IDs, version0.2 identification, typed nonzero failures, IO/FS/Env only."
+    },
+    {
+      "feature_id": "M8_REPORT_CLI",
+      "criterion": "Invalid input exits nonzero with field/context; no fallback to an empty successful cohort. Missing costs and observational/controlled evidence remain separate.",
+      "met": true,
+      "evidence": "ledger_report/ledger_report_test/ledger_cli plus installed integration: stable bytes and input-bound IDs, version0.2 identification, typed nonzero failures, IO/FS/Env only."
+    },
+    {
+      "feature_id": "M8_REPORT_CLI",
+      "criterion": "The installed offline command runs outside the source checkout under IO/FS/Env only; it does not request Process, Net or AI. Do not forge a 0.1.0 identity in 0.2.0 output.",
+      "met": true,
+      "evidence": "ledger_report/ledger_report_test/ledger_cli plus installed integration: stable bytes and input-bound IDs, version0.2 identification, typed nonzero failures, IO/FS/Env only."
+    },
+    {
+      "feature_id": "M9_F1_STARTER_ORACLE",
+      "criterion": "Both native starters pass the same baseline cases, including different bytes with repeated names, duplicate content and reordered documents. Record source/runtime/dependency identities.",
+      "met": true,
+      "evidence": "Resource native starters, shared baseline normal/reordered byte cases, independent byte/alias oracle, source/protocol/runtime qualification receipts."
+    },
+    {
+      "feature_id": "M9_F1_STARTER_ORACLE",
+      "criterion": "External checks detect planted byte corruption and cross-document aliasing while public checks remain unchanged. A nonzero exit before successful compilation is infrastructure evidence, not the desired semantic negative control.",
+      "met": true,
+      "evidence": "Resource native starters, shared baseline normal/reordered byte cases, independent byte/alias oracle, source/protocol/runtime qualification receipts."
+    },
+    {
+      "feature_id": "M9_F1_STARTER_ORACLE",
+      "criterion": "Attribute the seed and adaptation honestly; all exposed controls are development assets. Baseline native responsibility and allowed dependencies are documented before stage qualification.",
+      "met": true,
+      "evidence": "Resource native starters, shared baseline normal/reordered byte cases, independent byte/alias oracle, source/protocol/runtime qualification receipts."
+    },
+    {
+      "feature_id": "M10_F1_STAGE_CONTROLS",
+      "criterion": "Both languages pass each stage reference and all still-required older obligations. No-op/pre-fix and targeted weakened-oracle/implementation mutations fail actual assertions.",
+      "met": true,
+      "evidence": "Exact-head CI qualifier:16positive runs,14semantic negatives,12public-green negatives; old-resource/cap/retry/release obligations; typed oracle and overwrite controls."
+    },
+    {
+      "feature_id": "M10_F1_STAGE_CONTROLS",
+      "criterion": "Rejected or partially processed documents cannot corrupt earlier successes; cap boundaries, retry, shared content and release/unreleased ownership are exercised.",
+      "met": true,
+      "evidence": "Exact-head CI qualifier:16positive runs,14semantic negatives,12public-green negatives; old-resource/cap/retry/release obligations; typed oracle and overwrite controls."
+    },
+    {
+      "feature_id": "M10_F1_STAGE_CONTROLS",
+      "criterion": "Use per-source build/output directories and an explicit qualification script outside agent workspace. Record byte checks and timing; no uncalibrated RSS or physical-race pass claim.",
+      "met": true,
+      "evidence": "Exact-head CI qualifier:16positive runs,14semantic negatives,12public-green negatives; old-resource/cap/retry/release obligations; typed oracle and overwrite controls."
+    },
+    {
+      "feature_id": "M11_F2_STARTER_ORACLE",
+      "criterion": "Both starters preserve baseline logical text, internal/non-ASCII whitespace, decoded character references and empty/error distinctions on shared cases.",
+      "met": true,
+      "evidence": "Text native starters, independently specified baseline whitespace/error fixtures, shared decoded-text boundary, attributed Calamine adaptation."
+    },
+    {
+      "feature_id": "M11_F2_STARTER_ORACLE",
+      "criterion": "Specify identical semantic responsibility for S2 producer/interface events and S3 structured-text/output fields; provide both arms equally competent native producers/dependencies.",
+      "met": true,
+      "evidence": "Text native starters, independently specified baseline whitespace/error fixtures, shared decoded-text boundary, attributed Calamine adaptation."
+    },
+    {
+      "feature_id": "M11_F2_STARTER_ORACLE",
+      "criterion": "Independent oracle catches a planted semantic loss after a successful build. Reject unmatched responsibility rather than publishing an AILANG/Python delta; do not present Python assets as historical repairs.",
+      "met": true,
+      "evidence": "Text native starters, independently specified baseline whitespace/error fixtures, shared decoded-text boundary, attributed Calamine adaptation."
+    },
+    {
+      "feature_id": "M12_F2_STAGE_CONTROLS",
+      "criterion": "Both native reference chains pass the identical frozen stage expectations, including event chunk boundaries and relevant CDATA/rich-text/schema cases selected before execution.",
+      "met": true,
+      "evidence": "Exact-head CI qualifier:22variant sets,98positive reference assertions,144expected semantic assertion failures; retained older fixtures, no-op/mutant/type/weak-oracle controls."
+    },
+    {
+      "feature_id": "M12_F2_STAGE_CONTROLS",
+      "criterion": "No-op/pre-fix controls and targeted mutants fail specific old/new assertions; oracle weakening is detected by the independent expected-failure ledger.",
+      "met": true,
+      "evidence": "Exact-head CI qualifier:22variant sets,98positive reference assertions,144expected semantic assertion failures; retained older fixtures, no-op/mutant/type/weak-oracle controls."
+    },
+    {
+      "feature_id": "M12_F2_STAGE_CONTROLS",
+      "criterion": "Malformed versus empty output and missing consumer fields cannot pass. Fresh build identities and exact source requirements are included in qualification receipts.",
+      "met": true,
+      "evidence": "Exact-head CI qualifier:22variant sets,98positive reference assertions,144expected semantic assertion failures; retained older fixtures, no-op/mutant/type/weak-oracle controls."
+    },
+    {
+      "feature_id": "M13_REPLAY_COMPAT",
+      "criterion": "Account for the complete synthetic 8/24 schedule with forced failures, blocked continuation and costly retries; label its instrument-control role visibly.",
+      "met": true,
+      "evidence": "Independent ledger integration and both qualifiers in CI; v1-replay.json records six byte-identical old reports on original0.1source/lock and official checksum-verified0.54.17; frozen study paths unchanged."
+    },
+    {
+      "feature_id": "M13_REPLAY_COMPAT",
+      "criterion": "Run F1/F2 native starter/reference/no-op/mutation checks independently, record pass/fail counts and assert their intended failure causes. A skipped/weak oracle or stale build cannot qualify a family.",
+      "met": true,
+      "evidence": "Independent ledger integration and both qualifiers in CI; v1-replay.json records six byte-identical old reports on original0.1source/lock and official checksum-verified0.54.17; frozen study paths unchanged."
+    },
+    {
+      "feature_id": "M13_REPLAY_COMPAT",
+      "criterion": "Replay the old consumer with its actual 0.1.0 lock/compiler and compare original reports byte-for-byte. New v2 reports use a separate series; do not edit frozen pilot/mature studies.",
+      "met": true,
+      "evidence": "Independent ledger integration and both qualifiers in CI; v1-replay.json records six byte-identical old reports on original0.1source/lock and official checksum-verified0.54.17; frozen study paths unchanged."
+    },
+    {
+      "feature_id": "M14_QUALITY_DOCS_CI",
+      "criterion": "Record actual named/inline/property counts, compile/effects/interface/release/docs badges, smoke and SMT proved/counterexample/unknown/skipped outcomes. No undiscovered-test or vacuous-contract pass.",
+      "met": true,
+      "evidence": "Exact-head CI success; regular quality/dry-run pass;185native/500generated;3of20SMTverified17unsupported; strictPUB011/75 only; PR160 and this independent review. Pending flags are post-verdict closeout only."
+    },
+    {
+      "feature_id": "M14_QUALITY_DOCS_CI",
+      "criterion": "Keep baseline 75 uncontracted-export PUB011 limit from growing: add meaningful contracts to new exports or keep helpers internal. Disclose encoding skips as runtime assertions; no widened warning allowlist.",
+      "met": true,
+      "evidence": "Exact-head CI success; regular quality/dry-run pass;185native/500generated;3of20SMTverified17unsupported; strictPUB011/75 only; PR160 and this independent review. Pending flags are post-verdict closeout only."
+    },
+    {
+      "feature_id": "M14_QUALITY_DOCS_CI",
+      "criterion": "Verify clean dependency resolution and installed commands; provide scoped source PR with exact tested revision. Do not claim main/registry availability or CI success before verified.",
+      "met": true,
+      "evidence": "Exact-head CI success; regular quality/dry-run pass;185native/500generated;3of20SMTverified17unsupported; strictPUB011/75 only; PR160 and this independent review. Pending flags are post-verdict closeout only."
+    },
+    {
+      "feature_id": "M14_QUALITY_DOCS_CI",
+      "criterion": "Run sprint-evaluator against both designs and acceptance controls; resolve material failures before calling the sprint complete. No core compiler/harness edits or default rotation changes belong to this sprint.",
+      "met": true,
+      "evidence": "Exact-head CI success; regular quality/dry-run pass;185native/500generated;3of20SMTverified17unsupported; strictPUB011/75 only; PR160 and this independent review. Pending flags are post-verdict closeout only."
+    }
+  ],
+  "acceptance_summary": {
+    "total": 45,
+    "substantively_met": 45,
+    "marked_passed_at_evaluated_head": 41,
+    "pending_flags": "M14 four criteria await this verdict/CI closeout; no circular implementation deduction"
+  },
+  "documentation_check": {
+    "changelog_updated": true,
+    "examples_created": true,
+    "design_doc_status": "foundation delivered; downstream adapter/campaign explicitly planned; closeout metadata follows verdict",
+    "local_links_resolve": true
+  },
+  "design_fidelity": {
+    "score": 9,
+    "notes": "Approved foundation delivered; standalone economic cards narrowed to identity-bound controlled-report route."
+  },
+  "nonblocking_feedback": [
+    {
+      "file": "research/real-world-maintenance/taskpacks/v1/resource-ownership/oracle.py",
+      "line": 17,
+      "category": "code_quality",
+      "issue": "validate is82lines including nested helpers",
+      "suggestion": "Consider shortening stateful oracle control flow in a later maintenance change",
+      "deduction": 2
+    },
+    {
+      "file": "research/real-world-maintenance/taskpacks/v1/resource-ownership/references/s3/python/main.py",
+      "line": 12,
+      "category": "code_quality",
+      "issue": "run is52lines including nested helpers",
+      "suggestion": "Consider extracting a helper without changing native responsibilities",
+      "deduction": 2
+    }
+  ],
+  "feedback": [],
+  "scope": "Experimental source-candidate foundation only; excludes staged runner/isolation, model campaign, comparative superiority, merge and registry publication",
+  "identity_policy": "Declared report identity plus externally pinned exact source/lock/runtime; not self-attesting",
+  "closeout": [
+    "Complete M14 and sprint state after verdict",
+    "Record honest velocity/retrospective and fix stale planning authorization paragraph",
+    "Commit reports and docs-only closeout",
+    "Require successful final-head CI"
+  ],
+  "report_markdown": "eval_M-MAINTENANCE-EVAL-FOUNDATION_round_1.md"
+}

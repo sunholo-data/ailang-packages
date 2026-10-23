@@ -1,0 +1,55 @@
+module sunholo/maintenance_bench/usage_codec
+import ./usage_types (UsageIdentity, TokenCounters, CostEvidence, UsageReceipt)
+import ./usage_normalize (normalize)
+import ./strict_json (decodeCountDocument)
+import ./codec (requiredText, optionalText, optionalCount, requiredBool, enumText, collectResults)
+import std/json (Json, JArray, JObject, get)
+import std/result (Result, Ok, Err, flatMap)
+import std/option (Option, Some, None)
+import std/list (map, foldl, contains, length as size)
+import std/map as M
+
+func shape(j: Json, keys: [string]) -> Result[Json, string] = match j {
+  JObject(fs) => if size(fs) == size(keys) && foldl(\ok f. ok && contains(keys, f.key), true, fs) then Ok(j) else Err("unexpected or missing usage fields"),
+  _ => Err("expected usage object")
+}
+
+func object(j: Json, key: string, keys: [string]) -> Result[Json, string] = match get(j, key) {
+  Some(v) => shape(v, keys),
+  None => Err("missing usage object: ${key}")
+}
+
+func identity(j: Json) -> Result[UsageIdentity, string] =
+  flatMap(\j. flatMap(\source. flatMap(\version. flatMap(\digest. flatMap(\attempt. flatMap(\request. flatMap(\provider. flatMap(\model. flatMap(\harness. flatMap(\settings. Ok({ source: source, version: version, digest: digest, attemptId: attempt, requestId: request, provider: provider, model: model, harness: harness, settingsDigest: settings }), requiredText(j, "settingsDigest")), requiredText(j, "harness")), optionalText(j, "model")), optionalText(j, "provider")), optionalText(j, "requestId")), requiredText(j, "attemptId")), requiredText(j, "digest")), requiredText(j, "version")), requiredText(j, "source")), object(j, "identity", ["source", "version", "digest", "attemptId", "requestId", "provider", "model", "harness", "settingsDigest"]))
+
+func tokens(j: Json) -> Result[TokenCounters, string] =
+  flatMap(\j. flatMap(\contract. flatMap(\input. flatMap(\read. flatMap(\write. flatMap(\reported. flatMap(\output. flatMap(\reason. flatMap(\reasonReported. flatMap(\scheme. Ok({ contract: contract, input: input, cacheRead: read, cacheWrite: write, cacheReported: reported, output: output, reasoning: reason, reasoningReported: reasonReported, outputScheme: scheme }), enumText(j, "outputScheme", ["separate", "combined", "unknown"])), requiredBool(j, "reasoningReported")), optionalCount(j, "reasoning")), optionalCount(j, "output")), requiredBool(j, "cacheReported")), optionalCount(j, "cacheWrite")), optionalCount(j, "cacheRead")), optionalCount(j, "input")), enumText(j, "contract", ["inclusive/1", "exclusive/1", "legacy-total/1"])), object(j, "tokens", ["contract", "input", "cacheRead", "cacheWrite", "cacheReported", "output", "reasoning", "reasoningReported", "outputScheme"]))
+
+func cost(j: Json) -> Result[CostEvidence, string] =
+  flatMap(\j. flatMap(\amount. flatMap(\currency. flatMap(\basis. flatMap(\price. Ok({ amount: amount, currency: currency, basis: basis, priceVersion: price }), optionalText(j, "priceVersion")), enumText(j, "basis", ["metered", "list_price", "local_free", "unknown"])), optionalText(j, "currency")), optionalText(j, "amount")), object(j, "cost", ["amount", "currency", "basis", "priceVersion"]))
+
+type Meta = { id: string, role: string, parent: Option[string], complete: bool, purpose: string, failed: bool }
+
+func meta(j: Json) -> Result[Meta, string] =
+  flatMap(\id. flatMap(\role. flatMap(\parent. flatMap(\complete. flatMap(\purpose. flatMap(\failed. Ok({ id: id, role: role, parent: parent, complete: complete, purpose: purpose, failed: failed }), requiredBool(j, "failed")), enumText(j, "purpose", ["generation", "maintenance", "verification", "infrastructure", "preparation"])), requiredBool(j, "childrenComplete")), optionalText(j, "parentId")), enumText(j, "role", ["leaf", "summary"])), requiredText(j, "id"))
+
+func receipt(j: Json) -> Result[UsageReceipt, string] = flatMap(\j. flatMap(\m. flatMap(\i. flatMap(\t. flatMap(\c. {
+  let r = { id: m.id, identity: i, tokens: t, cost: c, role: m.role, parentId: m.parent, childrenComplete: m.complete, purpose: m.purpose, failed: m.failed }
+  match normalize(r) {
+    Err(e) => Err(e),
+    Ok(_) => Ok(r)
+  }
+}, cost(j)), tokens(j)), identity(j)), meta(j)), shape(j, ["id", "identity", "tokens", "cost", "role", "parentId", "childrenComplete", "purpose", "failed"]))
+
+func unique(rows: [UsageReceipt]) -> bool = M.size(M.fromList(map(\r. (r.id, true), rows))) == size(rows)
+
+export pure func decodeReceipts(raw: string) -> Result[[UsageReceipt], string]
+ensures { match result {
+  Ok(rows) => unique(rows),
+  Err(_) => true
+} } {
+  flatMap(\j. flatMap(\j. flatMap(\schema. if schema != "maintenance.usage/2" then Err("unsupported usage schema") else match get(j, "receipts") {
+    Some(JArray(xs)) => flatMap(\rows. if unique(rows) then Ok(rows) else Err("duplicate usage receipt id"), collectResults(map(\x. receipt(x), xs))),
+    _ => Err("expected receipts array")
+  }, requiredText(j, "schema")), shape(j, ["schema", "receipts"])), decodeCountDocument(raw))
+}

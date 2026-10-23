@@ -3,13 +3,17 @@ on:
   pull_request:
     paths:
       - 'packages/maintenance-bench/**'
+      - 'research/real-world-maintenance/taskpacks/v1/**'
       - '.github/workflows/maintenance-bench.yml'
       - 'design_docs/planned/m-maintenance-bench-package-sprint-plan.md'
+      - 'design_docs/planned/m-maintenance-eval-foundation-sprint-plan.md'
+      - '.ailang/state/sprints/sprint_M-MAINTENANCE-EVAL-FOUNDATION.json'
       - '.ailang/state/sprints/sprint_M-MAINTENANCE-BENCH-PACKAGE.json'
   push:
     branches: [main]
     paths:
       - 'packages/maintenance-bench/**'
+      - 'research/real-world-maintenance/taskpacks/v1/**'
       - '.github/workflows/maintenance-bench.yml'
 permissions:
   contents: read
@@ -29,7 +33,7 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -y z3 jq
           mkdir -p "$RUNNER_TEMP/maintenance-runtime"
-          gh release download v0.54.17 --repo sunholo-data/ailang \
+          gh release download v0.54.18 --repo sunholo-data/ailang \
             -p linux.x64.ailang.tar.gz -p SHA256SUMS -D "$RUNNER_TEMP/maintenance-runtime"
           cd "$RUNNER_TEMP/maintenance-runtime"
           sha256sum --ignore-missing -c SHA256SUMS
@@ -40,15 +44,17 @@ jobs:
         run: make verify
       - name: Installed CLI and offline Git/gh integration
         run: make integration
+      - name: Strict ledger and independent native task qualification
+        run: make ledger-integration qualify-taskpacks
       - name: Bounded 1k/10k scale accounting
         run: make scale
       - name: Quality and explicit experimental contract limitation
         run: |
           ailang pkg quality --json . > quality-ci.json
-          jq -e '.compile.ok and .tests.failed == 0 and .tests.passed >= 84 and .smoke.passed and (.gates | length == 0)' quality-ci.json
+          jq -e '.compile.ok and .tests.failed == 0 and .tests.passed >= 185 and .smoke.passed and (.gates | length == 0)' quality-ci.json
           strict_status=0
           ailang pkg quality --strict --json . > quality-strict-ci.json || strict_status=$?
-          jq -e '.compile.ok and .tests.failed == 0 and .tests.passed >= 84 and .smoke.passed and .contracts.counterexample == 0 and .contracts.errors == 0 and .contracts.uncontracted_exports <= 75 and (.gates | all(.code == "PUB011"))' quality-strict-ci.json
+          jq -e '.compile.ok and .tests.failed == 0 and .tests.passed >= 185 and .smoke.passed and .contracts.counterexample == 0 and .contracts.errors == 0 and .contracts.uncontracted_exports <= 75 and (.gates | all(.code == "PUB011"))' quality-strict-ci.json
           if [ "$strict_status" -ne 0 ]; then
             echo 'Strict quality fails only the documented experimental PUB011 contract-coverage gate (maximum 75 uncontracted exports). It is not reported as a strict pass.'
           fi

@@ -1,0 +1,97 @@
+{
+  "schema": "ailang.package-quality/v1",
+  "package": "benchmark/text_fidelity",
+  "version": "0.1.0",
+  "stability": "experimental",
+  "mode": "publisher",
+  "compile": {
+    "source": "server",
+    "ok": true,
+    "files": 5
+  },
+  "contracts": {
+    "source": "server",
+    "evidence_schema": "ailang.verification-evidence/v1",
+    "numeric_model": {
+      "float_sort": "Real",
+      "int_sort": "Int",
+      "runtime_equivalence": "not_established"
+    },
+    "runtime_contracts": "not_measured",
+    "reason_counts": {
+      "uncontracted": 1,
+      "unsupported_encoding": 1
+    },
+    "verified": 1,
+    "total": 2,
+    "counterexample": 0,
+    "skipped": 1,
+    "errors": 0,
+    "uncontracted_exports": 1,
+    "wall_seconds": 0.022585917
+  },
+  "tests": {
+    "source": "attested",
+    "files": 1,
+    "passed": 3,
+    "failed": 0
+  },
+  "smoke": {
+    "source": "attested",
+    "present": true,
+    "passed": true,
+    "seconds": 0.200758834
+  },
+  "interface": {
+    "source": "server",
+    "hash_v1": "sha256:798f596d383bc30f43372a3be9908613bc643d34bdbde59722018b1ec83277b3",
+    "hash_v2": "sha256:ifacev2:bafa65741d61f118c8260f5beffe3cf2665ff933068a2c44cb2c4f06ceded6c2",
+    "signatures": 3
+  },
+  "effects": {
+    "source": "server",
+    "max": [
+      "Env",
+      "FS",
+      "IO"
+    ],
+    "ceiling_declared": true,
+    "rank_max": "FS"
+  },
+  "release": {
+    "source": "server",
+    "kind": "feature",
+    "changelog_section": true,
+    "notes": "Initial public text-fidelity starter for offline maintenance qualification."
+  },
+  "docs": {
+    "agent_md": true,
+    "ai_summary": true,
+    "agent_doc_exports_covered": 2,
+    "export_overlap_error": "failed to fetch registry index: Get \"https://storage.googleapis.com/ailang-registry/index.json?t=1792763927\": dial tcp: lookup storage.googleapis.com: no such host"
+  },
+  "style": {
+    "exported_funcs": 3,
+    "pure_exports": 2,
+    "pure_ratio": 0.6666666666666666
+  },
+  "gates": [
+    {
+      "code": "PUB011",
+      "level": "gate",
+      "msg": "1 exported function(s) carry no contract"
+    }
+  ],
+  "badges": [
+    {
+      "code": "PUB016",
+      "level": "info",
+      "msg": "1 contract(s) skipped by the verifier — not proved; `ailang verify --package .` lists the reason per function"
+    },
+    {
+      "code": "PUB023",
+      "level": "info",
+      "msg": "registry export-overlap check did not run: failed to fetch registry index: Get \"https://storage.googleapis.com/ailang-registry/index.json?t=1792763927\": dial tcp: lookup storage.googleapis.com: no such host"
+    }
+  ]
+}

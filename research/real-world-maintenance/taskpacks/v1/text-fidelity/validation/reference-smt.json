@@ -1,0 +1,51 @@
+{
+  "evidence_schema": "ailang.verification-evidence/v1",
+  "numeric_model": {
+    "float_sort": "Real",
+    "int_sort": "Int",
+    "runtime_equivalence": "not_established"
+  },
+  "runtime_contracts": "not_measured",
+  "file": "text.ail",
+  "verified": 1,
+  "counterexample": 0,
+  "skipped": 2,
+  "errors": 0,
+  "uncontracted": 0,
+  "total_exported": 3,
+  "results": [
+    {
+      "function": "asciiEdge",
+      "status": "verified",
+      "duration": 4872667
+    },
+    {
+      "reason_code": "unsupported_encoding",
+      "function": "render",
+      "status": "skipped",
+      "reason": "Function \"render\" calls \"content\" whose signature uses an unencodable type \"Result[Content, string]\"",
+      "rejections": [
+        {
+          "Code": "UNENCODABLE_TYPE",
+          "Message": "Function \"render\" calls \"content\" whose signature uses an unencodable type \"Result[Content, string]\"",
+          "Location": "",
+          "Hint": "Cross-function verification cannot encode parametric ADTs (Option/Result) or type variables in a callee signature. Callees returning records/enum ADTs are also not yet inlinable and will skip. Rewrite the callee to return a primitive, or inline its logic into the caller."
+        }
+      ]
+    },
+    {
+      "reason_code": "unsupported_encoding",
+      "function": "trimAscii",
+      "status": "skipped",
+      "reason": "SMT declaration closure could not resolve a required sort (cannot encode function body: let body: let value: unresolvable SMT declaration types: calls user function \"left\" that is not SMT-encodable in this context)",
+      "rejections": [
+        {
+          "Code": "UNENCODABLE_TYPE",
+          "Message": "cannot encode function body: let body: let value: unresolvable SMT declaration types: calls user function \"left\" that is not SMT-encodable in this context",
+          "Location": "",
+          "Hint": "The function uses a type shape whose required SMT sorts cannot be declared"
+        }
+      ]
+    }
+  ]
+}

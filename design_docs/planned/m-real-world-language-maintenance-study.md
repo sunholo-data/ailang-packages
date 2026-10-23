@@ -299,3 +299,11 @@ Research/instrument design only; scores describe protocol constraints, not demon
 | A12 System boundary | +1 | Separate application, dependency, runtime, harness and inference boundaries |
 
 **Net +7; no hard violations proposed on A1/A3/A4/A7.** Proceed to review of this plan, not implementation. Any later compiler/runtime or permission change needs its own scoped design and verification.
+
+## 2026-10-23: Merged evidence and concrete eval proposals
+
+The package shipped as `sunholo/maintenance_bench@0.1.0`. [Research PR #157](https://github.com/sunholo-data/ailang-packages/pull/157) is merged at `683046911d27e10ba5ccd44aae19988a62010e80`, including the initial availability and mature-history studies, three historical task-usage receipts and public-source regression reproductions. This is evidence of specific maintenance work and one confirmed AILANG introduction, not completion of the broader comparative research or a language-advantage result.
+
+Mark requested merging those results and designing a useful repeatable eval. The new [maintenance task-pack proposal](m-maintenance-eval-taskpack.md) owns two real-requirement families, three successive changes and existing-executor integration; the [evidence-ledger proposal](m-maintenance-bench-evidence-ledger.md) owns sampled index/follow-up scopes, cost accounting and roadmap cards. They reuse the lifecycle protocol and preserve this study's eligibility/claim rules. Both are planned, not implementation-approved.
+
+Recommended sequence: scope/identity ledger and offline oracle qualification; then the staged adapter; then a separately priced and approved eight-trajectory / 24-maintenance-episode feasibility pilot. No model call, registry release or compiler change is authorised merely by these proposal files.

@@ -2,8 +2,8 @@ AILANG_BIN ?= ailang
 # Native forall properties compile/test but trigger the pinned formatter nil-expression bug.
 # Explicit formatting waiver only for these four test modules; both remain compiled/tested.
 FMT_FILES = $(filter-out codec_test.ail cohort_test.ail lineage_test.ail metrics_test.ail,$(wildcard *.ail examples/*.ail))
-.PHONY: verify test fmt smoke examples integration scale quality quality-strict package
-verify: fmt test smoke examples
+.PHONY: verify test fmt smoke examples integration ledger-integration qualify-taskpacks scale quality quality-strict package
+verify: fmt test smoke examples ledger-examples
 	$(AILANG_BIN) lock --check
 	$(AILANG_BIN) check --package .
 	$(AILANG_BIN) run --caps IO,FS,Env --entry main cli.ail verify-snapshot assets/fixtures/analytical.snapshot.json assets/fixtures/analytical.annotations.json assets/fixtures/analytical.manifest.json assets/fixtures/analytical.expected.json
@@ -15,6 +15,10 @@ smoke:
 	$(AILANG_BIN) run --caps IO --entry main _smoke.ail
 integration:
 	AILANG_BIN=$(AILANG_BIN) sh tests/integration.sh
+ledger-integration:
+	AILANG_BIN=$(AILANG_BIN) sh tests/ledger_integration.sh
+qualify-taskpacks:
+	AILANG_BIN=$(AILANG_BIN) sh ../../research/real-world-maintenance/taskpacks/v1/qualify.sh
 scale:
 	@task_tmp=$$(mktemp -d); trap 'rm -rf "$$task_tmp"' EXIT; \
 	$(AILANG_BIN) run --caps IO,FS,Env,Clock --entry main benchmark.ail 1000 "$$task_tmp/1000.json" && \
@@ -32,3 +36,10 @@ examples:
 	$(AILANG_BIN) run --caps IO --entry main examples/compare_projects.ail
 	@task_tmp=$$(mktemp -d); trap 'rm -rf "$$task_tmp"' EXIT; \
 	$(AILANG_BIN) run --caps IO,FS,Env,Clock --entry main examples/scale_bench.ail 24 "$$task_tmp/example.json"
+
+# Ledger examples consume the explicit checked-in instrument/control fixtures.
+ledger-examples:
+	$(AILANG_BIN) run --caps IO --entry main examples/scoped_index.ail
+	$(AILANG_BIN) run --caps IO --entry main examples/usage_accounting.ail
+	$(AILANG_BIN) run --caps IO,FS --entry main examples/maintenance_trajectory.ail > /dev/null
+	$(AILANG_BIN) run --caps IO,FS --entry main examples/roadmap_card.ail > /dev/null
