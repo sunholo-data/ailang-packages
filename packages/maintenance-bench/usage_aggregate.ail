@@ -1,0 +1,175 @@
+module sunholo/maintenance_bench/usage_aggregate
+import ./usage_types (UsageReceipt, NormalizedUsage, Quantity, CostGroup, UsageTotals)
+import ./usage_normalize (normalize)
+import ./codec (collectResults, countOption, textOption)
+import std/option (Option, Some, None)
+import std/result (Result, Ok, Err)
+import std/list (map, foldl, filter, length as size, contains)
+import std/json (encode, JArray, JString, JObject, JBool, kv)
+import std/map as M
+
+type Entry = { receipt: UsageReceipt, normal: NormalizedUsage }
+
+func text(x: Option[string]) -> string = match x {
+  Some(s) => s,
+  None => ""
+}
+
+func requestKey(r: UsageReceipt) -> Option[string] = match (r.identity.provider, r.identity.requestId) {
+  (Some(p), Some(q)) => Some(encode(JArray([JString(p), JString(q)]))),
+  _ => None
+}
+
+func importKey(r: UsageReceipt) -> string = encode(JArray([JString(r.identity.source), JString(r.id)]))
+
+func key(r: UsageReceipt) -> string = match requestKey(r) {
+  Some(s) => "request:${s}",
+  None => "receipt:${importKey(r)}"
+}
+
+-- Source capture IDs/digests may differ between imports of the same provider request;
+-- every charged fact and its attribution must nevertheless agree.
+func fingerprint(r: UsageReceipt) -> string {
+  let t = r.tokens
+  let counters = JObject([kv("contract", JString(t.contract)), kv("input", countOption(t.input)), kv("read", countOption(t.cacheRead)), kv("write", countOption(t.cacheWrite)), kv("cacheReported", JBool(t.cacheReported)), kv("output", countOption(t.output)), kv("reasoning", countOption(t.reasoning)), kv("reasoningReported", JBool(t.reasoningReported)), kv("outputScheme", JString(t.outputScheme))])
+  let money = JObject([kv("amount", textOption(r.cost.amount)), kv("currency", textOption(r.cost.currency)), kv("basis", JString(r.cost.basis)), kv("price", textOption(r.cost.priceVersion))])
+  encode(JObject([kv("attempt", JString(r.identity.attemptId)), kv("request", textOption(r.identity.requestId)), kv("provider", textOption(r.identity.provider)), kv("model", textOption(r.identity.model)), kv("harness", JString(r.identity.harness)), kv("settings", JString(r.identity.settingsDigest)), kv("counters", counters), kv("cost", money), kv("role", JString(r.role)), kv("parent", textOption(r.parentId)), kv("complete", JBool(r.childrenComplete)), kv("purpose", JString(r.purpose)), kv("failed", JBool(r.failed))]))
+}
+
+func dedup(rows: [UsageReceipt]) -> Result[{ rows: [UsageReceipt], duplicates: int }, string] {
+  let state = foldl(\state r. match state {
+    Err(e) => Err(e),
+    Ok(s) => {
+      let k = key(r)
+      let ik = importKey(r)
+      let fp = fingerprint(r)
+      let request = M.lookup(s.requests, k)
+      let imported = M.lookup(s.imports, ik)
+      if (match request {
+        Some(old) => old != fp,
+        None => false
+      }) || (match imported {
+        Some(old) => old != fp,
+        None => false
+      }) then Err("conflicting duplicate request or receipt identity") else {
+        let seen = request != None || imported != None
+        Ok({ rows: if seen then s.rows else r :: s.rows, duplicates: if seen then s.duplicates + 1 else s.duplicates, requests: M.insert(s.requests, k, fp), imports: M.insert(s.imports, ik, fp) })
+      }
+    }
+  }, Ok({ rows: [], duplicates: 0, requests: M.empty(), imports: M.empty() }), rows)
+  match state {
+    Err(e) => Err(e),
+    Ok(s) => Ok({ rows: s.rows, duplicates: s.duplicates })
+  }
+}
+
+@allow_empty_ok("Empty usage is a legitimate zero-known/missing partition; total remains None, never zero expenditure.")
+func quantity(values: [Option[int]], usable: bool) -> Result[Quantity, string] {
+  let state = foldl(\acc value. match acc {
+    Err(e) => Err(e),
+    Ok(s) => match value {
+      None => Ok({ s | missing: s.missing + 1 }),
+      Some(n) => if n > 9007199254740991 - s.subtotal then Err("usage aggregate overflow") else Ok({ s | known: s.known + 1, subtotal: s.subtotal + n })
+    }
+  }, Ok({ known: 0, missing: 0, subtotal: 0 }), values)
+  match state {
+    Err(e) => Err(e),
+    Ok(s) => Ok({ known: s.known, missing: s.missing, subtotal: s.subtotal, total: if usable && s.missing == 0 && s.known > 0 then Some(s.subtotal) else None })
+  }
+}
+
+func entries(rows: [UsageReceipt]) -> Result[[Entry], string] = collectResults(map(\r. match normalize(r) {
+  Err(e) => Err(e),
+  Ok(n) => Ok({ receipt: r, normal: n })
+}, rows))
+
+func costKey(r: UsageReceipt) -> string = encode(JArray([JString(r.cost.basis), JString(text(r.cost.currency))]))
+
+func costGroups(es: [Entry], usable: bool, overlap: bool) -> Result[[CostGroup], string] {
+  let groups = M.values(M.fromList(map(\e. (costKey(e.receipt), e.receipt), es)))
+  collectResults(map(\r. match quantity(map(\e. if overlap then None else e.normal.costMicros, filter(\e. costKey(e.receipt) == costKey(r), es)), usable) {
+    Err(e) => Err(e),
+    Ok(q) => Ok({ basis: r.cost.basis, currency: text(r.cost.currency), quantity: q })
+  }, groups))
+}
+
+func equalKnown(a: Option[int], b: Option[int]) -> bool = match (a, b) {
+  (Some(x), Some(y)) => x == y,
+  _ => true
+}
+
+func parentCheck(parent: Entry, children: [Entry]) -> Result[(), string] {
+  if not parent.receipt.childrenComplete then Ok() else if size(children) == 0 then Err("complete parent has no leaves") else {
+    let sameRaw = foldl(\ok e. ok && e.receipt.tokens.contract == parent.receipt.tokens.contract && e.receipt.tokens.outputScheme == parent.receipt.tokens.outputScheme, true, children)
+    let checks = [{ label: "fresh", want: parent.normal.fresh, values: map(\e. e.normal.fresh, children) }, { label: "cacheRead", want: parent.normal.cacheRead, values: map(\e. e.normal.cacheRead, children) }, { label: "cacheWrite", want: parent.normal.cacheWrite, values: map(\e. e.normal.cacheWrite, children) }, { label: "visible", want: parent.normal.visible, values: map(\e. e.normal.visible, children) }, { label: "reasoning", want: parent.normal.reasoning, values: map(\e. e.normal.reasoning, children) }, { label: "generated", want: parent.normal.generated, values: map(\e. e.normal.generated, children) }, { label: "accounted", want: parent.normal.accounted, values: map(\e. e.normal.accounted, children) }, { label: "recorded", want: if sameRaw then parent.normal.recorded else None, values: map(\e. e.normal.recorded, children) }, { label: "cost", want: parent.normal.costMicros, values: map(\e. e.normal.costMicros, children) }]
+    if parent.normal.costMicros != None && size(filter(\e. costKey(e.receipt) != costKey(parent.receipt), children)) > 0 then Err("parent cost provenance mismatch") else foldl(\acc item. match acc {
+      Err(e) => Err(e),
+      Ok(_) => match quantity(item.values, true) {
+        Err(e) => Err(e),
+        Ok(q) => if equalKnown(item.want, q.total) then Ok() else Err("parent ${item.label} summary mismatch")
+      }
+    }, Ok(), checks)
+  }
+}
+
+func parentChecks(es: [Entry]) -> Result[(), string] {
+  let leaves = filter(\e. e.receipt.role == "leaf", es)
+  let parents = filter(\e. e.receipt.role == "summary", es)
+  let links = foldl(\ok e. ok && (match e.receipt.parentId {
+    None => true,
+    Some(p) => size(filter(\parent. parent.receipt.id == p && parent.receipt.identity.attemptId == e.receipt.identity.attemptId, parents)) == 1
+  }), true, leaves)
+  if not links then Err("missing or ambiguous parent summary") else foldl(\acc p. match acc {
+    Err(e) => Err(e),
+    Ok(_) => parentCheck(p, filter(\e. e.receipt.parentId == Some(p.receipt.id), leaves))
+  }, Ok(), parents)
+}
+
+func totals(es: [Entry], duplicates: int) -> Result[UsageTotals, string] {
+  let leaves = filter(\e. e.receipt.role == "leaf", es)
+  let summaries = filter(\e. e.receipt.role == "summary", es)
+  let sources = M.size(M.fromList(map(\e. (e.receipt.identity.source, true), leaves)))
+  let overlap = sources > 1 && size(filter(\e. requestKey(e.receipt) == None, leaves)) > 0
+  let unchecked = size(filter(\e. not e.receipt.childrenComplete, summaries))
+  let usable = not overlap && unchecked == 0
+  let bases = M.keys(M.fromList(map(\e. (e.receipt.cost.basis, true), leaves)))
+  let currencies = M.keys(M.fromList(map(\e. (text(e.receipt.cost.currency), true), leaves)))
+  let basis = match bases {
+    [one] => one,
+    [] => "unknown",
+    _ => "mixed"
+  }
+  let costUsable = usable && size(currencies) == 1 && basis != "mixed" && basis != "unknown"
+  let fresh = quantity(map(\e. if overlap then None else e.normal.fresh, leaves), usable)
+  let generated = quantity(map(\e. if overlap then None else e.normal.generated, leaves), usable)
+  let accounted = quantity(map(\e. if overlap then None else e.normal.accounted, leaves), usable)
+  let recorded = quantity(map(\e. if overlap then None else e.normal.recorded, leaves), usable)
+  let mixedMoney = size(currencies) > 1 || basis == "mixed"
+  let costs = quantity(map(\e. if overlap || mixedMoney then None else e.normal.costMicros, leaves), costUsable)
+  let overhead = quantity(map(\e. if overlap || mixedMoney then None else e.normal.costMicros, filter(\e. e.receipt.purpose == "preparation" || e.receipt.purpose == "infrastructure", leaves)), costUsable)
+  let groups = costGroups(leaves, usable, overlap)
+  match (fresh, generated, accounted, recorded, costs, overhead, groups) {
+    (Ok(f), Ok(g), Ok(a), Ok(r), Ok(c), Ok(o), Ok(cg)) => Ok({ leafCount: size(leaves), summaryCount: size(summaries), duplicateCount: duplicates, failedLeaves: size(filter(\e. e.receipt.failed, leaves)), overlapUnknown: overlap, coverageComplete: unchecked == 0, summariesUnchecked: unchecked, fresh: f, generated: g, accounted: a, recorded: r, costMicros: c, overheadMicros: o, costBasis: basis, costGroups: cg }),
+    _ => Err("usage aggregate overflow")
+  }
+}
+
+export pure func aggregate(rows: [UsageReceipt]) -> Result[UsageTotals, string]
+ensures { match result {
+  Ok(t) => t.leafCount + t.summaryCount + t.duplicateCount == size(rows) && t.failedLeaves <= t.leafCount,
+  Err(_) => true
+} } {
+  match entries(rows) {
+    Err(e) => Err(e),
+    Ok(_) => match dedup(rows) {
+      Err(e) => Err(e),
+      Ok(d) => match entries(d.rows) {
+        Err(e) => Err(e),
+        Ok(es) => match parentChecks(es) {
+          Err(e) => Err(e),
+          Ok(_) => totals(es, d.duplicates)
+        }
+      }
+    }
+  }
+}

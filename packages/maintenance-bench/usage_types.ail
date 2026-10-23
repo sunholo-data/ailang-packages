@@ -1,0 +1,19 @@
+module sunholo/maintenance_bench/usage_types
+import std/option (Option)
+
+-- A source-qualified neutral receipt, not a provider-log decoder. Null means unreported.
+export type UsageIdentity = { source: string, version: string, digest: string, attemptId: string, requestId: Option[string], provider: Option[string], model: Option[string], harness: string, settingsDigest: string }
+
+export type TokenCounters = { contract: string, input: Option[int], cacheRead: Option[int], cacheWrite: Option[int], cacheReported: bool, output: Option[int], reasoning: Option[int], reasoningReported: bool, outputScheme: string }
+
+export type CostEvidence = { amount: Option[string], currency: Option[string], basis: string, priceVersion: Option[string] }
+
+export type UsageReceipt = { id: string, identity: UsageIdentity, tokens: TokenCounters, cost: CostEvidence, role: string, parentId: Option[string], childrenComplete: bool, purpose: string, failed: bool }
+
+export type NormalizedUsage = { fresh: Option[int], cacheRead: Option[int], cacheWrite: Option[int], visible: Option[int], reasoning: Option[int], generated: Option[int], accounted: Option[int], freshGenerated: Option[int], recorded: Option[int], costMicros: Option[int], costUnavailable: Option[string] }
+
+export type Quantity = { known: int, missing: int, subtotal: int, total: Option[int] }
+
+export type CostGroup = { basis: string, currency: string, quantity: Quantity }
+
+export type UsageTotals = { leafCount: int, summaryCount: int, duplicateCount: int, failedLeaves: int, overlapUnknown: bool, coverageComplete: bool, summariesUnchecked: int, fresh: Quantity, generated: Quantity, accounted: Quantity, recorded: Quantity, costMicros: Quantity, overheadMicros: Quantity, costBasis: string, costGroups: [CostGroup] }
