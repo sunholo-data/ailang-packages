@@ -65,7 +65,7 @@ def build(ailang_evidence, python_evidence):
         grader = source / "grade_candidate.py"
         trusted = [grader, HERE.parent / "candidate_grade.py"] + [source / name for name in
                                (["oracle.py", "public_check.py", "protocol.json"]
-                                if family == "resource-ownership" else ["qualify.py", "taskpack.json"])]
+                                if family == "resource-ownership" else ["qualify.py", "taskpack.json", "stages/contract.md"])]
         trusted += sorted((source / "fixtures").glob("*.json"))
         oracle_files = [relative_ref(p) for p in trusted]
         for repeat in (1, 2):
