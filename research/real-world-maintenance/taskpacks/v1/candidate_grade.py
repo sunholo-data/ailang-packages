@@ -86,7 +86,8 @@ def run_command(args, cwd, prefix, timeout):
     """Prefix convention: trusted-wrapper [policy args] -- executable argv..."""
     env = {k: v for k, v in os.environ.items() if k not in ('PYTHONPATH', 'PYTHONSTARTUP')}
     env['PYTHONDONTWRITEBYTECODE'] = '1'
-    argv = prefix + ['--'] + args if prefix else args
+    resolved_prefix = [part.replace('{runtimeRoot}', str(Path(cwd).parent)) for part in prefix]
+    argv = resolved_prefix + ['--'] + args if prefix else args
     process = subprocess.Popen(argv, cwd=cwd, env=env, stdout=subprocess.PIPE,
                                stderr=subprocess.PIPE, text=True, start_new_session=os.name == 'posix')
     try:
