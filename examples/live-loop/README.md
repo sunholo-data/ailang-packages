@@ -61,7 +61,10 @@ Open `/soak-check.html` through the same local or approved private HTTPS origin.
 User-run Firefox trials reached three exact-frame handoffs before the original
 visibility rule cancelled the soak, and exposed a main-thread/render-clock mismatch
 in a later short run. Runner version 2 fixes that clock path and records visibility
-instead of cancelling merely because a tab is hidden. A complete run is still open.
+instead of cancelling merely because a tab is hidden. The user then completed
+its 8-handoff profile successfully in Firefox at 44.1 kHz, with zero frame errors
+and clamping. The first acknowledgement confirmed a 67-frame main-clock lag.
+The 100-handoff/30-minute soak and background-browser coverage are still open.
 
 - Stop & reset Loop Lab first. The runner refuses to take over a running planner
   session. Background tabs are allowed; keep the machine awake.

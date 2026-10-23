@@ -4,6 +4,8 @@ This is software evidence, **not full L0 acceptance**. The user ran the real
 browser synthetic harness and reported Loop Lab working through the approved
 private HTTPS preview. The [supplied Firefox report](browser-firefox158-user-run.json)
 is preserved as user-run evidence; the agent did not independently rerun it.
+A subsequent [runner v2 short profile](browser-firefox158-runner-v2-short.json)
+passed all eight full-path handoffs in Firefox; the scope is recorded below.
 Physical microphone/speaker loopback, the full lifecycle matrix, 100 actual host
 handoffs and a 30-minute soak remain open. No physical audio timing has been measured.
 
@@ -179,4 +181,29 @@ if a later request fails. Background visibility is recorded (32 bounded events,
 all intervals counted) without aborting synthetic audio. Page closure, manual Stop,
 context suspension, deadline/activation failures and incomplete duration still fail
 or interrupt the run. The actual microphone capture UI still cancels on hide/focus
-loss. A fresh browser run is required to validate these fixes and complete L0.
+loss. The subsequent user-run short profile below validates the activation fix;
+background-browser coverage and a complete soak remain open.
+
+## Successful user-run runner v2 short profile
+
+The [supplied Firefox 158 report](browser-firefox158-runner-v2-short.json) started at
+2026-10-23T13:34:20.546Z and passed/completed the 8-handoff profile at 44.1 kHz.
+Each of the four tracks activated twice; all eight applied frames exactly equal
+their planned frames. There were zero clamped frames over 56.0514 audio seconds.
+Private input peak was 1 while program output before commit was 0, becoming nonzero
+after commit. This is user-run evidence, not an independent agent browser run.
+
+The first activation directly confirms the diagnosed clock mismatch: main frame
+46081 trails the correct planned/applied frame 46148 by 67 frames (about 1.52 ms).
+Runner v2 used the confirmed frame 46148 as its known clock floor and the planner
+accepted it. All subsequent activations also passed without weakening frame equality.
+
+Worker preparation/hash median was 5 ms and p95 6 ms (8 observations); worker round
+trip median 6.5 ms and p95 32 ms (8 observations). Bridge median was 34.3515 ms,
+p95 53.508 ms and maximum 76.915 ms (26 observations, including setup/cleanup).
+These are small-sample observations, not latency guarantees or physical measurements.
+The stored summary values were recomputed from the supplied raw arrays and agree.
+
+Visibility remained foreground for this entire run (`hiddenMs=0`, no changes), so
+this does not validate background-tab operation. The 100-handoff/30-minute soak,
+background behavior, microphone/device lifecycle and physical loopback remain open.

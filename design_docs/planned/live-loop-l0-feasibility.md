@@ -67,7 +67,11 @@ worker/hash and AudioWorklets with 8-handoff or 100-handoff/30-minute profiles. 
 has user-run Firefox evidence for three exact-frame handoffs before a visibility
 cancellation, plus a short-run activation rejection. Runner v2 fixes a reproduced
 main-thread/render-clock mismatch and records visibility instead of cancelling on
-hide; a complete rerun remains open. A cancelled/short profile cannot pass the soak. The
+hide. A subsequent user-run v2 short profile passed 8/8 handoffs across all four
+tracks, zero frame error and zero clamping. Its first activation recorded a 67-frame
+main-clock lag and used the confirmed render frame successfully. The run stayed
+foreground; background operation and the full soak remain open. A short profile
+cannot pass the soak. The
 UI follows the user-supplied Sunholo guide with original local AILANG/Montserrat
 assets. The preview serves those assets successfully; visual review is still open.
 
