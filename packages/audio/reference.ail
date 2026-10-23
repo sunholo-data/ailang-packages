@@ -1,0 +1,25 @@
+module sunholo/audio/reference
+-- Reference recipes and signals, exported so consumers can pin the package: the reference loop and one-shot recipes (the same values as the
+-- stapledons-godot game's own pin, so a maths change shows in both places), and plain sines.
+import std/list (map, range)
+import std/math (sin)
+import ./recipe (Recipe, Layer, Env)
+import ./dsp (twoPi)
+
+export pure func noEnv() -> Env = {delay: 0.0, attack: 0.0, tau: 0.0, stop: 0.0}
+export pure func sine(f: float, a: float) -> Layer = {kind: "sine", freq: f, freqTo: f, glide0: 0.0, glide1: 0.0, amp: a, lowpass: 0.0, highpass: 0.0, seed: 1, env: noEnv(), vibRate: 0.0, vibCents: 0.0, amRate: 0.0, amDepth: 0.0, lowpassTo: 0.0}
+export pure func hiss(lp: float) -> Layer = {kind: "noise", freq: 0.0, freqTo: 0.0, glide0: 0.0, glide1: 0.0, amp: 0.3, lowpass: lp, highpass: 0.0, seed: 7, env: noEnv(), vibRate: 0.0, vibCents: 0.0, amRate: 0.0, amDepth: 0.0, lowpassTo: 0.0}
+
+-- A 0.25 s loop: 440 Hz (110 cycles), 220 Hz (55 cycles), filtered legacy noise, a 4 Hz swell (1 cycle).
+export pure func loopRecipe() -> Recipe = {id: "t_loop", seconds: 0.25, loop: true, peakDb: -6.0, fadeMs: 0.0, swellRate: 4.0, swellDepth: 0.2, drive: 0.0, rate: 48000,
+  layers: [sine(440.0, 0.5), sine(220.0, 0.3), hiss(800.0)]}
+
+-- A 0.1 s one-shot gliding 300 -> 900 Hz with an attack and decay, to -3 dBFS.
+export pure func shotRecipe() -> Recipe = {id: "t_shot", seconds: 0.1, loop: false, peakDb: -3.0, fadeMs: 10.0, swellRate: 0.0, swellDepth: 0.0, drive: 0.0, rate: 48000,
+  layers: [{kind: "sine", freq: 300.0, freqTo: 900.0, glide0: 0.0, glide1: 0.08, amp: 0.6, lowpass: 0.0, highpass: 0.0, seed: 1, env: {delay: 0.0, attack: 0.005, tau: 0.04, stop: 0.0}, vibRate: 0.0, vibCents: 0.0, amRate: 0.0, amDepth: 0.0, lowpassTo: 0.0}]}
+
+-- n samples of a sine of amplitude a at f Hz, 48 kHz, from phase 0.
+export pure func sineWave(f: float, a: float, n: int) -> [float] = map(\i. a * sin(twoPi() * f * intToFloat(i) / 48000.0), range(0, n))
+
+-- The reference loop's PCM sha256 (pin 1; the game's synth_test prints the same).
+export pure func loopPcmSha() -> string = "28ee281fd0d0f02f67aa83295b89490a94895a654084a095ccf9772b59797467"

@@ -1,0 +1,52 @@
+-- Checks for sunholo/audio/pcm on hand-built bytes: the int16 little-endian encoding, a WAV made by
+-- std/audio, a WAV with a LIST chunk before fmt and data, refusals, and the round trip bound
+-- 1/32767 + 1/32768. Pin 2: the reference loop's WAV sha256 (the 44-byte header + pin 1's PCM).
+module sunholo/audio/pcm_test
+import std/list (map, range, zipWith, foldl, length as size)
+import std/bytes (fromInts, toInts, concat)
+import std/result (Result, Ok, Err)
+import std/crypto (sha256Bytes)
+import std/audio (wavHeader)
+import ./pcm (pcm16, wav16, wavInfo, pcm16Floats, WavInfo)
+import ./recipe (render)
+import ./reference (loopRecipe, sineWave)
+import ./dsp (absF)
+
+test "pcm16: 0, full scale and minus full scale" { toInts(pcm16([0.0, 1.0, -1.0, 2.0])) == [0, 0, 255, 127, 1, 128, 255, 127] }
+
+test "wavInfo reads std/audio's header: 48 kHz mono 16-bit, data at 44" {
+  match wavInfo(wav16([0.0, 0.5, -0.5], 48000)) { Ok(i) => i.rate == 48000 && i.channels == 1 && i.bits == 16 && i.frames == 3 && i.dataOffset == 44, Err(_) => false }
+}
+
+pure func le32(n: int) -> [int] = [n % 256, n / 256 % 256, n / 65536 % 256, n / 16777216 % 256]
+pure func withList() -> bytes {
+  let pcm = toInts(pcm16([0.25, -0.25]));
+  let fmt = [102, 109, 116, 32] ++ le32(16) ++ [1, 0, 1, 0] ++ le32(24000) ++ le32(48000) ++ [2, 0, 16, 0];
+  let lst = [76, 73, 83, 84] ++ le32(5) ++ [1, 2, 3, 4, 5, 0];
+  let body = [87, 65, 86, 69] ++ lst ++ fmt ++ [100, 97, 116, 97] ++ le32(4) ++ pcm;
+  fromInts([82, 73, 70, 70] ++ le32(size(body)) ++ body)
+}
+test "wavInfo skips a LIST chunk (odd size, padded) and finds fmt and data" {
+  match wavInfo(withList()) { Ok(i) => i.rate == 24000 && i.frames == 2 && pcm16Floats(withList(), i) == [8192.0 / 32768.0, -8192.0 / 32768.0], Err(_) => false }
+}
+
+test "wavInfo refuses non-RIFF bytes and float PCM (tag 3)" {
+  let notRiff = match wavInfo(fromInts(map(\i. 0, range(0, 64)))) { Err(_) => true, Ok(_) => false };
+  let w = toInts(wav16([0.0], 48000));
+  let tag3 = fromInts(zipWith(\k v. if k == 20 then 3 else v, range(0, size(w)), w));
+  notRiff && (match wavInfo(tag3) { Err(_) => true, Ok(_) => false })
+}
+
+test "pcm16 then pcm16Floats is within 1/32767 + 1/32768" {
+  let xs = sineWave(997.0, 0.9, 480);
+  let b = wav16(xs, 48000);
+  match wavInfo(b) {
+    Ok(i) => foldl(\ok p. ok && p, true, zipWith(\x y. absF(x - y) <= 1.0 / 32767.0 + 1.0 / 32768.0, xs, pcm16Floats(b, i))),
+    Err(_) => false
+  }
+}
+
+test "the reference loop's WAV is its header plus pin 1's PCM" {
+  let pcm = pcm16(render(loopRecipe()));
+  sha256Bytes(wav16(render(loopRecipe()), 48000)) == sha256Bytes(concat(wavHeader(24000, 48000, 1, 16), pcm))
+}

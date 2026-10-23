@@ -1,0 +1,86 @@
+-- Checks for sunholo/audio/recipe. Expected values are closed forms (a peak of -3 dBFS is
+-- 10^(-3/20) = 0.70794578), counts, rules, or the reference loop's PCM sha256 pinned from the
+-- stapledons-godot sounds approved by ear (render stability).
+module sunholo/audio/recipe_test
+import std/list (map, range, length as size, nth, take, drop, foldl)
+import std/option (Option, Some, None)
+import std/result (Result, Ok, Err)
+import std/crypto (sha256Bytes)
+import ./recipe (Recipe, Layer, render, frames, loopErrors, parseRecipes, parseRecipesAs, envAt, phaseAt)
+import ./pcm (pcm16)
+import ./dsp (absF, clamp16, twoPi)
+import ./reference (sine, hiss, noEnv, loopRecipe, shotRecipe, loopPcmSha)
+import std/math (round, floatToInt)
+
+pure func q(x: float) -> int = clamp16(floatToInt(round(x * 32767.0)))
+pure func at(xs: [int], i: int) -> int = match nth(xs, i) { Some(v) => v, None => 0 }
+pure func maxAbs(xs: [float]) -> float = foldl(\m x. if absF(x) > m then absF(x) else m, 0.0, xs)
+pure func roughness(xs: [float]) -> float =
+  match foldl(\acc x. { let d = absF(x - acc.prev); {prev: x, sum: acc.sum + d, n: acc.n + 1} }, {prev: 0.0, sum: 0.0, n: 0}, xs) { r => r.sum / intToFloat(r.n) }
+pure func badLoop() -> Recipe = {id: "bad", seconds: 0.25, loop: true, peakDb: -6.0, fadeMs: 0.0, swellRate: 0.0, swellDepth: 0.0, drive: 0.0, rate: 48000, layers: [sine(441.1, 0.5)]}
+pure func one(body: string) -> string = "{\"schema\":\"sunholo.audio.recipes/1\",\"recipes\":[${body}]}"
+
+test "reference loop PCM sha256 is pinned (render stability)" { sha256Bytes(pcm16(render(loopRecipe()))) == loopPcmSha() }
+
+test "frames: 0.25 s at 48 kHz is 12,000; at 24 kHz 6,000" { frames(loopRecipe()) == 12000 && size(render(loopRecipe())) == 12000 && frames({loopRecipe() | rate: 24000}) == 6000 }
+
+pure func checkSeam() -> bool {
+  let lp = map(q, render(loopRecipe()));
+  let n = size(lp);
+  let maxStep = foldl(\m i. { let d = at(lp, i + 1) - at(lp, i); let a = if d < 0 then 0 - d else d; if a > m then a else m }, 0, range(0, n - 1));
+  let s = { let d = at(lp, 0) - at(lp, n - 1); if d < 0 then 0 - d else d };
+  s <= maxStep + 1
+}
+test "a loop's seam step is no larger than its largest inner step + 1 LSB" { checkSeam() }
+
+test "a one-shot is normalised to -3 dBFS (0.70794578)" { absF(maxAbs(render(shotRecipe())) - 0.70794578) < 0.00001 }
+
+test "a one-shot starts and ends at silence" {
+  let s = render(shotRecipe());
+  absF(foldl(\a x. x, 0.0, s)) < 0.001 && absF(match nth(s, 0) { Some(v) => v, None => 1.0 }) < 0.001
+}
+
+test "a loop sine with a fractional cycle count is rejected" { size(loopErrors(badLoop())) == 1 }
+test "a loop vibrato with a fractional cycle count is rejected" { size(loopErrors({badLoop() | layers: [{sine(440.0, 0.5) | vibRate: 0.3, vibCents: 5.0}]})) == 1 }
+test "a whole-cycle loop beat is accepted" { size(loopErrors({badLoop() | layers: [{sine(440.0, 0.5) | amRate: 4.0, amDepth: 0.5}]})) == 0 }
+test "a loop cannot glide, have an envelope or sweep its filter" {
+  size(loopErrors({badLoop() | layers: [{sine(440.0, 0.5) | freqTo: 880.0}]})) == 1
+  && size(loopErrors({badLoop() | layers: [{sine(440.0, 0.5) | env: {noEnv() | tau: 0.1}}]})) == 1
+  && size(loopErrors({badLoop() | layers: [{hiss(200.0) | lowpassTo: 800.0}]})) == 1
+}
+test "a one-shot has no loop rules" { size(loopErrors({badLoop() | loop: false})) == 0 }
+
+test "envelope: silent before delay, linear attack, e^-1 one tau after it, silent from stop" {
+  let e = {delay: 0.1, attack: 0.01, tau: 0.2, stop: 1.0};
+  envAt(e, 0.05) == 0.0 && absF(envAt(e, 0.105) - 0.5) < 0.000001 && absF(envAt(e, 0.31) - 0.36787944117) < 0.000001 && envAt(e, 1.0) == 0.0
+}
+
+test "an exponential glide reaches freqTo: phase slope after glide1 is 2 pi freqTo" {
+  let l = {sine(300.0, 1.0) | freqTo: 900.0, glide0: 0.0, glide1: 0.08};
+  absF((phaseAt(l, 0.09) - phaseAt(l, 0.0899)) / 0.0001 - twoPi() * 900.0) < 0.01
+}
+
+test "drive keeps the peak" { absF(maxAbs(render({shotRecipe() | drive: 2.0})) - 0.70794578) < 0.00001 }
+
+test "a filter sweep from 200 Hz to 8 kHz brightens white noise" {
+  let sw = render({id: "sw", seconds: 0.5, loop: false, peakDb: -3.0, fadeMs: 10.0, swellRate: 0.0, swellDepth: 0.0, drive: 0.0, rate: 48000,
+    layers: [{hiss(200.0) | kind: "white", lowpassTo: 8000.0}]});
+  roughness(take(4000, drop(18000, sw))) > 2.0 * roughness(take(4000, drop(2000, sw)))
+}
+
+test "parse: defaults, rate and both schema ids" {
+  let body = one("{\"id\":\"x\",\"seconds\":0.5,\"rate\":24000,\"layers\":[{\"kind\":\"white\",\"amp\":0.5}]}");
+  match parseRecipes(body) {
+    Ok([r]) => r.rate == 24000 && r.peakDb == -6.0 && r.fadeMs == 20.0 && r.loop == false && frames(r) == 12000
+      && (match parseRecipesAs("game.recipes/1", body) { Err(_) => true, Ok(_) => false }),
+    _ => false
+  }
+}
+
+test "parse refuses an empty file, a bad loop, an unknown kind, no layers and no id" {
+  let bad = \s. match parseRecipes(s) { Err(_) => true, Ok(_) => false };
+  bad(one("")) && bad(one("{\"id\":\"x\",\"seconds\":1,\"loop\":true,\"layers\":[{\"kind\":\"sine\",\"freq\":1.5,\"amp\":0.5}]}"))
+  && bad(one("{\"id\":\"x\",\"seconds\":1,\"layers\":[{\"kind\":\"square\",\"freq\":100,\"amp\":0.5}]}"))
+  && bad(one("{\"id\":\"x\",\"seconds\":1,\"layers\":[]}")) && bad(one("{\"seconds\":1,\"layers\":[{\"kind\":\"white\"}]}"))
+  && bad("not json")
+}

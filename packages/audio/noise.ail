@@ -1,0 +1,27 @@
+module sunholo/audio/noise
+-- Two deterministic noise generators over (sample index, seed), both in [-1, 1). Integer maths
+-- only until the last step, every product below 2^62, so they are identical on every machine and
+-- on the strict VM and the interpreter.
+
+-- The legacy generator: three affine LCG rounds. It is NOT white: affine rounds over a sequential
+-- index stay affine in the index, so it is a fast ramp mod 2^31 with a buzzy, tonal edge. It is
+-- kept, under an honest name, because sounds approved by ear were made with it (recipe kind
+-- "noise"); use `white` for new sounds.
+export pure func rampNoise(i: int, seed: int) -> float {
+  let m = 2147483648;
+  let x0 = (i * 1103515245 + seed * 12347 + 12345) % m;
+  let x1 = (x0 * 1103515245 + 12345) % m;
+  let x2 = (x1 * 1103515245 + 12345) % m;
+  intToFloat(x2) / 1073741824.0 - 1.0
+}
+
+-- White noise: an affine start, then rounds of squaring mod 2^31 (nonlinear, so neighbouring
+-- samples decorrelate: lag-1 autocorrelation below 0.03). Recipe kind "white".
+export pure func white(i: int, seed: int) -> float {
+  let m = 2147483648;
+  let x0 = (i * 1103515245 + seed * 12347 + 12345) % m;
+  let x1 = (x0 * x0 + 2654435) % m;
+  let x2 = (x1 * x1 + i * 40503 + 97) % m;
+  let x3 = (x2 * x2 + 7) % m;
+  intToFloat(x3) / 1073741824.0 - 1.0
+}

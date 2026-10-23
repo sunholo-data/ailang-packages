@@ -1,0 +1,26 @@
+[package]
+name = "sunholo/audio"
+version = "0.1.0"
+edition = "1"
+ailang = ">=0.54.14"
+description = "Deterministic, pure sound synthesis and measurement: envelopes, gliding sines with vibrato and beats, one-pole and swept filters, soft saturation, two seeded noise generators (white, and a legacy ramp kept for byte-stable sounds), JSON recipes rendered to floats, 16-bit PCM and WAV in and out, mixing, and offline loudness measures (peak, gated RMS, high-pass keep, low-band level, loop seams) that match a GDScript reference to 0.01 dB"
+license = "Apache-2.0"
+
+[exports]
+modules = ["sunholo/audio/dsp", "sunholo/audio/noise", "sunholo/audio/recipe", "sunholo/audio/pcm", "sunholo/audio/mix", "sunholo/audio/analysis", "sunholo/audio/reference"]
+
+[effects]
+max = ["IO"]  # every export is pure; IO is used only by _smoke.ail to print its verdict
+
+[metadata]
+tags = ["audio", "synthesis", "dsp", "wav", "pcm", "loudness", "games", "procedural"]
+ai_summary = "Pure, deterministic audio in float64, the same bits on the strict bytecode VM and the interpreter. recipe: a sound as JSON (schema sunholo.audio.recipes/1, or a host's own id via parseRecipesAs) - layers of sines (exponential glide, vibrato in cents, amplitude beat) and noise (white, or the legacy rampNoise), each with a delay/attack/exponential-decay/stop envelope and one-pole low/high-pass filters (the low-pass may sweep exponentially), summed under a swell, soft-saturated (drive k), faded at one-shot edges and normalised to a peak in dBFS, at a per-recipe sample rate (default 48 kHz); loopErrors refuses loops that would click (non-whole cycles, glides, envelopes, sweeps). pcm: pcm16 (x*32767, rounded, clamped), wav16 via std/audio, wavInfo (RIFF chunk walk, integer PCM only) and pcm16Floats (s16/32768). mix: tile (loops repeat, one-shots at start samples, a later start cuts the earlier) and sum. analysis: peak and RMS gated at |x| > 0.001 after a dB gain (Godot's db_to_linear), the RMS kept by a one-pole high-pass and left under N cascaded one-pole low-passes, in dB, levels in centi-dB rounded as Godot's snappedf, and a loop seam check. dsp: dB conversions, clamp16, onePole, filters, softSat, normalisePeak. reference: recipes and signals to pin against. Render stability: an existing recipe's samples never change in a 0.x release unless its release kind is breaking. No dependency on any other package; WAV headers and Opus come from std/audio."
+repository = "https://github.com/sunholo-data/ailang-packages/tree/main/packages/audio"
+homepage = "https://ailang.sunholo.com/docs/packages/sunholo/audio"
+license_url = "https://github.com/sunholo-data/ailang-packages/blob/main/LICENSE"
+
+[stability]
+level = "experimental"
+
+[release]
+kind = "feature"   # security | fix | feature | breaking — what THIS version changes

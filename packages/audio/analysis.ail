@@ -1,0 +1,81 @@
+module sunholo/audio/analysis
+-- Offline loudness measures over decoded samples (floats in [-1, 1]), written to give the same
+-- numbers as a Godot-side GDScript loop over the same samples, operation for operation:
+-- peak and RMS gated at |x| > 0.001 after a gain, the RMS a one-pole high-pass keeps, the RMS
+-- under a cascade of one-pole low-passes, and a loop's seam step. Levels come back in centi-dB
+-- (hundredths, rounded as snappedf) so reports print exact integers.
+import std/list (map, foldl, range, length as size, nth)
+import std/math (sqrt, exp, round, floor, floatToInt)
+import std/option (Option, Some, None)
+import ./dsp (absF, gainToDb, centiDb, onePole, clamp16)
+
+pure func maxF(a: float, b: float) -> float = if a > b then a else b
+
+-- A gain in dB as Godot's db_to_linear computes it: exp(db * ln(10) / 20).
+export func levelGain(db: float) -> float ! {}
+requires { db > -1000.0 && db < 1000.0 }
+{
+  exp(db * 0.11512925464970228)
+}
+
+-- The largest |x|.
+export func peak(xs: [float]) -> float ! {}
+ensures { result >= 0.0 }
+{
+  foldl(\m v. maxF(m, absF(v)), 0.0, xs)
+}
+
+-- RMS over the samples with |x| > threshold (all samples when threshold < 0); 0 when none qualify.
+export func rmsGated(xs: [float], threshold: float) -> float ! {}
+ensures { result >= 0.0 }
+{
+  let r = foldl(\acc v. { let a = absF(v); if a > threshold then {sq: acc.sq + a * a, m: acc.m + 1} else acc }, {sq: 0.0, m: 0}, xs);
+  sqrt(r.sq / maxF(1.0, intToFloat(r.m)))
+}
+
+export type Level = {peakCdb: int, rmsCdb: int, seconds: float}
+
+-- Peak and gated RMS (|x| > 0.001 after the gain) of xs times gainDb, in centi-dBFS, and the
+-- length in seconds rounded to 1 ms.
+export pure func level(xs: [float], gainDb: float, rate: int) -> Level {
+  let g = levelGain(gainDb);
+  let r = foldl(\acc v. { let a = absF(v * g); if a > 0.001 then {pk: maxF(acc.pk, a), sq: acc.sq + a * a, m: acc.m + 1} else {acc | pk: maxF(acc.pk, a)} }, {pk: 0.0, sq: 0.0, m: 0}, xs);
+  {peakCdb: centiDb(gainToDb(r.pk)), rmsCdb: centiDb(gainToDb(sqrt(r.sq / maxF(1.0, intToFloat(r.m))))),
+   seconds: floor(intToFloat(size(xs)) / intToFloat(rate) / 0.001 + 0.5) * 0.001}
+}
+
+-- The RMS a one-pole high-pass at cut Hz keeps, in dB of the whole signal's RMS.
+export pure func highpassKeepDb(xs: [float], cut: float, rate: int) -> float {
+  let a = onePole(cut, intToFloat(rate));
+  let r = foldl(\acc v. { let lp = acc.lp + a * (v - acc.lp); {lp: lp, all: acc.all + v * v, hi: acc.hi + (v - lp) * (v - lp)} }, {lp: 0.0, all: 0.0, hi: 0.0}, xs);
+  gainToDb(sqrt(r.hi / maxF(r.all, 0.000000000001)))
+}
+
+pure func cascade(a: float, ys: [float], u: float) -> [float] = match ys {
+  [] => [],
+  y :: more => { let y2 = y + a * (u - y); y2 :: cascade(a, more, y2) }
+}
+
+pure func lastOr(xs: [float], d: float) -> float = match xs { [] => d, [x] => x, _ :: more => lastOr(more, d) }
+
+-- The RMS left under `poles` cascaded one-pole low-passes at cut Hz, in dB of the whole signal's RMS.
+export pure func lowbandDb(xs: [float], cut: float, poles: int, rate: int) -> float {
+  let a = onePole(cut, intToFloat(rate));
+  let r = foldl(\acc v. { let ys = cascade(a, acc.ys, v); let u = lastOr(ys, v); {ys: ys, all: acc.all + v * v, lo: acc.lo + u * u} },
+    {ys: map(\k. 0.0, range(0, poles)), all: 0.0, lo: 0.0}, xs);
+  gainToDb(sqrt(r.lo / maxF(r.all, 0.000000000001)))
+}
+
+export type Seam = {seam: int, maxStep: int}
+
+pure func q(x: float) -> int = clamp16(floatToInt(round(x * 32767.0)))
+
+-- A loop's join as 16-bit steps: the step from the last sample back to the first, and the largest
+-- step inside the loop. A clean loop has seam <= maxStep + 1.
+export pure func seam(xs: [float]) -> Seam {
+  let first = match nth(xs, 0) { Some(v) => q(v), None => 0 };
+  let r = foldl(\acc x. { let v = q(x); let d = if acc.started then { let s = v - acc.prev; if s < 0 then 0 - s else s } else 0;
+      {prev: v, started: true, mx: if d > acc.mx then d else acc.mx} }, {prev: 0, started: false, mx: 0}, xs);
+  let s = first - r.prev;
+  {seam: if s < 0 then 0 - s else s, maxStep: r.mx}
+}
