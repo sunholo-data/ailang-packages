@@ -1,0 +1,105 @@
+module analysis
+import pkg/sunholo/maintenance_bench/types (Episode)
+import pkg/sunholo/maintenance_bench/codec (decodeSnapshot)
+import pkg/sunholo/maintenance_bench/metrics (rate, totalKnown, median)
+import pkg/sunholo/maintenance_bench/compare (deltaPP)
+import pkg/sunholo/maintenance_bench/report_json (optionalNumber, integerResult)
+import pkg/sunholo/maintenance_bench/snapshot_io (writeNew)
+import std/fs (readFileResult)
+import std/env (getArgs)
+import std/io (println, eprintln, exit)
+import std/result (Result, Ok, Err, flatMap)
+import std/option (Some, None)
+import std/list (filter, map, sortBy, take, any, contains, length as size, flatMap as flatten)
+import std/string (compare)
+import std/crypto (sha256Hex)
+import std/json (Json, JObject, JArray, JString, JBool, JNull, kv, jint, encode)
+
+-- A touch endpoint, never a substitute for confirmed introduced-defect incidence.
+export pure func inWindow(start: int, later: int) -> bool
+ensures { not result || later > start }
+  tests [
+    ((0, 0), false),
+    ((10, 9), false),
+    ((0, 1), true),
+    ((0, 2592000000), true),
+    ((0, 2592000001), false)
+  ] {
+  later > start && later - start <= 2592000000
+}
+
+export pure func overlaps(a: [string], b: [string]) -> bool
+  tests [
+    (([], ["a"]), false),
+    ((["a"], ["b"]), false),
+    ((["a"], ["a"]), true),
+    ((["a", "b"], ["b", "c"]), true)
+  ] {
+  any(\p. contains(b, p), a)
+}
+
+func selected(rows: [Episode], repo: string) -> [Episode] {
+  let eligible = filter(\r. r.repo == repo && r.canonical && r.acceptedMs >= 1767225600000 && r.acceptedMs < 1790121600000, rows)
+  take(12, sortBy(\a b. compare(sha256Hex("mature-2026-10-23-v1|${a.id}"), sha256Hex("mature-2026-10-23-v1|${b.id}")), eligible))
+}
+
+func later(index: Episode, allRows: [Episode]) -> [Episode] =
+  filter(\r. r.repo == index.repo && r.canonical && inWindow(index.acceptedMs, r.acceptedMs) && overlaps(index.files, r.files ++ map(\c. c.oldPath, filter(\c. c.status == "R", r.changes))), allRows)
+
+func touched(index: [Episode], rows: [Episode]) -> int = size(filter(\r. size(later(r, rows)) > 0, index))
+
+func candidateJson(r: Episode) -> Json =
+  JObject([kv("id", JString(r.id)), kv("purpose", JString(r.purpose)), kv("evidenceLevel", JString(r.evidenceLevel)), kv("files", JArray(map(\p. JString(p), r.files)))])
+
+func rowJson(r: Episode, rows: [Episode]) -> Json {
+  let xs = later(r, rows)
+  JObject([kv("indexId", JString(r.id)), kv("indexAcceptedMs", jint(r.acceptedMs)), kv("indexPurpose", JString(r.purpose)), kv("files", JArray(map(\p. JString(p), r.files))), kv("laterTouchCount", jint(size(xs))), kv("laterTouches", JArray(map(\x. candidateJson(x), xs)))])
+}
+
+func groupJson(repo: string, rows: [Episode]) -> Json {
+  let index = selected(rows, repo)
+  let durations = flatten(\r. match r.durationMs {
+    Some(n) => [n],
+    None => []
+  }, index)
+  JObject([kv("repo", JString(repo)), kv("selectedMatureChanges", jint(size(index))), kv("changesWithAnyLaterPrTouch", jint(touched(index, rows))), kv("observedLaterPrTouchFraction", optionalNumber(rate(touched(index, rows), size(index)))), kv("knownTokenRows", jint(size(filter(\r. match r.tokens {
+    Some(_) => true,
+    None => false
+  }, index)))), kv("recordedTokens", integerResult(totalKnown(map(\r. r.tokens, index)))), kv("knownDurationRows", jint(size(durations))), kv("medianRecordedDurationMs", optionalNumber(median(durations))), kv("index", JArray(map(\r. rowJson(r, rows), index)))])
+}
+
+func comparison(rows: [Episode], other: string) -> Json {
+  let a = selected(rows, "sunholo-data/ailang-parse")
+  let b = selected(rows, other)
+  JObject([kv("left", JString("sunholo-data/ailang-parse")), kv("right", JString(other)), kv("endpoint", JString("any later accepted PR touching an observed source path within 30 days")), kv("deltaPP", optionalNumber(deltaPP(touched(a, rows), size(a), touched(b, rows), size(b)))), kv("causalLanguageEffect", JBool(false)), kv("defectRateDelta", JNull), kv("tokenCostDelta", JNull), kv("limitation", JString("AILANG sample is three resource/performance changes; project, task mix and direct-push ascertainment differ; no matched execution or complete bug ascertainment"))])
+}
+
+func analyse(allText: string, indexText: string) -> Result[string, string] = flatMap(\allData. flatMap(\indexData. {
+  let repos = ["sunholo-data/ailang-parse", "sunholo-data/docparse", "qax-os/excelize", "tafia/calamine", "python-openxml/python-docx"]
+  let expectedIds = flatten(\repo. map(\r. r.id, selected(allData.episodes, repo)), repos)
+  let actualIds = map(\r. r.id, indexData.episodes)
+  if expectedIds != actualIds then Err("published index IDs differ from native hash selection or ordering") else if allData.cutoffMs != 1792713600000 || indexData.cutoffMs != 1792713600000 then Err("fixed protocol cutoff mismatch") else Ok(encode(JObject([kv("schema", JString("maintenance.mature-touch-study/1")), kv("package", JString("sunholo/maintenance_bench@0.1.0")), kv("allInputSha256", JString(sha256Hex(allText))), kv("indexInputSha256", JString(sha256Hex(indexText))), kv("windowDays", jint(30)), kv("sampling", JString("first 12 eligible by SHA256(mature-2026-10-23-v1|repo#number); census if smaller; recomputed in AILANG")), kv("endpoint", JString("observed later merged-PR source touch; not a bug or causal introducing-change measure")), kv("groups", JArray(map(\repo. groupJson(repo, allData.episodes), repos))), kv("descriptiveProxyComparisons", JArray([comparison(allData.episodes, "qax-os/excelize"), comparison(allData.episodes, "tafia/calamine")])), kv("primaryBugRate", JObject([kv("status", JString("unavailable")), kv("reason", JString("direct-push coverage and causal-link ascertainment are incomplete; one individually reproduced AILANG introduction does not establish a population bug rate"))]))])))
+}, decodeSnapshot(indexText)), decodeSnapshot(allText))
+
+export func main() -> () ! {IO, FS, Env} = match getArgs() {
+  [allPath, indexPath, output] => {
+    let result = flatMap(\a. flatMap(\i. analyse(a, i), readFileResult(indexPath)), readFileResult(allPath))
+    match result {
+      Err(e) => {
+        eprintln(e)
+        exit(1)
+      },
+      Ok(text) => match writeNew(output, "${text}\n") {
+        Err(e) => {
+          eprintln(e)
+          exit(1)
+        },
+        Ok(_) => println("wrote ${output}")
+      }
+    }
+  },
+  _ => {
+    eprintln("analysis ALL_SNAPSHOT INDEX_SNAPSHOT NEW_JSON")
+    exit(2)
+  }
+}
