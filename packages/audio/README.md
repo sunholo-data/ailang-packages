@@ -12,6 +12,8 @@ ailang pkg-docs sunholo/audio   # AGENT.md: the recipe schema, conventions, pitf
 - `clip`: validated planar mono/stereo arrays, explicit channel selection/conversion and interleaving.
 - `edit`: gain, trim, padding, reverse, append, fades, crossfades, mixAt and equal-power mono panning.
 - `clip_pcm`: channel-preserving PCM16/WAV adapters with explicit Reject/Saturate clipping policy.
+- `levels` (0.3.0 candidate): whole-signal/active-window RMS, block accumulation,
+  and explicit Off/PeakSafe/MatchRms preparation with bounded boost and peak ceilings.
 - `recipe`: layers (sine with glide, vibrato, beat; white or legacy noise), envelopes, filters
   and sweeps, swell, drive, edge fades, peak normalisation; loop rules that refuse clicks.
 - `pcm`: `pcm16`, `wav16`, strict `wavInfo`, `pcm16Floats`; checked encoding and bounded decoding.
@@ -32,3 +34,7 @@ and export with `clip_pcm.toWav16` using an explicit clipping policy. Every chec
 See [AGENT.md](AGENT.md) for domains, resource limits, error variants and compatibility behavior.
 
 0.2.0 groups the clip/editing features with the 0.1.1 hardening work.
+0.3.0 adds the offline level-preparation foundation; it is not yet published.
+It exposes gain decisions for a host-owned private preview/undo/commit flow;
+it does not add that UI or microphone gain control itself. See the
+[validation evidence](../../design_docs/implemented/audio-levels-0.3.0/README.md).

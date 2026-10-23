@@ -1,0 +1,6 @@
+module study/resource_ownership/_smoke
+import ./engine (withinCap)
+import std/io (println, exit)
+
+export func main() -> () ! {IO} =
+  if withinCap(3, 3) && not withinCap(4, 3) then println("cap smoke passed") else exit(1)

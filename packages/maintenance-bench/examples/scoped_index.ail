@@ -1,0 +1,14 @@
+module sunholo/maintenance_bench/examples/scoped_index
+import pkg/sunholo/maintenance_bench/scoped_metrics (scopedSummary)
+import pkg/sunholo/maintenance_bench/index_reference (indexText)
+import pkg/sunholo/maintenance_bench/reference (data)
+import std/result (Ok, Err)
+import std/io (println, exit)
+
+export func main() -> () ! {IO} = match scopedSummary(data(), indexText()) {
+  Ok(s) => println("selected=${show(s.indexSelected)}; workload=${show(s.totalWorkload)}"),
+  Err(e) => {
+    println(e)
+    exit(1)
+  }
+}

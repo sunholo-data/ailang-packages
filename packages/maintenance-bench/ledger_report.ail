@@ -1,0 +1,77 @@
+module sunholo/maintenance_bench/ledger_report
+import ./report (Analysis)
+import ./codec (decodeSnapshot, textOption, countOption)
+import ./index_types (ScopedSummary)
+import ./types (Snapshot)
+import ./scoped_metrics (scopedSummary)
+import ./run_types (RunSummary)
+import ./run_codec (decodeRunBundle)
+import ./run_metrics (summarizeRuns)
+import ./run_compare (RunComparison, ArmEconomics, compareRuns)
+import ./usage_types (UsageTotals, Quantity)
+import ./usage_codec (decodeReceipts)
+import ./evidence_card (EvidenceCard, decodeCards)
+import std/json (Json, JObject, JArray, JString, JBool, JNumber, JNull, kv, jint, encode)
+import std/result (Result, Ok, Err, flatMap)
+import std/option (Option, Some, None)
+import std/list (map, length)
+import std/string (join, replace)
+import std/crypto (sha256Hex)
+
+func count(n: int) -> Json = jint(n)
+
+func floating(n: Option[float]) -> Json = match n {
+  Some(x) => JNumber(x),
+  None => JNull
+}
+
+func quantity(q: Quantity) -> Json =
+  JObject([kv("known", jint(q.known)), kv("missing", jint(q.missing)), kv("subtotal", jint(q.subtotal)), kv("total", countOption(q.total))])
+
+func usage(u: UsageTotals) -> Json =
+  JObject([kv("leafCount", jint(u.leafCount)), kv("summaryCount", jint(u.summaryCount)), kv("duplicateCount", jint(u.duplicateCount)), kv("failedLeaves", jint(u.failedLeaves)), kv("overlapUnknown", JBool(u.overlapUnknown)), kv("coverageComplete", JBool(u.coverageComplete)), kv("summariesUnchecked", jint(u.summariesUnchecked)), kv("fresh", quantity(u.fresh)), kv("freshGenerated", quantity(u.freshGenerated)), kv("generated", quantity(u.generated)), kv("accounted", quantity(u.accounted)), kv("recorded", quantity(u.recorded)), kv("costMicros", quantity(u.costMicros)), kv("overheadMicros", quantity(u.overheadMicros)), kv("costBasis", JString(u.costBasis)), kv("costGroups", JArray(map(\g. JObject([kv("basis", JString(g.basis)), kv("currency", JString(g.currency)), kv("quantity", quantity(g.quantity))]), u.costGroups)))])
+
+func arm(a: ArmEconomics) -> Json =
+  JObject([kv("language", JString(a.language)), kv("trajectories", jint(a.trajectories)), kv("successes", jint(a.successes)), kv("unknown", jint(a.unknown)), kv("missingAttemptUsage", jint(a.missingAttemptUsage)), kv("unknownReceiptIdentity", jint(a.unknownReceiptIdentity)), kv("costStatus", JString(a.costStatus)), kv("costPerSuccessMicros", floating(a.costPerSuccessMicros)), kv("freshStatus", JString(a.freshStatus)), kv("usage", usage(a.usage))])
+
+func comparison(c: RunComparison) -> Json =
+  JObject([kv("matched", jint(c.matched)), kv("knownPairs", jint(c.knownPairs)), kv("bothPass", jint(c.bothPass)), kv("leftOnly", jint(c.leftOnly)), kv("rightOnly", jint(c.rightOnly)), kv("neither", jint(c.neither)), kv("unknownPairs", jint(c.unknownPairs)), kv("missingAttemptUsage", jint(c.missingAttemptUsage)), kv("unknownReceiptIdentity", jint(c.unknownReceiptIdentity)), kv("costStatus", JString(c.costStatus)), kv("costPerSuccessNumerator", countOption(c.costPerSuccessNumerator)), kv("costPerSuccessDenominator", countOption(c.costPerSuccessDenominator)), kv("deltaDirection", JString(c.deltaDirection)), kv("freshDeltaStatus", JString(c.freshDeltaStatus)), kv("costDeltaStatus", JString(c.costDeltaStatus)), kv("freshTokenDelta", countOption(c.freshTokenDelta)), kv("freshInputTokenDelta", countOption(c.freshInputTokenDelta)), kv("costPerSuccessDeltaMicros", floating(c.costPerSuccessDeltaMicros)), kv("left", arm(c.left)), kv("right", arm(c.right)), kv("unmatchedTrajectories", jint(c.unmatchedTrajectories)), kv("unmatchedUsage", usage(c.unmatchedUsage)), kv("overheadUsage", usage(c.overheadUsage)), kv("allUsage", usage(c.usage))])
+
+func indexJson(x: ScopedSummary, s: Snapshot) -> Json =
+  JObject([kv("sourceComplete", JBool(s.complete)), kv("sourceRef", JString(s.sourceRef)), kv("timeBasis", JString(s.timeBasis)), kv("followupTouchScope", JString("observed canonical artifact identities in acceptance window; copies and deletion/recreation start new identities")), kv("followupRepairScope", JString("canonical application corrections with supported detection time in the index-specific window")), kv("indexSelected", jint(x.indexSelected)), kv("indexEligible", jint(x.indexEligible)), kv("indexMature", jint(x.indexMature)), kv("indexCensored", jint(x.indexCensored)), kv("indexUnresolved", jint(x.indexUnresolved)), kv("indexExcluded", jint(x.indexExcluded)), kv("indexUnknownOutcomes", jint(x.indexUnknownOutcomes)), kv("followupTouches", jint(x.followupTouches)), kv("confirmedIntroductions", jint(x.confirmedIntroductions)), kv("supportedRepairs", jint(x.supportedRepairs)), kv("canonicalWorkload", jint(x.canonicalWorkload)), kv("totalWorkload", jint(x.totalWorkload)), kv("knownTokenRows", jint(x.knownTokenRows)), kv("missingTokenRows", jint(x.missingTokenRows)), kv("recordedTokenSubtotal", jint(x.recordedTokenSubtotal)), kv("indexFeatures", jint(x.indexFeatures)), kv("indexRepairs", jint(x.indexRepairs)), kv("indexMigrations", jint(x.indexMigrations)), kv("indexPerformance", jint(x.indexPerformance)), kv("indexMixed", jint(x.indexMixed)), kv("indexUnknownIntent", jint(x.indexUnknownIntent)), kv("indexOtherIntent", jint(x.indexOtherIntent)), kv("confirmedRepairTouches", jint(x.confirmedRepairTouches)), kv("featureFollowupTouches", jint(x.featureFollowupTouches)), kv("unknownFollowupTouches", jint(x.unknownFollowupTouches)), kv("defectAscertainment", JString("not_established: linked introductions are observed lower-bound counts, not clean-index prevalence")), kv("localEditCoverage", JString("not_observed_in_git_snapshots"))])
+
+func runJson(x: RunSummary) -> Json =
+  JObject([kv("scheduledTrajectories", jint(x.scheduledTrajectories)), kv("scheduledStages", jint(x.scheduledStages)), kv("startedStages", jint(x.startedStages)), kv("completedStages", jint(x.completedStages)), kv("failedStages", jint(x.failedStages)), kv("blockedStages", jint(x.blockedStages)), kv("invalidStages", jint(x.invalidStages)), kv("budgetStoppedStages", jint(x.budgetStoppedStages)), kv("notRunStages", jint(x.notRunStages)), kv("successfulTrajectories", jint(x.successfulTrajectories)), kv("knownFailedTrajectories", jint(x.knownFailedTrajectories)), kv("unknownTrajectories", jint(x.unknownTrajectories)), kv("visibleGreenRegressions", jint(x.visibleGreenRegressions)), kv("matchedPairs", jint(x.matchedPairs)), kv("unmatchedArms", jint(x.unmatchedArms)), kv("familyClusters", jint(x.familyClusters)), kv("knownLocalEdits", jint(x.knownLocalEdits)), kv("missingEditAttempts", jint(x.missingEditAttempts))])
+
+func cardJson(c: EvidenceCard) -> Json =
+  JObject([kv("id", JString(c.identity.id)), kv("state", JString(c.identity.state)), kv("role", JString(c.identity.role)), kv("obligation", JString(c.identity.obligation)), kv("beforeId", JString(c.identity.beforeId)), kv("afterId", JString(c.identity.afterId)), kv("oracleDigest", JString(c.identity.oracleDigest)), kv("reproducer", textOption(c.evidence.reproducer)), kv("beforeCompiled", JBool(c.evidence.beforeCompiled)), kv("afterCompiled", JBool(c.evidence.afterCompiled)), kv("beforeFails", JBool(c.evidence.beforeFails)), kv("afterPasses", JBool(c.evidence.afterPasses)), kv("mutationControls", jint(c.evidence.mutationControls)), kv("claim", JString(c.evidence.claim)), kv("usageStatus", JString(c.evidence.usageStatus)), kv("route", JString(c.context.route)), kv("reuseAudit", textOption(c.context.reuseAudit)), kv("alternative", JString(c.context.alternative)), kv("consumers", JArray(map(\s. JString(s), c.context.consumers))), kv("severityException", textOption(c.context.severityException)), kv("model", JString(c.context.model)), kv("harness", JString(c.context.harness)), kv("toolchain", JString(c.context.toolchain)), kv("configDigest", JString(c.context.configDigest)), kv("scope", JString(c.context.scope))])
+
+func resultReport(section: string, role: string, inputs: [string], compiler: string, data: Json) -> Result[Analysis, string] {
+  if compiler == "" then Err("declared compiler identity must be supplied and externally attested") else {
+    let hashes = map(\s. sha256Hex(s), inputs)
+    let id = sha256Hex(encode(JArray(map(\s. JString(s), ["maintenance_bench/0.2.0", "maintenance.metrics/2", section, role, compiler] ++ hashes))))
+    let j = encode(JObject([kv("schema", JString("maintenance.ledger-report/2")), kv("packageVersion", JString("0.2.0")), kv("metricVersion", JString("maintenance.metrics/2")), kv("section", JString(section)), kv("role", JString(role)), kv("reportId", JString(id)), kv("inputDigests", JArray(map(\s. JString(s), hashes))), kv("declaredCompilerId", JString(compiler)), kv("identityProvenance", JString("declared identity; actual runtime needs external attestation")), kv("claim", JString("descriptive development evidence; historical and controlled populations remain separate")), kv("inferential", JString("not_computed: small clustered families and incomplete ascertainment")), kv("data", data)]))
+    Ok({ json: j, markdown: join("\n", ["# Maintenance evidence", "", "Role: ${role}; section: ${section}; package 0.2.0.", "", "Descriptive evidence. Unknowns remain unavailable; file touches are not confirmed bugs. Exposed controls do not establish a general language advantage.", "", "```json", replace(j, "`", "\\u0060"), "```", ""]) })
+  }
+}
+
+export pure func analyseIndex(snapshotText: string, indexText: string, compiler: string) -> Result[Analysis, string]
+ensures { match result {
+  Ok(a) => a.json != "" && a.markdown != "",
+  Err(e) => e != ""
+} } =
+  flatMap(\s. flatMap(\summary. resultReport("historical_scopes", "observational", [snapshotText, indexText], compiler, indexJson(summary, s)), scopedSummary(s, indexText)), decodeSnapshot(snapshotText))
+
+export pure func analyseRuns(planText: string, runText: string, usageText: string, compiler: string) -> Result[Analysis, string]
+ensures { match result {
+  Ok(a) => a.json != "" && a.markdown != "",
+  Err(e) => e != ""
+} } =
+  flatMap(\b. flatMap(\receipts. flatMap(\summary. flatMap(\comp. resultReport("controlled_trajectories", b.plan.role, [planText, runText, usageText], compiler, JObject([kv("protocolId", JString(b.plan.protocolId)), kv("summary", runJson(summary)), kv("comparison", comparison(comp))])), compareRuns(b, receipts)), summarizeRuns(b)), decodeReceipts(usageText)), decodeRunBundle(planText, runText))
+
+export pure func analyseCards(cardText: string, compiler: string) -> Result[Analysis, string]
+ensures { match result {
+  Ok(a) => a.json != "" && a.markdown != "",
+  Err(e) => e != ""
+} } =
+  flatMap(\cards. resultReport("roadmap_cards", "drafts", [cardText], compiler, JArray(map(\c. cardJson(c), cards))), decodeCards(cardText))

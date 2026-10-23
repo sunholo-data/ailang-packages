@@ -1,0 +1,54 @@
+module sunholo/maintenance_bench/run_codec
+import ./run_types (StagePlan, TrajectoryPlan, RunPlan, Attempt, StageRun, TrajectoryRun, RunBundle)
+import ./run_validate (validateBundle)
+import ./codec (requiredText, requiredCount, requiredTexts, optionalText, optionalCount, enumText, collectResults)
+import ./strict_json (decodeCountDocument, hasExactKeys)
+import std/json (Json, get, JArray)
+import std/option (Option, Some, None)
+import std/result (Result, Ok, Err, flatMap)
+import std/list (map)
+
+func array(j: Json, key: string) -> Result[[Json], string] = match get(j, key) {
+  Some(JArray(xs)) => Ok(xs),
+  _ => Err("missing array: ${key}")
+}
+
+func stagePlan(j: Json) -> Result[StagePlan, string] =
+  if not hasExactKeys(j, ["id", "requirementDigest", "oracleDigest"]) then Err("unexpected or missing stagePlan fields") else flatMap(\id. flatMap(\requirement. flatMap(\oracle. Ok({ id: id, requirementDigest: requirement, oracleDigest: oracle }), requiredText(j, "oracleDigest")), requiredText(j, "requirementDigest")), requiredText(j, "id"))
+
+func trajectory(j: Json) -> Result[TrajectoryPlan, string] =
+  if not hasExactKeys(j, ["id", "family", "variant", "repeat", "language", "starterDigest", "nativeToolDigest", "stages"]) then Err("unexpected or missing trajectory fields") else flatMap(\id. flatMap(\family. flatMap(\variant. flatMap(\repeat. flatMap(\language. flatMap(\starter. flatMap(\tool. flatMap(\xs. flatMap(\stages. Ok({ id: id, family: family, variant: variant, repeat: repeat, language: language, starterDigest: starter, nativeToolDigest: tool, stages: stages }), collectResults(map(\x. stagePlan(x), xs))), array(j, "stages")), requiredText(j, "nativeToolDigest")), requiredText(j, "starterDigest")), requiredText(j, "language")), requiredCount(j, "repeat")), requiredText(j, "variant")), requiredText(j, "family")), requiredText(j, "id"))
+
+type PlanIdentity = { protocolId: string, role: string, model: string, harness: string, settingsDigest: string }
+
+func planIdentity(j: Json) -> Result[PlanIdentity, string] =
+  flatMap(\protocol. flatMap(\role. flatMap(\model. flatMap(\harness. flatMap(\settings. Ok({ protocolId: protocol, role: role, model: model, harness: harness, settingsDigest: settings }), requiredText(j, "settingsDigest")), requiredText(j, "harness")), requiredText(j, "model")), enumText(j, "role", ["instrument_control", "qualification", "model_run"])), requiredText(j, "protocolId"))
+
+func plan(j: Json) -> Result[RunPlan, string] =
+  if not hasExactKeys(j, ["schema", "protocolId", "role", "model", "harness", "settingsDigest", "retention", "treatment", "trajectories", "leftLanguage", "rightLanguage"]) then Err("unexpected or missing plan fields") else flatMap(\schema. flatMap(\ident. flatMap(\retention. flatMap(\treatment. flatMap(\xs. flatMap(\rows. flatMap(\left. flatMap(\right. Ok({ schema: schema, protocolId: ident.protocolId, role: ident.role, model: ident.model, harness: ident.harness, settingsDigest: ident.settingsDigest, retention: retention, treatment: treatment, leftLanguage: left, rightLanguage: right, trajectories: rows }), requiredText(j, "rightLanguage")), requiredText(j, "leftLanguage")), collectResults(map(\x. trajectory(x), xs))), array(j, "trajectories")), requiredText(j, "treatment")), enumText(j, "retention", ["fresh-session-owned-artifacts"])), planIdentity(j)), enumText(j, "schema", ["maintenance.trajectory/2"]))
+
+func attempt(j: Json) -> Result[Attempt, string] =
+  if not hasExactKeys(j, ["id", "receiptIds", "localEdits"]) then Err("unexpected or missing attempt fields") else flatMap(\id. flatMap(\receipts. flatMap(\edits. Ok({ id: id, receiptIds: receipts, localEdits: edits }), optionalCount(j, "localEdits")), requiredTexts(j, "receiptIds")), requiredText(j, "id"))
+
+type StageIdentity = { id: string, state: string, prior: Option[string], artifact: Option[string] }
+
+func stageIdentity(j: Json) -> Result[StageIdentity, string] =
+  flatMap(\id. flatMap(\state. flatMap(\prior. flatMap(\artifact. Ok({ id: id, state: state, prior: prior, artifact: artifact }), optionalText(j, "artifactDigest")), optionalText(j, "priorDigest")), enumText(j, "state", ["completed", "failed", "blocked", "invalid", "budget_stopped", "not_started"])), requiredText(j, "id"))
+
+type Checks = { visible: string, oracle: string, oracleDigest: Option[string], oracleArtifact: Option[string], provenance: string, checkKinds: [string] }
+
+func checks(j: Json) -> Result[Checks, string] =
+  flatMap(\visible. flatMap(\oracle. flatMap(\digest. flatMap(\artifact. flatMap(\provenance. flatMap(\kinds. Ok({ visible: visible, oracle: oracle, oracleDigest: digest, oracleArtifact: artifact, provenance: provenance, checkKinds: kinds }), requiredTexts(j, "checkKinds")), requiredText(j, "provenance")), optionalText(j, "oracleArtifact")), optionalText(j, "oracleDigest")), enumText(j, "oracle", ["pass", "fail", "not_run", "unknown"])), enumText(j, "visible", ["pass", "fail", "not_run", "unknown"]))
+
+func stage(j: Json) -> Result[StageRun, string] =
+  if not hasExactKeys(j, ["id", "state", "priorDigest", "artifactDigest", "visible", "oracle", "oracleDigest", "oracleArtifact", "provenance", "attempts", "checkKinds"]) then Err("unexpected or missing stage fields") else flatMap(\i. flatMap(\c. flatMap(\xs. flatMap(\attempts. Ok({ id: i.id, state: i.state, priorDigest: i.prior, artifactDigest: i.artifact, visible: c.visible, oracle: c.oracle, oracleDigest: c.oracleDigest, oracleArtifact: c.oracleArtifact, provenance: c.provenance, attempts: attempts, checkKinds: c.checkKinds }), collectResults(map(\x. attempt(x), xs))), array(j, "attempts")), checks(j)), stageIdentity(j))
+
+func run(j: Json) -> Result[TrajectoryRun, string] =
+  if not hasExactKeys(j, ["id", "model", "harness", "settingsDigest", "stages"]) then Err("unexpected or missing run fields") else flatMap(\id. flatMap(\model. flatMap(\harness. flatMap(\settings. flatMap(\xs. flatMap(\stages. Ok({ id: id, model: model, harness: harness, settingsDigest: settings, stages: stages }), collectResults(map(\x. stage(x), xs))), array(j, "stages")), requiredText(j, "settingsDigest")), requiredText(j, "harness")), requiredText(j, "model")), requiredText(j, "id"))
+
+export pure func decodeRunBundle(planText: string, runText: string) -> Result[RunBundle, string]
+ensures { match result {
+  Ok(b) => b.plan.schema == "maintenance.trajectory/2",
+  Err(e) => e != ""
+} } =
+  flatMap(\pj. flatMap(\p. flatMap(\rj. flatMap(\_. flatMap(\xs. flatMap(\runs. validateBundle({ plan: p, runs: runs }), collectResults(map(\x. run(x), xs))), array(rj, "trajectories")), if hasExactKeys(rj, ["schema", "trajectories"]) then enumText(rj, "schema", ["maintenance.runs/2"]) else Err("unexpected run ledger fields")), decodeCountDocument(runText)), plan(pj)), decodeCountDocument(planText))

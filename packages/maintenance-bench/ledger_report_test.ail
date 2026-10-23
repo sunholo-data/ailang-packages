@@ -1,0 +1,68 @@
+module sunholo/maintenance_bench/ledger_report_test
+import ./ledger_report (analyseIndex, analyseCards)
+import ./reference (data)
+import ./codec (encodeSnapshot)
+import ./index_reference (indexText)
+import std/result (Ok, Err)
+import std/string (contains)
+
+func deterministic() -> bool {
+  let s = encodeSnapshot(data())
+  match (analyseIndex(s, indexText(), "declared-runtime"), analyseIndex(s, indexText(), "declared-runtime")) {
+    (Ok(a), Ok(b)) => a.json == b.json && a.markdown == b.markdown,
+    _ => false
+  }
+}
+
+test "v2 reports replay identical inputs byte for byte" {
+  deterministic()
+}
+
+func identityChanged() -> bool {
+  let s = encodeSnapshot(data())
+  match (analyseIndex(s, indexText(), "declared-runtime"), analyseIndex(s, indexText(), "changed-runtime")) {
+    (Ok(a), Ok(b)) => a.json != b.json,
+    _ => false
+  }
+}
+
+test "declared compiler identity changes report identity" {
+  identityChanged()
+}
+
+func inputChanged() -> bool {
+  let s = encodeSnapshot(data())
+  match (analyseIndex(s, indexText(), "runtime"), analyseIndex(s, "${indexText()} ", "runtime")) {
+    (Ok(a), Ok(b)) => a.json != b.json,
+    _ => false
+  }
+}
+
+test "input byte identity is bound even with same semantic counts" {
+  inputChanged()
+}
+
+test "missing runtime identity is not silently invented" {
+  match analyseIndex(encodeSnapshot(data()), indexText(), "") {
+    Err(_) => true,
+    _ => false
+  }
+}
+
+test "malformed cards cannot become an empty success" {
+  match analyseCards("{}", "runtime") {
+    Err(_) => true,
+    _ => false
+  }
+}
+
+func honestVersion() -> bool {
+  match analyseIndex(encodeSnapshot(data()), indexText(), "runtime") {
+    Ok(a) => contains(a.json, "maintenance.metrics/2") && contains(a.json, "0.2.0"),
+    _ => false
+  }
+}
+
+test "new reports identify actual package and metric series" {
+  honestVersion()
+}

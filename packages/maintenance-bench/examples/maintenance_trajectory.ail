@@ -1,0 +1,14 @@
+module sunholo/maintenance_bench/examples/maintenance_trajectory
+import pkg/sunholo/maintenance_bench/ledger_report (analyseRuns)
+import std/fs (readFile)
+import std/result (Ok, Err)
+import std/io (println, exit)
+
+export func main() -> () ! {IO, FS} =
+  match analyseRuns(readFile("assets/fixtures/ledger/plan.json"), readFile("assets/fixtures/ledger/runs.json"), readFile("assets/fixtures/ledger/empty-usage.json"), "declared-example-runtime") {
+    Ok(a) => println(a.json),
+    Err(e) => {
+      println(e)
+      exit(1)
+    }
+  }

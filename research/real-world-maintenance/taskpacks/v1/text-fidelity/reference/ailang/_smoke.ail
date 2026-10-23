@@ -1,0 +1,7 @@
+module benchmark/text_fidelity/_smoke
+import ./text (trimAscii)
+import std/io (println, exit)
+
+export func main() -> () ! {IO} {
+  if trimAscii(" A  B ") == "A  B" then println("text fidelity smoke passed") else exit(1)
+}

@@ -18,6 +18,7 @@ import std/bytes (toInts, length as byteLength)
 import ./clip (fromMono, defaultClipLimits)
 import ./edit (gain, panMono)
 import ./clip_pcm (Reject, toPcm16, toWav16, fromWav16)
+import ./levels (MatchRms, PeakSafe, BelowActivityFloor, prepare as prepareLevelClip, measure as measureLevels, plan as planLevels)
 import std/list (map, range, foldl, take, zipWith)
 import std/result (Result, Ok, Err)
 import ./recipe (render, frames, renderChecked, validateRecipe)
@@ -64,9 +65,9 @@ export func main() -> () ! {IO @limit=1} {
   let lv = level(sineWave(1000.0, 1.0, 48000), 0.0, 48000);
   let rmsOk = lv.rmsCdb == -283 && lv.peakCdb == 0;
   let whiteOk = absF(lag1(map(\i. white(i, 3), range(0, 20000)))) < 0.03;
-  if pinOk && wavOk && rmsOk && whiteOk && checkedProbe(0) == "true true true true" && clipProbe(0) == "true true true"
-  then println("OK: audio reference loop PCM sha256 28ee281f...7467 (render stability), WAV round trip 480 frames, gated RMS of a full-scale 1 kHz sine -2.83 dB (sqrt(24/46)), white noise lag-1 |r| < 0.03; checked boundaries and stereo clips passed")
-  else println("FAIL: pin ${show(pinOk)} wav ${show(wavOk)} rms ${show(lv.rmsCdb)} peak ${show(lv.peakCdb)} white ${show(whiteOk)} checked ${checkedProbe(0)} clips ${clipProbe(0)}")
+  if pinOk && wavOk && rmsOk && whiteOk && checkedProbe(0) == "true true true true" && clipProbe(0) == "true true true" && prepareLevelsProbe(0) == "true true true true"
+  then println("OK: audio reference loop PCM sha256 28ee281f...7467 (render stability), WAV round trip 480 frames, gated RMS of a full-scale 1 kHz sine -2.83 dB (sqrt(24/46)), white noise lag-1 |r| < 0.03; checked boundaries, stereo clips and level preparation passed")
+  else println("FAIL: pin ${show(pinOk)} wav ${show(wavOk)} rms ${show(lv.rmsCdb)} peak ${show(lv.peakCdb)} white ${show(whiteOk)} checked ${checkedProbe(0)} clips ${clipProbe(0)} levels ${prepareLevelsProbe(0)}")
 }
 
 
@@ -111,4 +112,29 @@ export pure func clipProbe(n: int) -> string {
       }
     }
   }
+}
+
+-- Closed-form preparation decisions; execute with --verify-contracts on both engines.
+export pure func prepareLevelsProbe(n: int) -> string {
+  let l = defaultClipLimits(); let config = {windowFrames: 2, activityFloor: 0.001};
+  let policy = MatchRms({targetRms: 0.25, peakCeiling: 0.5, maxBoost: 4.0, minActiveFrames: 1});
+  let matched = match fromMono(8000, [0.125, -0.125], l) {
+    Err(_) => false, Ok(c) => match prepareLevelClip(c, config, policy, l) {
+      Ok(v) => v.plan.gain == 2.0 && map(toList, v.clip.planes) == [[0.25, -0.25]] && map(toList, c.planes) == [[0.125, -0.125]], _ => false
+    }
+  };
+  let gated = match fromMono(8000, [0.0001, -0.0001], l) {
+    Err(_) => false, Ok(c) => match planLevels(c, config, policy, l) { Ok(p) => p.gain == 1.0 && p.reason == BelowActivityFloor, _ => false }
+  };
+  let ceiling = match fromMono(8000, [2.0, -2.0], l) {
+    Err(_) => false, Ok(c) => match prepareLevelClip(c, config, PeakSafe(0.5), l) {
+      Ok(v) => match measureLevels(v.clip, config, l) { Ok(r) => r.peak <= 0.5 && r.peak > 0.499999999, _ => false }, _ => false
+    }
+  };
+  let measured = match fromMono(8000, [0.5, 0.5, 0.0, 0.0], l) {
+    Err(_) => false, Ok(c) => match measureLevels(c, config, l) {
+      Ok(r) => absF(r.rms - 0.3535533905932738) < 1.0e-12 && r.activeRms == 0.5 && r.activeFrames == 2, _ => false
+    }
+  };
+  "${show(matched)} ${show(gated)} ${show(ceiling)} ${show(measured)}"
 }

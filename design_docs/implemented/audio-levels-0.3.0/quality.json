@@ -1,0 +1,89 @@
+{
+  "schema": "ailang.package-quality/v1",
+  "package": "sunholo/audio",
+  "version": "0.3.0",
+  "stability": "experimental",
+  "mode": "publisher",
+  "compile": {
+    "source": "server",
+    "ok": true,
+    "files": 24
+  },
+  "contracts": {
+    "source": "server",
+    "evidence_schema": "ailang.verification-evidence/v1",
+    "numeric_model": {
+      "float_sort": "Real",
+      "int_sort": "Int",
+      "runtime_equivalence": "not_established"
+    },
+    "runtime_contracts": "not_measured",
+    "reason_counts": {
+      "missing_postcondition": 5,
+      "uncontracted": 33,
+      "unsupported_encoding": 40
+    },
+    "verified": 12,
+    "total": 57,
+    "counterexample": 0,
+    "skipped": 45,
+    "errors": 0,
+    "uncontracted_exports": 33,
+    "wall_seconds": 0.205567833
+  },
+  "tests": {
+    "source": "attested",
+    "files": 11,
+    "passed": 145,
+    "failed": 0
+  },
+  "smoke": {
+    "source": "attested",
+    "present": true,
+    "passed": true,
+    "seconds": 7.371264417
+  },
+  "interface": {
+    "source": "server",
+    "hash_v1": "sha256:97eef01706b62c8ed5dba47909b6ea1ce840ace5f81e547f86eae0e186d73982",
+    "hash_v2": "sha256:ifacev2:288857c0489e83ce9f235a0263ef69b7af4ed55fc9dce1224e85b146eb1aa031",
+    "signatures": 130
+  },
+  "effects": {
+    "source": "server",
+    "max": [
+      "IO"
+    ],
+    "ceiling_declared": true,
+    "rank_max": "IO"
+  },
+  "release": {
+    "source": "server",
+    "kind": "feature",
+    "changelog_section": true,
+    "notes": "Feature candidate: checked offline level preparation. Not yet published.\n\n- `levels`: whole-clip RMS and active-window RMS with sample peaks, frame/sample\n  counts and full-scale/over-range counts. Scaled energy supports finite headroom\n  without directly squaring the largest/tiniest samples. Windows span blocks;\n  cumulative frame/sample limits and public accumulator records are checked.\n- Explicit Off, PeakSafe and MatchRms policies return a bounded gain decision and\n  reason. Matching uses one linked gain across channels, an activity floor/minimum,\n  boost cap and peak ceiling. Silence/below-floor takes are never boosted.\n- Checked preparation recomputes its plan and checks output headroom. Original\n  immutable clips remain available for caller-owned preview/undo/explicit commit.\n  No microphone control, perceptual loudness, plugin hosting or UI is implied.\n- Preserve every existing recipe, legacy gated-RMS and PCM quantization behavior."
+  },
+  "docs": {
+    "agent_md": true,
+    "ai_summary": true,
+    "agent_doc_exports_covered": 6
+  },
+  "style": {
+    "exported_funcs": 89,
+    "pure_exports": 89,
+    "pure_ratio": 1
+  },
+  "gates": [],
+  "badges": [
+    {
+      "code": "PUB016",
+      "level": "info",
+      "msg": "45 contract(s) skipped by the verifier — not proved; `ailang verify --package .` lists the reason per function"
+    },
+    {
+      "code": "PUB011",
+      "level": "warn",
+      "msg": "33 exported function(s) carry no contract"
+    }
+  ]
+}

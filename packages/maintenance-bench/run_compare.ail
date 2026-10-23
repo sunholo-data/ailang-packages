@@ -1,0 +1,172 @@
+module sunholo/maintenance_bench/run_compare
+import ./run_types (RunBundle, TrajectoryPlan, TrajectoryRun)
+import ./run_validate (validateBundle)
+import ./run_metrics (summarizeRuns)
+import ./usage_types (UsageReceipt, UsageTotals)
+import ./usage_aggregate (aggregate)
+import std/result (Result, Ok, Err, flatMap)
+import std/option (Option, Some, None)
+import std/list (map, filter, length, contains, flatMap as flatten)
+import std/json (encode, JArray, JString)
+import std/math (intToFloat)
+import std/map as M
+
+export type ArmEconomics = { language: string, trajectories: int, usage: UsageTotals, successes: int, unknown: int, missingAttemptUsage: int, unknownReceiptIdentity: int, costStatus: string, freshStatus: string, costPerSuccessMicros: Option[float] }
+
+export type RunComparison = { matched: int, knownPairs: int, bothPass: int, leftOnly: int, rightOnly: int, neither: int, unknownPairs: int, leftSuccesses: int, rightSuccesses: int, missingAttemptUsage: int, unknownReceiptIdentity: int, costPerSuccessNumerator: Option[int], costPerSuccessDenominator: Option[int], costStatus: string, usage: UsageTotals, left: ArmEconomics, right: ArmEconomics, unmatchedTrajectories: int, unmatchedUsage: UsageTotals, overheadUsage: UsageTotals, deltaDirection: string, freshTokenDelta: Option[int], freshInputTokenDelta: Option[int], costPerSuccessDeltaMicros: Option[float], freshDeltaStatus: string, costDeltaStatus: string }
+
+type ReceiptRef = { receipt: string, attempt: string, trajectory: string }
+
+type AttemptRef = { id: string, trajectory: string, receiptIds: [string] }
+
+type Pair = { left: TrajectoryRun, right: TrajectoryRun }
+
+func key(p: TrajectoryPlan) -> string = encode(JArray(map(\x. JString(x), [p.family, p.variant, show(p.repeat)])))
+
+func contract(p: TrajectoryPlan) -> string =
+  encode(JArray(flatten(\s. map(\x. JString(x), [s.id, s.requirementDigest, s.oracleDigest]), p.stages)))
+
+func verdict(r: TrajectoryRun) -> string =
+  if length(filter(\s. s.state == "invalid", r.stages)) > 0 then "unknown" else if length(filter(\s. s.state != "completed" || s.oracle != "pass", r.stages)) == 0 then "pass" else if length(filter(\s. s.state != "invalid" && (s.oracle == "fail" || s.state == "failed"), r.stages)) > 0 then "fail" else "unknown"
+
+func attempts(runs: [TrajectoryRun]) -> [AttemptRef] =
+  flatten(\r. flatten(\s. map(\a. { id: a.id, trajectory: r.id, receiptIds: a.receiptIds }, s.attempts), r.stages), runs)
+
+func references(runs: [TrajectoryRun]) -> [ReceiptRef] =
+  flatten(\a. map(\id. { receipt: id, attempt: a.id, trajectory: a.trajectory }, a.receiptIds), attempts(runs))
+
+func overhead(r: UsageReceipt) -> bool = r.purpose == "preparation" || r.purpose == "infrastructure"
+
+func missing(runs: [TrajectoryRun], receipts: [UsageReceipt]) -> int =
+  length(filter(\a. length(filter(\r. r.role == "leaf" && contains(a.receiptIds, r.id), receipts)) == 0, attempts(runs)))
+
+func identityUnknown(rows: [UsageReceipt]) -> int =
+  length(filter(\r. r.role == "leaf" && (r.identity.model == None || r.identity.provider == None), rows))
+
+func forRuns(runs: [TrajectoryRun], receipts: [UsageReceipt]) -> [UsageReceipt] {
+  let refs = map(\ref. ref.receipt, references(runs))
+  let ids = map(\a. a.id, attempts(runs))
+  filter(\r. if r.role == "leaf" then contains(refs, r.id) else contains(ids, r.identity.attemptId), receipts)
+}
+
+func overheadRows(b: RunBundle, receipts: [UsageReceipt]) -> [UsageReceipt] {
+  let refs = map(\r. r.receipt, references(b.runs))
+  let leaves = filter(\r. r.role == "leaf" && not contains(refs, r.id) && overhead(r), receipts)
+  let parents = flatten(\r. match r.parentId {
+    Some(id) => [id],
+    None => []
+  }, leaves)
+  let ids = map(\a. a.id, attempts(b.runs))
+  filter(\r. if r.role == "leaf" then not contains(refs, r.id) && overhead(r) else contains(parents, r.id) || overhead(r) && not contains(ids, r.identity.attemptId), receipts)
+}
+
+func association(b: RunBundle, receipts: [UsageReceipt]) -> Result[(), string] {
+  let refs = references(b.runs)
+  let ids = M.fromList(map(\r. (r.id, r), receipts))
+  let attemptIds = map(\a. a.id, attempts(b.runs))
+  let badRefs = filter(\ref. match M.lookup(ids, ref.receipt) {
+    None => true,
+    Some(r) => r.identity.attemptId != ref.attempt
+  }, refs)
+  let badLeaves = filter(\r. r.role == "leaf" && (length(filter(\ref. ref.receipt == r.id, refs)) > 1 || not overhead(r) && length(filter(\ref. ref.receipt == r.id, refs)) != 1), receipts)
+  let badSummaries = filter(\r. r.role == "summary" && not overhead(r) && not contains(attemptIds, r.identity.attemptId), receipts)
+  let drift = filter(\r. (length(filter(\ref. ref.receipt == r.id, refs)) > 0 || r.role == "summary" && contains(attemptIds, r.identity.attemptId)) && (r.identity.harness != b.plan.harness || r.identity.settingsDigest != b.plan.settingsDigest || (match r.identity.model {
+    Some(m) => m != b.plan.model,
+    None => false
+  })), receipts)
+  if length(badRefs) > 0 || length(badLeaves) > 0 || length(badSummaries) > 0 || length(drift) > 0 then Err("usage/attempt/model association mismatch") else Ok()
+}
+
+func pairRuns(b: RunBundle) -> Result[[Pair], string] {
+  let rows = M.fromList(map(\r. (r.id, r), b.runs))
+  let left = filter(\p. p.language == b.plan.leftLanguage, b.plan.trajectories)
+  let right = M.fromList(map(\p. (key(p), p), filter(\p. p.language == b.plan.rightLanguage, b.plan.trajectories)))
+  let drift = filter(\p. match M.lookup(right, key(p)) {
+    Some(q) => contract(p) != contract(q),
+    None => false
+  }, left)
+  if length(drift) > 0 then Err("paired stage contract mismatch") else Ok(flatten(\p. match (M.lookup(right, key(p)), M.lookup(rows, p.id)) {
+    (Some(q), Some(l)) => match M.lookup(rows, q.id) {
+      Some(r) => [{ left: l, right: r }],
+      None => []
+    },
+    _ => []
+  }, left))
+}
+
+func outcomeStatus(n: int, successes: int, unknown: int, miss: int, identity: int) -> string =
+  if n == 0 then "no_matched_trajectories" else if successes == 0 then "no_verified_success" else if unknown > 0 then "unknown_outcomes" else if miss > 0 || identity > 0 then "incomplete_attempt_usage" else "available"
+
+func costStatus(common: string, usage: UsageTotals) -> string =
+  if common != "available" then common else if usage.costBasis != "metered" then "not_metered_usd" else if usage.costMicros.total == None then "unreported_or_unreconciled_cost" else "available"
+
+func economics(language: string, runs: [TrajectoryRun], receipts: [UsageReceipt]) -> Result[ArmEconomics, string] {
+  let rows = forRuns(runs, receipts)
+  let wins = length(filter(\r. verdict(r) == "pass", runs))
+  let unknown = length(filter(\r. verdict(r) == "unknown", runs))
+  let miss = missing(runs, receipts)
+  let identity = identityUnknown(rows)
+  let common = outcomeStatus(length(runs), wins, unknown, miss, identity)
+  flatMap(\usage. {
+    let status = costStatus(common, usage)
+    let ratio = if status != "available" then None else match usage.costMicros.total {
+      Some(n) => Some(intToFloat(n) / intToFloat(wins)),
+      None => None
+    }
+    Ok({ language: language, trajectories: length(runs), usage: usage, successes: wins, unknown: unknown, missingAttemptUsage: miss, unknownReceiptIdentity: identity, costStatus: status, freshStatus: if common != "available" then common else if usage.freshGenerated.total == None then "unreported_or_unreconciled_tokens" else "available", costPerSuccessMicros: ratio })
+  }, aggregate(rows))
+}
+
+func providers(rows: [UsageReceipt]) -> string {
+  let ps = flatten(\r. match r.identity.provider {
+    Some(p) => [(p, true)],
+    None => []
+  }, filter(\r. r.role == "leaf", rows))
+  encode(JArray(map(\s. JString(s), M.keys(M.fromList(ps)))))
+}
+
+func deltaStatus(left: string, right: string, global: UsageTotals, sameProviders: bool) -> string =
+  if left != "available" then "left:${left}" else if right != "available" then "right:${right}" else if global.overlapUnknown then "unresolved_global_overlap" else if not sameProviders then "provider_mismatch" else "available"
+
+func finish(b: RunBundle, receipts: [UsageReceipt], pairs: [Pair], usage: UsageTotals) -> Result[RunComparison, string] {
+  let leftRuns = map(\p. p.left, pairs)
+  let rightRuns = map(\p. p.right, pairs)
+  let matchedIds = map(\r. r.id, leftRuns ++ rightRuns)
+  let unmatched = filter(\r. not contains(matchedIds, r.id), b.runs)
+  let leftovers = forRuns(unmatched, receipts)
+  let prep = overheadRows(b, receipts)
+  flatMap(\l. flatMap(\r. flatMap(\unmatchedUsage. flatMap(\overheadUsage. flatMap(\summary. {
+    let known = filter(\p. verdict(p.left) != "unknown" && verdict(p.right) != "unknown", pairs)
+    let both = length(filter(\p. verdict(p.left) == "pass" && verdict(p.right) == "pass", known))
+    let onlyL = length(filter(\p. verdict(p.left) == "pass" && verdict(p.right) == "fail", known))
+    let onlyR = length(filter(\p. verdict(p.left) == "fail" && verdict(p.right) == "pass", known))
+    let miss = missing(b.runs, receipts)
+    let identity = identityUnknown(forRuns(b.runs, receipts))
+    let verified = length(filter(\run. verdict(run) == "pass", b.runs))
+    let unknown = length(filter(\run. verdict(run) == "unknown", b.runs))
+    let status = costStatus(outcomeStatus(length(b.runs), verified, unknown, miss, identity), usage)
+    let sameProviders = length(filter(\pair. providers(forRuns([pair.left], receipts)) != providers(forRuns([pair.right], receipts)), pairs)) == 0
+    let freshStatus = deltaStatus(l.freshStatus, r.freshStatus, usage, sameProviders)
+    let dollarsStatus = deltaStatus(l.costStatus, r.costStatus, usage, sameProviders)
+    let freshDelta = if freshStatus != "available" then None else match (l.usage.freshGenerated.total, r.usage.freshGenerated.total) {
+      (Some(a), Some(c)) => Some(a - c),
+      _ => None
+    }
+    let inputDelta = if not sameProviders || usage.overlapUnknown || l.missingAttemptUsage > 0 || r.missingAttemptUsage > 0 || l.unknownReceiptIdentity > 0 || r.unknownReceiptIdentity > 0 then None else match (l.usage.fresh.total, r.usage.fresh.total) {
+      (Some(a), Some(c)) => Some(a - c),
+      _ => None
+    }
+    let dollarDelta = if dollarsStatus != "available" then None else match (l.costPerSuccessMicros, r.costPerSuccessMicros) {
+      (Some(a), Some(c)) => Some(a - c),
+      _ => None
+    }
+    Ok({ matched: length(pairs), knownPairs: length(known), bothPass: both, leftOnly: onlyL, rightOnly: onlyR, neither: length(known) - both - onlyL - onlyR, unknownPairs: length(pairs) - length(known), leftSuccesses: l.successes, rightSuccesses: r.successes, missingAttemptUsage: miss, unknownReceiptIdentity: identity, costPerSuccessNumerator: if status == "available" then usage.costMicros.total else None, costPerSuccessDenominator: if status == "available" then Some(verified) else None, costStatus: status, usage: usage, left: l, right: r, unmatchedTrajectories: length(unmatched), unmatchedUsage: unmatchedUsage, overheadUsage: overheadUsage, deltaDirection: "left_minus_right", freshTokenDelta: freshDelta, freshInputTokenDelta: inputDelta, costPerSuccessDeltaMicros: dollarDelta, freshDeltaStatus: freshStatus, costDeltaStatus: dollarsStatus })
+  }, summarizeRuns(b)), aggregate(prep)), aggregate(leftovers)), economics(b.plan.rightLanguage, rightRuns, receipts)), economics(b.plan.leftLanguage, leftRuns, receipts))
+}
+
+export pure func compareRuns(b: RunBundle, receipts: [UsageReceipt]) -> Result[RunComparison, string]
+ensures { match result {
+  Ok(x) => x.matched == x.knownPairs + x.unknownPairs && x.knownPairs == x.bothPass + x.leftOnly + x.rightOnly + x.neither && x.left.trajectories == x.matched && x.right.trajectories == x.matched && x.deltaDirection == "left_minus_right" && (x.costPerSuccessDenominator == None || x.costStatus == "available"),
+  Err(e) => e != ""
+} } =
+  flatMap(\v. flatMap(\_. flatMap(\usage. flatMap(\pairs. finish(v, receipts, pairs, usage), pairRuns(v)), aggregate(receipts)), association(v, receipts)), validateBundle(b))

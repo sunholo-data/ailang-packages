@@ -1,0 +1,416 @@
+module sunholo/maintenance_bench/usage_test
+import ./usage_types (UsageReceipt)
+import ./usage_normalize (normalize, usdMicros)
+import ./usage_aggregate (aggregate)
+import std/option (Some, None)
+import std/result (Ok, Err)
+
+func sample() -> UsageReceipt =
+  { id: "r1", identity: { source: "fixture", version: "v1", digest: "fixture-digest", attemptId: "attempt1", requestId: Some("request1"), provider: Some("provider1"), model: Some("model1"), harness: "fixture-harness", settingsDigest: "fixed-settings" }, tokens: { contract: "inclusive/1", input: Some(150), cacheRead: Some(80), cacheWrite: Some(20), cacheReported: true, output: Some(7), reasoning: Some(3), reasoningReported: true, outputScheme: "separate" }, cost: { amount: Some("0.010001"), currency: Some("USD"), basis: "metered", priceVersion: Some("fixture-price") }, role: "leaf", parentId: None, childrenComplete: false, purpose: "maintenance", failed: false }
+
+func case1() -> bool {
+  match normalize(sample()) {
+    Ok(n) => n.fresh == Some(50) && n.generated == Some(10) && n.accounted == Some(160) && n.freshGenerated == Some(60) && n.visible == Some(7),
+    _ => false
+  }
+}
+
+test "inclusive counters reconcile independent arithmetic" {
+  case1()
+}
+
+func case2() -> bool {
+  let r = sample()
+  let x = { r | tokens: { r.tokens | contract: "exclusive/1", input: Some(50) } }
+  match (normalize(r), normalize(x)) {
+    (Ok(a), Ok(b)) => a.accounted == b.accounted && a.fresh == b.fresh,
+    _ => false
+  }
+}
+
+test "exclusive and inclusive counters agree" {
+  case2()
+}
+
+func case3() -> bool {
+  let r = sample()
+  match normalize({ r | tokens: { r.tokens | output: Some(10), outputScheme: "combined" } }) {
+    Ok(n) => n.visible == Some(7) && n.generated == Some(10) && n.accounted == Some(160),
+    _ => false
+  }
+}
+
+test "reasoning included in generated is not charged twice" {
+  case3()
+}
+
+func case4() -> bool {
+  let r = sample()
+  match normalize({ r | tokens: { r.tokens | reasoning: Some(0), reasoningReported: false } }) {
+    Ok(n) => n.reasoning == None && n.generated == None && n.visible == Some(7),
+    _ => false
+  }
+}
+
+test "unreported zero reasoning stays unknown" {
+  case4()
+}
+
+func case5() -> bool {
+  let r = sample()
+  match normalize({ r | tokens: { r.tokens | output: Some(10), outputScheme: "combined", reasoning: None, reasoningReported: false } }) {
+    Ok(n) => n.generated == Some(10) && n.visible == None && n.accounted == Some(160),
+    _ => false
+  }
+}
+
+test "known combined output survives unknown split" {
+  case5()
+}
+
+func case6() -> bool {
+  let r = sample()
+  match normalize({ r | tokens: { r.tokens | input: Some(99) } }) {
+    Err(_) => true,
+    _ => false
+  }
+}
+
+test "impossible cache split is rejected" {
+  case6()
+}
+
+func case7() -> bool {
+  let r = sample()
+  match normalize({ r | tokens: { r.tokens | cacheRead: None } }) {
+    Err(_) => true,
+    _ => false
+  }
+}
+
+test "cache reporting requires both buckets" {
+  case7()
+}
+
+func case8() -> bool {
+  let r = sample()
+  match normalize({ r | tokens: { r.tokens | output: Some(2), outputScheme: "combined" } }) {
+    Err(_) => true,
+    _ => false
+  }
+}
+
+test "reasoning cannot exceed combined generated" {
+  case8()
+}
+
+func case9() -> bool {
+  let r = sample()
+  match normalize({ r | tokens: { r.tokens | contract: "legacy-total/1", cacheRead: None, cacheWrite: None, cacheReported: false, reasoning: None, reasoningReported: false, outputScheme: "unknown" } }) {
+    Ok(n) => n.recorded == Some(157) && n.fresh == None && n.accounted == None,
+    _ => false
+  }
+}
+
+test "legacy totals never acquire a fresh split" {
+  case9()
+}
+
+func case10() -> bool {
+  usdMicros("0.010001") == Ok(10001) && usdMicros("1.234567000") == Ok(1234567)
+}
+
+test "USD money is exact without rounding" {
+  case10()
+}
+
+func case11() -> bool {
+  match usdMicros("0.0000001") {
+    Err(_) => true,
+    _ => false
+  }
+}
+
+test "unsupported precision is unavailable" {
+  case11()
+}
+
+func case12() -> bool {
+  match (usdMicros("-1"), usdMicros("1e2"), usdMicros("01.0")) {
+    (Err(_), Err(_), Err(_)) => true,
+    _ => false
+  }
+}
+
+test "negative exponent and leading-zero money are refused" {
+  case12()
+}
+
+func case13() -> bool {
+  usdMicros("9007199254.740991") == Ok(9007199254740991) && (match usdMicros("9007199254.740992") {
+    Err(_) => true,
+    _ => false
+  })
+}
+
+test "money exact bound and overflow" {
+  case13()
+}
+
+func case14() -> bool {
+  let r = sample()
+  match normalize({ r | cost: { r.cost | currency: Some("EUR") } }) {
+    Ok(n) => n.costMicros == None && n.costUnavailable == Some("unsupported_currency"),
+    _ => false
+  }
+}
+
+test "non USD is retained but not converted" {
+  case14()
+}
+
+func case15() -> bool {
+  match aggregate([sample(), sample()]) {
+    Ok(a) => a.leafCount == 1 && a.duplicateCount == 1 && a.costMicros.total == Some(10001),
+    _ => false
+  }
+}
+
+test "leaf replay is idempotent" {
+  case15()
+}
+
+func case16() -> bool {
+  let r = sample()
+  match aggregate([r, { r | id: "r2", tokens: { r.tokens | input: Some(151) } }]) {
+    Err(_) => true,
+    _ => false
+  }
+}
+
+test "conflicting request duplicate is refused" {
+  case16()
+}
+
+func case17() -> bool {
+  let r = sample()
+  let b = { r | id: "r2", failed: true, identity: { r.identity | requestId: Some("request2") } }
+  match aggregate([r, b]) {
+    Ok(a) => a.leafCount == 2 && a.failedLeaves == 1 && a.costMicros.total == Some(20002),
+    _ => false
+  }
+}
+
+test "failed attempts retain all their cost" {
+  case17()
+}
+
+func case18() -> bool {
+  let r = sample()
+  let parent = { r | id: "parent", role: "summary", childrenComplete: true, identity: { r.identity | requestId: None } }
+  match aggregate([{ r | parentId: Some("parent") }, parent]) {
+    Ok(a) => a.leafCount == 1 && a.summaryCount == 1 && a.costMicros.total == Some(10001),
+    _ => false
+  }
+}
+
+test "summary and children are not charged twice" {
+  case18()
+}
+
+func case19() -> bool {
+  let r = sample()
+  let parent = { r | id: "parent", role: "summary", childrenComplete: true, identity: { r.identity | requestId: None }, cost: { r.cost | amount: Some("9") } }
+  match aggregate([{ r | parentId: Some("parent") }, parent]) {
+    Err(_) => true,
+    _ => false
+  }
+}
+
+test "incorrect complete parent sum is refused" {
+  case19()
+}
+
+func case20() -> bool {
+  let r = sample()
+  let a = { r | identity: { r.identity | requestId: None } }
+  let b = { r | id: "r2", identity: { r.identity | source: "other", requestId: None } }
+  match aggregate([a, b]) {
+    Ok(n) => n.overlapUnknown && n.costMicros.total == None && n.accounted.total == None,
+    _ => false
+  }
+}
+
+test "unknown cross-source overlap prevents additive claim" {
+  case20()
+}
+
+func case21() -> bool {
+  let r = sample()
+  let b = { r | id: "r2", identity: { r.identity | requestId: Some("request2") }, cost: { r.cost | basis: "list_price" } }
+  match aggregate([r, b]) {
+    Ok(n) => n.costMicros.total == None && n.costBasis == "mixed",
+    _ => false
+  }
+}
+
+test "metered and list-price bases remain separate" {
+  case21()
+}
+
+func case22() -> bool {
+  let r = sample()
+  match aggregate([{ r | cost: { r.cost | amount: None, currency: None, basis: "unknown", priceVersion: None } }]) {
+    Ok(n) => n.costMicros.known == 0 && n.costMicros.missing == 1 && n.costMicros.total == None,
+    _ => false
+  }
+}
+
+test "unknown cost is not a zero total" {
+  case22()
+}
+
+func case23() -> bool {
+  let r = sample()
+  match aggregate([{ r | purpose: "preparation" }]) {
+    Ok(n) => n.overheadMicros.total == Some(10001) && n.costMicros.total == Some(10001),
+    _ => false
+  }
+}
+
+test "preparation overhead remains separately visible" {
+  case23()
+}
+
+func case24() -> bool {
+  match aggregate([]) {
+    Ok(n) => n.leafCount == 0 && n.costMicros.total == None && n.costMicros.known == 0,
+    _ => false
+  }
+}
+
+test "empty input has no known expenditure" {
+  case24()
+}
+
+func case25() -> bool {
+  let r = sample()
+  let alias = { r | id: "alias" }
+  let changed = { alias | identity: { alias.identity | requestId: Some("other-request") } }
+  match aggregate([r, alias, changed]) {
+    Err(_) => true,
+    _ => false
+  }
+}
+
+test "provider-request replay alias cannot hide conflicting import" {
+  case25()
+}
+
+func case26() -> bool {
+  let r = sample()
+  let bad = { r | identity: { r.identity | source: "" } }
+  match aggregate([r, bad]) {
+    Err(_) => true,
+    _ => false
+  }
+}
+
+test "invalid metadata cannot hide behind a duplicate" {
+  case26()
+}
+
+func case27() -> bool {
+  let r = sample()
+  let b = { r | id: "r2", identity: { r.identity | requestId: Some("request2") }, cost: { r.cost | basis: "list_price" } }
+  match aggregate([r, b]) {
+    Ok(n) => n.costMicros.subtotal == 0 && n.costMicros.known == 0,
+    _ => false
+  }
+}
+
+test "mixed money is not added even into a subtotal" {
+  case27()
+}
+
+func case28() -> bool {
+  let r = sample()
+  let a = { r | identity: { r.identity | requestId: None } }
+  let b = { r | id: "r2", identity: { r.identity | source: "other", requestId: None } }
+  match aggregate([a, b]) {
+    Ok(n) => n.costMicros.subtotal == 0 && n.accounted.subtotal == 0,
+    _ => false
+  }
+}
+
+test "unresolved overlap has no misleading known subtotal" {
+  case28()
+}
+
+func case29() -> bool {
+  let r = sample()
+  let parent = { r | id: "parent", role: "summary", childrenComplete: false, identity: { r.identity | requestId: None } }
+  match aggregate([{ r | parentId: Some("parent") }, parent]) {
+    Ok(a) => a.costMicros.subtotal == 10001 && a.costMicros.total == None && not a.coverageComplete,
+    _ => false
+  }
+}
+
+test "incomplete parent leaves remain charged but total is unavailable" {
+  case29()
+}
+
+func case30() -> bool {
+  let r = sample()
+  match normalize({ r | tokens: { r.tokens | cacheReported: false, cacheRead: Some(0), cacheWrite: Some(0) } }) {
+    Ok(n) => n.fresh == None && n.cacheRead == None && n.accounted == Some(160),
+    _ => false
+  }
+}
+
+test "incomplete native flags cannot attest cache zero" {
+  case30()
+}
+
+func replayLaw(n: int) -> bool {
+  if n < 0 || n > 100000 then true else {
+    let r = sample()
+    let x = { r | tokens: { r.tokens | input: Some(100 + n) } }
+    match (aggregate([x]), aggregate([x, x])) {
+      (Ok(a), Ok(b)) => a.leafCount == b.leafCount && a.accounted.total == b.accounted.total && a.costMicros.total == b.costMicros.total && b.duplicateCount == 1,
+      _ => false
+    }
+  }
+}
+
+property "receipt replay is idempotent across bounded counters" {
+  forall(n: int) => replayLaw(n)
+}
+
+func parentCounterControl() -> bool {
+  let r = sample()
+  let parent = { r | id: "parent", role: "summary", childrenComplete: true, identity: { r.identity | requestId: None }, tokens: { r.tokens | input: Some(151), output: Some(6) } }
+  match aggregate([{ r | parentId: Some("parent") }, parent]) {
+    Err(_) => true,
+    _ => false
+  }
+}
+
+test "parent counter mismatch cannot hide behind same grand total" {
+  parentCounterControl()
+}
+
+func orderLaw(n: int) -> bool {
+  if n < 0 || n > 100000 then true else {
+    let a = sample()
+    let b = { a | id: "second", failed: true, identity: { a.identity | requestId: Some("second") }, tokens: { a.tokens | input: Some(100 + n) } }
+    match (aggregate([a, b]), aggregate([b, a])) {
+      (Ok(x), Ok(y)) => x.leafCount == y.leafCount && x.accounted.total == y.accounted.total && x.costMicros.total == y.costMicros.total && x.failedLeaves == y.failedLeaves,
+      _ => false
+    }
+  }
+}
+
+property "receipt order preserves totals across bounded counters" {
+  forall(n: int) => orderLaw(n)
+}

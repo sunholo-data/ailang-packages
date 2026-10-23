@@ -1,0 +1,41 @@
+module audio_levels/reference_probe
+import std/array (fromList)
+import std/list (map, range)
+import std/result (Ok, Err)
+import std/json (encode, jo, kv, jnum)
+import pkg/sunholo/audio/clip (Mono, Stereo, create, defaultClipLimits)
+import pkg/sunholo/audio/levels (measure, prepare, MatchRms)
+
+export pure func probe(index: int) -> string {
+  let ch = if index % 2 == 0 then 1 else 2;
+  let n = if index < 10 then 37 + index * 3 else 1027;
+  let scale = if index == 10 then 1.0e308 else if index == 11 then 1.0e-300 else if index == 9 then 4.0 else 1.0;
+  let planes = map(\c. fromList(map(\i. if (i / 7 + index) % 3 == 0 then 0.0 else intToFloat((i * 17 + c * 11 + index * 3) % 29 - 14) / 16.0 * scale, range(0, n))), range(0, ch));
+  match create(44100, if ch == 1 then Mono else Stereo, planes, defaultClipLimits()) {
+    Err(e) => "ERR ${show(e)}",
+    Ok(clip) => match measure(clip, {windowFrames: 7, activityFloor: 0.2}, defaultClipLimits()) {
+      Err(e) => "ERR ${show(e)}",
+      Ok(r) => encode(jo([kv("frames", jnum(intToFloat(r.frames))), kv("samples", jnum(intToFloat(r.samples))),
+        kv("peak", jnum(r.peak)), kv("rms", jnum(r.rms)), kv("activeRms", jnum(r.activeRms)),
+        kv("activeFrames", jnum(intToFloat(r.activeFrames))), kv("fullScaleSamples", jnum(intToFloat(r.fullScaleSamples))),
+        kv("overRangeSamples", jnum(intToFloat(r.overRangeSamples)))]))
+    }
+  }
+}
+
+-- Whole operation timing includes fixture/clip allocation and output validation.
+export pure func benchmark(frames: int) -> string =
+  if frames < 0 || frames > 768000 then "ERR benchmark frame budget" else benchmarkWithinLimit(frames)
+
+pure func benchmarkWithinLimit(frames: int) -> string {
+  let xs = fromList(map(\i. if i % 2 == 0 then 0.125 else -0.125, range(0, frames)));
+  let limits = {maxFrames: 768000, maxSamples: 1536000};
+  match create(48000, Mono, [xs], limits) {
+    Err(e) => "ERR ${show(e)}",
+    Ok(c) => match prepare(c, {windowFrames: 1024, activityFloor: 0.001},
+      MatchRms({targetRms: 0.25, peakCeiling: 0.5, maxBoost: 4.0, minActiveFrames: 1024}), limits) {
+      Err(e) => "ERR ${show(e)}",
+      Ok(v) => encode(jo([kv("frames", jnum(intToFloat(v.clip.frames))), kv("gain", jnum(v.plan.gain))]))
+    }
+  }
+}

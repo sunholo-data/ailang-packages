@@ -1,0 +1,37 @@
+module benchmark/text_fidelity/text
+import std/json (Json, JString, JBool, JNull, JObject, get, kv)
+import std/result (Result, Ok, Err)
+import std/option (Some, None)
+
+-- Competent baseline preserves every logical character; no future stage policy.
+export pure func logicalIdentity(text: string) -> string
+ensures { result == text } {
+  text
+}
+
+export pure func render(j: Json) -> Result[Json, string]
+ensures { match result {
+  Ok(v) => match get(v, "ok") {
+    Some(JBool(_)) => true,
+    _ => false
+  },
+  Err(_) => true
+} } {
+  match (get(j, "cell"), get(j, "preserve"), get(j, "invalid"), get(j, "schema")) {
+    (Some(JString(cell)), Some(JBool(_)), Some(JBool(invalid)), Some(JString(schema))) => {
+      let value = if invalid || schema != "cell.text/1" then Err("invalid_cell") else match get(j, "text") {
+        Some(JString(text)) => Ok(logicalIdentity(text)),
+        _ => Err("invalid_cell")
+      }
+      let good = match value {
+        Ok(_) => true,
+        Err(_) => false
+      }
+      Ok(JObject([kv("cell", JString(cell)), kv("ok", JBool(good)), kv("text", match value {
+        Ok(text) => JString(text),
+        Err(_) => JNull
+      }), kv("error", if good then JNull else JString("invalid_cell"))]))
+    },
+    _ => Err("invalid request header")
+  }
+}

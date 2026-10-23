@@ -1,0 +1,119 @@
+module sunholo/maintenance_bench/usage_codec_test
+import ./usage_codec (decodeReceipts)
+import std/result (Ok, Err)
+import std/option (Some, None)
+import std/string (replace)
+import std/list (length)
+
+func document() -> string =
+  "{\"schema\":\"maintenance.usage/2\",\"receipts\":[{\"id\":\"r1\",\"identity\":{\"source\":\"fixture\",\"version\":\"v1\",\"digest\":\"fixture-digest\",\"attemptId\":\"attempt1\",\"requestId\":\"request1\",\"provider\":\"provider1\",\"model\":\"model1\",\"harness\":\"fixture-harness\",\"settingsDigest\":\"fixed-settings\"},\"tokens\":{\"contract\":\"inclusive/1\",\"input\":150,\"cacheRead\":80,\"cacheWrite\":20,\"cacheReported\":true,\"output\":7,\"reasoning\":3,\"reasoningReported\":true,\"outputScheme\":\"separate\"},\"cost\":{\"amount\":\"0.010001\",\"currency\":\"USD\",\"basis\":\"metered\",\"priceVersion\":\"fixture-price\"},\"role\":\"leaf\",\"parentId\":null,\"childrenComplete\":false,\"purpose\":\"maintenance\",\"failed\":false}]}"
+
+func refused(raw: string) -> bool = match decodeReceipts(raw) {
+  Err(_) => true,
+  _ => false
+}
+
+func case1() -> bool {
+  refused(replace(document(), "maintenance.usage/2", "maintenance.usage/999"))
+}
+
+test "unknown schema cannot load" {
+  case1()
+}
+
+func case2() -> bool {
+  refused(replace(document(), "\"input\":150", "\"input\":150,\"input\":0"))
+}
+
+test "duplicate object keys cannot change accounting" {
+  case2()
+}
+
+func case3() -> bool {
+  refused(replace(document(), "\"input\":150", "\"input\":150.00000000000001"))
+}
+
+test "fractional raw count cannot round into integer" {
+  case3()
+}
+
+func case4() -> bool {
+  refused(replace(document(), "\"input\":150", "\"input\":15e1"))
+}
+
+test "exponent counts are refused" {
+  case4()
+}
+
+func case5() -> bool {
+  refused(replace(document(), "\"reasoning\":3,", ""))
+}
+
+test "missing optional field cannot become unknown silently" {
+  case5()
+}
+
+func case6() -> bool {
+  refused(replace(document(), "\"input\":150", "\"input\":-1"))
+}
+
+test "negative count refused" {
+  case6()
+}
+
+func case7() -> bool {
+  refused(replace(document(), "inclusive/1", "unqualified/1"))
+}
+
+test "unknown counter contract refused" {
+  case7()
+}
+
+func case8() -> bool {
+  refused(replace(document(), "0.010001", "1e-3"))
+}
+
+test "invalid cost amount lexical form is refused" {
+  case8()
+}
+
+func case9() -> bool {
+  match decodeReceipts(document()) {
+    Ok([r]) => r.tokens.input == Some(150) && r.tokens.cacheReported && r.cost.amount == Some("0.010001") && r.identity.model == Some("model1"),
+    _ => false
+  }
+}
+
+test "strict usage receipt preserves original counters and knownness" {
+  case9()
+}
+
+func case10() -> bool {
+  match decodeReceipts(replace(document(), "0.010001", "0.0000001")) {
+    Ok([r]) => r.cost.amount == Some("0.0000001"),
+    _ => false
+  }
+}
+
+test "unsupported money precision remains explicit input" {
+  case10()
+}
+
+func case11() -> bool {
+  match decodeReceipts("{\"schema\":\"maintenance.usage/2\",\"receipts\":[]}") {
+    Ok(rows) => length(rows) == 0,
+    _ => false
+  }
+}
+
+test "empty valid receipt frame stays empty" {
+  case11()
+}
+
+func case12() -> bool {
+  refused("{\"schema\":\"maintenance.usage/2\",\"receipts\":[{\"id\":\"r1\",\"identity\":{\"source\":\"fixture\",\"version\":\"v1\",\"digest\":\"fixture-digest\",\"attemptId\":\"attempt1\",\"requestId\":\"request1\",\"provider\":\"provider1\",\"model\":\"model1\",\"harness\":\"fixture-harness\",\"settingsDigest\":\"fixed-settings\"},\"tokens\":{\"contract\":\"inclusive/1\",\"input\":150,\"cacheRead\":80,\"cacheWrite\":20,\"cacheReported\":true,\"output\":7,\"reasoning\":3,\"reasoningReported\":true,\"outputScheme\":\"separate\"},\"cost\":{\"amount\":\"0.010001\",\"currency\":\"USD\",\"basis\":\"metered\",\"priceVersion\":\"fixture-price\"},\"role\":\"leaf\",\"parentId\":null,\"childrenComplete\":false,\"purpose\":\"maintenance\",\"failed\":false},{\"id\":\"r1\",\"identity\":{\"source\":\"fixture\",\"version\":\"v1\",\"digest\":\"fixture-digest\",\"attemptId\":\"attempt1\",\"requestId\":\"request1\",\"provider\":\"provider1\",\"model\":\"model1\",\"harness\":\"fixture-harness\",\"settingsDigest\":\"fixed-settings\"},\"tokens\":{\"contract\":\"inclusive/1\",\"input\":150,\"cacheRead\":80,\"cacheWrite\":20,\"cacheReported\":true,\"output\":7,\"reasoning\":3,\"reasoningReported\":true,\"outputScheme\":\"separate\"},\"cost\":{\"amount\":\"0.010001\",\"currency\":\"USD\",\"basis\":\"metered\",\"priceVersion\":\"fixture-price\"},\"role\":\"leaf\",\"parentId\":null,\"childrenComplete\":false,\"purpose\":\"maintenance\",\"failed\":false}]}")
+}
+
+test "duplicate receipt id is rejected" {
+  case12()
+}

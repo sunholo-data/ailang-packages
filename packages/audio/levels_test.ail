@@ -1,0 +1,288 @@
+module sunholo/audio/levels_test
+import std/array (fromList, toList)
+import std/list (map, range)
+import std/math (sqrt)
+import std/result (Result, Ok, Err)
+import ./clip (Clip, ClipLimits, Mono, Stereo, create, fromMono, defaultClipLimits)
+import ./edit (trim)
+import ./reference (sineWave)
+import ./safety (InvalidClip, InvalidSamples, ResourceLimit)
+import ./levels (LevelState, LevelReport, LevelTarget, LevelsOff, PeakSafe, MatchRms,
+  Bypassed, BelowActivityFloor, InsufficientActivity, AlreadyAtLevel, TargetMatched, BoostLimited, PeakLimited,
+  defaultConfig, start, accumulate, finish, measure, plan, prepare)
+
+pure func fixture(xs: [float]) -> Clip = match fromMono(8000, xs, defaultClipLimits()) {
+  Ok(c) => c, Err(_) => {rate: 0, layout: Mono, frames: -1, planes: []}
+}
+pure func target() -> LevelTarget = {targetRms: 0.25, peakCeiling: 0.5, maxBoost: 4.0, minActiveFrames: 1}
+pure func near(a: float, b: float) -> bool = if a > b then a - b < 1.0e-12 else b - a < 1.0e-12
+pure func reportEqual(a: LevelReport, b: LevelReport) -> bool =
+  a.rate == b.rate && a.layout == b.layout && a.frames == b.frames && a.samples == b.samples
+  && a.peak == b.peak && near(a.rms, b.rms) && near(a.activeRms, b.activeRms)
+  && a.activeFrames == b.activeFrames && a.fullScaleSamples == b.fullScaleSamples && a.overRangeSamples == b.overRangeSamples
+
+pure func feed(s: LevelState, c: Clip, offset: int, chunk: int, limits: ClipLimits) -> Result[LevelState, string] =
+  if offset >= c.frames then Ok(s) else {
+    let end = if chunk > c.frames - offset then c.frames else offset + chunk;
+    match trim(c, offset, end, limits) {
+      Err(_) => Err("trim"),
+      Ok(block) => match accumulate(s, block, limits) { Err(_) => Err("accumulate"), Ok(next) => feed(next, c, end, chunk, limits) }
+    }
+  }
+
+pure func chunkReport(c: Clip, chunk: int, limits: ClipLimits) -> Result[LevelReport, string] =
+  match start(c.rate, c.layout, {windowFrames: 7, activityFloor: 0.1}, limits) {
+    Err(_) => Err("start"),
+    Ok(s) => match feed(s, c, 0, chunk, limits) {
+      Err(e) => Err(e), Ok(next) => match finish(next, limits) { Err(_) => Err("finish"), Ok(r) => Ok(r) }
+    }
+  }
+
+test "empty and silent clips have zero RMS and no active frames even at zero floor" {
+  let l = defaultClipLimits(); let config = {windowFrames: 2, activityFloor: 0.0};
+  (match measure(fixture([]), config, l) { Ok(r) => r.peak == 0.0 && r.rms == 0.0 && r.samples == 0 && r.activeFrames == 0, _ => false })
+  && (match measure(fixture([0.0, 0.0, 0.0]), config, l) { Ok(r) => r.rms == 0.0 && r.activeRms == 0.0 && r.activeFrames == 0, _ => false })
+}
+
+test "DC and alternating polarity have the closed-form full RMS" {
+  let config = {windowFrames: 4, activityFloor: 0.0};
+  match measure(fixture([0.5, -0.5, 0.5, -0.5]), config, defaultClipLimits()) {
+    Ok(r) => r.rms == 0.5 && r.activeRms == 0.5 && r.peak == 0.5 && r.activeFrames == 4 && r.frames == 4 && r.samples == 4,
+    _ => false
+  }
+}
+
+test "whole-signal RMS includes silence while active-window RMS includes every sample in qualifying windows" {
+  match measure(fixture([0.5, 0.5, 0.0, 0.0, 0.0, 0.0]), {windowFrames: 2, activityFloor: 0.1}, defaultClipLimits()) {
+    Ok(r) => near(r.rms, 0.5 / sqrt(3.0)) && r.activeRms == 0.5 && r.activeFrames == 2,
+    _ => false
+  }
+}
+
+test "an impulse qualifies its entire window, not only the nonzero sample" {
+  match measure(fixture([1.0, 0.0, 0.0, 0.0]), {windowFrames: 4, activityFloor: 0.4}, defaultClipLimits()) {
+    Ok(r) => r.rms == 0.5 && r.activeRms == 0.5 && r.activeFrames == 4 && r.fullScaleSamples == 1 && r.overRangeSamples == 0,
+    _ => false
+  }
+}
+
+test "activity floor is inclusive and final partial windows use actual frame count" {
+  let l = defaultClipLimits();
+  (match measure(fixture([0.25, -0.25]), {windowFrames: 2, activityFloor: 0.25}, l) { Ok(r) => r.activeFrames == 2, _ => false })
+  && (match measure(fixture([0.0, 0.0, 0.5]), {windowFrames: 2, activityFloor: 0.3}, l) { Ok(r) => r.activeFrames == 1 && r.activeRms == 0.5, _ => false })
+}
+
+test "a full-cycle sine has ordinary RMS A over sqrt two without the legacy sample gate" {
+  match measure(fixture(sineWave(1000.0, 0.5, 480)), {windowFrames: 48, activityFloor: 0.01}, defaultClipLimits()) {
+    Ok(r) => near(r.rms, 0.5 / sqrt(2.0)) && near(r.activeRms, r.rms) && r.activeFrames == 480,
+    _ => false
+  }
+}
+
+test "stereo energies are pooled without downmix cancellation and counts use frames versus channel samples" {
+  let l = defaultClipLimits();
+  match create(44100, Stereo, [fromList([0.5, -0.5]), fromList([-0.5, 0.5])], l) {
+    Err(_) => false, Ok(c) => match measure(c, {windowFrames: 2, activityFloor: 0.1}, l) {
+      Ok(r) => r.rms == 0.5 && r.activeRms == 0.5 && r.frames == 2 && r.samples == 4 && r.activeFrames == 2 && r.layout == Stereo && r.rate == 44100,
+      _ => false
+    }
+  }
+}
+
+test "stereo silent channel contributes to pooled RMS" {
+  let l = defaultClipLimits();
+  match create(8000, Stereo, [fromList([1.0, -1.0]), fromList([0.0, 0.0])], l) {
+    Ok(c) => match measure(c, defaultConfig(), l) { Ok(r) => near(r.rms, 1.0 / sqrt(2.0)) && r.fullScaleSamples == 2, _ => false }, _ => false
+  }
+}
+
+test "full-scale and over-range counts do not claim clipping history" {
+  match measure(fixture([-2.0, -1.0, 0.0, 1.0, 2.0]), defaultConfig(), defaultClipLimits()) {
+    Ok(r) => r.fullScaleSamples == 4 && r.overRangeSamples == 2 && r.peak == 2.0 && near(r.rms, sqrt(2.0)), _ => false
+  }
+}
+
+test "scaled energy supports huge finite headroom and tiny signals without squaring them directly" {
+  let l = defaultClipLimits(); let config = {windowFrames: 2, activityFloor: 0.0};
+  (match measure(fixture([1.6e308, -1.6e308]), config, l) { Ok(r) => r.rms == 1.6e308 && r.activeRms == 1.6e308, _ => false })
+  && (match measure(fixture([1.0e-300, -1.0e-300]), config, l) { Ok(r) => r.rms == 1.0e-300 && r.activeFrames == 2, _ => false })
+}
+
+test "analysis rejects NaN, infinities and forged clip dimensions" {
+  let c = fixture([0.25]); let l = defaultClipLimits();
+  (match measure({c | planes: [fromList([0.0 / 0.0])]}, defaultConfig(), l) { Err(InvalidSamples(_)) => true, _ => false })
+  && (match measure({c | planes: [fromList([1.0 / 0.0])]}, defaultConfig(), l) { Err(InvalidSamples(_)) => true, _ => false })
+  && (match measure({c | frames: 2}, defaultConfig(), l) { Err(InvalidClip(_)) => true, _ => false })
+}
+
+test "analysis configuration rejects invalid windows and nonfinite or out-of-range floors" {
+  let l = defaultClipLimits();
+  (match start(8000, Mono, {windowFrames: 0, activityFloor: 0.1}, l) { Err(InvalidClip(_)) => true, _ => false })
+  && (match start(8000, Mono, {windowFrames: 65537, activityFloor: 0.1}, l) { Err(InvalidClip(_)) => true, _ => false })
+  && (match start(8000, Mono, {windowFrames: 1, activityFloor: -0.1}, l) { Err(InvalidClip(_)) => true, _ => false })
+  && (match start(8000, Mono, {windowFrames: 1, activityFloor: 0.0 / 0.0}, l) { Err(InvalidClip(_)) => true, _ => false })
+}
+
+test "accumulation checks cumulative budgets, empty blocks and rate/layout mismatches" {
+  let l = {maxFrames: 3, maxSamples: 4}; let c = fixture([0.25, 0.5]);
+  match start(8000, Mono, defaultConfig(), l) {
+    Err(_) => false, Ok(s) => match accumulate(s, c, l) {
+      Err(_) => false, Ok(next) =>
+        (match accumulate(next, c, l) { Err(ResourceLimit(_)) => true, _ => false })
+        && (match accumulate(next, fixture([]), l) { Ok(v) => v.frames == 2, _ => false })
+        && (match accumulate(next, {c | rate: 48000}, l) { Err(InvalidClip(_)) => true, _ => false })
+        && (match accumulate(s, {c | layout: Stereo, planes: c.planes ++ c.planes}, l) { Err(InvalidClip(_)) => true, _ => false })
+    }
+  }
+}
+
+test "stereo accumulation enforces cumulative channel sample limit" {
+  let l = {maxFrames: 4, maxSamples: 6};
+  match create(8000, Stereo, [fromList([0.25, 0.5]), fromList([-0.25, -0.5])], l) {
+    Err(_) => false, Ok(c) => match start(8000, Stereo, defaultConfig(), l) {
+      Err(_) => false, Ok(s) => match accumulate(s, c, l) { Err(_) => false, Ok(next) => match accumulate(next, c, l) { Err(ResourceLimit(_)) => true, _ => false } }
+    }
+  }
+}
+
+test "public accumulator records are revalidated before finish and append" {
+  let l = defaultClipLimits();
+  match start(8000, Mono, defaultConfig(), l) {
+    Err(_) => false, Ok(s) =>
+      (match finish({s | frames: 1}, l) { Err(InvalidClip(_)) => true, _ => false })
+      && (match finish({s | total: {s.total | peak: 1.0 / 0.0}}, l) { Err(InvalidSamples(_)) => true, _ => false })
+      && (match accumulate({s | pending: {s.pending | samples: 1}}, fixture([0.1]), l) { Err(InvalidClip(_)) => true, _ => false })
+      && (match finish({s | active: {s.active | squares: -1.0}}, l) { Err(InvalidSamples(_)) => true, _ => false })
+  }
+}
+
+test "finish does not flush a partial window or alter future classification" {
+  let l = defaultClipLimits(); let config = {windowFrames: 2, activityFloor: 0.4};
+  match start(8000, Mono, config, l) {
+    Err(_) => false, Ok(s) => match accumulate(s, fixture([0.5]), l) {
+      Err(_) => false, Ok(one) => match finish(one, l) {
+        Err(_) => false, Ok(first) => match accumulate(one, fixture([0.0]), l) {
+          Err(_) => false, Ok(two) => match finish(two, l) { Ok(last) => first.activeFrames == 1 && last.activeFrames == 0 && last.rms > 0.0, _ => false }
+        }
+      }
+    }
+  }
+}
+
+test "partitions 1 127 128 1024 and whole preserve windows and report" {
+  let c = fixture(map(\i. if i % 19 < 7 then 0.5 else 0.0, range(0, 2051))); let l = defaultClipLimits();
+  match chunkReport(c, c.frames, l) {
+    Err(_) => false, Ok(want) =>
+      (match chunkReport(c, 1, l) { Ok(r) => reportEqual(r, want), _ => false })
+      && (match chunkReport(c, 127, l) { Ok(r) => reportEqual(r, want), _ => false })
+      && (match chunkReport(c, 128, l) { Ok(r) => reportEqual(r, want), _ => false })
+      && (match chunkReport(c, 1024, l) { Ok(r) => reportEqual(r, want), _ => false })
+  }
+}
+
+test "Off retains exact original samples including finite headroom" {
+  let c = fixture([-2.0, 0.0, 2.0]);
+  match prepare(c, defaultConfig(), LevelsOff, defaultClipLimits()) {
+    Ok(v) => map(toList, v.clip.planes) == [[-2.0, 0.0, 2.0]] && v.plan.gain == 1.0 && v.plan.reason == Bypassed, _ => false
+  }
+}
+
+test "stereo partitions preserve pooled activity windows across channel boundaries" {
+  let l = defaultClipLimits();
+  match create(48000, Stereo,
+    [fromList(map(\i. if i % 17 < 8 then 0.5 else 0.0, range(0, 1031))),
+     fromList(map(\i. if i % 13 < 5 then -0.25 else 0.0, range(0, 1031)))], l) {
+    Err(_) => false, Ok(c) => match chunkReport(c, c.frames, l) {
+      Err(_) => false, Ok(want) =>
+        (match chunkReport(c, 1, l) { Ok(r) => reportEqual(r, want), _ => false })
+        && (match chunkReport(c, 127, l) { Ok(r) => reportEqual(r, want), _ => false })
+        && (match chunkReport(c, 128, l) { Ok(r) => reportEqual(r, want), _ => false })
+        && (match chunkReport(c, 1024, l) { Ok(r) => reportEqual(r, want), _ => false })
+    }
+  }
+}
+
+test "PeakSafe attenuates strong takes and never raises quiet ones" {
+  let l = defaultClipLimits();
+  (match prepare(fixture([-2.0, 2.0]), defaultConfig(), PeakSafe(0.5), l) {
+    Ok(v) => v.plan.reason == PeakLimited && near(v.plan.gain, 0.25) && (match measure(v.clip, defaultConfig(), l) { Ok(r) => r.peak <= 0.5, _ => false }), _ => false
+  })
+  && (match plan(fixture([0.1]), defaultConfig(), PeakSafe(0.5), l) { Ok(p) => p.gain == 1.0 && p.reason == AlreadyAtLevel, _ => false })
+}
+
+test "Matched raises an active quiet take to the requested RMS without mutating the original" {
+  let c = fixture([0.125, -0.125]); let l = defaultClipLimits();
+  match prepare(c, defaultConfig(), MatchRms(target()), l) {
+    Ok(v) => v.plan.gain == 2.0 && v.plan.requestedGain == 2.0 && v.plan.reason == TargetMatched
+      && map(toList, v.clip.planes) == [[0.25, -0.25]] && map(toList, c.planes) == [[0.125, -0.125]], _ => false
+  }
+}
+
+test "Matched caps boost, leaves below-floor noise alone and requires enough active frames" {
+  let l = defaultClipLimits(); let config = {windowFrames: 1, activityFloor: 0.001};
+  (match plan(fixture([0.01, -0.01]), config, MatchRms(target()), l) { Ok(p) => p.gain == 4.0 && p.reason == BoostLimited, _ => false })
+  && (match plan(fixture([0.0001, -0.0001]), config, MatchRms(target()), l) { Ok(p) => p.gain == 1.0 && p.reason == BelowActivityFloor, _ => false })
+  && (match plan(fixture([0.125]), config, MatchRms({target() | minActiveFrames: 2}), l) { Ok(p) => p.gain == 1.0 && p.reason == InsufficientActivity, _ => false })
+}
+
+test "Matched never boosts silence and still peak-protects an insufficiently active transient" {
+  let l = defaultClipLimits();
+  (match plan(fixture([0.0, 0.0]), defaultConfig(), MatchRms(target()), l) { Ok(p) => p.gain == 1.0 && p.reason == BelowActivityFloor, _ => false })
+  && (match plan(fixture([2.0]), defaultConfig(), MatchRms({target() | minActiveFrames: 2}), l) { Ok(p) => p.gain < 1.0 && p.reason == PeakLimited, _ => false })
+}
+
+test "peak ceiling wins when target RMS would over-amplify a transient" {
+  let c = fixture([0.0, 0.0, 0.0, 0.5]); let l = defaultClipLimits();
+  match prepare(c, {windowFrames: 4, activityFloor: 0.01}, MatchRms({target() | targetRms: 0.5}), l) {
+    Ok(v) => v.plan.requestedGain == 2.0 && v.plan.gain <= 1.0 && v.plan.reason == PeakLimited
+      && (match measure(v.clip, defaultConfig(), l) { Ok(r) => r.peak <= 0.5 && r.rms < 0.5, _ => false }), _ => false
+  }
+}
+
+test "Matched uses one linked gain for stereo and preserves polarity rate and channel identity" {
+  let l = defaultClipLimits();
+  match create(44100, Stereo, [fromList([0.1, -0.1]), fromList([0.2, -0.2])], l) {
+    Err(_) => false, Ok(c) => match prepare(c, defaultConfig(), MatchRms(target()), l) {
+      Ok(v) => v.clip.rate == 44100 && v.clip.layout == Stereo && v.clip.frames == 2
+        && (match v.clip.planes { a :: b :: [] => near((match toList(b) { x :: _ => x, _ => 0.0 }), 2.0 * (match toList(a) { x :: _ => x, _ => 0.0 })), _ => false }),
+      _ => false
+    }
+  }
+}
+
+test "huge finite takes attenuate safely and tiny eligible takes hit the boost cap without infinite ratios" {
+  let l = defaultClipLimits(); let config = {windowFrames: 1, activityFloor: 0.0};
+  (match prepare(fixture([1.6e308, -1.6e308]), config, MatchRms(target()), l) { Ok(v) => v.plan.gain >= 0.0 && v.plan.gain < 1.0, _ => false })
+  && (match prepare(fixture([1.0e-300]), config, MatchRms(target()), l) { Ok(v) => v.plan.gain == 4.0 && v.plan.reason == BoostLimited, _ => false })
+  && (match prepare(fixture([1.6e308]), config, PeakSafe(1.0e-12), l) { Ok(v) => v.plan.gain >= 0.0 && (match measure(v.clip, config, l) { Ok(r) => r.peak <= 1.0e-12, _ => false }), _ => false })
+}
+
+test "invalid policies fail on empty input as well as nonempty input" {
+  let c = fixture([]); let l = defaultClipLimits();
+  (match plan(c, defaultConfig(), PeakSafe(0.0), l) { Err(InvalidSamples(_)) => true, _ => false })
+  && (match plan(c, defaultConfig(), PeakSafe(1.0 / 0.0), l) { Err(InvalidSamples(_)) => true, _ => false })
+  && (match plan(c, defaultConfig(), MatchRms({target() | targetRms: 0.0 / 0.0}), l) { Err(InvalidSamples(_)) => true, _ => false })
+  && (match plan(c, defaultConfig(), MatchRms({target() | maxBoost: 65.0}), l) { Err(InvalidSamples(_)) => true, _ => false })
+  && (match plan(c, defaultConfig(), MatchRms({target() | minActiveFrames: 0}), l) { Err(InvalidSamples(_)) => true, _ => false })
+}
+
+property "partitioning arbitrary small signals leaves measurement unchanged" {
+  forall(n: int) => {
+    let raw = n % 31; let count = if raw < 0 then 0 - raw else raw;
+    let c = fixture(map(\i. intToFloat((i * 7) % 13 - 6) / 16.0, range(0, count)));
+    match chunkReport(c, 1, defaultClipLimits()) {
+      Ok(a) => match chunkReport(c, 8, defaultClipLimits()) { Ok(b) => reportEqual(a, b), _ => false }, _ => false
+    }
+  }
+}
+
+property "prepared matched output respects headroom and never exceeds the chosen boost" {
+  forall(n: int) => {
+    let c = fixture([intToFloat(n % 1000) / 100.0, intToFloat(n % 37) / 20.0]);
+    match prepare(c, {windowFrames: 1, activityFloor: 0.001}, MatchRms(target()), defaultClipLimits()) {
+      Ok(v) => v.plan.gain >= 0.0 && v.plan.gain <= 4.0
+        && (match measure(v.clip, defaultConfig(), defaultClipLimits()) { Ok(r) => r.peak <= 0.5 && r.frames == 2, _ => false }),
+      _ => false
+    }
+  }
+}

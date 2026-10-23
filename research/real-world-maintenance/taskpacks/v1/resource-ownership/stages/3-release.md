@@ -1,0 +1,1 @@
+Add release for one active document, deleting only its file resources. A released or unknown document reads as document_missing. Unreleased documents remain readable, including identical-content cases. Released IDs may be reused. Releasing an unknown ID returns document_missing. Preserve all cap, batch, ownership and file-backed requirements.

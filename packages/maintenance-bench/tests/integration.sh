@@ -13,6 +13,8 @@ cd "$TASK_TMP"
 "$TASK_TMP/bin/maintenance-bench" analyse "$ROOT/assets/fixtures/analytical.snapshot.json" "$ROOT/assets/fixtures/analytical.annotations.json" "$ROOT/assets/fixtures/analytical.manifest.json" "$TASK_TMP/second.json"
 cmp "$TASK_TMP/first.json" "$TASK_TMP/second.json"
 if "$TASK_TMP/bin/maintenance-bench" analyse "$ROOT/assets/fixtures/analytical.snapshot.json" "$ROOT/assets/fixtures/analytical.annotations.json" "$ROOT/assets/fixtures/analytical.manifest.json" "$TASK_TMP/first.json"; then echo 'overwrite unexpectedly succeeded' >&2; exit 1; fi
+"$TASK_TMP/bin/maintenance-ledger" runs "$ROOT/assets/fixtures/ledger/plan.json" "$ROOT/assets/fixtures/ledger/runs.json" "$ROOT/assets/fixtures/ledger/empty-usage.json" fixture-runtime "$TASK_TMP/ledger.json"
+"$TASK_TMP/bin/maintenance-ledger" cards "$ROOT/assets/fixtures/ledger/cards.json" fixture-runtime "$TASK_TMP/cards.json"
 # Network-free gh replay covers pagination, all review endpoints and failed requests.
 export PATH="$ROOT/tests/fake-bin:$PATH"
 export MB_GH_LOG="$TASK_TMP/gh.log"

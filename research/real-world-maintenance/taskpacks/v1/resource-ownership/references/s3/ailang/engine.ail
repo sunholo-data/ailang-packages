@@ -1,0 +1,212 @@
+module study/resource_ownership/engine
+import std/result (Result, Ok, Err, flatMap)
+import std/option (Some, None)
+import std/json (Json, JString, JNumber, JArray, JBool, JNull, decode, get, kv, jo)
+import std/list (map, filter, foldl, length, contains)
+import std/bytes as B
+import std/fs (writeFileBytesResult, readFileRaw, removeFileResult)
+import std/crypto (sha256Hex)
+import std/math (floor, floatToInt, intToFloat)
+
+export type Resource = { doc: string, name: string, data: string, path: string }
+
+type Image = { name: string, data: string, size: int }
+
+type State = { active: [string], resources: [Resource] }
+
+export pure func withinCap(total: int, cap: int) -> bool ! {}
+ensures { result == (total >= 0 && cap >= 0 && total <= cap && total <= 16777216) } {
+  total >= 0 && cap >= 0 && total <= cap && total <= 16777216
+}
+
+func text(j: Json, key: string) -> Result[string, string] = match get(j, key) {
+  Some(JString(s)) => if s == "" then Err("empty ${key}") else Ok(s),
+  _ => Err("expected string ${key}")
+}
+
+func array(j: Json, key: string) -> Result[[Json], string] = match get(j, key) {
+  Some(JArray(xs)) => Ok(xs),
+  _ => Err("expected array ${key}")
+}
+
+func cap(j: Json) -> Result[int, string] = match get(j, "cap") {
+  Some(JNumber(n)) => if n >= 0.0 && n <= 1.6777216e+07 && floor(n) == n then Ok(floatToInt(n)) else Err("invalid cap"),
+  _ => Err("expected cap")
+}
+
+func bytesText(j: Json) -> Result[string, string] = match get(j, "bytes") {
+  Some(JString(s)) => Ok(s),
+  _ => Err("expected base64 string")
+}
+
+func image(j: Json) -> Result[Image, string] = flatMap(\name. flatMap(\data. match B.fromBase64(data) {
+  Some(payload) => Ok({ name: name, data: data, size: B.length(payload) }),
+  None => Err("invalid base64")
+}, bytesText(j)), text(j, "name"))
+
+@allow_empty_ok("Empty recursion tail is a valid fully processed sequence, not missing input")
+func images(js: [Json]) -> Result[[Image], string] = match js {
+  [] => Ok([]),
+  x :: rest => flatMap(\im. flatMap(\ims. Ok(im :: ims), images(rest)), image(x))
+}
+
+func decodedLength(im: Image) -> int = im.size
+
+func failure(reason: string) -> Json = jo([kv("ok", JBool(false)), kv("error", JString(reason))])
+
+func success() -> Json = jo([kv("ok", JBool(true))])
+
+func ref(r: Resource) -> Json = jo([kv("name", JString(r.name)), kv("bytes", JNull), kv("path", JString(r.path))])
+
+func store(im: Image, doc: string, index: int, root: string) -> Result[Resource, string] ! {FS} {
+  let path = "${root}/${sha256Hex(doc)}-${show(index)}"
+  match B.fromBase64(im.data) {
+    None => Err("invalid base64"),
+    Some(payload) => match writeFileBytesResult(path, payload) {
+      Err(e) => Err(e),
+      Ok(_) => Ok({ doc: doc, name: im.name, data: "", path: path })
+    }
+  }
+}
+
+@allow_empty_ok("Empty recursion tail is a valid fully processed sequence, not missing input")
+func storeAll(ims: [Image], doc: string, index: int, root: string) -> Result[[Resource], string] ! {FS} = match ims {
+  [] => Ok([]),
+  im :: rest => match store(im, doc, index, root) {
+    Err(e) => Err(e),
+    Ok(r) => match storeAll(rest, doc, index + 1, root) {
+      Err(e) => Err(e),
+      Ok(rs) => Ok(r :: rs)
+    }
+  }
+}
+
+func extract(state: State, op: Json, root: string) -> Result[(State, Json), string] ! {FS} {
+  match (text(op, "doc"), array(op, "images")) {
+    (Ok(doc), Ok(raw)) => match images(raw) {
+      Err(e) => Err(e),
+      Ok(ims) => {
+        let total = foldl(\n im. n + decodedLength(im), 0, ims)
+        if contains(state.active, doc) then Ok((state, failure("document_exists"))) else if length(ims) > 16 then Ok((state, failure("image_limit"))) else if total > 16777216 then Ok((state, failure("byte_cap"))) else if match cap(op) {
+          Ok(limit) => not withinCap(total, limit),
+          Err(_) => true
+        } then Ok((state, failure("byte_cap"))) else match storeAll(ims, doc, 0, root) {
+          Err(e) => Err(e),
+          Ok(rs) => Ok(({ active: state.active ++ [doc], resources: state.resources ++ rs }, jo([kv("ok", JBool(true)), kv("refs", JArray(map(ref, rs)))])))
+        }
+      }
+    },
+    _ => Err("invalid extract request")
+  }
+}
+
+func readResource(r: Resource) -> Result[Json, string] ! {FS} {
+  match readFileRaw(r.path) {
+    Err(e) => Err(e),
+    Ok(payload) => Ok(JString(B.toBase64(payload)))
+  }
+}
+
+@allow_empty_ok("Empty recursion tail is a valid fully processed sequence, not missing input")
+func readAll(rs: [Resource]) -> Result[[Json], string] ! {FS} = match rs {
+  [] => Ok([]),
+  r :: rest => match readResource(r) {
+    Err(e) => Err(e),
+    Ok(value) => match readAll(rest) {
+      Err(e) => Err(e),
+      Ok(values) => Ok(value :: values)
+    }
+  }
+}
+
+func readDoc(state: State, doc: string) -> Result[(State, Json), string] ! {FS} =
+  if not contains(state.active, doc) then Ok((state, failure("document_missing"))) else match readAll(filter(\r. r.doc == doc, state.resources)) {
+    Err(e) => Err(e),
+    Ok(values) => Ok((state, jo([kv("ok", JBool(true)), kv("bytes", JArray(values))])))
+  }
+
+func batchMembers(state: State, docs: [Json], limit: int, root: string) -> Result[(State, [Json]), string] ! {FS} =
+  match docs {
+    [] => Ok((state, [])),
+    doc :: rest => match get(doc, "images") {
+      None => Err("missing images"),
+      Some(ims) => match text(doc, "doc") {
+        Err(e) => Err(e),
+        Ok(id) => {
+          let member = jo([kv("doc", JString(id)), kv("images", ims), kv("cap", JNumber(intToFloat(limit)))])
+          match extract(state, member, root) {
+            Err(e) => Err(e),
+            Ok(pair) => match pair {
+              (next, value) => match batchMembers(next, rest, limit, root) {
+                Err(e) => Err(e),
+                Ok(tail) => match tail {
+                  (last, values) => Ok((last, value :: values))
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+
+func batch(state: State, op: Json, root: string) -> Result[(State, Json), string] ! {FS} =
+  match (array(op, "docs"), cap(op)) {
+    (Ok(docs), Ok(limit)) => if length(docs) > 16 then Err("batch limit") else match batchMembers(state, docs, limit, root) {
+      Err(e) => Err(e),
+      Ok(pair) => match pair {
+        (next, values) => Ok((next, jo([kv("ok", JBool(true)), kv("results", JArray(values))])))
+      }
+    },
+    _ => Err("invalid batch")
+  }
+
+func deleteAll(rs: [Resource]) -> Result[(), string] ! {FS} = match rs {
+  [] => Ok(),
+  r :: rest => match removeFileResult(r.path) {
+    Err(e) => Err(e),
+    Ok(_) => deleteAll(rest)
+  }
+}
+
+func release(state: State, doc: string) -> Result[(State, Json), string] ! {FS} =
+  if not contains(state.active, doc) then Ok((state, failure("document_missing"))) else match deleteAll(filter(\r. r.doc == doc, state.resources)) {
+    Err(e) => Err(e),
+    Ok(_) => Ok(({ active: filter(\id. id != doc, state.active), resources: filter(\r. r.doc != doc, state.resources) }, success()))
+  }
+
+func step(state: State, op: Json, root: string) -> Result[(State, Json), string] ! {FS} = match text(op, "op") {
+  Err(e) => Err(e),
+  Ok(kind) => if kind == "extract" then extract(state, op, root) else if kind == "read" then match text(op, "doc") {
+    Err(e) => Err(e),
+    Ok(doc) => readDoc(state, doc)
+  } else if kind == "batch" then batch(state, op, root) else if kind == "release" then match text(op, "doc") {
+    Err(e) => Err(e),
+    Ok(doc) => release(state, doc)
+  } else Ok((state, failure("unsupported_operation")))
+}
+
+@allow_empty_ok("Empty recursion tail is a valid fully processed sequence, not missing input")
+func steps(state: State, ops: [Json], root: string) -> Result[[Json], string] ! {FS} = match ops {
+  [] => Ok([]),
+  op :: rest => match step(state, op, root) {
+    Err(e) => Err(e),
+    Ok(pair) => match pair {
+      (next, value) => match steps(next, rest, root) {
+        Err(e) => Err(e),
+        Ok(values) => Ok(value :: values)
+      }
+    }
+  }
+}
+
+export func run(input: string, root: string) -> Result[Json, string] ! {FS} = match decode(input) {
+  Err(e) => Err(e),
+  Ok(j) => match (text(j, "schema"), array(j, "operations")) {
+    (Ok(schema), Ok(ops)) => if schema != "maintenance.resource-ownership/1" || length(ops) > 64 then Err("invalid protocol or operation limit") else match steps({ active: [], resources: [] }, ops, root) {
+      Err(e) => Err(e),
+      Ok(values) => Ok(jo([kv("schema", JString(schema)), kv("results", JArray(values))]))
+    },
+    _ => Err("invalid request")
+  }
+}

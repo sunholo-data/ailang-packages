@@ -16,6 +16,8 @@ clip processing:
 - Measuring loudness offline, headless, with no audio device: peak, gated RMS, how much a
   high-pass keeps (small speakers), how much sits under a low-pass cascade (rumble guards), and a
   loop's seam (`analysis`).
+- Checked offline take preparation: whole-signal and active-window RMS, cumulative
+  block measurements, peak protection and bounded RMS-matching gain plans (`levels`).
 
 Everything is pure: no effects, no clocks, no randomness except the two seeded index generators,
 and matching output on the tested bytecode VM (`--strict-bytecode`) and interpreter. Cross-architecture equality needs separate evidence. It depends on no
@@ -148,10 +150,13 @@ loopErrors, recipeSchema, parseRecipes, parseRecipesAs, validateRecipe, renderCh
 `clip`: ChannelLayout (Mono/Stereo), Clip, ClipLimits, channelCount, defaultClipLimits, checkSize, validate, create, fromMono, selectChannel, interleave, fromInterleaved, toStereo, toMono.
 `edit`: gain, trim, pad, reverse, append, fade, crossfade, mixAt, panMono.
 `clip_pcm`: ClippingPolicy (Reject/Saturate), fromPcm16, fromWav16, toPcm16, toWav16.
+`levels`: LevelConfig, LevelEnergy, LevelState, LevelReport, LevelTarget, LevelPolicy,
+GainReason, LevelPlan, PreparedLevels, defaultConfig, start, accumulate, finish,
+measure, plan, prepare.
 
 ## Validation
 
-`ailang test --package .` runs 116 checks against closed forms and two byte pins; `_smoke.ail`
+`ailang test --package .` runs 145 checks against closed forms and two byte pins; `_smoke.ail`
 prints `OK:` and its three probes give the same bytes on `--strict-bytecode` and the interpreter.
 The first consumer, stapledons-godot, regenerates its 19 shipped WAVs byte for byte from this
 package (`make sound-synth-check`) and compares `analysis` with its GDScript loudness checks on
@@ -163,8 +168,9 @@ every cue (`make sound-levels-parity`: 0 differences in centi-dB).
   tree-walking interpreter is about 10x slower, so compare engines on short probes.
 - `render` normalises to `peak_db`: a layer's `amp` sets balance, not absolute level.
 - `wavInfo` accepts integer PCM8/16/24/32 only (format tag 1), with fmt before data and at most 4096 chunks. `pcm16Floats` returns [] for malformed/unsupported input; use the checked decoder for typed errors.
-- Known std gaps (reported upstream as sunholo-data/ailang#1930): `std/audio` has no WAV reader
-  (hence `wavInfo` here) and `std/string` has no fixed-precision float formatter (hence centi-dB).
+- AILANG v0.54.18 now includes checked WAV/PCM APIs and fixed-precision formatting.
+  The legacy helpers remain for compatibility: the new stdlib PCM writer's quantization
+  differs from this package's pinned convention. Resampling remains outside this package.
 
 
 ## Checked APIs and trust boundaries in 0.1.1
@@ -322,8 +328,85 @@ ailang run --quiet --relax-modules --bytecode --strict-bytecode --verify-contrac
 ```
 
 Both print `true true true`: independent expected PCM bytes, stereo WAV reimport,
-and forged-clip rejection. Static verification currently has an upstream constructor
-declaration error on `checkSize`; retain that error separately from skipped proofs
-and passing native/runtime-contract checks. This toolchain limitation does not
-represent a successful proof or a counterexample. See the roadmap's 0.2.0 report
-for actual proof/test counts and the upstream message ID.
+and forged-clip rejection. The previous verifier constructor error on `checkSize`
+is fixed in v0.54.18, where that function verifies. Larger operations still have
+unsupported-encoding skips; consult the retained version-specific quality evidence.
+
+## Offline level plans in 0.3.0 (feature candidate)
+
+`levels` is pure, offline preparation, not a microphone AGC, compressor, LUFS meter
+or true-peak limiter. It never alters the legacy `analysis.level`/`rmsGated` meaning.
+Amplitudes, RMS, targets and gains are **linear**; use your display layer for dBFS.
+
+```ailang
+import pkg/sunholo/audio/clip (defaultClipLimits)
+import pkg/sunholo/audio/levels (defaultConfig, MatchRms, plan, prepare)
+-- `c` is a validated mono/stereo Clip. Targets below illustrate an explicit policy.
+let policy = MatchRms({targetRms: 0.125, peakCeiling: 0.5, maxBoost: 4.0, minActiveFrames: 1024});
+-- Inspect plan(c, defaultConfig(), policy, defaultClipLimits()) while c is private.
+-- prepare(c, defaultConfig(), policy, defaultClipLimits()) returns {clip, plan} in Ok.
+-- Retain c for undo; the host separately chooses preview, commit, save or export.
+```
+
+| API | Behavior |
+|---|---|
+| `defaultConfig()` | `{windowFrames: 1024, activityFloor: 0.001}`; configurable amplitude threshold, not a universal noise detector |
+| `start(rate, layout, config, limits)` | Empty checked LevelState |
+| `accumulate(state, block, limits)` | Requires identical rate/layout; checks input and cumulative frame/sample budgets; retains an incomplete window |
+| `finish(state, limits)` | Includes the last partial window using its actual size; does not flush/change state, so appending after a report preserves windows |
+| `measure(clip, config, limits)` | Whole-clip convenience for start/accumulate/finish |
+| `plan(clip, config, policy, limits)` | Validates and measures this clip, returning its report, policy, bounded requested/applied gain and reason |
+| `prepare(clip, config, policy, limits)` | Recomputes the plan, applies one linked positive/zero gain to all channels, validates finite output and scans the peak ceiling |
+
+Windows start at frame zero of the accumulated stream and span all channels.
+Window RMS is pooled energy over channel samples: opposite-polarity stereo does
+not cancel; a silent channel contributes zero energy. A window is active when RMS
+is positive and >= activityFloor. Active RMS includes **all samples in qualifying
+windows**, rather than selecting individual samples. `frames`/`activeFrames` count
+time frames; `samples` counts frames times channels. The default window is a frame
+count, so its duration changes with sample rate. The last partial window can be
+reclassified after appending; only the final report describes the finished clip.
+
+Reports contain `peak`, `rms`, `activeRms`, `frames`, `samples`, `activeFrames`,
+`fullScaleSamples` (|x| >= 1), `overRangeSamples` (|x| > 1), `rate`, `layout` and
+window/floor settings. These sample counts flag level risk; they cannot establish
+whether a microphone or earlier processor clipped. Scaled sums avoid directly
+squaring huge/tiny amplitudes; IEEE rounding/subnormal underflow still applies.
+
+`LevelPolicy` is `LevelsOff | PeakSafe(peakCeiling) | MatchRms(LevelTarget)`:
+
+- Off uses unity, including finite headroom beyond full scale. It provides no peak ceiling.
+- PeakSafe only reduces gain when the sample peak exceeds the ceiling.
+- MatchRms targets active-window RMS. No active windows or fewer than
+  `minActiveFrames` disables boosting/level matching but still permits peak protection.
+  Matching preserves phrase dynamics, stereo balance/polarity and frame/rate/layout.
+- Ceilings/target RMS are 1e-12..1; maxBoost is 1..64; minimum active frames is
+  1..2147483647; windowFrames is 1..65536; activityFloor is 0..1. Invalid/nonfinite
+  values return AudioError even for empty clips. No automatic target preset is chosen.
+
+`requestedGain` already respects the boost/activity policy; `gain` can be reduced
+further by the peak ceiling. Reasons are Bypassed, BelowActivityFloor,
+InsufficientActivity, AlreadyAtLevel, TargetMatched, BoostLimited or PeakLimited.
+Peak protection takes precedence if both constraints apply. A tiny downward
+rounding reserve near the ceiling may prevent an exactly attained RMS target.
+Under extreme floating-point ranges, a gain may underflow to zero; prepare returns
+an error rather than releasing nonfinite or above-ceiling output.
+
+Public LevelState/LevelEnergy records are checked for finite values, dimensions,
+counts, window alignment and plausible energy ranges. This is structural validation,
+not authentication that the state came from actual samples. `plan` always measures
+its supplied clip; `prepare` never accepts an externally constructed plan as authority.
+Keep configuration fixed through accumulation. A policy change may reuse the original
+clip, but start a fresh accumulator when window/floor settings change.
+
+Work is O(frames * channels); the accumulator uses fixed-size numeric state.
+Clip validation and edits retain their existing bounded temporary allocations;
+this is not a heap-byte, wall-time or audio-callback guarantee. ClipLimits apply
+to each block **and the cumulative stream**, with the same 2147483647 maxima.
+No effects are used, so effect @limit does not meter sample work.
+
+The 0.3.0 evidence directory records tests, native engine runs, runtime-contract
+probes, independent Decimal reference checks and descriptive CLI timings. Z3 uses
+Real/Int models: its two proofs in levels cover defaultConfig and boundedGain,
+while the six public processing APIs are skipped for unsupported encodings.
+This is not proof of IEEE arithmetic, audible quality or third-party DSP.

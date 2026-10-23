@@ -30,3 +30,12 @@ export pure func decodeCountDocument(raw: string) -> Result[Json, string] =
     },
     _ => Err("internal JSON lexical validator pattern failed")
   }
+
+export pure func hasExactKeys(j: Json, keys: [string]) -> bool
+ensures { not result || (match j {
+  JObject(fs) => size(fs) == size(keys),
+  _ => false
+}) } = match j {
+  JObject(fs) => size(fs) == size(keys) && M.size(M.fromList(map(\k. (k, true), keys))) == size(keys) && foldl(\ok f. ok && M.member(M.fromList(map(\k. (k, true), keys)), f.key), true, fs),
+  _ => false
+}

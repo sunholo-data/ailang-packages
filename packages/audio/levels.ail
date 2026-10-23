@@ -1,0 +1,234 @@
+module sunholo/audio/levels
+-- Checked offline level preparation. All amplitudes and gains are linear.
+-- Windows are anchored to the start of the accumulated stream, not each block.
+import std/array (fromList, get)
+import std/math (sqrt)
+import std/result (Result, Ok, Err)
+import ./clip (Clip, ClipLimits, ChannelLayout, channelCount, checkSize, validate)
+import ./edit (gain)
+import ./safety (AudioError, InvalidClip, InvalidSamples, ResourceLimit, inRange)
+
+export type LevelConfig = {windowFrames: int, activityFloor: float}
+-- A scaled sum of squares avoids x*x overflow/underflow for finite headroom.
+-- These public records are revalidated; they are not authenticated observations.
+export type LevelEnergy = {samples: int, peak: float, squares: float, fullScaleSamples: int, overRangeSamples: int}
+export type LevelState = {rate: int, layout: ChannelLayout, frames: int, config: LevelConfig, total: LevelEnergy, active: LevelEnergy, pending: LevelEnergy}
+export type LevelReport = {rate: int, layout: ChannelLayout, frames: int, samples: int, peak: float, rms: float, activeRms: float, activeFrames: int, fullScaleSamples: int, overRangeSamples: int, windowFrames: int, activityFloor: float}
+export type LevelTarget = {targetRms: float, peakCeiling: float, maxBoost: float, minActiveFrames: int}
+export type LevelPolicy = LevelsOff | PeakSafe(float) | MatchRms(LevelTarget) deriving (Eq)
+export type GainReason = Bypassed | BelowActivityFloor | InsufficientActivity | AlreadyAtLevel | TargetMatched | BoostLimited | PeakLimited deriving (Eq)
+export type LevelPlan = {report: LevelReport, policy: LevelPolicy, requestedGain: float, gain: float, reason: GainReason}
+export type PreparedLevels = {clip: Clip, plan: LevelPlan}
+
+export func defaultConfig() -> LevelConfig ! {}
+ensures { result.windowFrames == 1024 && result.activityFloor == 0.001 }
+{
+  {windowFrames: 1024, activityFloor: 0.001}
+}
+
+pure func configValid(c: LevelConfig) -> bool =
+  c.windowFrames >= 1 && c.windowFrames <= 65536 && inRange(c.activityFloor, 0.0, 1.0)
+
+pure func emptyEnergy() -> LevelEnergy =
+  {samples: 0, peak: 0.0, squares: 0.0, fullScaleSamples: 0, overRangeSamples: 0}
+
+pure func energyValid(e: LevelEnergy) -> bool =
+  e.samples >= 0 && e.samples <= 2147483647
+  && e.peak - e.peak == 0.0 && e.peak >= 0.0
+  && inRange(e.squares, 0.0, intToFloat(e.samples) * (1.0 + 1.0e-12))
+  && e.fullScaleSamples >= 0 && e.fullScaleSamples <= e.samples
+  && e.overRangeSamples >= 0 && e.overRangeSamples <= e.fullScaleSamples
+  && (if e.samples == 0 then e.peak == 0.0 else true)
+  && (if e.peak == 0.0 then e.squares == 0.0 && e.fullScaleSamples == 0
+      else e.samples > 0 && e.squares >= 1.0)
+  && (if e.peak < 1.0 then e.fullScaleSamples == 0 else e.fullScaleSamples > 0)
+  && (if e.peak <= 1.0 then e.overRangeSamples == 0 else e.overRangeSamples > 0)
+
+pure func energyRms(e: LevelEnergy) -> float =
+  if e.samples == 0 || e.peak == 0.0 then 0.0
+  else {
+    let ratio = e.squares / intToFloat(e.samples);
+    e.peak * sqrt(if ratio > 1.0 then 1.0 else ratio)
+  }
+
+pure func mergeEnergy(a: LevelEnergy, b: LevelEnergy) -> LevelEnergy {
+  let p = if a.peak > b.peak then a.peak else b.peak;
+  let ar = if p == 0.0 then 0.0 else a.peak / p;
+  let br = if p == 0.0 then 0.0 else b.peak / p;
+  {samples: a.samples + b.samples, peak: p,
+   squares: a.squares * ar * ar + b.squares * br * br,
+   fullScaleSamples: a.fullScaleSamples + b.fullScaleSamples,
+   overRangeSamples: a.overRangeSamples + b.overRangeSamples}
+}
+
+pure func addSample(e: LevelEnergy, x: float) -> LevelEnergy {
+  let a = if x < 0.0 then 0.0 - x else x;
+  let p = if a > e.peak then a else e.peak;
+  let old = if p == 0.0 then 0.0 else e.peak / p;
+  let next = if p == 0.0 then 0.0 else a / p;
+  {samples: e.samples + 1, peak: p, squares: e.squares * old * old + next * next,
+   fullScaleSamples: e.fullScaleSamples + (if a >= 1.0 then 1 else 0),
+   overRangeSamples: e.overRangeSamples + (if a > 1.0 then 1 else 0)}
+}
+
+pure func isActive(e: LevelEnergy, floor: float) -> bool =
+  let rms = energyRms(e) in rms > 0.0 && rms >= floor
+
+pure func stateValid(s: LevelState, limits: ClipLimits) -> Result[LevelState, AudioError] =
+  match checkSize(s.rate, s.layout, s.frames, limits) {
+    Err(e) => Err(e),
+    Ok(n) => if not configValid(s.config) then Err(InvalidClip("invalid level window/floor"))
+      else if not energyValid(s.total) || not energyValid(s.active) || not energyValid(s.pending)
+        then Err(InvalidSamples("invalid level energy state"))
+      else {
+        let ch = channelCount(s.layout); let windowSamples = s.config.windowFrames * ch;
+        if s.total.samples != n || s.pending.samples != (s.frames % s.config.windowFrames) * ch
+          || s.active.samples % windowSamples != 0 || s.active.samples > n - s.pending.samples
+          || s.active.peak > s.total.peak || s.pending.peak > s.total.peak
+          || s.active.fullScaleSamples + s.pending.fullScaleSamples > s.total.fullScaleSamples
+          || s.active.overRangeSamples + s.pending.overRangeSamples > s.total.overRangeSamples
+        then Err(InvalidClip("inconsistent level state counts/peaks")) else Ok(s)
+      }
+  }
+
+export func start(rate: int, layout: ChannelLayout, config: LevelConfig, limits: ClipLimits) -> Result[LevelState, AudioError] ! {}
+ensures { match result { Ok(s) => s.frames == 0 && s.total.samples == 0 && s.rate == rate && s.layout == layout, Err(_) => true } }
+{
+  stateValid({rate: rate, layout: layout, frames: 0, config: config, total: emptyEnergy(), active: emptyEnergy(), pending: emptyEnergy()}, limits)
+}
+
+pure func scan(s: LevelState, planes: Array[Array[float]], i: int, n: int) -> LevelState =
+  if i >= n then s
+  else {
+    let ch = channelCount(s.layout);
+    let x = get(get(planes, i % ch), i / ch);
+    let pending = addSample(s.pending, x);
+    let done = pending.samples == s.config.windowFrames * ch;
+    let active = if done && isActive(pending, s.config.activityFloor) then mergeEnergy(s.active, pending) else s.active;
+    scan({s | total: addSample(s.total, x), active: active, pending: if done then emptyEnergy() else pending}, planes, i + 1, n)
+  }
+
+export func accumulate(s: LevelState, block: Clip, limits: ClipLimits) -> Result[LevelState, AudioError] ! {}
+ensures { match result { Ok(v) => v.frames == s.frames + block.frames && v.rate == s.rate && v.layout == s.layout, Err(_) => true } }
+{
+  match stateValid(s, limits) {
+    Err(e) => Err(e),
+    Ok(_) => match validate(block, limits) {
+      Err(e) => Err(e),
+      Ok(c) => if c.rate != s.rate || c.layout != s.layout then Err(InvalidClip("level block rate/layout mismatch"))
+        else if c.frames > limits.maxFrames - s.frames then Err(ResourceLimit("cumulative level frame limit exceeded"))
+        else match checkSize(s.rate, s.layout, s.frames + c.frames, limits) {
+          Err(e) => Err(e),
+          Ok(_) => {
+            let v = scan(s, fromList(c.planes), 0, c.frames * channelCount(c.layout));
+            stateValid({v | frames: s.frames + c.frames}, limits)
+          }
+        }
+    }
+  }
+}
+
+-- Finalization observes the last partial window without mutating/flushing state.
+-- The same state can subsequently accept more frames without partition changes.
+export func finish(s: LevelState, limits: ClipLimits) -> Result[LevelReport, AudioError] ! {}
+ensures { match result { Ok(r) => r.frames == s.frames && r.samples == s.frames * channelCount(s.layout) && r.activeFrames >= 0 && r.activeFrames <= r.frames && r.rms >= 0.0 && r.rms <= r.peak, Err(_) => true } }
+{
+  match stateValid(s, limits) {
+    Err(e) => Err(e),
+    Ok(v) => {
+      let a = if isActive(v.pending, v.config.activityFloor) then mergeEnergy(v.active, v.pending) else v.active;
+      Ok({rate: v.rate, layout: v.layout, frames: v.frames, samples: v.total.samples,
+        peak: v.total.peak, rms: energyRms(v.total), activeRms: energyRms(a),
+        activeFrames: a.samples / channelCount(v.layout), fullScaleSamples: v.total.fullScaleSamples,
+        overRangeSamples: v.total.overRangeSamples, windowFrames: v.config.windowFrames, activityFloor: v.config.activityFloor})
+    }
+  }
+}
+
+export func measure(c: Clip, config: LevelConfig, limits: ClipLimits) -> Result[LevelReport, AudioError] ! {}
+ensures { match result { Ok(r) => r.frames == c.frames && r.rate == c.rate && r.layout == c.layout && r.rms >= 0.0 && r.rms <= r.peak && r.activeFrames >= 0 && r.activeFrames <= c.frames, Err(_) => true } }
+{
+  match start(c.rate, c.layout, config, limits) {
+    Err(e) => Err(e),
+    Ok(s) => match accumulate(s, c, limits) { Err(e) => Err(e), Ok(v) => finish(v, limits) }
+  }
+}
+
+pure func policyValid(p: LevelPolicy) -> bool = match p {
+  LevelsOff => true,
+  PeakSafe(ceiling) => inRange(ceiling, 1.0e-12, 1.0),
+  MatchRms(t) => inRange(t.targetRms, 1.0e-12, 1.0) && inRange(t.peakCeiling, 1.0e-12, 1.0)
+    && inRange(t.maxBoost, 1.0, 64.0) && t.minActiveFrames >= 1 && t.minActiveFrames <= 2147483647
+}
+
+pure func boundedGain(requested: float, ceiling: float) -> float
+requires { requested >= 0.0 && requested <= 64.0 && ceiling >= 0.0 && ceiling <= 64.0 }
+ensures { result >= 0.0 && result <= requested && result <= ceiling }
+{
+  if requested < ceiling then requested else ceiling
+}
+
+-- Reserve a tiny rounding margin only when a gain approaches the peak ceiling.
+-- The result is subsequently scanned in prepare; no IEEE guarantee comes from SMT.
+pure func peakGain(peak: float, ceiling: float) -> float =
+  if peak == 0.0 then 64.0
+  else if peak <= ceiling / 64.0 then 64.0
+  else {
+    let ratio = (ceiling / peak) * (1.0 - 2.0e-15);
+    -- One minimum subnormal also covers division rounding when the ratio itself
+    -- is subnormal (a relative margin alone may round away there).
+    if ratio > 0.0 then ratio - 5.0e-324 else 0.0
+  }
+
+pure func planned(r: LevelReport, policy: LevelPolicy) -> LevelPlan = match policy {
+  LevelsOff => {report: r, policy: policy, requestedGain: 1.0, gain: 1.0, reason: Bypassed},
+  PeakSafe(ceiling) => {
+    let factor = if r.peak <= ceiling then 1.0 else boundedGain(1.0, peakGain(r.peak, ceiling));
+    {report: r, policy: policy, requestedGain: 1.0, gain: factor, reason: if factor < 1.0 then PeakLimited else AlreadyAtLevel}
+  },
+  MatchRms(t) => {
+    let quiet = r.activeRms == 0.0 || r.activeFrames < t.minActiveFrames;
+    let boosted = not quiet && r.activeRms < t.targetRms / t.maxBoost;
+    let desired = if quiet then 1.0 else if boosted then t.maxBoost else t.targetRms / r.activeRms;
+    let factor = boundedGain(desired, peakGain(r.peak, t.peakCeiling));
+    let reason = if factor < desired then PeakLimited
+      else if r.activeRms == 0.0 then BelowActivityFloor
+      else if r.activeFrames < t.minActiveFrames then InsufficientActivity
+      else if boosted then BoostLimited else if factor == 1.0 then AlreadyAtLevel else TargetMatched;
+    {report: r, policy: policy, requestedGain: desired, gain: factor, reason: reason}
+  }
+}
+
+export func plan(c: Clip, config: LevelConfig, policy: LevelPolicy, limits: ClipLimits) -> Result[LevelPlan, AudioError] ! {}
+ensures { match result { Ok(p) => p.gain >= 0.0 && p.gain <= p.requestedGain && p.requestedGain <= 64.0 && p.report.frames == c.frames, Err(_) => true } }
+{
+  if not policyValid(policy) then Err(InvalidSamples("invalid level target/ceiling/boost/minimum activity"))
+  else match measure(c, config, limits) {
+    Err(e) => Err(e),
+    Ok(r) => {
+      let p = planned(r, policy);
+      if not inRange(p.gain, 0.0, 64.0) || not inRange(p.requestedGain, p.gain, 64.0)
+      then Err(InvalidSamples("nonfinite level plan")) else Ok(p)
+    }
+  }
+}
+
+-- Recompute the plan from this clip; never trust an externally constructed plan.
+-- The caller retains the immutable original for preview/undo and chooses commit.
+export func prepare(c: Clip, config: LevelConfig, policy: LevelPolicy, limits: ClipLimits) -> Result[PreparedLevels, AudioError] ! {}
+ensures { match result { Ok(v) => v.clip.frames == c.frames && v.clip.rate == c.rate && v.clip.layout == c.layout && v.plan.gain >= 0.0 && v.plan.gain <= 64.0, Err(_) => true } }
+{
+  match plan(c, config, policy, limits) {
+    Err(e) => Err(e),
+    Ok(p) => match gain(c, p.gain, limits) {
+      Err(e) => Err(e),
+      Ok(out) => match measure(out, config, limits) {
+        Err(e) => Err(e),
+        Ok(after) => {
+          let safe = match policy { LevelsOff => true, PeakSafe(ceiling) => after.peak <= ceiling, MatchRms(t) => after.peak <= t.peakCeiling };
+          if safe then Ok({clip: out, plan: p}) else Err(InvalidSamples("prepared output exceeds level peak ceiling"))
+        }
+      }
+    }
+  }
+}
