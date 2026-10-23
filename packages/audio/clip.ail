@@ -1,0 +1,121 @@
+module sunholo/audio/clip
+-- Validated planar mono/stereo float clips. Public records are revalidated at each
+-- boundary. Finite headroom is preserved; conversion and clipping are explicit.
+import std/array (fromList, toList, get, length as arrayLength, scale, add)
+import std/list (map, range, length as size, head, any, nth)
+import std/option (Some, None)
+import std/result (Result, Ok, Err)
+import ./safety (AudioError, InvalidClip, InvalidSamples, ResourceLimit, fitsWork)
+
+export type ChannelLayout = Mono | Stereo deriving (Eq)
+export type Clip = {rate: int, layout: ChannelLayout, frames: int, planes: [Array[float]]}
+export type ClipLimits = {maxFrames: int, maxSamples: int}
+
+export func channelCount(layout: ChannelLayout) -> int ! {}
+ensures { result >= 1 && result <= 2 }
+{
+  match layout { Mono => 1, Stereo => 2 }
+}
+
+export func defaultClipLimits() -> ClipLimits ! {}
+ensures { result.maxFrames > 0 && result.maxSamples == 2 * result.maxFrames }
+{
+  {maxFrames: 1440000, maxSamples: 2880000}
+}
+
+-- Validate dimensions before any sample allocation or byte-size multiplication.
+export func checkSize(rate: int, layout: ChannelLayout, frames: int, limits: ClipLimits) -> Result[int, AudioError] ! {}
+ensures { match result { Ok(n) => n == frames * channelCount(layout) && n <= limits.maxSamples && frames >= 0 && frames <= limits.maxFrames && rate > 0 && rate <= 384000, Err(_) => true } }
+{
+  if limits.maxFrames < 0 || limits.maxFrames > 2147483647 || limits.maxSamples < 0 || limits.maxSamples > 2147483647 then Err(ResourceLimit("invalid clip limits"))
+  else if rate <= 0 || rate > 384000 then Err(InvalidClip("rate must be 1..384000 Hz"))
+  else if frames < 0 then Err(InvalidClip("negative frame count"))
+  else if frames > limits.maxFrames then Err(ResourceLimit("clip frame limit exceeded"))
+  else if not fitsWork(frames, channelCount(layout), limits.maxSamples) then Err(ResourceLimit("clip sample limit exceeded"))
+  else Ok(frames * channelCount(layout))
+}
+
+export func validate(c: Clip, limits: ClipLimits) -> Result[Clip, AudioError] ! {}
+ensures { match result { Ok(v) => v.frames >= 0 && v.frames <= limits.maxFrames && size(v.planes) == channelCount(v.layout) && v.frames * channelCount(v.layout) <= limits.maxSamples, Err(_) => true } }
+{
+  match checkSize(c.rate, c.layout, c.frames, limits) {
+    Err(e) => Err(e),
+    Ok(_) => if size(c.planes) != channelCount(c.layout) then Err(InvalidClip("plane count does not match channel layout"))
+      else if any(\p. arrayLength(p) != c.frames, c.planes) then Err(InvalidClip("channel lengths do not match frame count"))
+      else if any(\p. any(\x. x - x != 0.0, toList(p)), c.planes) then Err(InvalidSamples("clip samples must be finite"))
+      else Ok(c)
+  }
+}
+
+export func create(rate: int, layout: ChannelLayout, planes: [Array[float]], limits: ClipLimits) -> Result[Clip, AudioError] ! {}
+ensures { match result { Ok(c) => c.rate == rate && c.layout == layout && size(c.planes) == channelCount(layout) && c.frames <= limits.maxFrames && c.frames >= 0, Err(_) => true } }
+{
+  let frames = match head(planes) { Some(p) => arrayLength(p), None => 0 };
+  validate({rate: rate, layout: layout, frames: frames, planes: planes}, limits)
+}
+
+export func fromMono(rate: int, samples: [float], limits: ClipLimits) -> Result[Clip, AudioError] ! {}
+ensures { match result { Ok(c) => c.rate == rate && c.layout == Mono && c.frames == size(samples), Err(_) => true } }
+{
+  match checkSize(rate, Mono, size(samples), limits) {
+    Err(e) => Err(e), Ok(_) => create(rate, Mono, [fromList(samples)], limits)
+  }
+}
+
+export func selectChannel(c: Clip, index: int, limits: ClipLimits) -> Result[Array[float], AudioError] ! {}
+ensures { match result { Ok(p) => arrayLength(p) == c.frames, Err(_) => true } }
+{
+  match validate(c, limits) {
+    Err(e) => Err(e),
+    Ok(v) => match nth(v.planes, index) { Some(p) => Ok(p), None => Err(InvalidClip("channel index out of range")) }
+  }
+}
+
+export func interleave(c: Clip, limits: ClipLimits) -> Result[Array[float], AudioError] ! {}
+ensures { match result { Ok(xs) => arrayLength(xs) == c.frames * channelCount(c.layout), Err(_) => true } }
+{
+  match validate(c, limits) {
+    Err(e) => Err(e),
+    Ok(v) => {
+      let count = channelCount(v.layout); let ps = fromList(v.planes);
+      Ok(fromList(map(\i. get(get(ps, i % count), i / count), range(0, v.frames * count))))
+    }
+  }
+}
+
+export func fromInterleaved(rate: int, layout: ChannelLayout, samples: Array[float], limits: ClipLimits) -> Result[Clip, AudioError] ! {}
+ensures { match result { Ok(c) => c.rate == rate && c.layout == layout && c.frames * channelCount(layout) == arrayLength(samples), Err(_) => true } }
+{
+  let count = channelCount(layout); let n = arrayLength(samples);
+  if n % count != 0 then Err(InvalidClip("interleaved input has a partial frame"))
+  else match checkSize(rate, layout, n / count, limits) {
+    Err(e) => Err(e),
+    Ok(_) => create(rate, layout, map(\ch. fromList(map(\i. get(samples, i * count + ch), range(0, n / count))), range(0, count)), limits)
+  }
+}
+
+-- Unity duplication shares immutable channel arrays. This is not equal-power pan.
+export func toStereo(c: Clip, limits: ClipLimits) -> Result[Clip, AudioError] ! {}
+ensures { match result { Ok(v) => v.layout == Stereo && v.rate == c.rate && v.frames == c.frames, Err(_) => true } }
+{
+  match validate(c, limits) {
+    Err(e) => Err(e),
+    Ok(v) => match v.layout {
+      Stereo => Ok(v), Mono => { let p = get(fromList(v.planes), 0); create(v.rate, Stereo, [p, p], limits) }
+    }
+  }
+}
+
+-- Correlated unity stereo remains unity. Scaling before adding avoids overflow
+-- from summing two large finite channels before taking the average.
+export func toMono(c: Clip, limits: ClipLimits) -> Result[Clip, AudioError] ! {}
+ensures { match result { Ok(v) => v.layout == Mono && v.rate == c.rate && v.frames == c.frames, Err(_) => true } }
+{
+  match validate(c, limits) {
+    Err(e) => Err(e),
+    Ok(v) => match v.layout {
+      Mono => Ok(v),
+      Stereo => { let ps = fromList(v.planes); create(v.rate, Mono, [add(scale(0.5, get(ps, 0)), scale(0.5, get(ps, 1)))], limits) }
+    }
+  }
+}

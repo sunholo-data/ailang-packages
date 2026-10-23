@@ -1,0 +1,77 @@
+{
+  "schema": "ailang.package-quality/v1",
+  "package": "sunholo/audio",
+  "version": "0.2.0",
+  "stability": "experimental",
+  "mode": "publisher",
+  "compile": {
+    "source": "server",
+    "ok": true,
+    "files": 22
+  },
+  "contracts": {
+    "source": "server",
+    "verified": 9,
+    "total": 49,
+    "counterexample": 0,
+    "skipped": 39,
+    "errors": 1,
+    "uncontracted_exports": 33,
+    "wall_seconds": 0.224438583
+  },
+  "tests": {
+    "source": "attested",
+    "files": 10,
+    "passed": 116,
+    "failed": 0
+  },
+  "smoke": {
+    "source": "attested",
+    "present": true,
+    "passed": true,
+    "seconds": 7.264038959
+  },
+  "interface": {
+    "source": "server",
+    "hash_v1": "sha256:ccae557d82122238f159482caed9085b69a91fb3d1980ce57428014899134cdf",
+    "hash_v2": "sha256:ifacev2:88d860b4797eb822e9087e4f01bcfdd4f5b6ad1d689ab58c3be153b83ce3e678",
+    "signatures": 104
+  },
+  "effects": {
+    "source": "server",
+    "max": [
+      "IO"
+    ],
+    "ceiling_declared": true,
+    "rank_max": "IO"
+  },
+  "release": {
+    "source": "server",
+    "kind": "feature",
+    "changelog_section": true,
+    "notes": "Feature: checked mono/stereo clips, channel-preserving PCM16/WAV adapters and editing.\nThis release candidate groups the unpublished 0.1.1 hardening milestone with a useful\nset of offline audio features; publication is deferred until the group is reviewed.\n\n- `clip`: planar `Array[float]` clips, explicit Mono/Stereo layouts, input/output frame\n  and sample budgets, finite headroom, channel selection and interleaving. Unity\n  mono duplication and 0.5L+0.5R downmix use explicit conversion functions.\n- `edit`: gain, trim, padding, reverse, append, endpoint-defined fades, complementary\n  linear crossfades, bounded placement/mixing and equal-power mono panning. Every\n  public operation revalidates clip records; rates/layouts must match for composition.\n- `clip_pcm`: preserve both stereo channels on PCM16/WAV import and export; choose\n  Reject or Saturate clipping explicitly. In-range mono quantization keeps the old\n  *32767/round convention; decode uses /32768. Huge finite samples saturate before\n  integer conversion. Partial frames, unsupported depth/channel counts, excessive\n  allocations and malformed RIFF return typed errors.\n- Keep all v1 recipe record shapes and existing mono render behavior. Internal\n  headroom is finite but can exceed full scale; integer encoding is the explicit\n  clipping boundary. No implicit resampling or normalization is added.\n- Add InvalidClip to the new, still-unpublished AudioError type. Keep DSP pure and\n  reuse existing std/array and std/bytes; core changes are developed separately."
+  },
+  "docs": {
+    "agent_md": true,
+    "ai_summary": true,
+    "agent_doc_exports_covered": 4
+  },
+  "style": {
+    "exported_funcs": 82,
+    "pure_exports": 82,
+    "pure_ratio": 1
+  },
+  "gates": [],
+  "badges": [
+    {
+      "code": "PUB016",
+      "level": "info",
+      "msg": "39 contract(s) skipped by Z3 (unencodable types or builtins) — not proved; `ailang verify --package .` lists the reason per function"
+    },
+    {
+      "code": "PUB011",
+      "level": "warn",
+      "msg": "33 exported function(s) carry no contract"
+    }
+  ]
+}

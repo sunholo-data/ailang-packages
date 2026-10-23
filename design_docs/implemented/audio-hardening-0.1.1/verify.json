@@ -1,0 +1,385 @@
+{
+  "schema": "ailang.package-verify/v1",
+  "package": "sunholo/audio",
+  "version": "0.1.1",
+  "verified": 7,
+  "total": 25,
+  "counterexample": 0,
+  "skipped": 18,
+  "errors": 0,
+  "uncontracted": 33,
+  "wall_seconds": 0.12333525,
+  "modules": [
+    {
+      "module": "sunholo/audio/analysis",
+      "file": "analysis.ail",
+      "verified": 0,
+      "counterexample": 0,
+      "skipped": 3,
+      "errors": 0,
+      "uncontracted": 4,
+      "results": [
+        {
+          "function": "levelGain",
+          "status": "skipped",
+          "reason": "no ensures clause (nothing to verify)"
+        },
+        {
+          "function": "rmsGated",
+          "status": "skipped",
+          "reason": "Function \"rmsGated\" calls \"foldl\" whose signature uses an unencodable type \"b\""
+        },
+        {
+          "function": "peak",
+          "status": "skipped",
+          "reason": "Function \"peak\" calls \"foldl\" whose signature uses an unencodable type \"b\""
+        },
+        {
+          "function": "level",
+          "status": "uncontracted",
+          "reason": "no contract annotations (not a verification candidate)"
+        },
+        {
+          "function": "highpassKeepDb",
+          "status": "uncontracted",
+          "reason": "no contract annotations (not a verification candidate)"
+        },
+        {
+          "function": "lowbandDb",
+          "status": "uncontracted",
+          "reason": "no contract annotations (not a verification candidate)"
+        },
+        {
+          "function": "seam",
+          "status": "uncontracted",
+          "reason": "no contract annotations (not a verification candidate)"
+        }
+      ]
+    },
+    {
+      "module": "sunholo/audio/dsp",
+      "file": "dsp.ail",
+      "verified": 2,
+      "counterexample": 0,
+      "skipped": 4,
+      "errors": 0,
+      "uncontracted": 7,
+      "results": [
+        {
+          "function": "clamp16",
+          "status": "verified"
+        },
+        {
+          "function": "gainToDb",
+          "status": "skipped",
+          "reason": "SMT declaration closure could not resolve a required sort (cannot encode function body: let body: if else: let value: unresolvable SMT declaration types: calls user function \"log\" that is not SMT-encodable in this context)"
+        },
+        {
+          "function": "onePole",
+          "status": "skipped",
+          "reason": "no ensures clause (nothing to verify)"
+        },
+        {
+          "function": "centiDb",
+          "status": "skipped",
+          "reason": "no ensures clause (nothing to verify)"
+        },
+        {
+          "function": "absF",
+          "status": "verified"
+        },
+        {
+          "function": "peakAbs",
+          "status": "skipped",
+          "reason": "Function \"peakAbs\" uses an unencodable builtin: std/list.map; Function \"peakAbs\" calls \"map\" whose signature uses an unencodable type \"Option[b]\""
+        },
+        {
+          "function": "twoPi",
+          "status": "uncontracted",
+          "reason": "no contract annotations (not a verification candidate)"
+        },
+        {
+          "function": "dbToGain",
+          "status": "uncontracted",
+          "reason": "no contract annotations (not a verification candidate)"
+        },
+        {
+          "function": "lowpass",
+          "status": "uncontracted",
+          "reason": "no contract annotations (not a verification candidate)"
+        },
+        {
+          "function": "highpass",
+          "status": "uncontracted",
+          "reason": "no contract annotations (not a verification candidate)"
+        },
+        {
+          "function": "sweepLowpass",
+          "status": "uncontracted",
+          "reason": "no contract annotations (not a verification candidate)"
+        },
+        {
+          "function": "softSat",
+          "status": "uncontracted",
+          "reason": "no contract annotations (not a verification candidate)"
+        },
+        {
+          "function": "normalisePeak",
+          "status": "uncontracted",
+          "reason": "no contract annotations (not a verification candidate)"
+        }
+      ]
+    },
+    {
+      "module": "sunholo/audio/mix",
+      "file": "mix.ail",
+      "verified": 0,
+      "counterexample": 0,
+      "skipped": 1,
+      "errors": 0,
+      "uncontracted": 1,
+      "results": [
+        {
+          "function": "tile",
+          "status": "skipped",
+          "reason": "no ensures clause (nothing to verify)"
+        },
+        {
+          "function": "sum",
+          "status": "uncontracted",
+          "reason": "no contract annotations (not a verification candidate)"
+        }
+      ]
+    },
+    {
+      "module": "sunholo/audio/noise",
+      "file": "noise.ail",
+      "verified": 0,
+      "counterexample": 0,
+      "skipped": 0,
+      "errors": 0,
+      "uncontracted": 2,
+      "results": [
+        {
+          "function": "rampNoise",
+          "status": "uncontracted",
+          "reason": "no contract annotations (not a verification candidate)"
+        },
+        {
+          "function": "white",
+          "status": "uncontracted",
+          "reason": "no contract annotations (not a verification candidate)"
+        }
+      ]
+    },
+    {
+      "module": "sunholo/audio/pcm",
+      "file": "pcm.ail",
+      "verified": 0,
+      "counterexample": 0,
+      "skipped": 4,
+      "errors": 0,
+      "uncontracted": 3,
+      "results": [
+        {
+          "function": "pcm16FloatsChecked",
+          "status": "skipped",
+          "reason": "Function \"pcm16FloatsChecked\" calls \"byteAt\" whose signature uses an unencodable type \"Option[int]\""
+        },
+        {
+          "function": "wav16",
+          "status": "skipped",
+          "reason": "no ensures clause (nothing to verify)"
+        },
+        {
+          "function": "wav16Checked",
+          "status": "skipped",
+          "reason": "Function \"wav16Checked\" calls \"any\" whose signature uses an unencodable type \"*ast.FuncType\""
+        },
+        {
+          "function": "pcm16Checked",
+          "status": "skipped",
+          "reason": "Function \"pcm16Checked\" calls \"any\" whose signature uses an unencodable type \"*ast.FuncType\""
+        },
+        {
+          "function": "pcm16",
+          "status": "uncontracted",
+          "reason": "no contract annotations (not a verification candidate)"
+        },
+        {
+          "function": "wavInfo",
+          "status": "uncontracted",
+          "reason": "no contract annotations (not a verification candidate)"
+        },
+        {
+          "function": "pcm16Floats",
+          "status": "uncontracted",
+          "reason": "no contract annotations (not a verification candidate)"
+        }
+      ]
+    },
+    {
+      "module": "sunholo/audio/recipe",
+      "file": "recipe.ail",
+      "verified": 0,
+      "counterexample": 0,
+      "skipped": 5,
+      "errors": 0,
+      "uncontracted": 9,
+      "results": [
+        {
+          "function": "validateRecipe",
+          "status": "skipped",
+          "reason": "Function \"validateRecipe\" uses an unencodable builtin: std/string.join; Function \"validateRecipe\" calls \"flatMap\" whose signature uses an unencodable type \"Result[b, e]\""
+        },
+        {
+          "function": "frames",
+          "status": "skipped",
+          "reason": "SMT declaration closure could not resolve a required sort (cannot encode function body: let body: let body: let body: let body: let value: unresolvable SMT declaration types: calls user function \"round\" that is not SMT-encodable in this context)"
+        },
+        {
+          "function": "parseRecipesAsChecked",
+          "status": "skipped",
+          "reason": "Function \"parseRecipesAsChecked\" calls \"checkBudget\" whose signature uses an unencodable type \"Result[int, AudioError]\""
+        },
+        {
+          "function": "renderChecked",
+          "status": "skipped",
+          "reason": "Function \"renderChecked\" calls \"add\" whose signature uses an unencodable type \"*ast.ArrayType\""
+        },
+        {
+          "function": "parseRecipesChecked",
+          "status": "skipped",
+          "reason": "Function \"parseRecipesChecked\" calls \"checkBudget\" whose signature uses an unencodable type \"Result[int, AudioError]\""
+        },
+        {
+          "function": "defaultRate",
+          "status": "uncontracted",
+          "reason": "no contract annotations (not a verification candidate)"
+        },
+        {
+          "function": "envAt",
+          "status": "uncontracted",
+          "reason": "no contract annotations (not a verification candidate)"
+        },
+        {
+          "function": "phaseAt",
+          "status": "uncontracted",
+          "reason": "no contract annotations (not a verification candidate)"
+        },
+        {
+          "function": "layerSamples",
+          "status": "uncontracted",
+          "reason": "no contract annotations (not a verification candidate)"
+        },
+        {
+          "function": "render",
+          "status": "uncontracted",
+          "reason": "no contract annotations (not a verification candidate)"
+        },
+        {
+          "function": "loopErrors",
+          "status": "uncontracted",
+          "reason": "no contract annotations (not a verification candidate)"
+        },
+        {
+          "function": "parseRecipesAs",
+          "status": "uncontracted",
+          "reason": "no contract annotations (not a verification candidate)"
+        },
+        {
+          "function": "recipeSchema",
+          "status": "uncontracted",
+          "reason": "no contract annotations (not a verification candidate)"
+        },
+        {
+          "function": "parseRecipes",
+          "status": "uncontracted",
+          "reason": "no contract annotations (not a verification candidate)"
+        }
+      ]
+    },
+    {
+      "module": "sunholo/audio/reference",
+      "file": "reference.ail",
+      "verified": 0,
+      "counterexample": 0,
+      "skipped": 0,
+      "errors": 0,
+      "uncontracted": 7,
+      "results": [
+        {
+          "function": "noEnv",
+          "status": "uncontracted",
+          "reason": "no contract annotations (not a verification candidate)"
+        },
+        {
+          "function": "sine",
+          "status": "uncontracted",
+          "reason": "no contract annotations (not a verification candidate)"
+        },
+        {
+          "function": "hiss",
+          "status": "uncontracted",
+          "reason": "no contract annotations (not a verification candidate)"
+        },
+        {
+          "function": "loopRecipe",
+          "status": "uncontracted",
+          "reason": "no contract annotations (not a verification candidate)"
+        },
+        {
+          "function": "shotRecipe",
+          "status": "uncontracted",
+          "reason": "no contract annotations (not a verification candidate)"
+        },
+        {
+          "function": "sineWave",
+          "status": "uncontracted",
+          "reason": "no contract annotations (not a verification candidate)"
+        },
+        {
+          "function": "loopPcmSha",
+          "status": "uncontracted",
+          "reason": "no contract annotations (not a verification candidate)"
+        }
+      ]
+    },
+    {
+      "module": "sunholo/audio/safety",
+      "file": "safety.ail",
+      "verified": 5,
+      "counterexample": 0,
+      "skipped": 1,
+      "errors": 0,
+      "uncontracted": 0,
+      "results": [
+        {
+          "function": "fitsWork",
+          "status": "verified"
+        },
+        {
+          "function": "pcm16ByteCount",
+          "status": "verified"
+        },
+        {
+          "function": "limitsValid",
+          "status": "verified"
+        },
+        {
+          "function": "defaultLimits",
+          "status": "verified"
+        },
+        {
+          "function": "inRange",
+          "status": "verified"
+        },
+        {
+          "function": "samplesInRange",
+          "status": "skipped",
+          "reason": "Function \"samplesInRange\" uses higher-order functions; Function \"samplesInRange\" uses an unencodable builtin: std/list.any; Function \"samplesInRange\" calls \"any\" whose signature uses an unencodable type \"*ast.FuncType\""
+        }
+      ]
+    }
+  ]
+}

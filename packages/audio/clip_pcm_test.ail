@@ -1,0 +1,91 @@
+module sunholo/audio/clip_pcm_test
+import std/array (fromList, toList)
+import std/list (map)
+import std/bytes (fromInts, toInts, length as byteLength)
+import std/result (Result, Ok, Err)
+import std/audio (wavHeader)
+import ./safety (InvalidWav, InvalidClip, InvalidSamples, UnsupportedFormat, ResourceLimit)
+import ./clip (Clip, Mono, Stereo, create, fromMono, defaultClipLimits)
+import ./clip_pcm (Reject, Saturate, fromPcm16, fromWav16, toPcm16, toWav16)
+import ./pcm (pcm16, wavInfo)
+import ./dsp (absF)
+
+-- Independent RIFF fixture, 8 kHz stereo PCM16: left [-1,0.5], right [32767/32768,0].
+pure func stereoWav() -> bytes = fromInts([82,73,70,70,44,0,0,0,87,65,86,69,102,109,116,32,16,0,0,0,1,0,2,0,64,31,0,0,0,125,0,0,4,0,16,0,100,97,116,97,8,0,0,0,0,128,255,127,0,64,0,0])
+pure func mono(xs: [float]) -> Clip = match fromMono(8000, xs, defaultClipLimits()) {
+  Ok(c) => c, Err(_) => {rate: 0, layout: Mono, frames: -1, planes: []}
+}
+
+test "WAV import preserves both channels of independent stereo PCM" {
+  match fromWav16(stereoWav(), defaultClipLimits()) {
+    Ok(c) => c.rate == 8000 && c.layout == Stereo && c.frames == 2 && map(toList, c.planes) == [[-1.0, 0.5], [32767.0 / 32768.0, 0.0]], _ => false
+  }
+}
+
+test "raw stereo PCM import rejects partial frames and respects sample limits" {
+  let b = fromInts([0,128,255,127,0,64,0,0]);
+  (match fromPcm16(b, 24000, Stereo, defaultClipLimits()) { Ok(c) => c.rate == 24000 && map(toList, c.planes) == [[-1.0, 0.5], [32767.0 / 32768.0, 0.0]], _ => false })
+  && (match fromPcm16(fromInts([0,0]), 8000, Stereo, defaultClipLimits()) { Err(InvalidSamples(_)) => true, _ => false })
+  && (match fromPcm16(b, 8000, Stereo, {maxFrames: 2, maxSamples: 3}) { Err(ResourceLimit(_)) => true, _ => false })
+}
+
+test "WAV import rejects malformed input and excessive output frames" {
+  (match fromWav16(fromInts([1,2,3]), defaultClipLimits()) { Err(InvalidWav(_)) => true, _ => false })
+  && (match fromWav16(stereoWav(), {maxFrames: 1, maxSamples: 2}) { Err(ResourceLimit(_)) => true, _ => false })
+}
+
+test "PCM export preserves legacy in-range mono quantization" {
+  let xs = [-1.0, -0.5, 0.0, 0.5, 1.0];
+  match toPcm16(mono(xs), Reject, defaultClipLimits()) { Ok(b) => toInts(b) == toInts(pcm16(xs)), _ => false }
+}
+
+test "stereo PCM export interleaves channels in frame order" {
+  let l = defaultClipLimits();
+  match create(8000, Stereo, [fromList([1.0, 0.0]), fromList([-1.0, 0.5])], l) {
+    Ok(c) => match toPcm16(c, Reject, l) { Ok(b) => toInts(b) == [255,127,1,128,0,0,0,64], _ => false }, _ => false
+  }
+}
+
+test "clipping rejection and saturation are explicit, including huge finite samples" {
+  let c = mono([2.0, -2.0, 1e308, -1e308]); let l = defaultClipLimits();
+  (match toPcm16(c, Reject, l) { Err(InvalidSamples(_)) => true, _ => false })
+  && (match toPcm16(c, Saturate, l) { Ok(b) => toInts(b) == [255,127,0,128,255,127,0,128], _ => false })
+}
+
+test "WAV export preserves stereo metadata and expected byte length" {
+  let l = defaultClipLimits();
+  match create(44100, Stereo, [fromList([0.25, -0.25]), fromList([0.5, 0.0])], l) {
+    Ok(c) => match toWav16(c, Reject, l) {
+      Ok(b) => byteLength(b) == 52 && (match wavInfo(b) { Ok(i) => i.rate == 44100 && i.channels == 2 && i.frames == 2 && i.bits == 16, _ => false }), _ => false
+    }, _ => false
+  }
+}
+
+test "clip export rejects forged channels before touching sample indices" {
+  match toPcm16({mono([1.0]) | layout: Stereo}, Reject, defaultClipLimits()) { Err(InvalidClip(_)) => true, _ => false }
+}
+
+property "stereo WAV roundtrip has the documented quantization error and no channel swap" {
+  forall(n: int) => {
+    let x = intToFloat(n % 1025) / 1024.0; let l = defaultClipLimits();
+    match create(48000, Stereo, [fromList([x]), fromList([0.0 - x])], l) {
+      Err(_) => false,
+      Ok(c) => match toWav16(c, Reject, l) {
+        Err(_) => false,
+        Ok(b) => match fromWav16(b, l) {
+          Ok(out) => match map(toList, out.planes) {
+            [[a], [z]] => absF(a - x) <= 1.0 / 32767.0 + 1.0 / 32768.0 && absF(z + x) <= 1.0 / 32767.0 + 1.0 / 32768.0,
+            _ => false
+          }, _ => false
+        }
+      }
+    }
+  }
+}
+
+
+test "WAV import explicitly refuses supported metadata with unsupported depth or channels" {
+  let l = defaultClipLimits();
+  (match fromWav16(wavHeader(0, 8000, 1, 8), l) { Err(UnsupportedFormat(_)) => true, _ => false })
+  && (match fromWav16(wavHeader(0, 8000, 3, 16), l) { Err(UnsupportedFormat(_)) => true, _ => false })
+}

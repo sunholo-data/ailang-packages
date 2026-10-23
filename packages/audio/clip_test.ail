@@ -1,0 +1,92 @@
+module sunholo/audio/clip_test
+import std/array (fromList, toList, length as arrayLength)
+import std/list (map, range)
+import std/result (Result, Ok, Err)
+import ./safety (InvalidClip, InvalidSamples, ResourceLimit)
+import ./clip (Clip, Mono, Stereo, defaultClipLimits, checkSize, validate, create, fromMono, selectChannel, interleave, fromInterleaved, toStereo, toMono)
+
+pure func fixture(xs: [float]) -> Clip = match fromMono(8000, xs, defaultClipLimits()) {
+  Ok(c) => c, Err(_) => {rate: 0, layout: Mono, frames: -1, planes: []}
+}
+
+test "mono clips allow finite headroom and empty clips" {
+  (match fromMono(8000, [-2.0, 0.0, 2.0], defaultClipLimits()) { Ok(c) => c.frames == 3 && c.layout == Mono, _ => false })
+  && (match fromMono(8000, [], {maxFrames: 0, maxSamples: 0}) { Ok(c) => c.frames == 0, _ => false })
+}
+
+test "clip validation rejects forged metadata and mismatched planes" {
+  let c = fixture([1.0, 2.0]); let l = defaultClipLimits();
+  (match validate({c | frames: 3}, l) { Err(InvalidClip(_)) => true, _ => false })
+  && (match validate({c | planes: []}, l) { Err(InvalidClip(_)) => true, _ => false })
+  && (match validate({c | layout: Stereo}, l) { Err(InvalidClip(_)) => true, _ => false })
+  && (match create(8000, Stereo, [fromList([1.0]), fromList([1.0, 2.0])], l) { Err(InvalidClip(_)) => true, _ => false })
+  && (match validate({c | frames: 9223372036854775807}, l) { Err(ResourceLimit(_)) => true, _ => false })
+}
+
+test "clip dimensions reject invalid limits and total sample overflow" {
+  let l = {maxFrames: 4, maxSamples: 7};
+  (match checkSize(8000, Stereo, 4, l) { Err(ResourceLimit(_)) => true, _ => false })
+  && (match checkSize(8000, Mono, 4, l) { Ok(total) => total == 4, _ => false })
+  && (match checkSize(0, Mono, 1, l) { Err(InvalidClip(_)) => true, _ => false })
+  && (match checkSize(8000, Mono, 1, {l | maxSamples: -1}) { Err(ResourceLimit(_)) => true, _ => false })
+  && (match checkSize(8000, Stereo, 2147483647, {maxFrames: 2147483647, maxSamples: 2147483647}) { Err(ResourceLimit(_)) => true, _ => false })
+}
+
+test "clip constructors reject NaN and both infinities" {
+  let bad = \x. match fromMono(8000, [x], defaultClipLimits()) { Err(InvalidSamples(_)) => true, _ => false };
+  bad(0.0 / 0.0) && bad(1.0 / 0.0) && bad(0.0 - (1.0 / 0.0))
+}
+
+test "stereo interleaving retains distinct left and right samples" {
+  let l = defaultClipLimits();
+  match create(44100, Stereo, [fromList([1.0, 2.0]), fromList([-3.0, -4.0])], l) {
+    Ok(c) => match interleave(c, l) { Ok(xs) => toList(xs) == [1.0, -3.0, 2.0, -4.0] && c.rate == 44100, _ => false },
+    _ => false
+  }
+}
+
+test "interleaved input rejects a partial stereo frame and the output budget" {
+  let l = defaultClipLimits();
+  (match fromInterleaved(8000, Stereo, fromList([1.0, 2.0, 3.0]), l) { Err(InvalidClip(_)) => true, _ => false })
+  && (match fromInterleaved(8000, Stereo, fromList([1.0, 2.0, 3.0, 4.0]), {maxFrames: 2, maxSamples: 3}) { Err(ResourceLimit(_)) => true, _ => false })
+}
+
+test "channel selection bounds are checked" {
+  let c = fixture([0.25, -0.5]); let l = defaultClipLimits();
+  (match selectChannel(c, 0, l) { Ok(p) => toList(p) == [0.25, -0.5], _ => false })
+  && (match selectChannel(c, -1, l) { Err(InvalidClip(_)) => true, _ => false })
+  && (match selectChannel(c, 1, l) { Err(InvalidClip(_)) => true, _ => false })
+}
+
+test "unity mono duplication and average downmix have explicit coefficients" {
+  let l = defaultClipLimits();
+  let dup = match toStereo(fixture([1.0, -0.5]), l) {
+    Ok(c) => map(toList, c.planes) == [[1.0, -0.5], [1.0, -0.5]], _ => false
+  };
+  let avg = match create(8000, Stereo, [fromList([1.0, -1.0]), fromList([-1.0, 0.5])], l) {
+    Ok(c) => match toMono(c, l) { Ok(m) => map(toList, m.planes) == [[0.0, -0.25]], _ => false }, _ => false
+  };
+  dup && avg
+}
+
+test "stereo duplication checks its larger sample budget" {
+  match toStereo(fixture([1.0, 2.0]), {maxFrames: 2, maxSamples: 2}) { Err(ResourceLimit(_)) => true, _ => false }
+}
+
+test "average downmix avoids intermediate overflow for large finite channels" {
+  let l = defaultClipLimits();
+  match create(8000, Stereo, [fromList([1.6e308]), fromList([1.6e308])], l) {
+    Ok(c) => match toMono(c, l) { Ok(m) => map(toList, m.planes) == [[1.6e308]], _ => false }, _ => false
+  }
+}
+
+property "stereo deinterleave-interleave preserves arbitrary bounded frame data" {
+  forall(n: int) => {
+    let v = n % 32; let frames = if v < 0 then 0 - v else v;
+    let xs = fromList(map(\i. intToFloat(i - frames) / 32.0, range(0, frames * 2)));
+    match fromInterleaved(48000, Stereo, xs, defaultClipLimits()) {
+      Ok(c) => match interleave(c, defaultClipLimits()) { Ok(out) => toList(out) == toList(xs) && arrayLength(out) == frames * 2, _ => false },
+      _ => false
+    }
+  }
+}

@@ -1,5 +1,62 @@
 # Changelog
 
+## 0.2.0
+
+Feature: checked mono/stereo clips, channel-preserving PCM16/WAV adapters and editing.
+This release groups the unpublished 0.1.1 hardening milestone with the offline
+clip and editing features.
+
+- `clip`: planar `Array[float]` clips, explicit Mono/Stereo layouts, input/output frame
+  and sample budgets, finite headroom, channel selection and interleaving. Unity
+  mono duplication and 0.5L+0.5R downmix use explicit conversion functions.
+- `edit`: gain, trim, padding, reverse, append, endpoint-defined fades, complementary
+  linear crossfades, bounded placement/mixing and equal-power mono panning. Every
+  public operation revalidates clip records; rates/layouts must match for composition.
+- `clip_pcm`: preserve both stereo channels on PCM16/WAV import and export; choose
+  Reject or Saturate clipping explicitly. In-range mono quantization keeps the old
+  *32767/round convention; decode uses /32768. Huge finite samples saturate before
+  integer conversion. Partial frames, unsupported depth/channel counts, excessive
+  allocations and malformed RIFF return typed errors.
+- Keep all v1 recipe record shapes and existing mono render behavior. Internal
+  headroom is finite but can exceed full scale; integer encoding is the explicit
+  clipping boundary. No implicit resampling or normalization is added.
+- Add InvalidClip to the AudioError type introduced by the hardening milestone. Keep DSP pure and
+  reuse existing std/array and std/bytes; core changes are developed separately.
+
+
+## 0.1.1
+
+Unpublished hardening milestone, included in 0.2.0.
+
+Fix: harden the mono audio boundary without changing existing valid sound samples.
+
+- Add `safety.AudioError`, caller-supplied `RenderLimits` and `defaultLimits`; add
+  `validateRecipe`, `renderChecked`, `parseRecipesChecked` and `parseRecipesAsChecked`.
+  Checked rendering rejects invalid/non-finite parameters and excessive frames, layers
+  or layer work before allocating sample lists. JSON limits count UTF-8 bytes before decoding.
+- Reject wrong JSON field types, fractional rate/seed, invalid parameter domains,
+  zero-frame durations and zero-frequency exponential glides. Missing fields still default.
+- Silent layers with drive remain silence instead of producing NaNs. Existing nonzero
+  render arithmetic and PCM quantization order are preserved.
+- One-shot placement selects the greatest active nonnegative start, independently of
+  input ordering or duplicates. All loop restrictions are checked independently.
+- Validate all WAV chunks inside the declared RIFF extent: padding, fmt size, rate,
+  alignment/byte rate, complete frames, duplicate fmt/data and trailing truncation.
+  Bound scans to 4096 chunks. Integer PCM8/16/24/32 metadata is supported;
+  float/extensible/compressed WAV remains explicitly unsupported.
+- Add `pcm16FloatsChecked` (bounded first-channel decode with metadata revalidation),
+  `pcm16Checked` and `wav16Checked` (reject non-finite samples and clipping).
+  Decoding uses direct byte access instead of copying every byte into a boxed list.
+  The compatibility decoder returns [] on invalid metadata rather than indexing out of bounds.
+- Add regression/property tests, runtime-contract smoke coverage and verified integer
+  work/PCM-size helpers. Effects stay pure, with IO used only by the smoke verdict.
+
+Compatibility: public record shapes and existing function signatures are unchanged.
+Previously accepted malformed WAVs and invalid recipes now fail validation; supported
+recipe rates are 1..384000 Hz and peak targets are -120..0 dBFS. Checked APIs are
+opt-in; the original raw render/encode functions remain caller-validated primitives.
+Core WAV writers, codecs and resampling are unchanged.
+
 ## 0.1.0
 
 Feature (first release; stapledons-godot R2-SUNHOLO-AUDIO, ledger D-119): the sound synthesis and

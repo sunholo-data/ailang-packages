@@ -13,13 +13,15 @@ module sunholo/audio/recipe
 -- release unless that release is `[release] kind = "breaking"`; new fields default to a no-op.
 import std/list (map, range, foldl, zipWith, drop, flatMap, length as size, maximumFloat)
 import std/array (fromList, toList, add, make)
-import std/math (sin, cos, exp, log, round, floatToInt, pow)
+import std/math (sin, cos, exp, log, round, floatToInt, pow, floor)
 import std/option (Option, Some, None)
 import std/result (Result, Ok, Err)
-import std/string (join, floatToStr)
-import std/json (Json, decode, getString, getNumber, getBool, getArray, getObject, getInt)
+import std/string (join, floatToStr, length as textLength)
+import std/json (Json, decode, getString, getNumber, getBool, getArray, getObject, getInt, get, JNull, JBool, JNumber, JString, JArray, JObject)
 import ./dsp (twoPi, absF, onePole, lowpass, sweepLowpass, softSat, normalisePeak)
 import ./noise (rampNoise, white)
+import ./safety (AudioError, InvalidRecipe, ResourceLimit, InvalidSamples, RenderLimits, limitsValid, inRange, samplesInRange, fitsWork)
+import std/bytes (fromString, length as byteLength)
 
 -- The default sample rate: 48 kHz.
 export pure func defaultRate() -> int = 48000
@@ -122,7 +124,7 @@ export pure func render(r: Recipe) -> [float] {
   let n = frames(r);
   let fr = intToFloat(r.rate);
   let summed = foldl(\acc l. add(acc, fromList(layerSamples(l, n, r.loop, r.rate))), make(n, 0.0), r.layers);
-  let summed2 = if r.drive > 0.0 then { let pk = match maximumFloat(map(absF, toList(summed))) { Some(p) => p, None => 1.0 }; map(\x. softSat(r.drive, x / pk), toList(summed)) } else toList(summed);
+  let summed2 = if r.drive > 0.0 then { let pk = match maximumFloat(map(absF, toList(summed))) { Some(p) => p, None => 1.0 }; if pk <= 0.0 then toList(summed) else map(\x. softSat(r.drive, x / pk), toList(summed)) } else toList(summed);
   let shaped = zipWith(\x i. x * swellAt(r, intToFloat(i) / fr) * edgeAt(r, i, n, fr), summed2, range(0, n));
   normalisePeak(r.peakDb, shaped)
 }
@@ -139,8 +141,10 @@ export pure func loopErrors(r: Recipe) -> [string] =
       else if l.env.attack > 0.0 || l.env.tau > 0.0 || l.env.delay > 0.0 || l.env.stop > 0.0 then ["${r.id}: a loop layer cannot have an envelope"]
       else [], r.layers)
     ++ flatMap(\l. if l.vibCents > 0.0 && not whole(l.vibRate, r.seconds) then ["${r.id}: a vibrato does not complete whole cycles over the loop"]
-      else if l.amDepth > 0.0 && not whole(l.amRate, r.seconds) then ["${r.id}: a beat does not complete whole cycles over the loop"]
-      else if l.lowpassTo > 0.0 && l.lowpassTo != l.lowpass then ["${r.id}: a loop cannot sweep its filter"]
+      else [], r.layers)
+    ++ flatMap(\l. if l.amDepth > 0.0 && not whole(l.amRate, r.seconds) then ["${r.id}: a beat does not complete whole cycles over the loop"]
+      else [], r.layers)
+    ++ flatMap(\l. if l.lowpassTo > 0.0 && l.lowpassTo != l.lowpass then ["${r.id}: a loop cannot sweep its filter"]
       else [], r.layers)
     ++ (if r.swellDepth > 0.0 && not whole(r.swellRate, r.seconds) then ["${r.id}: the swell does not complete whole cycles over the loop"] else [])
 
@@ -165,7 +169,13 @@ pure func layerOf(j: Json) -> Layer {
 pure func kindErrors(id: string, ls: [Layer]) -> [string] =
   flatMap(\l. if l.kind == "sine" || l.kind == "noise" || l.kind == "white" then [] else ["${id}: unknown layer kind ${l.kind}"], ls)
 
-pure func recipeOf(j: Json) -> Result[Recipe, string] = match getString(j, "id") {
+pure func recipeOf(j: Json) -> Result[Recipe, string] =
+  match shapeErrors(j) {
+    e :: _ => Err(e),
+    [] => recipeValues(j)
+  }
+
+pure func recipeValues(j: Json) -> Result[Recipe, string] = match getString(j, "id") {
   None => Err("a recipe without an id"),
   Some(id) => {
     let layers = match getArray(j, "layers") { Some(ls) => map(layerOf, ls), None => [] };
@@ -175,11 +185,11 @@ pure func recipeOf(j: Json) -> Result[Recipe, string] = match getString(j, "id")
       swellRate: match sw { Some(s) => num(s, "rate", 0.0), None => 0.0 },
       swellDepth: match sw { Some(s) => num(s, "depth", 0.0), None => 0.0 },
       drive: num(j, "drive", 0.0), rate: match getInt(j, "rate") { Some(x) => x, None => defaultRate() }, layers: layers};
-    if r.seconds <= 0.0 then Err("${id}: seconds must be positive")
-    else if r.seconds >= 100000.0 then Err("${id}: seconds must be below 100000")
-    else if r.rate <= 0 then Err("${id}: rate must be positive")
-    else if size(layers) == 0 then Err("${id}: no layers")
-    else match kindErrors(id, layers) ++ loopErrors(r) { [] => Ok(r), es => Err(join("; ", es)) }
+    match validateRecipe(r) {
+      Ok(valid) => Ok(valid),
+      Err(InvalidRecipe(e)) => Err(e),
+      Err(_) => Err("invalid recipe")
+    }
   }
 }
 
@@ -200,3 +210,119 @@ export pure func parseRecipesAs(schema: string, text: string) -> Result[[Recipe]
 export pure func recipeSchema() -> string = "sunholo.audio.recipes/1"
 
 export pure func parseRecipes(text: string) -> Result[[Recipe], string] = parseRecipesAs(recipeSchema(), text)
+
+-- Explicit type checks keep missing defaults separate from provided-but-invalid values.
+pure func fieldErrors(j: Json, key: string, kind: string) -> [string] = match get(j, key) {
+  None => [],
+  Some(v) => {
+    let ok = match v {
+      JNumber(x) => if kind == "integer" then inRange(x, -2147483647.0, 2147483647.0) && x == floor(x) else kind == "number",
+      JString(_) => kind == "string",
+      JBool(_) => kind == "boolean",
+      JObject(_) => kind == "object",
+      JArray(_) => kind == "array",
+      JNull => false
+    };
+    if ok then [] else ["${key}: expected ${kind}"]
+  }
+}
+
+pure func numberErrors(j: Json, keys: [string]) -> [string] = flatMap(\k. fieldErrors(j, k, "number"), keys)
+pure func envErrors(j: Json) -> [string] = match getObject(j, "env") {
+  None => [], Some(e) => numberErrors(e, ["delay", "attack", "tau", "stop"])
+}
+pure func layerShape(j: Json) -> [string] = match j {
+  JObject(_) => fieldErrors(j, "kind", "string") ++ fieldErrors(j, "seed", "integer") ++ fieldErrors(j, "env", "object") ++ envErrors(j)
+    ++ numberErrors(j, ["freq", "glide_to", "glide_from_s", "glide_until_s", "amp", "lowpass_hz", "highpass_hz", "vib_hz", "vib_cents", "beat_hz", "beat_depth", "lowpass_to_hz"]),
+  _ => ["layer must be an object"]
+}
+pure func shapeErrors(j: Json) -> [string] = match j {
+  JObject(_) => fieldErrors(j, "id", "string") ++ fieldErrors(j, "rate", "integer") ++ fieldErrors(j, "loop", "boolean")
+    ++ fieldErrors(j, "swell", "object") ++ fieldErrors(j, "layers", "array")
+    ++ numberErrors(j, ["seconds", "peak_db", "fade_ms", "drive"])
+    ++ (match getObject(j, "swell") { None => [], Some(sw) => numberErrors(sw, ["rate", "depth"]) })
+    ++ (match getArray(j, "layers") { None => [], Some(ls) => flatMap(layerShape, ls) }),
+  _ => ["recipe must be an object"]
+}
+
+pure func layerValid(l: Layer) -> bool =
+  inRange(l.freq, 0.0, 1000000.0) && inRange(l.freqTo, 0.0, 1000000.0)
+  && inRange(l.glide0, 0.0, 100000.0) && inRange(l.glide1, l.glide0, 100000.0)
+  && (l.freq == l.freqTo || l.glide1 <= l.glide0 || (l.freq > 0.0 && l.freqTo > 0.0))
+  && inRange(l.amp, -1000000.0, 1000000.0)
+  && inRange(l.lowpass, 0.0, 1000000.0) && inRange(l.highpass, 0.0, 1000000.0)
+  && inRange(l.lowpassTo, 0.0, 1000000.0) && (l.lowpassTo == 0.0 || l.lowpass > 0.0)
+  && l.seed >= 0 && l.seed <= 2147483647
+  && inRange(l.env.delay, 0.0, 100000.0) && inRange(l.env.attack, 0.0, 100000.0)
+  && inRange(l.env.tau, 0.0, 100000.0) && inRange(l.env.stop, 0.0, 100000.0)
+  && inRange(l.vibRate, 0.0, 1000000.0) && inRange(l.vibCents, 0.0, 12000.0)
+  && inRange(l.amRate, 0.0, 1000000.0) && inRange(l.amDepth, 0.0, 1.0)
+
+-- Validates direct record construction as well as JSON. This does not allocate samples.
+-- Frequencies are bounded for arithmetic, not anti-aliased; rates are not converted.
+export func validateRecipe(r: Recipe) -> Result[Recipe, AudioError] ! {}
+ensures { match result { Ok(v) => v.rate > 0 && v.rate <= 384000 && v.seconds > 0.0 && v.seconds < 100000.0 && v.peakDb >= -120.0 && v.peakDb <= 0.0 && size(v.layers) > 0, Err(_) => true } }
+{
+  if r.id == "" then Err(InvalidRecipe("id must not be empty"))
+  else if not inRange(r.seconds, 0.0, 100000.0) || r.seconds <= 0.0 || r.seconds >= 100000.0 then Err(InvalidRecipe("seconds must be positive and below 100000"))
+  else if r.rate <= 0 || r.rate > 384000 then Err(InvalidRecipe("rate must be 1..384000 Hz"))
+  else if not inRange(r.peakDb, -120.0, 0.0) then Err(InvalidRecipe("peak_db must be -120..0 dBFS"))
+  else if not inRange(r.fadeMs, 0.0, 100000000.0) || not inRange(r.drive, 0.0, 1000000.0) then Err(InvalidRecipe("invalid fade or drive"))
+  else if not inRange(r.swellRate, 0.0, 1000000.0) || not inRange(r.swellDepth, 0.0, 1.0) then Err(InvalidRecipe("invalid swell"))
+  else if size(r.layers) == 0 then Err(InvalidRecipe("no layers"))
+  else if not foldl(\ok l. ok && layerValid(l), true, r.layers) then Err(InvalidRecipe("invalid layer parameter"))
+  else if round(r.seconds * intToFloat(r.rate)) < 1.0 then Err(InvalidRecipe("duration rounds to zero frames"))
+  else match kindErrors(r.id, r.layers) ++ loopErrors(r) {
+    [] => Ok(r), es => Err(InvalidRecipe(join("; ", es)))
+  }
+
+}
+
+pure func checkBudget(r: Recipe, limits: RenderLimits) -> Result[int, AudioError] =
+  if not limitsValid(limits) then Err(ResourceLimit("invalid render limits"))
+  else if size(r.layers) > limits.maxLayers then Err(ResourceLimit("layer limit exceeded"))
+  else match validateRecipe(r) {
+    Err(e) => Err(e),
+    Ok(_) => if round(r.seconds * intToFloat(r.rate)) > intToFloat(limits.maxFrames) then Err(ResourceLimit("frame limit exceeded"))
+      else {
+        let n = frames(r);
+        let passes = foldl(\k l. k + (if r.loop && (l.kind == "noise" || l.kind == "white") then 2 else 1), 0, r.layers);
+        if fitsWork(n, passes, limits.maxLayerFrames) then Ok(n) else Err(ResourceLimit("layer-frame limit exceeded"))
+      }
+  }
+
+-- No sample allocations happen until all domains and caller budgets have been checked.
+export func renderChecked(r: Recipe, limits: RenderLimits) -> Result[[float], AudioError] ! {}
+ensures { match result { Ok(xs) => size(xs) == frames(r) && size(xs) <= limits.maxFrames && samplesInRange(xs, -1.000000000001, 1.000000000001), Err(_) => true } }
+{
+ match checkBudget(r, limits) {
+  Err(e) => Err(e),
+  Ok(_) => {
+    let xs = render(r);
+    if samplesInRange(xs, -1.000000000001, 1.000000000001) then Ok(xs)
+    else Err(InvalidSamples("render produced non-finite or out-of-range samples"))
+  }
+}
+
+}
+
+export func parseRecipesAsChecked(schema: string, text: string, limits: RenderLimits) -> Result[[Recipe], AudioError] ! {}
+ensures { match result { Ok(rs) => size(rs) > 0 && foldl(\ok r. ok && size(r.layers) <= limits.maxLayers && frames(r) <= limits.maxFrames, true, rs), Err(_) => true } }
+{
+  if not limitsValid(limits) then Err(ResourceLimit("invalid render limits"))
+  else if textLength(text) > limits.maxInputBytes || byteLength(fromString(text)) > limits.maxInputBytes then Err(ResourceLimit("recipe input byte limit exceeded"))
+  else match parseRecipesAs(schema, text) {
+    Err(e) => Err(InvalidRecipe(e)),
+    Ok(rs) => {
+      let budget = foldl(\acc r. match acc { Err(e) => Err(e), Ok(_) => checkBudget(r, limits) }, Ok(0), rs);
+      match budget { Err(e) => Err(e), Ok(_) => Ok(rs) }
+    }
+  }
+
+}
+
+export func parseRecipesChecked(text: string, limits: RenderLimits) -> Result[[Recipe], AudioError] ! {}
+ensures { match result { Ok(rs) => size(rs) > 0 && foldl(\ok r. ok && size(r.layers) <= limits.maxLayers && frames(r) <= limits.maxFrames, true, rs), Err(_) => true } }
+{
+  parseRecipesAsChecked(recipeSchema(), text, limits)
+}

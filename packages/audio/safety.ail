@@ -1,0 +1,54 @@
+module sunholo/audio/safety
+-- Shared errors and allocation guards. These are ordinary pure checks: callers do not
+-- need --verify-contracts. Limits count inputs/frames/layer frames, not heap bytes or CPU.
+import std/list (any)
+
+export type AudioError = InvalidClip(string) | InvalidRecipe(string) | InvalidWav(string) | UnsupportedFormat(string) | ResourceLimit(string) | InvalidSamples(string) deriving (Eq)
+
+export type RenderLimits = {maxInputBytes: int, maxFrames: int, maxLayers: int, maxLayerFrames: int}
+
+-- 30 s mono at 48 kHz, up to 32 layers and eight full-duration layer passes.
+-- A noise loop counts twice because its filter warms up over two periods.
+export func defaultLimits() -> RenderLimits ! {}
+ensures { result.maxFrames > 0 && result.maxLayers > 0 && result.maxLayerFrames >= result.maxFrames && result.maxInputBytes > 0 }
+{
+  {maxInputBytes: 1048576, maxFrames: 1440000, maxLayers: 32, maxLayerFrames: 11520000}
+}
+
+-- Bounded comparisons reject both NaN (unordered) and infinities without conversions.
+export func inRange(x: float, low: float, high: float) -> bool ! {}
+ensures { not result || (x >= low && x <= high) }
+{
+  x - x == 0.0 && low - low == 0.0 && high - high == 0.0 && x >= low && x <= high
+}
+
+export func samplesInRange(xs: [float], low: float, high: float) -> bool ! {}
+ensures { not result || not any(\x. not inRange(x, low, high), xs) }
+{
+  not any(\x. not inRange(x, low, high), xs)
+}
+
+export func fitsWork(n: int, passes: int, limit: int) -> bool ! {}
+requires { n >= 0 && n <= 2147483647 && passes > 0 && passes <= 2048 && limit >= 0 && limit <= 2147483647 }
+ensures { not result || n * passes <= limit }
+{
+  n <= limit / passes
+}
+
+-- Integer PCM payload size. The upper bound leaves 36 bytes for a classic WAV RIFF body.
+export func pcm16ByteCount(n: int) -> int ! {}
+requires { n >= 0 && n <= 2147483629 }
+ensures { result == n * 2 && result >= 0 && result <= 4294967258 }
+{
+  n * 2
+}
+
+export func limitsValid(l: RenderLimits) -> bool ! {}
+ensures { not result || (l.maxInputBytes > 0 && l.maxInputBytes <= 16777216 && l.maxFrames > 0 && l.maxFrames <= 2147483647 && l.maxLayers > 0 && l.maxLayers <= 1024 && l.maxLayerFrames > 0 && l.maxLayerFrames <= 2147483647) }
+{
+  l.maxInputBytes > 0 && l.maxInputBytes <= 16777216
+  && l.maxFrames > 0 && l.maxFrames <= 2147483647
+  && l.maxLayers > 0 && l.maxLayers <= 1024
+  && l.maxLayerFrames > 0 && l.maxLayerFrames <= 2147483647
+
+}

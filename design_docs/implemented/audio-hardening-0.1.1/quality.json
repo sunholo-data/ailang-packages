@@ -1,0 +1,77 @@
+{
+  "schema": "ailang.package-quality/v1",
+  "package": "sunholo/audio",
+  "version": "0.1.1",
+  "stability": "experimental",
+  "mode": "publisher",
+  "compile": {
+    "source": "server",
+    "ok": true,
+    "files": 16
+  },
+  "contracts": {
+    "source": "server",
+    "verified": 7,
+    "total": 25,
+    "counterexample": 0,
+    "skipped": 18,
+    "errors": 0,
+    "uncontracted_exports": 33,
+    "wall_seconds": 0.123514416
+  },
+  "tests": {
+    "source": "attested",
+    "files": 7,
+    "passed": 79,
+    "failed": 0
+  },
+  "smoke": {
+    "source": "attested",
+    "present": true,
+    "passed": true,
+    "seconds": 7.171552667
+  },
+  "interface": {
+    "source": "server",
+    "hash_v1": "sha256:ccfa6ba3648c5c795ae6e343893be9aaad42e9d4f16b8438d940ee1e84861b67",
+    "hash_v2": "sha256:ifacev2:1c130bd28a9e2fb9c248c5ad861bd0e14ce85f31bcd06c4b6ea1d8f1bf80b8c8",
+    "signatures": 71
+  },
+  "effects": {
+    "source": "server",
+    "max": [
+      "IO"
+    ],
+    "ceiling_declared": true,
+    "rank_max": "IO"
+  },
+  "release": {
+    "source": "server",
+    "kind": "fix",
+    "changelog_section": true,
+    "notes": "Fix: harden the mono audio boundary without changing existing valid sound samples.\n\n- Add `safety.AudioError`, caller-supplied `RenderLimits` and `defaultLimits`; add\n  `validateRecipe`, `renderChecked`, `parseRecipesChecked` and `parseRecipesAsChecked`.\n  Checked rendering rejects invalid/non-finite parameters and excessive frames, layers\n  or layer work before allocating sample lists. JSON limits count UTF-8 bytes before decoding.\n- Reject wrong JSON field types, fractional rate/seed, invalid parameter domains,\n  zero-frame durations and zero-frequency exponential glides. Missing fields still default.\n- Silent layers with drive remain silence instead of producing NaNs. Existing nonzero\n  render arithmetic and PCM quantization order are preserved.\n- One-shot placement selects the greatest active nonnegative start, independently of\n  input ordering or duplicates. All loop restrictions are checked independently.\n- Validate all WAV chunks inside the declared RIFF extent: padding, fmt size, rate,\n  alignment/byte rate, complete frames, duplicate fmt/data and trailing truncation.\n  Bound scans to 4096 chunks. Integer PCM8/16/24/32 metadata is supported;\n  float/extensible/compressed WAV remains explicitly unsupported.\n- Add `pcm16FloatsChecked` (bounded first-channel decode with metadata revalidation),\n  `pcm16Checked` and `wav16Checked` (reject non-finite samples and clipping).\n  Decoding uses direct byte access instead of copying every byte into a boxed list.\n  The compatibility decoder returns [] on invalid metadata rather than indexing out of bounds.\n- Add regression/property tests, runtime-contract smoke coverage and verified integer\n  work/PCM-size helpers. Effects stay pure, with IO used only by the smoke verdict.\n\nCompatibility: public record shapes and existing function signatures are unchanged.\nPreviously accepted malformed WAVs and invalid recipes now fail validation; supported\nrecipe rates are 1..384000 Hz and peak targets are -120..0 dBFS. Checked APIs are\nopt-in; the original raw render/encode functions"
+  },
+  "docs": {
+    "agent_md": true,
+    "ai_summary": true,
+    "agent_doc_exports_covered": 4
+  },
+  "style": {
+    "exported_funcs": 58,
+    "pure_exports": 58,
+    "pure_ratio": 1
+  },
+  "gates": [],
+  "badges": [
+    {
+      "code": "PUB016",
+      "level": "info",
+      "msg": "18 contract(s) skipped by Z3 (unencodable types or builtins) — not proved; `ailang verify --package .` lists the reason per function"
+    },
+    {
+      "code": "PUB011",
+      "level": "warn",
+      "msg": "33 exported function(s) carry no contract"
+    }
+  ]
+}

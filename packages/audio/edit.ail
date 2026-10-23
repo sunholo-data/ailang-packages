@@ -1,0 +1,163 @@
+module sunholo/audio/edit
+-- Bounded pure clip edits. Inputs and outputs are validated, with finite
+-- headroom retained. Frame positions are integers; rates/layouts never change
+-- except for the explicit mono panner.
+import std/array (fromList, get, scale)
+import std/list (map, range)
+import std/math (sin, cos, sqrt, PI)
+import std/result (Result, Ok, Err)
+import ./clip (Clip, ClipLimits, Mono, Stereo, channelCount, checkSize, validate, create)
+import ./safety (AudioError, InvalidClip, InvalidSamples, ResourceLimit, inRange)
+
+pure func build(c: Clip, n: int, f: (int, int) -> float, limits: ClipLimits) -> Result[Clip, AudioError] =
+  match checkSize(c.rate, c.layout, n, limits) {
+    Err(e) => Err(e),
+    Ok(_) => create(c.rate, c.layout, map(\ch. fromList(map(\i. f(ch, i), range(0, n))), range(0, channelCount(c.layout))), limits)
+  }
+
+pure func pair(a: Clip, b: Clip, limits: ClipLimits) -> Result[(), AudioError] =
+  match validate(a, limits) {
+    Err(e) => Err(e),
+    Ok(_) => match validate(b, limits) {
+      Err(e) => Err(e),
+      Ok(_) => if a.rate != b.rate || a.layout != b.layout then Err(InvalidClip("clip rate/layout mismatch")) else Ok(())
+    }
+  }
+
+export func gain(c: Clip, factor: float, limits: ClipLimits) -> Result[Clip, AudioError] ! {}
+ensures { match result { Ok(v) => v.frames == c.frames && v.rate == c.rate && v.layout == c.layout, Err(_) => true } }
+{
+  if factor - factor != 0.0 then Err(InvalidSamples("gain must be finite"))
+  else match validate(c, limits) {
+    Err(e) => Err(e), Ok(v) => create(v.rate, v.layout, map(\p. scale(factor, p), v.planes), limits)
+  }
+}
+
+export func trim(c: Clip, start: int, end: int, limits: ClipLimits) -> Result[Clip, AudioError] ! {}
+ensures { match result { Ok(v) => v.frames == end - start && v.rate == c.rate && v.layout == c.layout, Err(_) => true } }
+{
+  match validate(c, limits) {
+    Err(e) => Err(e),
+    Ok(v) => if start < 0 || end < start || end > v.frames then Err(InvalidClip("invalid trim interval"))
+      else { let ps = fromList(v.planes); build(v, end - start, \ch i. get(get(ps, ch), start + i), limits) }
+  }
+}
+
+export func pad(c: Clip, before: int, after: int, limits: ClipLimits) -> Result[Clip, AudioError] ! {}
+ensures { match result { Ok(v) => v.frames == c.frames + before + after && v.rate == c.rate && v.layout == c.layout, Err(_) => true } }
+{
+  match validate(c, limits) {
+    Err(e) => Err(e),
+    Ok(v) => if before < 0 || after < 0 then Err(InvalidClip("negative padding"))
+      else if before > limits.maxFrames - v.frames || after > limits.maxFrames - v.frames - before then Err(ResourceLimit("padding exceeds frame limit"))
+      else {
+        let ps = fromList(v.planes);
+        build(v, v.frames + before + after, \ch i. if i < before || i - before >= v.frames then 0.0 else get(get(ps, ch), i - before), limits)
+      }
+  }
+}
+
+export func reverse(c: Clip, limits: ClipLimits) -> Result[Clip, AudioError] ! {}
+ensures { match result { Ok(v) => v.frames == c.frames && v.rate == c.rate && v.layout == c.layout, Err(_) => true } }
+{
+  match validate(c, limits) {
+    Err(e) => Err(e),
+    Ok(v) => { let ps = fromList(v.planes); build(v, v.frames, \ch i. get(get(ps, ch), v.frames - 1 - i), limits) }
+  }
+}
+
+export func append(a: Clip, b: Clip, limits: ClipLimits) -> Result[Clip, AudioError] ! {}
+ensures { match result { Ok(v) => v.frames == a.frames + b.frames && v.rate == a.rate && v.layout == a.layout, Err(_) => true } }
+{
+  match pair(a, b, limits) {
+    Err(e) => Err(e),
+    Ok(_) => if b.frames > limits.maxFrames - a.frames then Err(ResourceLimit("append exceeds frame limit"))
+      else {
+        let ap = fromList(a.planes); let bp = fromList(b.planes);
+        build(a, a.frames + b.frames, \ch i. if i < a.frames then get(get(ap, ch), i) else get(get(bp, ch), i - a.frames), limits)
+      }
+  }
+}
+
+pure func fadeWeight(pos: int, count: int) -> float =
+  if count <= 0 || pos >= count then 1.0
+  else if count == 1 then 0.0 else intToFloat(pos) / intToFloat(count - 1)
+
+-- Counts are samples including both endpoints. 0 disables; 1 mutes the edge
+-- sample. Overlapping fades multiply. No new samples or tail are introduced.
+export func fade(c: Clip, fadeIn: int, fadeOut: int, limits: ClipLimits) -> Result[Clip, AudioError] ! {}
+ensures { match result { Ok(v) => v.frames == c.frames && v.rate == c.rate && v.layout == c.layout, Err(_) => true } }
+{
+  match validate(c, limits) {
+    Err(e) => Err(e),
+    Ok(v) => if fadeIn < 0 || fadeOut < 0 || fadeIn > v.frames || fadeOut > v.frames then Err(InvalidClip("fade count outside clip"))
+      else {
+        let ps = fromList(v.planes);
+        build(v, v.frames, \ch i. get(get(ps, ch), i) * fadeWeight(i, fadeIn) * fadeWeight(v.frames - 1 - i, fadeOut), limits)
+      }
+  }
+}
+
+-- Complementary linear crossfade. A single overlapping sample uses 0.5/0.5;
+-- zero overlap appends. The overlap may be the entire length of either clip.
+export func crossfade(a: Clip, b: Clip, overlap: int, limits: ClipLimits) -> Result[Clip, AudioError] ! {}
+ensures { match result { Ok(v) => v.frames == a.frames + b.frames - overlap && v.rate == a.rate && v.layout == a.layout, Err(_) => true } }
+{
+  match pair(a, b, limits) {
+    Err(e) => Err(e),
+    Ok(_) => if overlap < 0 || overlap > a.frames || overlap > b.frames then Err(InvalidClip("invalid crossfade overlap"))
+      else if b.frames - overlap > limits.maxFrames - a.frames then Err(ResourceLimit("crossfade exceeds frame limit"))
+      else {
+        let ap = fromList(a.planes); let bp = fromList(b.planes); let start = a.frames - overlap;
+        build(a, a.frames + b.frames - overlap, \ch i.
+          if i < start then get(get(ap, ch), i)
+          else if i >= a.frames then get(get(bp, ch), i - start)
+          else {
+            let w = if overlap == 1 then 0.5 else intToFloat(i - start) / intToFloat(overlap - 1);
+            get(get(ap, ch), i) * (1.0 - w) + get(get(bp, ch), i - start) * w
+          }, limits)
+      }
+  }
+}
+
+-- Mix with finite headroom, extending with silence when needed. Empty overlays
+-- leave the base unchanged. Clipping/normalization is never implicit here.
+export func mixAt(base: Clip, overlay: Clip, start: int, limits: ClipLimits) -> Result[Clip, AudioError] ! {}
+ensures { match result { Ok(v) => v.frames >= base.frames && v.frames <= limits.maxFrames && v.rate == base.rate && v.layout == base.layout, Err(_) => true } }
+{
+  match pair(base, overlay, limits) {
+    Err(e) => Err(e),
+    Ok(_) => if start < 0 then Err(InvalidClip("negative mix start"))
+      else if start > limits.maxFrames || overlay.frames > limits.maxFrames - start then Err(ResourceLimit("mix exceeds frame limit"))
+      else if overlay.frames == 0 then Ok(base)
+      else {
+        let end = start + overlay.frames; let n = if end > base.frames then end else base.frames;
+        let bp = fromList(base.planes); let op = fromList(overlay.planes);
+        build(base, n, \ch i.
+          (if i < base.frames then get(get(bp, ch), i) else 0.0)
+          + (if i >= start && i < end then get(get(op, ch), i - start) else 0.0), limits)
+      }
+  }
+}
+
+-- Pan a mono source with equal-power gains. Stereo balance is a separate future
+-- policy. Hard endpoints are exact; center uses identical sqrt(0.5) gains.
+export func panMono(c: Clip, position: float, limits: ClipLimits) -> Result[Clip, AudioError] ! {}
+ensures { match result { Ok(v) => v.frames == c.frames && v.rate == c.rate && v.layout == Stereo, Err(_) => true } }
+{
+  if not inRange(position, -1.0, 1.0) then Err(InvalidClip("pan position must be -1..1"))
+  else match validate(c, limits) {
+    Err(e) => Err(e),
+    Ok(v) => if v.layout != Mono then Err(InvalidClip("panMono requires mono input"))
+      else match checkSize(v.rate, Stereo, v.frames, limits) {
+        Err(e) => Err(e),
+        Ok(_) => {
+          let angle = (position + 1.0) * PI(()) / 4.0;
+          let left = if position == -1.0 then 1.0 else if position == 1.0 then 0.0 else if position == 0.0 then sqrt(0.5) else cos(angle);
+          let right = if position == -1.0 then 0.0 else if position == 1.0 then 1.0 else if position == 0.0 then sqrt(0.5) else sin(angle);
+          let p = get(fromList(v.planes), 0);
+          create(v.rate, Stereo, [scale(left, p), scale(right, p)], limits)
+        }
+      }
+  }
+}

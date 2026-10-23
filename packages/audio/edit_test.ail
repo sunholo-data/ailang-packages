@@ -1,0 +1,133 @@
+module sunholo/audio/edit_test
+import std/array (fromList, toList)
+import std/list (map, range)
+import std/result (Result, Ok, Err)
+import ./safety (InvalidClip, InvalidSamples, ResourceLimit)
+import ./clip (Clip, Mono, Stereo, defaultClipLimits, fromMono, create)
+import ./edit (gain, trim, pad, reverse, append, fade, crossfade, mixAt, panMono)
+import ./dsp (absF)
+
+pure func mono(xs: [float]) -> Clip = match fromMono(8000, xs, defaultClipLimits()) {
+  Ok(c) => c, Err(_) => {rate: 0, layout: Mono, frames: -1, planes: []}
+}
+pure func samples(r: Result[Clip, e]) -> [[float]] = match r { Ok(c) => map(toList, c.planes), Err(_) => [[999999.0]] }
+
+test "gain retains headroom and leaves the immutable input unchanged" {
+  let c = mono([1.0, -0.5]); let l = defaultClipLimits();
+  samples(gain(c, 2.0, l)) == [[2.0, -1.0]] && map(toList, c.planes) == [[1.0, -0.5]]
+}
+
+test "gain rejects nonfinite factors and nonfinite output" {
+  let l = defaultClipLimits();
+  (match gain(mono([1.0]), 1.0 / 0.0, l) { Err(InvalidSamples(_)) => true, _ => false })
+  && (match gain(mono([1.0e308]), 4.0, l) { Err(InvalidSamples(_)) => true, _ => false })
+}
+
+test "trim uses end-exclusive frames and permits an empty interval" {
+  let c = mono([1.0, 2.0, 3.0, 4.0]); let l = defaultClipLimits();
+  samples(trim(c, 1, 3, l)) == [[2.0, 3.0]] && samples(trim(c, 2, 2, l)) == [[]]
+  && (match trim(c, -1, 2, l) { Err(InvalidClip(_)) => true, _ => false })
+  && (match trim(c, 2, 5, l) { Err(InvalidClip(_)) => true, _ => false })
+}
+
+test "padding and reverse retain both channel identities" {
+  let l = defaultClipLimits();
+  match create(8000, Stereo, [fromList([1.0, 2.0]), fromList([-3.0, -4.0])], l) {
+    Ok(c) => samples(pad(c, 1, 2, l)) == [[0.0, 1.0, 2.0, 0.0, 0.0], [0.0, -3.0, -4.0, 0.0, 0.0]]
+      && samples(reverse(c, l)) == [[2.0, 1.0], [-4.0, -3.0]], _ => false
+  }
+}
+
+test "padding refuses negative and excessive dimensions before building output" {
+  let c = mono([1.0]); let l = {maxFrames: 4, maxSamples: 4};
+  (match pad(c, -1, 0, l) { Err(InvalidClip(_)) => true, _ => false })
+  && (match pad(c, 9223372036854775807, 1, l) { Err(ResourceLimit(_)) => true, _ => false })
+  && (match pad(c, 2, 2, l) { Err(ResourceLimit(_)) => true, _ => false })
+}
+
+test "append places samples consecutively and rejects rate or layout mismatch" {
+  let a = mono([1.0, 2.0]); let b = mono([3.0]); let l = defaultClipLimits();
+  samples(append(a, b, l)) == [[1.0, 2.0, 3.0]]
+  && (match append(a, {b | rate: 16000}, l) { Err(InvalidClip(_)) => true, _ => false })
+  && (match append(a, b, {maxFrames: 2, maxSamples: 2}) { Err(ResourceLimit(_)) => true, _ => false })
+}
+
+test "fades include exact edge endpoints and handle zero and one frame" {
+  let c = mono([1.0, 1.0, 1.0, 1.0]); let l = defaultClipLimits();
+  samples(fade(c, 2, 2, l)) == [[0.0, 1.0, 1.0, 0.0]]
+  && samples(fade(c, 0, 0, l)) == [[1.0, 1.0, 1.0, 1.0]]
+  && samples(fade(c, 1, 1, l)) == [[0.0, 1.0, 1.0, 0.0]]
+  && (match fade(c, 5, 0, l) { Err(InvalidClip(_)) => true, _ => false })
+}
+
+test "crossfade uses complementary weights with explicit one-sample overlap" {
+  let a = mono([1.0, 2.0, 3.0]); let b = mono([4.0, 5.0, 6.0]); let l = defaultClipLimits();
+  samples(crossfade(a, b, 2, l)) == [[1.0, 2.0, 5.0, 6.0]]
+  && samples(crossfade(a, b, 1, l)) == [[1.0, 2.0, 3.5, 5.0, 6.0]]
+  && samples(crossfade(a, b, 0, l)) == [[1.0, 2.0, 3.0, 4.0, 5.0, 6.0]]
+  && (match crossfade(a, b, 4, l) { Err(InvalidClip(_)) => true, _ => false })
+}
+
+test "mixAt adds headroom and extends with silence" {
+  let l = defaultClipLimits(); let a = mono([1.0, 1.0]); let b = mono([2.0, -1.0]);
+  samples(mixAt(a, b, 1, l)) == [[1.0, 3.0, -1.0]]
+  && samples(mixAt(a, b, 4, l)) == [[1.0, 1.0, 0.0, 0.0, 2.0, -1.0]]
+  && samples(mixAt(a, mono([]), 4, l)) == [[1.0, 1.0]]
+}
+
+test "mix rejects rate/layout mismatch, over-budget placement and numeric overflow" {
+  let l = defaultClipLimits(); let a = mono([1.0]);
+  (match mixAt(a, {a | rate: 16000}, 0, l) { Err(InvalidClip(_)) => true, _ => false })
+  && (match mixAt(a, a, 9223372036854775807, l) { Err(ResourceLimit(_)) => true, _ => false })
+  && (match mixAt(a, a, -1, l) { Err(InvalidClip(_)) => true, _ => false })
+  && (match mixAt(mono([1.6e308]), mono([1.6e308]), 0, l) { Err(InvalidSamples(_)) => true, _ => false })
+}
+
+test "mono panning has exact hard endpoints and equal center gains" {
+  let c = mono([1.0]); let l = defaultClipLimits();
+  samples(panMono(c, -1.0, l)) == [[1.0], [0.0]] && samples(panMono(c, 1.0, l)) == [[0.0], [1.0]]
+  && (match samples(panMono(c, 0.0, l)) { [[a], [b]] => a == b && absF(a * a + b * b - 1.0) < 1e-12, _ => false })
+  && (match panMono(c, 1.1, l) { Err(InvalidClip(_)) => true, _ => false })
+}
+
+test "all edits reject forged clip dimensions instead of indexing them" {
+  let c = {mono([1.0]) | frames: 2}; let l = defaultClipLimits();
+  (match gain(c, 1.0, l) { Err(InvalidClip(_)) => true, _ => false })
+  && (match trim(c, 0, 1, l) { Err(InvalidClip(_)) => true, _ => false })
+  && (match reverse(c, l) { Err(InvalidClip(_)) => true, _ => false })
+}
+
+property "reversing a bounded clip twice restores exact samples" {
+  forall(n: int) => {
+    let k = n % 32; let count = if k < 0 then 0 - k else k; let xs = map(\i. intToFloat(i) / 32.0, range(0, count));
+    match reverse(mono(xs), defaultClipLimits()) { Ok(c) => samples(reverse(c, defaultClipLimits())) == [xs], _ => false }
+  }
+}
+
+property "mono pan preserves unit-sample energy across bounded positions" {
+  forall(n: int) => {
+    let p = intToFloat(n % 101) / 100.0;
+    match samples(panMono(mono([1.0]), p, defaultClipLimits())) {
+      [[a], [b]] => absF(a * a + b * b - 1.0) < 1e-12, _ => false
+    }
+  }
+}
+
+test "stereo edits reject layout mismatch and check total output samples" {
+  let l = {maxFrames: 2, maxSamples: 2};
+  match create(8000, Stereo, [fromList([1.0]), fromList([-1.0])], l) {
+    Err(_) => false,
+    Ok(c) => (match append(c, c, l) { Err(ResourceLimit(_)) => true, _ => false })
+      && (match pad(c, 1, 0, l) { Err(ResourceLimit(_)) => true, _ => false })
+      && (match mixAt(c, c, 1, l) { Err(ResourceLimit(_)) => true, _ => false })
+      && (match append(c, mono([1.0]), l) { Err(InvalidClip(_)) => true, _ => false })
+      && (match panMono(c, 0.0, l) { Err(InvalidClip(_)) => true, _ => false })
+  }
+}
+
+test "empty clip editing has explicit stable frame counts" {
+  let c = mono([]); let l = defaultClipLimits();
+  samples(reverse(c, l)) == [[]] && samples(fade(c, 0, 0, l)) == [[]]
+    && samples(crossfade(c, mono([0.25]), 0, l)) == [[0.25]]
+    && samples(append(c, c, l)) == [[]]
+}
