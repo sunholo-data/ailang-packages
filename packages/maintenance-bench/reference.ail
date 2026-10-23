@@ -1,0 +1,8 @@
+module sunholo/maintenance_bench/reference
+import ./types (Episode, Snapshot, Manifest, Annotation)
+import ./observation (observed, snapshot)
+import std/option (Some, None)
+export pure func manifest() -> Manifest = {schema:"maintenance.cohort/1",cutoffMs:10000000000,windowDays:30,repositories:[],authorship:"all",requireComplete:true,canonicalOnly:true,metricVersion:"maintenance.metrics/1",compilerId:"reference-fixture"}
+export pure func original(id: string, repo: string, language: string) -> Episode = {observed(id,repo,language,1,["source.ail"],"hand-calculated analytical fixture") | purpose:"feature",authorship:"agent",evidenceLevel:"confirmed"}
+export pure func label(id: string) -> Annotation = {id:id,rootCause:"application",detectionStage:"production",evidenceLevel:"confirmed",artifactRole:"canonical",purpose:"repair",authorship:"agent",defect:Some("defect-1"),repairs:Some("a1"),detectedMs:Some(1000),round:1,provenance:"independent fixture requirement"}
+export pure func data() -> Snapshot = snapshot("analytical-fixture","hand-counted-v1",10000000000,true,[original("a1","project/a","ailang"),original("a2","project/a","ailang"),{original("r1","project/a","ailang") | acceptedMs:2000}])
