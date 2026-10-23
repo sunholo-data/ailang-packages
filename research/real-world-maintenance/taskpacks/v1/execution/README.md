@@ -37,9 +37,12 @@ consumer is `packages/maintenance-bench/ledger_report.ail`. Registry 0.1 lacks
 this source's ledger APIs and must not substitute for it.
 
 The deterministic `write_development_manifest.py` freezes source files and
-independently collected version evidence; it never invokes a model or a toolchain.
-Its two `--*-evidence` files require `command` and `version`; the example captures
-only observed version-command output, not a complete toolchain qualification.
+independently collected runtime evidence; it never invokes a model or a toolchain.
+Its two `--*-evidence` files use `maintenance.toolchain/1`: explicit native
+`command`, `versionCommand`, observed `version` and executable `binarySHA256`.
+Dry run validates these metadata and their hashes without running the binaries;
+the native grader verifies actual executable bytes and version before and after
+grading. This attests the executable, not every mutable operating-system library.
 It uses create-only outputs and refuses to replace prior documents. When changing
 sources, freeze new documents in an isolated source checkout and review all
 changed hashes; do not overwrite banked run evidence.
