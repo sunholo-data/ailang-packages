@@ -1,0 +1,18 @@
+module sunholo/maintenance_bench/run_types
+import std/option (Option)
+
+export type StagePlan = { id: string, requirementDigest: string, oracleDigest: string }
+
+export type TrajectoryPlan = { id: string, family: string, variant: string, repeat: int, language: string, starterDigest: string, nativeToolDigest: string, stages: [StagePlan] }
+
+export type RunPlan = { schema: string, protocolId: string, role: string, model: string, harness: string, settingsDigest: string, retention: string, treatment: string, leftLanguage: string, rightLanguage: string, trajectories: [TrajectoryPlan] }
+
+export type Attempt = { id: string, receiptIds: [string], localEdits: Option[int] }
+
+export type StageRun = { id: string, state: string, priorDigest: Option[string], artifactDigest: Option[string], visible: string, oracle: string, oracleDigest: Option[string], oracleArtifact: Option[string], provenance: string, attempts: [Attempt], checkKinds: [string] }
+
+export type TrajectoryRun = { id: string, model: string, harness: string, settingsDigest: string, stages: [StageRun] }
+
+export type RunBundle = { plan: RunPlan, runs: [TrajectoryRun] }
+
+export type RunSummary = { scheduledTrajectories: int, scheduledStages: int, startedStages: int, completedStages: int, failedStages: int, blockedStages: int, invalidStages: int, budgetStoppedStages: int, notRunStages: int, successfulTrajectories: int, knownFailedTrajectories: int, unknownTrajectories: int, visibleGreenRegressions: int, matchedPairs: int, unmatchedArms: int, familyClusters: int, knownLocalEdits: int, missingEditAttempts: int }

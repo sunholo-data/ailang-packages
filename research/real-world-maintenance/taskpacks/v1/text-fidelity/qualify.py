@@ -51,10 +51,21 @@ def command(args, cwd):
     return proc.stdout
 
 
+def typed_equal(actual, expected):
+    """JSON booleans, numbers, nulls and strings have distinct protocol types."""
+    if type(actual) is not type(expected):
+        return False
+    if isinstance(expected, dict):
+        return actual.keys() == expected.keys() and all(typed_equal(actual[k], v) for k, v in expected.items())
+    if isinstance(expected, list):
+        return len(actual) == len(expected) and all(typed_equal(a, b) for a, b in zip(actual, expected))
+    return actual == expected
+
+
 def mismatches(actual, expected, weak=False):
     if not isinstance(actual, list) or len(actual) != len(expected):
         raise AssertionError("oracle requires complete ordered result array")
-    return [wanted["cell"] for got, wanted in zip(actual, expected) if not weak and got != wanted]
+    return [wanted["cell"] for got, wanted in zip(actual, expected) if not weak and not typed_equal(got, wanted)]
 
 
 def oracle_canary(weak=False):

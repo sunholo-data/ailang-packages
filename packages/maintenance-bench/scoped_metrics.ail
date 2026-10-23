@@ -4,6 +4,7 @@ import ./index_types (IndexSpec, IndexDecision, ScopedSummary)
 import ./index_codec (decodeIndex)
 import ./cohort (matureAt, validateLinks)
 import ./metrics (totalKnown)
+import ./lineage (observedTouches, ObservedTouch)
 import std/result (Result, Ok, Err, flatMap)
 import std/option (Some, None)
 import std/list (map, filter, length, contains)
@@ -21,34 +22,47 @@ func unknown(r: Episode) -> bool = match r.outcome {
   Some(_) => false
 }
 
+func within(ms: int, d: IndexDecision, m: IndexSpec) -> bool = match d.acceptedMs {
+  Some(accepted) => exact(d) && ms >= accepted && ms <= m.cutoffMs && ms - accepted <= m.windowDays * 86400000,
+  None => false
+}
+
+func sameArtifact(events: [ObservedTouch], a: string, b: string) -> bool {
+  let ids = M.fromList(map(\e. (e.artifactId, true), filter(\e. e.episodeId == a, events)))
+  length(filter(\e. e.episodeId == b && M.member(ids, e.artifactId), events)) > 0
+}
+
+func intentCount(ds: [IndexDecision], intent: string) -> int = length(filter(\d. d.intent == intent, ds))
+
 func summarize(s: Snapshot, m: IndexSpec) -> Result[ScopedSummary, string] {
   let ids = M.fromList(map(\r. (r.id, r), s.episodes))
-  if s.sourceRef != m.sourceRef || s.cutoffMs != m.cutoffMs then Err("index source/cutoff mismatch") else if length(filter(\id. not M.member(ids, id), m.selectedIds)) > 0 then Err("selected episode absent") else flatMap(\_. {
+  if s.timeBasis != "acceptance" then Err("followup metrics require an acceptance-based observation frame; reviewed index times cannot upgrade other observations") else if s.sourceRef != m.sourceRef || s.cutoffMs != m.cutoffMs then Err("index source/cutoff mismatch") else if length(filter(\id. not M.member(ids, id), m.selectedIds)) > 0 then Err("selected episode absent") else flatMap(\_. {
     let selected = filter(\r. contains(m.selectedIds, r.id), s.episodes)
     let eligible = filter(\d. not d.excluded, m.decisions)
     let eligibleIds = map(\d. d.id, eligible)
     let matureIds = map(\d. d.id, filter(\d. mature(d, m), m.decisions))
-    let touches = filter(\r. not contains(m.selectedIds, r.id) && length(filter(\original. contains(eligibleIds, original.id) && original.repo == r.repo && original.language == r.language && length(filter(\path. contains(original.files, path), r.files)) > 0 && length(filter(\d. d.id == original.id && (match d.acceptedMs {
-      Some(ms) => r.acceptedMs >= ms && r.acceptedMs - ms <= m.windowDays * 86400000,
-      None => false
-    }), m.decisions)) == 1, selected)) > 0, s.episodes)
-    let followup = filter(\r. match r.repairs {
-      Some(id) => contains(eligibleIds, id),
-      None => false
-    }, s.episodes)
-    let confirmed = filter(\r. r.purpose == "repair" && r.evidenceLevel == "confirmed" && r.canonical && (r.detectionStage == "production" || r.detectionStage == "post_acceptance") && (match (r.repairs, r.detectedMs) {
+    let events = observedTouches(s.episodes)
+    let touches = filter(\r. not contains(m.selectedIds, r.id) && length(filter(\d. not d.excluded && within(r.acceptedMs, d, m) && sameArtifact(events, d.id, r.id), m.decisions)) > 0, s.episodes)
+    let followup = filter(\r. r.canonical && (r.detectionStage == "production" || r.detectionStage == "post_acceptance") && contains(["application", "requirement", "type_interface", "effects_authority"], r.rootCause) && (match (r.repairs, r.detectedMs) {
+      (Some(id), Some(ms)) => length(filter(\d. d.id == id && contains(eligibleIds, id) && within(ms, d, m), m.decisions)) == 1,
+      _ => false
+    }), s.episodes)
+    let confirmed = filter(\r. r.purpose == "repair" && r.evidenceLevel == "confirmed" && contains(["application", "requirement", "type_interface", "effects_authority"], r.rootCause) && r.canonical && (r.detectionStage == "production" || r.detectionStage == "post_acceptance") && (match (r.repairs, r.detectedMs) {
       (Some(id), Some(ms)) => contains(matureIds, id) && length(filter(\d. d.id == id && (match d.acceptedMs {
         Some(accepted) => ms >= accepted && ms - accepted <= m.windowDays * 86400000 && ms <= m.cutoffMs,
         None => false
       }), m.decisions)) == 1,
       _ => false
     }), followup)
-    let introductions = M.fromList(map(\r. (show(r.repairs), true), confirmed))
+    let introductions = M.fromList(map(\r. (match r.repairs {
+      Some(id) => id,
+      None => ""
+    }, true), confirmed))
     let known = filter(\r. match r.tokens {
       Some(_) => true,
       None => false
     }, s.episodes)
-    flatMap(\sum. Ok({ indexSelected: length(selected), indexEligible: length(eligible), indexMature: length(matureIds), indexCensored: length(filter(\d. exact(d) && not mature(d, m), eligible)), indexUnresolved: length(filter(\d. not exact(d), eligible)), indexExcluded: length(m.decisions) - length(eligible), indexUnknownOutcomes: length(filter(\r. contains(eligibleIds, r.id) && unknown(r), selected)), followupTouches: length(touches), confirmedIntroductions: M.size(introductions), supportedRepairs: length(filter(\r. r.purpose == "repair" && r.evidenceLevel == "supported", followup)), canonicalWorkload: length(filter(\r. r.canonical, s.episodes)), totalWorkload: length(s.episodes), knownTokenRows: length(known), missingTokenRows: length(s.episodes) - length(known), recordedTokenSubtotal: sum }), totalKnown(map(\r. r.tokens, s.episodes)))
+    flatMap(\sum. Ok({ indexSelected: length(selected), indexEligible: length(eligible), indexMature: length(matureIds), indexCensored: length(filter(\d. exact(d) && not mature(d, m), eligible)), indexUnresolved: length(filter(\d. not exact(d), eligible)), indexExcluded: length(m.decisions) - length(eligible), indexUnknownOutcomes: length(filter(\r. contains(eligibleIds, r.id) && unknown(r), selected)), followupTouches: length(touches), confirmedIntroductions: M.size(introductions), supportedRepairs: length(filter(\r. r.purpose == "repair" && r.evidenceLevel == "supported", followup)), canonicalWorkload: length(filter(\r. r.canonical, s.episodes)), totalWorkload: length(s.episodes), knownTokenRows: length(known), missingTokenRows: length(s.episodes) - length(known), recordedTokenSubtotal: sum, indexFeatures: intentCount(eligible, "feature"), indexRepairs: intentCount(eligible, "repair"), indexMigrations: intentCount(eligible, "migration"), indexPerformance: intentCount(eligible, "performance"), indexMixed: intentCount(eligible, "mixed"), indexUnknownIntent: intentCount(eligible, "unknown"), indexOtherIntent: length(filter(\d. not contains(["feature", "repair", "migration", "performance", "mixed", "unknown"], d.intent), eligible)), confirmedRepairTouches: length(filter(\r. r.purpose == "repair" && r.evidenceLevel == "confirmed", touches)), featureFollowupTouches: length(filter(\r. r.purpose == "feature" && (r.evidenceLevel == "confirmed" || r.evidenceLevel == "supported"), touches)), unknownFollowupTouches: length(filter(\r. r.purpose == "uncertain" || r.evidenceLevel == "unknown", touches)) }), totalKnown(map(\r. r.tokens, s.episodes)))
   }, validateLinks(s))
 }
 

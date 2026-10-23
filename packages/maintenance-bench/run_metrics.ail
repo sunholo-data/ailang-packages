@@ -1,0 +1,32 @@
+module sunholo/maintenance_bench/run_metrics
+import ./run_types (RunBundle, RunSummary, TrajectoryRun)
+import ./run_validate (validateBundle)
+import ./metrics (totalKnown)
+import std/list (length, filter, map, flatMap as flatten, foldl)
+import std/result (Result, Ok, Err, flatMap)
+import std/option (Some, None)
+import std/map as M
+import std/json (encode, JArray, JString)
+
+func countState(b: RunBundle, state: string) -> int =
+  length(filter(\s. s.state == state, flatten(\r. r.stages, b.runs)))
+
+func success(r: TrajectoryRun) -> bool = length(filter(\s. s.state != "completed" || s.oracle != "pass", r.stages)) == 0
+
+func failed(r: TrajectoryRun) -> bool =
+  length(filter(\s. s.state == "invalid", r.stages)) == 0 && length(filter(\s. s.state != "invalid" && (s.oracle == "fail" || s.state == "failed"), r.stages)) > 0
+
+export pure func summarizeRuns(b: RunBundle) -> Result[RunSummary, string]
+ensures { match result {
+  Ok(x) => x.scheduledTrajectories == x.successfulTrajectories + x.knownFailedTrajectories + x.unknownTrajectories && x.scheduledStages == x.completedStages + x.failedStages + x.blockedStages + x.invalidStages + x.budgetStoppedStages + x.notRunStages,
+  Err(e) => e != ""
+} } = flatMap(\v. {
+  let stages = flatten(\r. r.stages, v.runs)
+  let attempts = flatten(\s. s.attempts, stages)
+  let pairs = M.fromList(map(\p. (encode(JArray(map(\s. JString(s), [p.family, p.variant, show(p.repeat)]))), true), v.plan.trajectories))
+  let armCounts = map(\key. length(filter(\p. encode(JArray(map(\s. JString(s), [p.family, p.variant, show(p.repeat)]))) == key, v.plan.trajectories)), M.keys(pairs))
+  let matched = length(filter(\n. n == 2, armCounts))
+  let passed = length(filter(\r. success(r), v.runs))
+  let failures = length(filter(\r. not success(r) && failed(r), v.runs))
+  flatMap(\editTotal. Ok({ scheduledTrajectories: length(v.runs), scheduledStages: length(stages), startedStages: length(stages) - countState(v, "blocked") - countState(v, "not_started"), completedStages: countState(v, "completed"), failedStages: countState(v, "failed"), blockedStages: countState(v, "blocked"), invalidStages: countState(v, "invalid"), budgetStoppedStages: countState(v, "budget_stopped"), notRunStages: countState(v, "not_started"), successfulTrajectories: passed, knownFailedTrajectories: failures, unknownTrajectories: length(v.runs) - passed - failures, visibleGreenRegressions: length(filter(\s. s.visible == "pass" && s.oracle == "fail", stages)), matchedPairs: matched, unmatchedArms: length(v.runs) - matched * 2, familyClusters: M.size(M.fromList(map(\p. (p.family, true), v.plan.trajectories))), knownLocalEdits: editTotal, missingEditAttempts: length(filter(\a. a.localEdits == None, attempts)) }), totalKnown(map(\a. a.localEdits, attempts)))
+}, validateBundle(b))

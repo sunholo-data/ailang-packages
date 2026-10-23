@@ -32,3 +32,7 @@ Each invocation starts with fresh state; **within that invocation** all operatio
 - No physical concurrency, RSS threshold, resource deduplication optimization, population bug-rate inference or language superiority is claimed. Known public controls are for development; future confirmation needs new frozen real requirements.
 
 [VALIDATION.md](VALIDATION.md) records the actual qualified counts and tooling outcomes. [validation/](validation/) contains the recorded qualification and package-quality evidence; reruns write a newly chosen output path.
+
+## Integrated foundation qualification amendment
+
+During source integration, independent review tightened JSON scalar-type checks and qualification evidence creation. The current [integration receipt](../../../../../packages/maintenance-bench/validation/v0.2.0/resource-qualification.json) binds the amended oracle/qualifier and actual runtime. Files under this taskpack's validation/ directory retain earlier worker-stage evidence and are not claimed to bind the amended host code. Native package source/checkpoint semantics did not change. Ordinary qualification stays offline; separate pkg quality checks can attempt a read-only registry overlap lookup.

@@ -141,6 +141,7 @@ func totals(es: [Entry], duplicates: int) -> Result[UsageTotals, string] {
   }
   let costUsable = usable && size(currencies) == 1 && basis != "mixed" && basis != "unknown"
   let fresh = quantity(map(\e. if overlap then None else e.normal.fresh, leaves), usable)
+  let freshGenerated = quantity(map(\e. if overlap then None else e.normal.freshGenerated, leaves), usable)
   let generated = quantity(map(\e. if overlap then None else e.normal.generated, leaves), usable)
   let accounted = quantity(map(\e. if overlap then None else e.normal.accounted, leaves), usable)
   let recorded = quantity(map(\e. if overlap then None else e.normal.recorded, leaves), usable)
@@ -148,8 +149,8 @@ func totals(es: [Entry], duplicates: int) -> Result[UsageTotals, string] {
   let costs = quantity(map(\e. if overlap || mixedMoney then None else e.normal.costMicros, leaves), costUsable)
   let overhead = quantity(map(\e. if overlap || mixedMoney then None else e.normal.costMicros, filter(\e. e.receipt.purpose == "preparation" || e.receipt.purpose == "infrastructure", leaves)), costUsable)
   let groups = costGroups(leaves, usable, overlap)
-  match (fresh, generated, accounted, recorded, costs, overhead, groups) {
-    (Ok(f), Ok(g), Ok(a), Ok(r), Ok(c), Ok(o), Ok(cg)) => Ok({ leafCount: size(leaves), summaryCount: size(summaries), duplicateCount: duplicates, failedLeaves: size(filter(\e. e.receipt.failed, leaves)), overlapUnknown: overlap, coverageComplete: unchecked == 0, summariesUnchecked: unchecked, fresh: f, generated: g, accounted: a, recorded: r, costMicros: c, overheadMicros: o, costBasis: basis, costGroups: cg }),
+  match (fresh, freshGenerated, generated, accounted, recorded, costs, overhead, groups) {
+    (Ok(f), Ok(fg), Ok(g), Ok(a), Ok(r), Ok(c), Ok(o), Ok(cg)) => Ok({ leafCount: size(leaves), summaryCount: size(summaries), duplicateCount: duplicates, failedLeaves: size(filter(\e. e.receipt.failed, leaves)), overlapUnknown: overlap, coverageComplete: unchecked == 0, summariesUnchecked: unchecked, fresh: f, freshGenerated: fg, generated: g, accounted: a, recorded: r, costMicros: c, overheadMicros: o, costBasis: basis, costGroups: cg }),
     _ => Err("usage aggregate overflow")
   }
 }

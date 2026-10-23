@@ -1,0 +1,14 @@
+module sunholo/maintenance_bench/examples/roadmap_card
+import pkg/sunholo/maintenance_bench/ledger_report (analyseCards)
+import std/fs (readFile)
+import std/result (Ok, Err)
+import std/io (println, exit)
+
+export func main() -> () ! {IO, FS} =
+  match analyseCards(readFile("assets/fixtures/ledger/cards.json"), "declared-example-runtime") {
+    Ok(a) => println(a.markdown),
+    Err(e) => {
+      println(e)
+      exit(1)
+    }
+  }

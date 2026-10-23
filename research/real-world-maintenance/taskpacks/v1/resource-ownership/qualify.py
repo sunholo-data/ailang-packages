@@ -122,22 +122,28 @@ def native_packages():
         source = HERE / ('starter' if stage == 0 else f'references/s{stage}') / 'ailang'
         run_checked([AILANG, 'lock', '--check'], source)
         run_checked([AILANG, 'fmt', '--check', *[str(p) for p in sorted(source.rglob('*.ail'))]], source)
-        q = json.loads(run_checked([AILANG, 'pkg', 'quality', '--json', '.'], source))
-        assert q['compile']['ok'] and not q['gates'], 'native package quality failed'
-        assert q['tests']['passed'] >= 3 and q['tests']['failed'] == 0, 'missing or failed native tests'
-        assert q['smoke']['passed'], 'native smoke failed'
-        evidence.append({'stage': stage, 'sourceDigest': digest_tree(source), 'namedTestsPassed': q['tests']['passed'], 'namedTestsFailed': q['tests']['failed'], 'smokePassed': q['smoke']['passed'], 'smtVerified': q['contracts']['verified'], 'smtCounterexamples': q['contracts']['counterexample'], 'smtSkipped': q['contracts']['skipped'], 'smtErrors': q['contracts']['errors'], 'uncontractedExports': q['contracts']['uncontracted_exports'], 'qualityGates': q['gates']})
+        run_checked([AILANG, 'check', '--package', '.'], source)
+        tests = json.loads(run_checked([AILANG, 'test', '--package', '.', '--json'], source))
+        assert tests['passed_tests'] >= 3 and tests['failed_tests'] == 0 and tests['skipped_tests'] == 0
+        smoke = run_checked([AILANG, 'run', '--caps', 'IO', '--entry', 'main', '_smoke.ail'], source)
+        proof = json.loads(run_checked([AILANG, 'verify', '--json', '--timeout', '2s', 'engine.ail'], source))
+        assert proof['counterexample'] == 0 and proof['errors'] == 0
+        evidence.append({'stage': stage, 'sourceDigest': digest_tree(source), 'namedTestsPassed': tests['passed_tests'], 'namedTestsFailed': tests['failed_tests'], 'smokePassed': True, 'smokeOutput': smoke, 'smtVerified': proof['verified'], 'smtCounterexamples': proof['counterexample'], 'smtSkipped': proof['skipped'], 'smtErrors': proof['errors'], 'qualityStatus': 'separate-check-not-run-by-offline-qualifier'})
     return evidence
 
 
 def main():
     parser = argparse.ArgumentParser(); parser.add_argument('--output', type=Path); args = parser.parse_args()
+    if args.output and args.output.exists():
+        raise FileExistsError(f"qualification output exists: {args.output}")
     native = native_packages()
     records = qualify()
     result = {"schema": "maintenance.task-qualification/1", "family": "resource-ownership", "role": "development-qualification", "protocolDigest": hashlib.sha256((HERE/'protocol.json').read_bytes()).hexdigest(), "oracleDigest": hashlib.sha256((HERE/'oracle.py').read_bytes()).hexdigest(), "qualifierDigest": hashlib.sha256((HERE/'qualify.py').read_bytes()).hexdigest(), "publicCheckDigest": hashlib.sha256((HERE/'public_check.py').read_bytes()).hexdigest(), "runtime": run_checked([AILANG, 'version'], HERE).strip(), "runtimeBinarySHA256": hashlib.sha256(Path(shutil.which(AILANG)).resolve().read_bytes()).hexdigest(), "python": sys.version.split()[0], "nativePackages": native, "records": records, "positiveRuns": sum(r["actual"] == "pass" for r in records), "negativeControlsKilled": sum(r["actual"] == "semantic_rejection" for r in records), "qualified": True}
     text = json.dumps(result, indent=2) + '\n'
     if args.output:
-        args.output.parent.mkdir(parents=True, exist_ok=True); args.output.write_text(text)
+        args.output.parent.mkdir(parents=True, exist_ok=True)
+        with args.output.open("x") as output:
+            output.write(text)
     else:
         print(text, end='')
 

@@ -46,9 +46,9 @@ All paths in M1–M8 are relative to `packages/maintenance-bench/`. Native taskp
 
 Reuse strict_json/codec boundary helpers. Add a distinct versioned index with selected IDs, source/cutoff/selection identity and per-row acceptance evidence. Represent primary intent, mixed labels and attribution separately. Preserve legacy Manifest/Episode decoders.
 
-- [ ] Reject duplicate or absent selected IDs, duplicate keys, invalid enums, fractional/exponent counts and unknown schemas; explicit null remains unknown.
-- [ ] A feature that introduces a confirmed defect remains feature-intent with a separate causal outcome. A feature-only follow-up is not a repair.
-- [ ] Commit-proxy or interval-ambiguous acceptance cannot silently enter an exact-window mature stratum. Reviewed disposition and provenance survive round trip.
+- [x] Reject duplicate or absent selected IDs, duplicate keys, invalid enums, fractional/exponent counts and unknown schemas; explicit null remains unknown.
+- [x] A feature that introduces a confirmed defect remains feature-intent with a separate causal outcome. A feature-only follow-up is not a repair.
+- [x] Commit-proxy or interval-ambiguous acceptance cannot silently enter an exact-window mature stratum. Reviewed disposition and provenance survive round trip.
 
 ### M2: Scoped historical counts and workload (~260 LOC)
 
@@ -58,9 +58,9 @@ Reuse strict_json/codec boundary helpers. Add a distinct versioned index with se
 
 Compute index/follow-up/canonical-workload/total-workload views without changing legacy metrics.summarize. Keep supported and confirmed repair links separate and include unknown ascertainment/trace coverage.
 
-- [ ] Selected index partitions account for every selected row; an out-of-index follow-up or excluded smoke cannot change index denominator/outcomes.
-- [ ] The same added row changes the correctly labelled workload count and known usage subtotal, with missingness retained.
-- [ ] A touch, five files and three repair rounds do not become equivalent defect counts; zero denominator is unavailable. Order-invariance and partition properties execute.
+- [x] Selected index partitions account for every selected row; an out-of-index follow-up or excluded smoke cannot change index denominator/outcomes.
+- [x] The same added row changes the correctly labelled workload count and known usage subtotal, with missingness retained.
+- [x] A touch, five files and three repair rounds do not become equivalent defect counts; zero denominator is unavailable. Order-invariance and partition properties execute.
 
 ### M3: Versioned strict usage receipts (~280 LOC)
 
@@ -70,9 +70,9 @@ Compute index/follow-up/canonical-workload/total-workload views without changing
 
 Accept a documented neutral receipt over already parsed executor/harness results, not provider logs. Store source/version/digest, provider request and attempt identity, leaf/summary role, accounting presence, cache/reasoning scheme and price/currency provenance.
 
-- [ ] A legacy chain scalar retains only its recorded known total; missing split/model/billing cannot become zero or a fresh-token claim.
-- [ ] Wrong types, duplicate IDs/keys, invalid or negative counts, unknown contracts and unsupported precision are rejected or explicitly unavailable under the field policy.
-- [ ] Money remains decimal text. Exact USD micro-unit aggregation uses scale 6 without rounding; excess nonzero precision/overflow is unavailable, trailing zero precision is accepted. Other currencies remain recorded but cannot silently join USD.
+- [x] A legacy chain scalar retains only its recorded known total; missing split/model/billing cannot become zero or a fresh-token claim.
+- [x] Wrong types, duplicate IDs/keys, invalid or negative counts, unknown contracts and unsupported precision are rejected or explicitly unavailable under the field policy.
+- [x] Money remains decimal text. Exact USD micro-unit aggregation uses scale 6 without rounding; excess nonzero precision/overflow is unavailable, trailing zero precision is accepted. Other currencies remain recorded but cannot silently join USD.
 
 ### M4: Token reconciliation and leaf-only costs (~300 LOC)
 
@@ -82,10 +82,10 @@ Accept a documented neutral receipt over already parsed executor/harness results
 
 Implement source-qualified inclusive/exclusive input and combined/separate output normalization. Deduplicate only proven request identities; treat parent summaries as integrity checks. Retain failed/retried/infrastructure and preparation overhead buckets.
 
-- [ ] Independent fixtures: inclusive input 150 minus cache 80+20 gives fresh 50; visible 7 plus reasoning 3 gives accounted total 160 and fresh+generated 60. Exclusive-input fixture agrees.
-- [ ] Combined generated 10 with reasoning 3 yields visible 7, never generated 13. Impossible cache splits fail; unknown reason/cache reporting never becomes proven zero.
-- [ ] Parent plus leaf costs are charged once; conflicting duplicate identities fail; possible cross-source overlap is unavailable. Costly failed attempts remain charged.
-- [ ] Mixed metered/list-price/local/unknown cost bases are separated. Known subtotal and coverage are distinct from total expenditure and cost per success.
+- [x] Independent fixtures: inclusive input 150 minus cache 80+20 gives fresh 50; visible 7 plus reasoning 3 gives accounted total 160 and fresh+generated 60. Exclusive-input fixture agrees.
+- [x] Combined generated 10 with reasoning 3 yields visible 7, never generated 13. Impossible cache splits fail; unknown reason/cache reporting never becomes proven zero.
+- [x] Parent plus leaf costs are charged once; conflicting duplicate identities fail; possible cross-source overlap is unavailable. Costly failed attempts remain charged.
+- [x] Mixed metered/list-price/local/unknown cost bases are separated. Known subtotal and coverage are distinct from total expenditure and cost per success.
 
 ### M5: Scheduled trajectories, checks and continuity (~260 LOC)
 
@@ -95,9 +95,9 @@ Implement source-qualified inclusive/exclusive input and combined/separate outpu
 
 Add a finite offline trajectory/stage/attempt/check ledger with immutable source identities and declared retained artifacts. No model executor calls. Keep visible checks, independent oracle results, edits and repair rounds distinct.
 
-- [ ] A synthetic 8-trajectory/24-stage schedule accounts for started, completed, failed, blocked, invalid, budget-stopped and never-started rows without counting non-launch as a model error.
-- [ ] Check prior/output checkpoint identities and the fixed stage schedule; a broken S1 remains the trajectory source for S2 rather than receiving a gold replacement.
-- [ ] Missing stage, duplicate attempt, wrong checkpoint and forged oracle provenance fail. Usage stays attached to spent attempts even if the terminal artifact fails.
+- [x] A synthetic 8-trajectory/24-stage schedule accounts for started, completed, failed, blocked, invalid, budget-stopped and never-started rows without counting non-launch as a model error.
+- [x] Check prior/output checkpoint identities and the fixed stage schedule; a broken S1 remains the trajectory source for S2 rather than receiving a gold replacement.
+- [x] Missing stage, duplicate attempt, wrong checkpoint and forged oracle provenance fail. Usage stays attached to spent attempts even if the terminal artifact fails.
 
 ### M6: Semantic pairs and trajectory economics (~240 LOC)
 
@@ -107,10 +107,10 @@ Add a finite offline trajectory/stage/attempt/check ledger with immutable source
 
 Implement cross-language keys over family/variant/protocol/repeat/model/harness/settings/retention/treatment. Keep language as an arm and permit pinned language-native tool/starter hashes to differ.
 
-- [ ] Reject duplicate arm keys and unintended config changes; preserve unmatched and invalid arms plus their spend. Never relabel language to call core PairArms.
-- [ ] Chain success requires every mandatory stage and retained invariant to pass independent checks. Visible-green hidden-regression is reported separately.
-- [ ] All failed work contributes to matched-cohort economic totals; unmatched/invalid overhead remains separately visible. Zero success, incomplete oracle outcomes or missing usage makes affected economic comparisons unavailable.
-- [ ] Two repeated families remain two clusters. Reports publish descriptive paired counts, never an unsupported population significance or representative-working-day claim.
+- [x] Reject duplicate arm keys and unintended config changes; preserve unmatched and invalid arms plus their spend. Never relabel language to call core PairArms.
+- [x] Chain success requires every mandatory stage and retained invariant to pass independent checks. Visible-green hidden-regression is reported separately.
+- [x] All failed work contributes to matched-cohort economic totals; unmatched/invalid overhead remains separately visible. Zero success, incomplete oracle outcomes or missing usage makes affected economic comparisons unavailable.
+- [x] Two repeated families remain two clusters. Reports publish descriptive paired counts, never an unsupported population significance or representative-working-day claim.
 
 ### M7: Qualified roadmap evidence drafts (~260 LOC)
 
@@ -120,9 +120,9 @@ Implement cross-language keys over family/variant/protocol/repeat/model/harness/
 
 Render deterministic discovery/reproduced/candidate/design_ready/landed/remeasured cards with failed obligation, source/run/oracle hashes, positive/negative/mutation outcomes, usage coverage, alternative explanation, recurrence and reuse audit. Human disposition is separate.
 
-- [ ] A missing reproducer, weakened oracle, unsupported causal link or all-pass tiny sample cannot emit a qualified language win or design_ready recommendation.
-- [ ] A reproduction can support an investigation card with unknown cost, while an economic claim requires its own coverage. A single severe case requires an explicit severity exception.
-- [ ] Seed discovery/reproduced cards cite the merged ownership/text cases; current application fixes remain recorded. No automatic stdlib deficiency, agent message, dispatch, approval or implementation is generated.
+- [x] A missing reproducer, weakened oracle, unsupported causal link or all-pass tiny sample cannot emit a qualified language win or design_ready recommendation.
+- [x] A reproduction can support an investigation card with unknown cost, while an economic claim requires its own coverage. A single severe case requires an explicit severity exception.
+- [x] Seed discovery/reproduced cards cite the merged ownership/text cases; current application fixes remain recorded. No automatic stdlib deficiency, agent message, dispatch, approval or implementation is generated.
 
 ### M8: Deterministic offline reports and command (~260 LOC)
 
@@ -132,9 +132,9 @@ Render deterministic discovery/reproduced/candidate/design_ready/landed/remeasur
 
 Add a separate offline maintenance-ledger [bin] entry with validate/analyse/cards subcommands over explicit files. Keep maintenance-bench/maintenance-collect behavior and v1 readers stable. Version new report series and bind actual declared package/compiler/protocol/accounting identities.
 
-- [ ] Same frozen inputs give identical JSON/Markdown/card bytes. Changed index, receipt, protocol or comparison direction changes the report identity.
-- [ ] Invalid input exits nonzero with field/context; no fallback to an empty successful cohort. Missing costs and observational/controlled evidence remain separate.
-- [ ] The installed offline command runs outside the source checkout under IO/FS/Env only; it does not request Process, Net or AI. Do not forge a 0.1.0 identity in 0.2.0 output.
+- [x] Same frozen inputs give identical JSON/Markdown/card bytes. Changed index, receipt, protocol or comparison direction changes the report identity.
+- [x] Invalid input exits nonzero with field/context; no fallback to an empty successful cohort. Missing costs and observational/controlled evidence remain separate.
+- [x] The installed offline command runs outside the source checkout under IO/FS/Env only; it does not request Process, Net or AI. Do not forge a 0.1.0 identity in 0.2.0 output.
 
 ### M9: Resource ownership starter pair and contract (~260 LOC)
 
@@ -144,9 +144,9 @@ Add a separate offline maintenance-ledger [bin] entry with validate/analyse/card
 
 Freeze the bounded image extraction command/API and file-lifetime contract from Parse #46/#77. Keep competent native inline-resource starters, identical byte obligations and a language-neutral protocol; no whole-platform port. Independent oracle checks outputs/resources, not implementation text.
 
-- [ ] Both native starters pass the same baseline cases, including different bytes with repeated names, duplicate content and reordered documents. Record source/runtime/dependency identities.
-- [ ] External checks detect planted byte corruption and cross-document aliasing while public checks remain unchanged. A nonzero exit before successful compilation is infrastructure evidence, not the desired semantic negative control.
-- [ ] Attribute the seed and adaptation honestly; all exposed controls are development assets. Baseline native responsibility and allowed dependencies are documented before stage qualification.
+- [x] Both native starters pass the same baseline cases, including different bytes with repeated names, duplicate content and reordered documents. Record source/runtime/dependency identities.
+- [x] External checks detect planted byte corruption and cross-document aliasing while public checks remain unchanged. A nonzero exit before successful compilation is infrastructure evidence, not the desired semantic negative control.
+- [x] Attribute the seed and adaptation honestly; all exposed controls are development assets. Baseline native responsibility and allowed dependencies are documented before stage qualification.
 
 ### M10: Resource stages and negative controls (~300 LOC)
 
@@ -156,9 +156,9 @@ Freeze the bounded image extraction command/API and file-lifetime contract from 
 
 Provide three successive requirements and native reference checkpoints: file backing, batch/per-document decoded-byte cap, then release/cleanup. References qualify assets, not repair agent trajectories. Keep original bytes/lifetime checks active throughout.
 
-- [ ] Both languages pass each stage reference and all still-required older obligations. No-op/pre-fix and targeted weakened-oracle/implementation mutations fail actual assertions.
-- [ ] Rejected or partially processed documents cannot corrupt earlier successes; cap boundaries, retry, shared content and release/unreleased ownership are exercised.
-- [ ] Use per-source build/output directories and an explicit qualification script outside agent workspace. Record byte checks and timing; no uncalibrated RSS or physical-race pass claim.
+- [x] Both languages pass each stage reference and all still-required older obligations. No-op/pre-fix and targeted weakened-oracle/implementation mutations fail actual assertions.
+- [x] Rejected or partially processed documents cannot corrupt earlier successes; cap boundaries, retry, shared content and release/unreleased ownership are exercised.
+- [x] Use per-source build/output directories and an explicit qualification script outside agent workspace. Record byte checks and timing; no uncalibrated RSS or physical-race pass claim.
 
 ### M11: Text fidelity starter pair and contract (~260 LOC)
 
@@ -168,9 +168,9 @@ Provide three successive requirements and native reference checkpoints: file bac
 
 Freeze the bounded cell-text adapter and native dependency responsibility from Calamine #671/#673. Both native starters implement the same correct initial logical-text contract. Write the exact streaming/interface and structured-record stage requests before references or model observations.
 
-- [ ] Both starters preserve baseline logical text, internal/non-ASCII whitespace, decoded character references and empty/error distinctions on shared cases.
-- [ ] Specify identical semantic responsibility for S2 producer/interface events and S3 structured-text/output fields; provide both arms equally competent native producers/dependencies.
-- [ ] Independent oracle catches a planted semantic loss after a successful build. Reject unmatched responsibility rather than publishing an AILANG/Python delta; do not present Python assets as historical repairs.
+- [x] Both starters preserve baseline logical text, internal/non-ASCII whitespace, decoded character references and empty/error distinctions on shared cases.
+- [x] Specify identical semantic responsibility for S2 producer/interface events and S3 structured-text/output fields; provide both arms equally competent native producers/dependencies.
+- [x] Independent oracle catches a planted semantic loss after a successful build. Reject unmatched responsibility rather than publishing an AILANG/Python delta; do not present Python assets as historical repairs.
 
 ### M12: Text stages and negative controls (~300 LOC)
 
@@ -180,9 +180,9 @@ Freeze the bounded cell-text adapter and native dependency responsibility from C
 
 Qualify preserve-space/default edge-ASCII trimming, an exact event/interface revision, and a documented structured-text/output extension. Preserve all earlier logical-text/consumer obligations.
 
-- [ ] Both native reference chains pass the identical frozen stage expectations, including event chunk boundaries and relevant CDATA/rich-text/schema cases selected before execution.
-- [ ] No-op/pre-fix controls and targeted mutants fail specific old/new assertions; oracle weakening is detected by the independent expected-failure ledger.
-- [ ] Malformed versus empty output and missing consumer fields cannot pass. Fresh build identities and exact source requirements are included in qualification receipts.
+- [x] Both native reference chains pass the identical frozen stage expectations, including event chunk boundaries and relevant CDATA/rich-text/schema cases selected before execution.
+- [x] No-op/pre-fix controls and targeted mutants fail specific old/new assertions; oracle weakening is detected by the independent expected-failure ledger.
+- [x] Malformed versus empty output and missing consumer fields cannot pass. Fresh build identities and exact source requirements are included in qualification receipts.
 
 ### M13: Independent replay and frozen-v1 compatibility (~220 LOC)
 
@@ -192,9 +192,9 @@ Qualify preserve-space/default edge-ASCII trimming, an exact event/interface rev
 
 Run bounded no-model native qualification plus scripted ledger ingestion. Combine hand-counted instrument fixtures with actual qualification receipts without presenting either as a model result. Re-run original pinned consumer separately and preserve all frozen study bytes.
 
-- [ ] Account for the complete synthetic 8/24 schedule with forced failures, blocked continuation and costly retries; label its instrument-control role visibly.
-- [ ] Run F1/F2 native starter/reference/no-op/mutation checks independently, record pass/fail counts and assert their intended failure causes. A skipped/weak oracle or stale build cannot qualify a family.
-- [ ] Replay the old consumer with its actual 0.1.0 lock/compiler and compare original reports byte-for-byte. New v2 reports use a separate series; do not edit frozen pilot/mature studies.
+- [x] Account for the complete synthetic 8/24 schedule with forced failures, blocked continuation and costly retries; label its instrument-control role visibly.
+- [x] Run F1/F2 native starter/reference/no-op/mutation checks independently, record pass/fail counts and assert their intended failure causes. A skipped/weak oracle or stale build cannot qualify a family.
+- [x] Replay the old consumer with its actual 0.1.0 lock/compiler and compare original reports byte-for-byte. New v2 reports use a separate series; do not edit frozen pilot/mature studies.
 
 ### M14: Release candidate, focused CI and evaluation (~220 LOC)
 
@@ -257,3 +257,7 @@ Mark's “ok continue” approves progressing from the designs into this concret
 ## Execution log
 
 - 2026-10-23: Mark explicitly approved execution. Isolated implementation branch created; original working trees and active core sprint preserved. Independent taskpack/usage work is assigned to local workers under sprint-executor Phase 2B; integration and all shared manifest/CI changes stay with the controller.
+
+- Integration checkpoint: M1–M13 passed. Main185 native tests plus500 generated cases; both native task families and amended host controls pass; old six-report replay byte-identical. M14 final scoring/CI pending. Source0.2 remains a release candidate.
+- Review amendments: immutable/distinct card IDs, standalone economic cards refused; fresh+generated headline versus fresh-input diagnostic; bounded follow-ups and rename lineage; typed JSON oracle equality; create-only evidence; exact edit sums. All pre-model changes and targeted controls are documented in VALIDATION.
+- Wrapper evidence amendment: scoped_index/usage_accounting use IO; trajectory/card examples read explicit checked-in fixtures under IO/FS. Pure owner modules hold contracts/native laws; wrappers contain no new pure logic. No vacuous wrapper contracts were added.

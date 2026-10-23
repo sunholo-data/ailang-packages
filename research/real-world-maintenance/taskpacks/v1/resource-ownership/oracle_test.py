@@ -34,5 +34,21 @@ class OracleControls(unittest.TestCase):
                 qualify()
 
 
+    def test_numeric_boolean_error_is_rejected(self):
+        request={"schema":"maintenance.resource-ownership/1","operations":[{"op":"read","doc":"missing"}]}
+        with tempfile.TemporaryDirectory() as root:
+            with self.assertRaises(AssertionError):
+                validate(request,{"schema":request['schema'],"results":[{"ok":0,"error":"document_missing"}]},root,0)
+
+    def test_qualification_refuses_existing_output_before_execution(self):
+        import sys
+        from qualify import main
+        with tempfile.TemporaryDirectory() as root:
+            path=Path(root)/'existing.json';path.write_text('original')
+            with patch.object(sys,'argv',['qualify','--output',str(path)]), patch('qualify.native_packages') as native:
+                with self.assertRaises(FileExistsError):main()
+                native.assert_not_called()
+            self.assertEqual(path.read_text(),'original')
+
 if __name__ == "__main__":
     unittest.main()

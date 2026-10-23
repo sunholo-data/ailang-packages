@@ -64,3 +64,7 @@ SMT proofs, runtime contracts and unavailable registry checks. Later executor
 integration must prove worker/oracle isolation, retain the agent's own failures,
 and charge all usage. Exposed cases are regression/development assets; subsequent
 confirmation needs new frozen real requirements. No model campaign is included.
+
+## Integrated foundation qualification amendment
+
+During source integration, independent review tightened JSON scalar-type checks and qualification evidence creation. The current [integration receipt](../../../../../packages/maintenance-bench/validation/v0.2.0/text-qualification.json) binds the amended oracle/qualifier and actual runtime. Files under this taskpack's validation/ directory retain earlier worker-stage evidence and are not claimed to bind the amended host code. Native package source/checkpoint semantics did not change. Ordinary qualification stays offline; separate pkg quality checks can attempt a read-only registry overlap lookup.

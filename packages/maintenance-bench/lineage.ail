@@ -2,14 +2,16 @@ module sunholo/maintenance_bench/lineage
 import ./types (Episode, FileChange)
 import std/result (unwrap, Err)
 import std/map as M
-import std/list (map, foldl, filter, sortBy, contains)
+import std/list (map, foldl, filter, sortBy, contains, length, reverse)
 import std/option (Some, None)
 import std/string (compare)
 import std/json (encode, JArray, JString)
 
 export type Artifact = { id: string, repo: string, language: string, cluster: string, paths: [string], touches: int, repairTouches: int, featureTouches: int, otherTouches: int }
 
-type History = { aliases: Map[string, string], artifacts: Map[string, Artifact] }
+export type ObservedTouch = { artifactId: string, episodeId: string }
+
+type History = { events: [ObservedTouch], aliases: Map[string, string], artifacts: Map[string, Artifact] }
 
 func pathKey(r: Episode, path: string) -> string =
   encode(JArray(map(\s. JString(s), [r.repo, r.language, r.cluster, path])))
@@ -30,7 +32,7 @@ func visit(h: History, before: Map[string, string], r: Episode, path: string, ch
   let repaired = r.purpose == "repair" && r.evidenceLevel == "confirmed"
   let feature = r.purpose == "feature" && (r.evidenceLevel == "confirmed" || r.evidenceLevel == "supported")
   let next = { prior | paths: paths, touches: prior.touches + 1, repairTouches: prior.repairTouches + (if repaired then 1 else 0), featureTouches: prior.featureTouches + (if feature then 1 else 0), otherTouches: prior.otherTouches + (if not repaired && not feature then 1 else 0) };
-  { aliases: if change.status == "D" then h.aliases else M.insert(h.aliases, key, id), artifacts: M.insert(h.artifacts, id, next) }
+  { events: { artifactId: id, episodeId: r.id } :: h.events, aliases: if change.status == "D" then h.aliases else M.insert(h.aliases, key, id), artifacts: M.insert(h.artifacts, id, next) }
 }
 
 func visitRow(h: History, r: Episode) -> History {
@@ -46,9 +48,21 @@ func visitRow(h: History, r: Episode) -> History {
 
 -- Observed within-snapshot lineage, not a claim to complete file creation history.
 -- Ties use episode id deterministically; capture finer acceptance ordering if needed.
-export pure func artifacts(rows: [Episode]) -> [Artifact] {
+func history(rows: [Episode]) -> History {
   let ordered = sortBy(\a b. if a.acceptedMs < b.acceptedMs then -1 else if a.acceptedMs > b.acceptedMs then 1 else compare(a.id, b.id), filter(\r. r.canonical, rows))
-  let initial: History = { aliases: M.empty(), artifacts: M.empty() }
+  let initial: History = { events: [], aliases: M.empty(), artifacts: M.empty() }
   let final = foldl(\state r. visitRow(state, r), initial, ordered)
-  M.values(final.artifacts)
+  final
+}
+
+export pure func artifacts(rows: [Episode]) -> [Artifact] {
+  let h = history(rows)
+  M.values(h.artifacts)
+}
+
+export pure func observedTouches(rows: [Episode]) -> [ObservedTouch]
+requires { length(filter(\r. length(filter(\path. length(filter(\c. c.path == path, r.changes)) != 1, r.files)) > 0, rows)) == 0 }
+ensures { length(result) == foldl(\n r. n + length(r.files), 0, filter(\r. r.canonical, rows)) } {
+  let h = history(rows)
+  reverse(h.events)
 }

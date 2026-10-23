@@ -19,5 +19,13 @@ class OracleControls(unittest.TestCase):
             mismatches([], [dict(cell="A1")])
 
 
+    def test_numeric_boolean_is_a_type_error(self):
+        self.assertEqual(mismatches([dict(cell="A1",ok=1,text="x",error=None)],
+                                   [dict(cell="A1",ok=True,text="x",error=None)]),["A1"])
+
+    def test_float_and_int_are_distinct_counts(self):
+        self.assertEqual(mismatches([dict(cell="A1",ok=True,count=1.0)],
+                                   [dict(cell="A1",ok=True,count=1)]),["A1"])
+
 if __name__ == "__main__":
     unittest.main()

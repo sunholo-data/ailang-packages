@@ -4,9 +4,34 @@ Repeatable real-project maintenance analysis, written in AILANG. Collect facts w
 
 This is an **experimental research instrument**, not evidence that AILANG has fewer bugs. The shipped analytical fixture is synthetic. Four source-attributed real repairs are a discovery sample with no mature follow-up, unknown AI authorship, and no validated introducing changes.
 
+## 0.2.0 source release candidate
+
+Registry version 0.1.0 remains available; this source adds the **maintenance ledger** and two independently qualified real-requirement task families. Version 0.2.0 is not uploaded by this sprint.
+
+- Explicit sampled IDs keep follow-ups/workload from changing index denominators. Reviewed intent stays separate from causal outcome, so a feature can introduce a bug without becoming a bug-fix change.
+- Follow-up file touches use observed artifact identities across renames; copies and deletion/recreation start new identities. Corrections respect the index-specific detection window. Acceptance-based observation frames are required.
+- Strict usage receipts preserve cache/reasoning/money provenance, failed attempts, retries, parent/leaf identity and unknowns. The token headline is **fresh input + generated output**; fresh input alone is a separate diagnostic.
+- A finite stage ledger preserves every scheduled change and owned checkpoint. Native AILANG/Python oracles qualify resource ownership and text fidelity against successful references, prior-version no-ops and semantic mutants.
+- Reproduced findings produce roadmap-card drafts. Standalone cards cannot qualify economic claims; the controlled report binds those to actual run/receipt identities. Cards confer no implementation authority.
+
+```sh
+# From this package directory; every output path must be new.
+ailang install --path . --bin-dir /tmp/maintenance-v2-bin
+/tmp/maintenance-v2-bin/maintenance-ledger runs \
+  assets/fixtures/ledger/plan.json assets/fixtures/ledger/runs.json \
+  assets/fixtures/ledger/empty-usage.json declared-runtime /tmp/new-ledger.json
+/tmp/maintenance-v2-bin/maintenance-ledger cards-md \
+  assets/fixtures/ledger/cards.json declared-runtime /tmp/new-roadmap-cards.md
+make verify integration ledger-integration qualify-taskpacks
+```
+
+The 8-trajectory/24-stage fixtures are **instrument controls**, with invented usage and dollar amounts. They are not model performance results. Actual real-project reanalysis is in [foundation evidence](../../research/real-world-maintenance/foundation-2026-10-23/README.md); the [taskpack contracts](../../research/real-world-maintenance/taskpacks/v1/README.md) explain the native component adaptations. The staged model executor and priced campaign remain later work. Existing language-development evals are excluded.
+
+The old metric-v1 reader remains, but source-v0.2 reports identify package 0.2.0. Reproduce frozen v0.1 reports with their actual original lock/compiler; do not counterfeit the old version in new output. See [SCHEMA](SCHEMA.md) and [VALIDATION](VALIDATION.md) for boundaries and measured checks.
+
 ## Run from this directory
 
-Requires AILANG >=0.54.17; Git and gh are required only for acquisition. There are no external package dependencies.
+Requires AILANG >=0.54.18; Git and gh are required only for acquisition. There are no external package dependencies.
 
 ```sh
 ailang install --path . --bin-dir /tmp/maintenance-bin

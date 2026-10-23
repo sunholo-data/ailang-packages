@@ -215,3 +215,11 @@ Net **+11**; no negative on A1/A3/A4/A7. This is a design assessment, not proof 
 - [x] A3: analysis and model/tool execution keep explicit effect/authority boundaries.
 - [x] A4: generated findings never grant run, merge or implementation permission.
 - [x] A7: machine-readable states preserve unknowns, invalidity and identity.
+
+## 2026-10-23 foundation implementation
+
+Mark approved the concrete foundation sprint with “execute sprint”. The native package now implements explicit index/workload scopes, strict neutral receipt accounting, retained stage ledger validation, matched-arm economics, exact edit bounds and draft reproduction cards. Both native resource/text development taskpacks qualified against positive, semantic-negative and weakened-oracle controls. Source v0.2.0 is a release candidate; registry publication has not occurred.
+
+Review amendments before model execution: headline token economics uses fresh input plus generated output, with fresh input as a separate diagnostic; unknown output cannot support the headline. Standalone roadmap cards cannot qualify economic claims from a known label; those need identity-bound controlled reports. Card identities and JSON output types are strict. Follow-up windows and observed rename/delete/copy history remain explicit. See the foundation sprint's actual verification and review log.
+
+The complete lifecycle design stays planned: existing-executor staged integration, actual worker/oracle protection, live source receipt qualification and a priced model campaign are later scope. Exposed development controls do not confirm a general language improvement.

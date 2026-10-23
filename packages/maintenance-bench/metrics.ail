@@ -11,8 +11,11 @@ import std/json (encode, JArray, JString)
 
 export type Summary = { repo: string, language: string, cluster: string, eligible: int, mature: int, censored: int, unlabelled: int, linkedRepairChanges: int, repairEpisodes: int, repairDefects: int, repairRounds: int, unattributedRepairs: int, interceptedRepairs: int, mechanicalChanges: int, compilerRepairs: int, canonicalFiles: int, knownTokenRows: int, totalTokens: Result[int, string], knownCostRows: int, totalCostMicros: Result[int, string], knownDurationRows: int, totalDurationMs: Result[int, string], successes: int, unknownOutcomes: int, medianDurationMs: Option[float], costPerSuccessMicros: Result[float, string] }
 
-export pure func rate(n: int, d: int) -> Option[float] =
-  if n < 0 || d <= 0 || n > d then None else Some(intToFloat(n) / intToFloat(d))
+export pure func rate(n: int, d: int) -> Option[float]
+ensures { match result {
+  Some(x) => x >= 0.0 && x <= 1.0,
+  None => n < 0 || d <= 0 || n > d
+} } = if n < 0 || d <= 0 || n > d then None else Some(intToFloat(n) / intToFloat(d))
 
 export pure func median(xs: [int]) -> Option[float] {
   let sorted = sortBy(\a b. if a < b then -1 else if a > b then 1 else 0, xs)

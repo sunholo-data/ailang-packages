@@ -3,6 +3,17 @@ import base64
 from pathlib import Path
 
 
+def typed_equal(actual, expected):
+    """JSON booleans, numbers, nulls and strings have distinct protocol types."""
+    if type(actual) is not type(expected):
+        return False
+    if isinstance(expected, dict):
+        return actual.keys() == expected.keys() and all(typed_equal(actual[k], v) for k, v in expected.items())
+    if isinstance(expected, list):
+        return len(actual) == len(expected) and all(typed_equal(a, b) for a, b in zip(actual, expected))
+    return actual == expected
+
+
 def validate(request, response, root, stage):
     """Raise AssertionError for a semantic failure; return assertion count."""
     count = 0
@@ -16,9 +27,10 @@ def validate(request, response, root, stage):
         assert ok, message
 
     def fail(result, reason):
-        check(result == {"ok": False, "error": reason}, f"expected {reason}: {result}")
+        check(typed_equal(result, {"ok": False, "error": reason}), f"expected {reason}: {result}")
 
     def extract(op, result):
+        check(type(result) is dict, "extract result must be an object")
         doc = op["doc"]
         if doc in active:
             fail(result, "document_exists")
@@ -32,6 +44,7 @@ def validate(request, response, root, stage):
         check(isinstance(refs, list) and len(refs) == len(values), "wrong ref count")
         paths = []
         for image, payload, ref in zip(op["images"], values, refs):
+            check(type(ref) is dict, "reference must be an object")
             check(ref.get("name") == image["name"], "consumer name lost")
             if stage == 0:
                 check(ref.get("path") is None, "starter unexpectedly file backed")
@@ -47,6 +60,7 @@ def validate(request, response, root, stage):
         active[doc] = {"bytes": [i["bytes"] for i in op["images"]], "paths": paths}
 
     def step(op, result):
+        check(type(result) is dict, "operation result must be an object")
         kind = op["op"]
         if kind == "extract":
             extract(op, result)
@@ -54,7 +68,7 @@ def validate(request, response, root, stage):
             if op["doc"] not in active:
                 fail(result, "document_missing")
             else:
-                check(result == {"ok": True, "bytes": active[op["doc"]]["bytes"]}, "read byte ownership changed")
+                check(typed_equal(result, {"ok": True, "bytes": active[op["doc"]]["bytes"]}), "read byte ownership changed")
         elif kind == "batch":
             check(stage >= 2, "batch fixture before stage 2")
             check(result.get("ok") is True and isinstance(result.get("results"), list), "batch missing")
@@ -66,13 +80,14 @@ def validate(request, response, root, stage):
             if op["doc"] not in active:
                 fail(result, "document_missing")
             else:
-                check(result == {"ok": True}, "release not implemented")
+                check(typed_equal(result, {"ok": True}), "release not implemented")
                 for path in active[op["doc"]]["paths"]:
                     files.pop(path)
                 del active[op["doc"]]
         else:
             raise AssertionError(f"oracle does not know operation {kind}")
 
+    check(type(response) is dict, "response must be an object")
     check(response.get("schema") == request["schema"], "output schema")
     results = response.get("results")
     check(isinstance(results, list) and len(results) == len(request["operations"]), "operation accounting")

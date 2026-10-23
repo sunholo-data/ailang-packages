@@ -21,3 +21,7 @@ The package `sunholo/maintenance_bench@0.1.0` is published. [PR #157](https://gi
 The eval emits auditable evidence cards, not automatic feature approval. A card must name the failed requirement, reproduction, source/run/oracle identities, cost coverage, recurrence and existing-capability audit before it supports a roadmap design. The resulting design still follows its repository's approval and sprint workflow. A negative result or an application-only fix can be the correct roadmap outcome.
 
 No new model campaign, package implementation or compiler/stdlib behavior is included in these design proposals. The proposed first pilot measures maintenance of existing starters; initial application generation belongs to a separately identified follow-on cohort.
+
+## Foundation source implementation
+
+The [v0.2 foundation replay](foundation-2026-10-23/README.md) uses explicit index scopes on the real Parse data. [Native taskpacks](taskpacks/v1/README.md) qualify real-requirement component adaptations in AILANG/Python; [sprint plan](../../design_docs/planned/m-maintenance-eval-foundation-sprint-plan.md) tracks the implementation. This is a source release candidate, not a registry publication or model campaign. The exposed controls remain separate from future confirmation.

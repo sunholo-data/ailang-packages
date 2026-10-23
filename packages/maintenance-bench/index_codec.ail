@@ -1,7 +1,7 @@
 module sunholo/maintenance_bench/index_codec
 import ./index_types (IndexSpec, IndexDecision)
 import ./codec (requiredText, requiredCount, requiredBool, requiredTexts, optionalCount, enumText, collectResults)
-import ./strict_json (decodeCountDocument)
+import ./strict_json (decodeCountDocument, hasExactKeys)
 import std/json (Json, JArray, get)
 import std/result (Result, Ok, Err, flatMap)
 import std/option (Some, None)
@@ -11,7 +11,7 @@ import std/map as M
 func unique(xs: [string]) -> bool = M.size(M.fromList(map(\s. (s, true), xs))) == length(xs)
 
 func decision(j: Json) -> Result[IndexDecision, string] =
-  flatMap(\id. flatMap(\excluded. flatMap(\acceptance. flatMap(\acceptedMs. flatMap(\intent. flatMap(\labels. flatMap(\evidence. flatMap(\provenance. Ok({ id: id, excluded: excluded, acceptance: acceptance, acceptedMs: acceptedMs, intent: intent, labels: labels, evidence: evidence, provenance: provenance }), requiredText(j, "provenance")), enumText(j, "evidence", ["confirmed", "supported", "inferred", "unknown"])), requiredTexts(j, "labels")), enumText(j, "intent", ["feature", "repair", "migration", "mechanical", "infrastructure", "mixed", "unknown"])), optionalCount(j, "acceptedMs")), enumText(j, "acceptance", ["reviewed_exact", "commit_proxy", "interval", "unknown"])), requiredBool(j, "excluded")), requiredText(j, "id"))
+  if not hasExactKeys(j, ["id", "excluded", "acceptance", "acceptedMs", "intent", "labels", "evidence", "provenance"]) then Err("unexpected or missing decision fields") else flatMap(\id. flatMap(\excluded. flatMap(\acceptance. flatMap(\acceptedMs. flatMap(\intent. flatMap(\labels. flatMap(\evidence. flatMap(\provenance. Ok({ id: id, excluded: excluded, acceptance: acceptance, acceptedMs: acceptedMs, intent: intent, labels: labels, evidence: evidence, provenance: provenance }), requiredText(j, "provenance")), enumText(j, "evidence", ["confirmed", "supported", "inferred", "unknown"])), requiredTexts(j, "labels")), enumText(j, "intent", ["feature", "repair", "migration", "mechanical", "infrastructure", "refactor", "performance", "security", "tests_docs", "mixed", "unknown"])), optionalCount(j, "acceptedMs")), enumText(j, "acceptance", ["reviewed_exact", "commit_proxy", "interval", "unknown"])), requiredBool(j, "excluded")), requiredText(j, "id"))
 
 func decisions(j: Json) -> Result[[IndexDecision], string] = match get(j, "decisions") {
   Some(JArray(xs)) => collectResults(map(\x. decision(x), xs)),
@@ -20,7 +20,7 @@ func decisions(j: Json) -> Result[[IndexDecision], string] = match get(j, "decis
 
 func valid(m: IndexSpec) -> Result[IndexSpec, string] {
   let ids = map(\d. d.id, m.decisions)
-  let bad = filter(\d. not contains(m.selectedIds, d.id) || not unique(d.labels) || length(filter(\label. not contains(["feature", "repair", "migration", "mechanical", "infrastructure", "unknown"], label), d.labels)) > 0 || d.intent == "mixed" && length(d.labels) < 2 || d.intent != "mixed" && not contains(d.labels, d.intent) || (match d.acceptedMs {
+  let bad = filter(\d. not contains(m.selectedIds, d.id) || not unique(d.labels) || length(filter(\label. not contains(["feature", "repair", "migration", "mechanical", "infrastructure", "refactor", "performance", "security", "tests_docs", "unknown"], label), d.labels)) > 0 || d.intent == "mixed" && length(d.labels) < 2 || d.intent != "mixed" && not contains(d.labels, d.intent) || (match d.acceptedMs {
     Some(ms) => d.acceptance != "reviewed_exact" || ms > m.cutoffMs,
     None => d.acceptance == "reviewed_exact"
   }), m.decisions)
@@ -32,4 +32,4 @@ ensures { match result {
   Ok(m) => m.schema == "maintenance.index/2" && (m.windowDays == 30 || m.windowDays == 90),
   Err(e) => e != ""
 } } =
-  flatMap(\j. flatMap(\schema. flatMap(\cutoffMs. flatMap(\windowDays. flatMap(\sourceRef. flatMap(\selectedIds. flatMap(\rows. valid({ schema: schema, cutoffMs: cutoffMs, windowDays: windowDays, sourceRef: sourceRef, selectedIds: selectedIds, decisions: rows }), decisions(j)), requiredTexts(j, "selectedIds")), requiredText(j, "sourceRef")), requiredCount(j, "windowDays")), requiredCount(j, "cutoffMs")), enumText(j, "schema", ["maintenance.index/2"])), decodeCountDocument(text))
+  flatMap(\j. if not hasExactKeys(j, ["schema", "cutoffMs", "windowDays", "sourceRef", "selectedIds", "decisions"]) then Err("unexpected index fields") else flatMap(\schema. flatMap(\cutoffMs. flatMap(\windowDays. flatMap(\sourceRef. flatMap(\selectedIds. flatMap(\rows. valid({ schema: schema, cutoffMs: cutoffMs, windowDays: windowDays, sourceRef: sourceRef, selectedIds: selectedIds, decisions: rows }), decisions(j)), requiredTexts(j, "selectedIds")), requiredText(j, "sourceRef")), requiredCount(j, "windowDays")), requiredCount(j, "cutoffMs")), enumText(j, "schema", ["maintenance.index/2"])), decodeCountDocument(text))
