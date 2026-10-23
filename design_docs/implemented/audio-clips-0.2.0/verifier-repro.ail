@@ -1,0 +1,8 @@
+module sunholo/audio/_verify_probe
+import std/result (Result, Ok, Err)
+import ./safety (AudioError, ResourceLimit)
+export func checked(n: int) -> Result[int, AudioError] ! {}
+ensures { match result { Ok(x) => x >= 0, Err(_) => true } }
+{
+  if n < 0 then Err(ResourceLimit("negative")) else Ok(n)
+}
