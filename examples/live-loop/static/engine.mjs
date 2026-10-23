@@ -1,6 +1,14 @@
 // The worklet owns timing. Functions here are shared by the renderer and tests.
 export const TRACKS = 4;
 export const MAX_SECONDS = 16;
+// The renderer has already reached its acknowledged frame even when a cached or
+// reduced-precision main-thread currentTime still trails it. Keep exact-frame
+// validation; use the acknowledgement as a lower bound on the known clock.
+export function activationNow(mainFrame, plannedFrame, appliedFrame) {
+  if([mainFrame,plannedFrame,appliedFrame].some(x=>!Number.isSafeInteger(x)||x<0||x>1e12))throw new Error('Invalid activation clock');
+  if(appliedFrame!==plannedFrame)throw new Error('Activation differs from planned frame');
+  return Math.max(mainFrame,appliedFrame);
+}
 export function validSamples(xs, rate) {
   return xs instanceof Float32Array && Number.isInteger(rate) && rate >= 8000 && rate <= 192000
     && xs.length > 0 && xs.length <= rate * MAX_SECONDS && xs.every(x => Number.isFinite(x) && Math.abs(x) <= 1);

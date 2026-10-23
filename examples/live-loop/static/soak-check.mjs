@@ -1,4 +1,5 @@
-import {EventWaiters,delay,timingSummary} from './check-utils.mjs';
+import {EventWaiters,delay,timingSummary,VisibilityLog} from './check-utils.mjs';
+import {activationNow} from './engine.mjs';
 const $=id=>document.getElementById(id);
 let running=null;
 async function api(path,body,signal) {
@@ -11,7 +12,7 @@ $('run').onclick=async()=> {
   if(running)return;
   const controller=new AbortController();running=controller;const {signal}=controller;
   const long=$('profile').value==='soak',target=long?100:8,seconds=long?1800:0;
-  const report={kind:'synthetic planner/worker/Web Audio repeated handoff check',profile:long?'100 handoffs and 30-minute soak':'8 handoffs only',userAgent:navigator.userAgent,startedAt:new Date().toISOString(),physicalDeviceLatencyMeasured:false,targetHandoffs:target,targetAudioSeconds:seconds,handoffs:[],workerMs:[],workerRoundTripMs:[],bridgeMs:[],passed:false,completed:false};
+  const report={kind:'synthetic planner/worker/Web Audio repeated handoff check',runnerVersion:2,profile:long?'100 handoffs and 30-minute soak':'8 handoffs only',userAgent:navigator.userAgent,startedAt:new Date().toISOString(),physicalDeviceLatencyMeasured:false,targetHandoffs:target,targetAudioSeconds:seconds,handoffs:[],workerMs:[],workerRoundTripMs:[],bridgeMs:[],passed:false,completed:false};
   let state,ownedEpoch=null,configureId=null,configureFromEpoch=null,ctx,program,capture,osc,worker,sink,lastMeter=null,privatePeak=0,programPeakBefore=0,sequence=0;
   const audioEvents=new EventWaiters(signal),workerEvents=new EventWaiters(signal);
   const frame=()=>Math.ceil(ctx.currentTime*ctx.sampleRate);
@@ -22,7 +23,8 @@ $('run').onclick=async()=> {
     return state;
   };
   const fail=reason=>{if(!signal.aborted)controller.abort(reason);};
-  const visibility=()=>{if(document.hidden)fail('Page hidden; repeat the check with this tab visible');};
+  const visibilityLog=new VisibilityLog(document.hidden,performance.now());
+  const visibility=()=>visibilityLog.record(document.hidden,performance.now());
   const leaving=()=>fail('Page closing');
   document.addEventListener('visibilitychange',visibility);window.addEventListener('pagehide',leaving);
   $('run').disabled=true;$('profile').disabled=true;$('stop').disabled=false;$('result').textContent='Running…';
@@ -83,8 +85,10 @@ $('run').onclick=async()=> {
       $('progress').textContent=`Handoff ${i+1} of ${target}: waiting for the planned loop boundary…`;
       const active=await activatedPromise;
       if(active.applied!==pending.at||active.epoch!==ownedEpoch)throw new Error('Activation frame or epoch mismatch');
-      await command('activate',{track:track.id,base:track.revision,pendingId:pending.id,at:pending.at,applied:active.applied});
-      report.handoffs.push({track:track.id,plannedFrame:pending.at,appliedFrame:active.applied,errorFrames:active.applied-pending.at,stagingLeadFrames:pending.at-staged.frame});
+      const mainFrameAtAck=frame(),now=activationNow(mainFrameAtAck,pending.at,active.applied);
+      report.lastActivation={track:track.id,plannedFrame:pending.at,appliedFrame:active.applied,errorFrames:active.applied-pending.at,stagingLeadFrames:pending.at-staged.frame,mainFrameAtAck,acknowledgedNow:now,mainClockLagFrames:Math.max(0,active.applied-mainFrameAtAck),plannerScheduled:state.tracks[track.id-1].pending?.scheduled===true};
+      await command('activate',{track:track.id,base:track.revision,pendingId:pending.id,at:pending.at,applied:active.applied,now});
+      report.handoffs.push(report.lastActivation);
       if(i===0) {
         // The tone is short: match a block that begins before the tail as well.
         if(!lastMeter||lastMeter.peak===0)await audioEvents.wait(m=>m.type==='meter'&&m.frame>=active.applied&&m.peak>.001);
@@ -116,6 +120,7 @@ $('run').onclick=async()=> {
     }
     try{await ctx?.close();}catch(error){report.cleanupError=error.message;report.passed=false;}report.finishedAt=new Date().toISOString();
     report.workerSummary=timingSummary(report.workerMs);report.workerRoundTripSummary=timingSummary(report.workerRoundTripMs);report.bridgeSummary=timingSummary(report.bridgeMs);
+    report.visibility=visibilityLog.summary(performance.now());
     report.bridgeSamplesCappedAt=512;$('result').textContent=JSON.stringify(report,null,2);$('run').disabled=false;$('profile').disabled=false;$('stop').disabled=true;running=null;
   }
 };

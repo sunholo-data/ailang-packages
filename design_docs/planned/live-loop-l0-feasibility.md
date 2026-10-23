@@ -45,7 +45,8 @@ is not a prerequisite for live host playback.
 10 AILANG tests (9 VM named tests + 1 evaluator property/100 cases), 10 host-kernel
 tests and 6 real CLI/HTTP integration tests pass. Four additional waiter/statistics
 checks bring the Node suite to 14 passing tests. The current quality/native/integration
-checks also pass on the newly installed v0.54.18-dirty CLI. Quality: 3/6 contracts proved,
+checks also pass on clean v0.54.18. The host/orchestration suite now has 19 checks,
+including a real strict-planner reproduction of an activation clock mismatch. Quality: 3/6 contracts proved,
 3 skipped, 0 refuted/errors, 1 uncontracted effectful generator, smoke passed, no gates.
 Only three integer-arithmetic helpers are proved. The lifecycle relies on executable
 guards and tests; raw sample arithmetic, audible quality and device timing are not
@@ -63,7 +64,10 @@ reported the Loop Lab working. The agent did not independently rerun browser tes
 
 A branded `/soak-check.html` runner now exercises the real planner, preparation
 worker/hash and AudioWorklets with 8-handoff or 100-handoff/30-minute profiles. It
-has not yet run in a browser; a cancelled/short profile cannot pass the soak. The
+has user-run Firefox evidence for three exact-frame handoffs before a visibility
+cancellation, plus a short-run activation rejection. Runner v2 fixes a reproduced
+main-thread/render-clock mismatch and records visibility instead of cancelling on
+hide; a complete rerun remains open. A cancelled/short profile cannot pass the soak. The
 UI follows the user-supplied Sunholo guide with original local AILANG/Montserrat
 assets. The preview serves those assets successfully; visual review is still open.
 

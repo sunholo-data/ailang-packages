@@ -38,11 +38,11 @@ reported base latency 0 does not establish zero physical latency.
 The initial benchmarks/browser baseline used AILANG `v0.54.17-dirty`, commit `8f58117f265471584176e2aeb45996c2c9822577`,
 built 2026-10-22. macOS 26.6.2 arm64, Python 3.13.7, Node 26.12.1.
 The current `quality.json`, `verify.json`, native and integration tests were rerun
-on `v0.54.18-dirty`, commit `19e33da02f99d9912e199dfb2c35817b88e786fe`,
-built 2026-10-23 10:59:56. The numerical benchmark samples remain the historical
+on clean `v0.54.18`, commit `cd33d050b2276633c82624453309ebf7fcea9e2f`,
+built 2026-10-23 11:36:25. The numerical benchmark samples remain the historical
 v0.54.17 measurements; they have not been relabelled as v0.54.18 performance.
-The optional current WASM binary was built from a **clean archive of that same
-commit**, not the concurrently modified core checkout, using Go 1.26.10 and its
+The optional WASM binary was built from a **clean archive of the earlier 8f58117
+benchmark commit**, not the concurrently modified core checkout, using Go 1.26.10 and its
 matching `wasm_exec.js`. Its version API reports `v0.54.17-8f58117` and its
 SHA-256 is `92742e0b0c8f10d5e3eeac12f752ec27f7e6f45bc9497bf59b8433a44ff7d354`.
 An older unversioned dev WASM binary failed module loading; it was not used for
@@ -73,13 +73,14 @@ bytecode and runtime contract checking on v0.54.18; its output is preserved in
 `runtime-contract-init.json`. That init probe does not measure contracts for every
 command path. No whole-state-machine proof is claimed.
 
-`host-kernel-tests.txt`: 14/14 Node tests, 0 failed/skipped. Tests cover bounded
+`host-kernel-tests.txt`: 19/19 Node tests, 0 failed/skipped. Tests cover bounded
 preparation, finite domains, four-part mixing, zero private output with nonzero
 private input, cancellation, fixed capacity, exact in-block replacement, late/stale
 rejection, malformed initialization and 100 handoffs, plus four orchestration
 tests for bounded waiters, timeout/cancellation cleanup and timing-summary validity.
-The clock and processor
-base class are fakes: these exercise the actual kernel code but do not measure
+Five further checks cover activation-clock domains, the real strict planner
+regression and bounded visibility accounting/delivery. The clock and processor
+base class in the render-kernel checks are fakes: these exercise the actual kernel code but do not measure
 Web Audio, speaker sound, GC deadlines or device behavior.
 
 `integration-tests.txt`: 6/6 Python tests pass. They invoke the real AILANG JSON
@@ -144,6 +145,38 @@ window, so the updated layout has not been visually reviewed by the agent.
 `/soak-check.html` adds real planner/worker/worklet orchestration for 8-handoff trials
 or 100 handoffs plus 30 audio minutes. It includes worker hashing/transfer round trips,
 rotates all four tracks, rejects taking over an active session, and cleans up its own
-epoch. The agent has **not run this new runner in a browser**. The 14 Node tests do
-not stand in for that run, and the earlier single-handoff Firefox result does not
-validate this new page. Start with its short profile before the full soak.
+epoch. The agent has **not independently run this runner in a browser**. User-run
+trials below exposed two host-adapter issues. The Node suite is regression evidence,
+not a substitute for a complete browser short/soak run.
+
+## Interrupted user trials and runner v2 fixes
+
+Two further user-supplied Firefox reports are preserved without calling them passes:
+
+- [Soak interrupted by visibility](user-trials/soak-visibility-interrupted.json):
+  three confirmed planner/render handoffs, all at the exact frame, before the old
+  runner deliberately cancelled on hide. Four preparation samples and 13 bridge
+  samples include work on a fourth pending take and cleanup; they are not four
+  completed handoffs or a completed soak.
+- [Short run rejected at activation](user-trials/short-activation-rejected.json):
+  preparation/staging proceeded, but the planner rejected activation and cleanup
+  reset the owned test session. No confirmed handoff was recorded.
+
+The runner checked renderer/planned equality before sending Activate, and Schedule
+had returned success. That isolates the remaining activation guard to the supplied
+`now` clock. The original report did not record that clock. A regression reproduces
+the exact error against the real strict planner with main clock 128 frames behind
+an otherwise correct acknowledgement, then passes with the acknowledged frame as
+its lower bound. Incorrect applied frames remain rejected. This supports the clock
+mismatch diagnosis; the next browser report will also record both clock values.
+[Mozilla documents block updates and possible precision reduction in currentTime](https://developer.mozilla.org/en-US/docs/Web/API/BaseAudioContext/currentTime).
+No particular Firefox privacy setting is inferred from the supplied report.
+
+Both the instrument and runner now use `max(mainFrame, appliedFrame)` only after
+validating the exact planned/applied frame. The planner's guard is unchanged.
+Runner v2 includes per-handoff clock observations and a last activation diagnostic
+if a later request fails. Background visibility is recorded (32 bounded events,
+all intervals counted) without aborting synthetic audio. Page closure, manual Stop,
+context suspension, deadline/activation failures and incomplete duration still fail
+or interrupt the run. The actual microphone capture UI still cancels on hide/focus
+loss. A fresh browser run is required to validate these fixes and complete L0.

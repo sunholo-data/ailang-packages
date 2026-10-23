@@ -58,18 +58,28 @@ go to third-party asset/font servers. See `DESIGN.md` for the instrument layout.
 ## Repeated handoffs and soak
 
 Open `/soak-check.html` through the same local or approved private HTTPS origin.
-This new runner has **not yet been executed in a browser**; it is provided to collect
-the remaining evidence after the passed single-handoff Firefox check.
+User-run Firefox trials reached three exact-frame handoffs before the original
+visibility rule cancelled the soak, and exposed a main-thread/render-clock mismatch
+in a later short run. Runner version 2 fixes that clock path and records visibility
+instead of cancelling merely because a tab is hidden. A complete run is still open.
 
 - Stop & reset Loop Lab first. The runner refuses to take over a running planner
-  session. Keep this check tab visible and the machine awake.
+  session. Background tabs are allowed; keep the machine awake.
 - **Short:** 8 replacements across all four tracks, about one minute. Use this to
   check the runner before spending 30 minutes on a soak.
 - **Soak:** 100 replacements, then continued rendering until 30 audio minutes have
   elapsed from the transport origin. Only the full profile can pass that soak.
 - **Stop check:** cancels and releases its graph/worker. It resets only its own
-  planner epoch. A hidden page or suspended context interrupts the check instead
-  of producing a successful result. Refresh Loop Lab after the check finishes.
+  planner epoch. Hiding records bounded visibility intervals; audio suspension,
+  missed deadlines, a closed page or Stop still interrupts the run. Refresh Loop
+  Lab after the check finishes.
+
+Runner version 2 records main-thread and render-frame observations for each
+activation. A render acknowledgement supplies a lower bound on the known audio
+clock when `AudioContext.currentTime` trails it; planned/applied equality remains
+mandatory in both the client and planner. Visibility is metadata only and does not
+relax deadline or completion requirements. The microphone capture UI still discards
+a take when focus/page visibility is lost.
 
 The muted graph uses a private synthetic capture and the real `prepare-worker`,
 including SHA-256, then the real AILANG Prepare→Schedule→Activate bridge. It rotates

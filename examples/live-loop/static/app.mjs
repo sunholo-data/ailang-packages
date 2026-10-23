@@ -1,3 +1,4 @@
+import {activationNow} from './engine.mjs';
 const $=id=>document.getElementById(id), names=['Drums','Bass','Harmony','Texture'];
 let state=null,ctx=null,program=null,captureNode=null,source=null,stream=null,sink=null,worker=null,ready=null;
 let captureId=0,activeCaptureId=null;
@@ -117,9 +118,12 @@ function programMessage(m,sessionToken) {
     log(`Part ${m.track} staged at frame ${m.frame}; target ${m.at}`);
     command('schedule',{track:m.track,base:t.revision,pendingId:m.id,at:m.at,now:m.frame}).catch(error=>{notice(`Schedule acknowledgement failed: ${error.message}. Reset required.`);stop(false);});
   } else if(m.type==='activated') {
+    let now;
+    try{now=activationNow(currentFrame(),t.pending.at,m.applied);}
+    catch(error){notice(error.message);stop(false);return;}
     activationErrors.push(m.applied-m.at); activationErrors=activationErrors.slice(-128);
     log(`Part ${m.track} activated · planned ${m.at} / applied ${m.applied} / error ${m.applied-m.at} frames`);
-    command('activate',{track:m.track,base:t.revision,pendingId:m.id,at:m.at,applied:m.applied}).then(()=>notice(`${names[m.track-1]}: committed take is now active.`)).catch(error=>{notice(`Activation acknowledgement failed: ${error.message}. Reset required.`);stop(false);});
+    command('activate',{track:m.track,base:t.revision,pendingId:m.id,at:m.at,applied:m.applied,now}).then(()=>notice(`${names[m.track-1]}: committed take is now active.`)).catch(error=>{notice(`Activation acknowledgement failed: ${error.message}. Reset required.`);stop(false);});
   }
 }
 function releaseSource() { if(source) { try{source.disconnect();source.stop?.();}catch{} source=null; } if(stream){for(const t of stream.getTracks())t.stop();stream=null;} }

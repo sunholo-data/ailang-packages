@@ -1,4 +1,28 @@
 // Main-thread test orchestration only. Nothing here runs in an audio callback.
+export class VisibilityLog {
+  constructor(hidden,now) {
+    if(typeof hidden!=='boolean'||!Number.isFinite(now))throw new Error('Invalid visibility observation');
+    this.started=now;this.latest=now;this.changed=now;this.hidden=hidden;this.startedHidden=hidden;this.settledHidden=0;this.changes=0;this.dropped=0;
+    this.events=[{hidden,elapsedMs:0}];
+  }
+  time(now) {
+    if(!Number.isFinite(now)||now<this.latest)throw new Error('Non-monotonic visibility clock');
+    this.latest=now;
+  }
+  record(hidden,now) {
+    this.time(now);if(typeof hidden!=='boolean')throw new Error('Invalid visibility state');
+    if(hidden===this.hidden)return;
+    if(this.hidden)this.settledHidden+=now-this.changed;
+    this.hidden=hidden;this.changed=now;this.changes++;
+    this.events.push({hidden,elapsedMs:now-this.started});
+    if(this.events.length>32){this.events.shift();this.dropped++;}
+  }
+  summary(now) {
+    this.time(now);
+    const hiddenMs=this.settledHidden+(this.hidden?now-this.changed:0),elapsedMs=now-this.started;
+    return {policy:'background permitted; suspension and deadline checks remain active',basis:'monotonic elapsed milliseconds since runner start',startedHidden:this.startedHidden,endedHidden:this.hidden,elapsedMs,hiddenMs,visibleMs:elapsedMs-hiddenMs,changes:this.changes,eventsDropped:this.dropped,events:this.events.map(e=>({...e}))};
+  }
+}
 export class EventWaiters {
   constructor(signal) { this.signal=signal;this.pending=new Set(); }
   wait(predicate,timeout=12000) {

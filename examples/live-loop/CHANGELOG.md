@@ -9,3 +9,7 @@ routing checks, and local/optional WASM bridge measurements. Never published as 
 Official local Sunholo tokens/Montserrat/AILANG logo; accessible controls and reduced-motion
 transport. Added a muted planner/worker/worklet runner for 8-handoff trials or
 100 handoffs plus a 30-minute software soak, with cancellation and epoch-scoped cleanup.
+
+Fix: authorize activation from the exact renderer acknowledgement when the main
+AudioContext clock trails it. Runner v2 records hidden-tab intervals instead of
+cancelling synthetic background checks; microphone capture still cancels on hide.
