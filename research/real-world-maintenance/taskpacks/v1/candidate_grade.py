@@ -101,6 +101,8 @@ def run_command(args, cwd, prefix, timeout):
                                stderr=subprocess.PIPE, text=True, start_new_session=os.name == 'posix')
     try:
         stdout, stderr = process.communicate(timeout=timeout)
+        if prefix and process.returncode in (125, 126, 127):
+            raise ValueError(f'containment/runtime command unavailable: exit {process.returncode}')
         return process.returncode, stdout, stderr
     finally:
         if os.name == 'posix':

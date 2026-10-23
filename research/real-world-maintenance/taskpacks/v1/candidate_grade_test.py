@@ -195,5 +195,16 @@ class CandidateBridge(unittest.TestCase):
         wanted = ('"' + r'\u0026\u003c\u003e' + '🍉' + r'\u2028\u2029' + '"').encode()
         self.assertEqual(grade.canonical('&<>🍉  '),wanted)
 
+    def test_wrapper_initialization_failure_is_invalid_setup(self):
+        if __import__('os').name != 'posix':
+            self.skipTest('POSIX wrapper control')
+        with tempfile.TemporaryDirectory() as d:
+            wrapper=Path(d)/'wrapper';wrapper.write_text('#!/bin/sh\nexit 125\n');wrapper.chmod(0o755)
+            source=ROOT/'text-fidelity/reference/python'
+            report=grade.grade_candidate(ROOT/'text-fidelity',source,'python',1,
+                expected_source_digest=grade.source_digest(source),command_prefix=[str(wrapper)],containment_qualified='a'*64)
+            self.assertEqual(report['status'],'invalid_setup')
+            self.assertFalse(report['compiled'])
+
 
 if __name__ == '__main__': unittest.main()
