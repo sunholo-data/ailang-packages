@@ -1,0 +1,993 @@
+{
+  "evidence_schema": "ailang.verification-evidence/v1",
+  "numeric_model": {
+    "float_sort": "Real",
+    "int_sort": "Int",
+    "runtime_equivalence": "not_established"
+  },
+  "runtime_contracts": "not_measured",
+  "reason_counts": {
+    "missing_postcondition": 5,
+    "uncontracted": 33,
+    "unsupported_encoding": 34
+  },
+  "schema": "ailang.package-verify/v1",
+  "package": "sunholo/audio",
+  "version": "0.2.0",
+  "verified": 10,
+  "total": 49,
+  "counterexample": 0,
+  "skipped": 39,
+  "errors": 0,
+  "uncontracted": 33,
+  "wall_seconds": 0.169374875,
+  "modules": [
+    {
+      "reason_counts": {
+        "missing_postcondition": 1,
+        "uncontracted": 4,
+        "unsupported_encoding": 2
+      },
+      "module": "sunholo/audio/analysis",
+      "file": "analysis.ail",
+      "verified": 0,
+      "counterexample": 0,
+      "skipped": 3,
+      "errors": 0,
+      "uncontracted": 4,
+      "results": [
+        {
+          "reason_code": "unsupported_encoding",
+          "rejections": [
+            {
+              "code": "UNENCODABLE_TYPE",
+              "message": "Function \"peak\" calls \"foldl\" whose signature uses an unencodable type \"b\"",
+              "hint": "Cross-function verification cannot encode parametric ADTs (Option/Result) or type variables in a callee signature. Callees returning records/enum ADTs are also not yet inlinable and will skip. Rewrite the callee to return a primitive, or inline its logic into the caller."
+            }
+          ],
+          "function": "peak",
+          "status": "skipped",
+          "reason": "Function \"peak\" calls \"foldl\" whose signature uses an unencodable type \"b\""
+        },
+        {
+          "reason_code": "unsupported_encoding",
+          "rejections": [
+            {
+              "code": "UNENCODABLE_TYPE",
+              "message": "Function \"rmsGated\" calls \"foldl\" whose signature uses an unencodable type \"b\"",
+              "hint": "Cross-function verification cannot encode parametric ADTs (Option/Result) or type variables in a callee signature. Callees returning records/enum ADTs are also not yet inlinable and will skip. Rewrite the callee to return a primitive, or inline its logic into the caller."
+            }
+          ],
+          "function": "rmsGated",
+          "status": "skipped",
+          "reason": "Function \"rmsGated\" calls \"foldl\" whose signature uses an unencodable type \"b\""
+        },
+        {
+          "reason_code": "missing_postcondition",
+          "function": "levelGain",
+          "status": "skipped",
+          "reason": "no ensures clause (nothing to verify)"
+        },
+        {
+          "reason_code": "uncontracted",
+          "function": "level",
+          "status": "uncontracted",
+          "reason": "no contract annotations (not a verification candidate)"
+        },
+        {
+          "reason_code": "uncontracted",
+          "function": "highpassKeepDb",
+          "status": "uncontracted",
+          "reason": "no contract annotations (not a verification candidate)"
+        },
+        {
+          "reason_code": "uncontracted",
+          "function": "lowbandDb",
+          "status": "uncontracted",
+          "reason": "no contract annotations (not a verification candidate)"
+        },
+        {
+          "reason_code": "uncontracted",
+          "function": "seam",
+          "status": "uncontracted",
+          "reason": "no contract annotations (not a verification candidate)"
+        }
+      ]
+    },
+    {
+      "reason_counts": {
+        "unsupported_encoding": 8
+      },
+      "module": "sunholo/audio/clip",
+      "file": "clip.ail",
+      "verified": 3,
+      "counterexample": 0,
+      "skipped": 8,
+      "errors": 0,
+      "uncontracted": 0,
+      "results": [
+        {
+          "function": "channelCount",
+          "status": "verified"
+        },
+        {
+          "function": "defaultClipLimits",
+          "status": "verified"
+        },
+        {
+          "reason_code": "unsupported_encoding",
+          "rejections": [
+            {
+              "code": "UNENCODABLE_TYPE",
+              "message": "Function \"fromInterleaved\" uses an unencodable builtin: std/list.range",
+              "hint": "Z3 has no SMT-LIB encoding for std/list.range. Either remove its use, refactor to use a supported builtin, or narrow the function's contracts."
+            },
+            {
+              "code": "UNENCODABLE_TYPE",
+              "message": "Function \"fromInterleaved\" calls \"any\" whose signature uses an unencodable type \"*ast.FuncType\"",
+              "hint": "Cross-function verification cannot encode parametric ADTs (Option/Result) or type variables in a callee signature. Callees returning records/enum ADTs are also not yet inlinable and will skip. Rewrite the callee to return a primitive, or inline its logic into the caller."
+            }
+          ],
+          "function": "fromInterleaved",
+          "status": "skipped",
+          "reason": "Function \"fromInterleaved\" uses an unencodable builtin: std/list.range; Function \"fromInterleaved\" calls \"any\" whose signature uses an unencodable type \"*ast.FuncType\""
+        },
+        {
+          "reason_code": "unsupported_encoding",
+          "rejections": [
+            {
+              "code": "UNENCODABLE_TYPE",
+              "message": "Function \"toStereo\" calls \"any\" whose signature uses an unencodable type \"*ast.FuncType\"",
+              "hint": "Cross-function verification cannot encode parametric ADTs (Option/Result) or type variables in a callee signature. Callees returning records/enum ADTs are also not yet inlinable and will skip. Rewrite the callee to return a primitive, or inline its logic into the caller."
+            }
+          ],
+          "function": "toStereo",
+          "status": "skipped",
+          "reason": "Function \"toStereo\" calls \"any\" whose signature uses an unencodable type \"*ast.FuncType\""
+        },
+        {
+          "reason_code": "unsupported_encoding",
+          "rejections": [
+            {
+              "code": "UNENCODABLE_TYPE",
+              "message": "Function \"toMono\" calls \"add\" whose signature uses an unencodable type \"*ast.ArrayType\"",
+              "hint": "Cross-function verification cannot encode parametric ADTs (Option/Result) or type variables in a callee signature. Callees returning records/enum ADTs are also not yet inlinable and will skip. Rewrite the callee to return a primitive, or inline its logic into the caller."
+            }
+          ],
+          "function": "toMono",
+          "status": "skipped",
+          "reason": "Function \"toMono\" calls \"add\" whose signature uses an unencodable type \"*ast.ArrayType\""
+        },
+        {
+          "reason_code": "unsupported_encoding",
+          "rejections": [
+            {
+              "code": "UNENCODABLE_TYPE",
+              "message": "Function \"interleave\" uses an unencodable builtin: std/list.range",
+              "hint": "Z3 has no SMT-LIB encoding for std/list.range. Either remove its use, refactor to use a supported builtin, or narrow the function's contracts."
+            },
+            {
+              "code": "UNENCODABLE_TYPE",
+              "message": "Function \"interleave\" calls \"any\" whose signature uses an unencodable type \"*ast.FuncType\"",
+              "hint": "Cross-function verification cannot encode parametric ADTs (Option/Result) or type variables in a callee signature. Callees returning records/enum ADTs are also not yet inlinable and will skip. Rewrite the callee to return a primitive, or inline its logic into the caller."
+            }
+          ],
+          "function": "interleave",
+          "status": "skipped",
+          "reason": "Function \"interleave\" uses an unencodable builtin: std/list.range; Function \"interleave\" calls \"any\" whose signature uses an unencodable type \"*ast.FuncType\""
+        },
+        {
+          "reason_code": "unsupported_encoding",
+          "rejections": [
+            {
+              "code": "HIGHER_ORDER",
+              "message": "Function \"validate\" uses higher-order functions",
+              "hint": "Inline function arguments or extract to named functions"
+            },
+            {
+              "code": "UNENCODABLE_TYPE",
+              "message": "Function \"validate\" uses an unencodable builtin: std/list.any",
+              "hint": "Z3 has no SMT-LIB encoding for std/list.any. Either remove its use, refactor to use a supported builtin, or narrow the function's contracts."
+            },
+            {
+              "code": "UNENCODABLE_TYPE",
+              "message": "Function \"validate\" calls \"any\" whose signature uses an unencodable type \"*ast.FuncType\"",
+              "hint": "Cross-function verification cannot encode parametric ADTs (Option/Result) or type variables in a callee signature. Callees returning records/enum ADTs are also not yet inlinable and will skip. Rewrite the callee to return a primitive, or inline its logic into the caller."
+            }
+          ],
+          "function": "validate",
+          "status": "skipped",
+          "reason": "Function \"validate\" uses higher-order functions; Function \"validate\" uses an unencodable builtin: std/list.any; Function \"validate\" calls \"any\" whose signature uses an unencodable type \"*ast.FuncType\""
+        },
+        {
+          "reason_code": "unsupported_encoding",
+          "rejections": [
+            {
+              "code": "UNENCODABLE_TYPE",
+              "message": "Function \"create\" uses an unencodable builtin: std/list.head",
+              "hint": "Z3 has no SMT-LIB encoding for std/list.head. Either remove its use, refactor to use a supported builtin, or narrow the function's contracts."
+            },
+            {
+              "code": "UNENCODABLE_TYPE",
+              "message": "Function \"create\" calls \"any\" whose signature uses an unencodable type \"*ast.FuncType\"",
+              "hint": "Cross-function verification cannot encode parametric ADTs (Option/Result) or type variables in a callee signature. Callees returning records/enum ADTs are also not yet inlinable and will skip. Rewrite the callee to return a primitive, or inline its logic into the caller."
+            }
+          ],
+          "function": "create",
+          "status": "skipped",
+          "reason": "Function \"create\" uses an unencodable builtin: std/list.head; Function \"create\" calls \"any\" whose signature uses an unencodable type \"*ast.FuncType\""
+        },
+        {
+          "reason_code": "unsupported_encoding",
+          "rejections": [
+            {
+              "code": "UNENCODABLE_TYPE",
+              "message": "Function \"selectChannel\" uses an unencodable builtin: std/list.nth",
+              "hint": "Z3 has no SMT-LIB encoding for std/list.nth. Either remove its use, refactor to use a supported builtin, or narrow the function's contracts."
+            },
+            {
+              "code": "UNENCODABLE_TYPE",
+              "message": "Function \"selectChannel\" calls \"any\" whose signature uses an unencodable type \"*ast.FuncType\"",
+              "hint": "Cross-function verification cannot encode parametric ADTs (Option/Result) or type variables in a callee signature. Callees returning records/enum ADTs are also not yet inlinable and will skip. Rewrite the callee to return a primitive, or inline its logic into the caller."
+            }
+          ],
+          "function": "selectChannel",
+          "status": "skipped",
+          "reason": "Function \"selectChannel\" uses an unencodable builtin: std/list.nth; Function \"selectChannel\" calls \"any\" whose signature uses an unencodable type \"*ast.FuncType\""
+        },
+        {
+          "reason_code": "unsupported_encoding",
+          "rejections": [
+            {
+              "code": "UNENCODABLE_TYPE",
+              "message": "Function \"fromMono\" calls \"any\" whose signature uses an unencodable type \"*ast.FuncType\"",
+              "hint": "Cross-function verification cannot encode parametric ADTs (Option/Result) or type variables in a callee signature. Callees returning records/enum ADTs are also not yet inlinable and will skip. Rewrite the callee to return a primitive, or inline its logic into the caller."
+            }
+          ],
+          "function": "fromMono",
+          "status": "skipped",
+          "reason": "Function \"fromMono\" calls \"any\" whose signature uses an unencodable type \"*ast.FuncType\""
+        },
+        {
+          "function": "checkSize",
+          "status": "verified"
+        }
+      ]
+    },
+    {
+      "reason_counts": {
+        "unsupported_encoding": 4
+      },
+      "module": "sunholo/audio/clip_pcm",
+      "file": "clip_pcm.ail",
+      "verified": 0,
+      "counterexample": 0,
+      "skipped": 4,
+      "errors": 0,
+      "uncontracted": 0,
+      "results": [
+        {
+          "reason_code": "unsupported_encoding",
+          "rejections": [
+            {
+              "code": "UNENCODABLE_TYPE",
+              "message": "Function \"fromPcm16\" calls \"byteAt\" whose signature uses an unencodable type \"Option[int]\"",
+              "hint": "Cross-function verification cannot encode parametric ADTs (Option/Result) or type variables in a callee signature. Callees returning records/enum ADTs are also not yet inlinable and will skip. Rewrite the callee to return a primitive, or inline its logic into the caller."
+            }
+          ],
+          "function": "fromPcm16",
+          "status": "skipped",
+          "reason": "Function \"fromPcm16\" calls \"byteAt\" whose signature uses an unencodable type \"Option[int]\""
+        },
+        {
+          "reason_code": "unsupported_encoding",
+          "rejections": [
+            {
+              "code": "UNENCODABLE_TYPE",
+              "message": "Function \"fromWav16\" calls \"byteAt\" whose signature uses an unencodable type \"Option[int]\"",
+              "hint": "Cross-function verification cannot encode parametric ADTs (Option/Result) or type variables in a callee signature. Callees returning records/enum ADTs are also not yet inlinable and will skip. Rewrite the callee to return a primitive, or inline its logic into the caller."
+            }
+          ],
+          "function": "fromWav16",
+          "status": "skipped",
+          "reason": "Function \"fromWav16\" calls \"byteAt\" whose signature uses an unencodable type \"Option[int]\""
+        },
+        {
+          "reason_code": "unsupported_encoding",
+          "rejections": [
+            {
+              "code": "HIGHER_ORDER",
+              "message": "Function \"toPcm16\" uses higher-order functions",
+              "hint": "Inline function arguments or extract to named functions"
+            },
+            {
+              "code": "UNENCODABLE_TYPE",
+              "message": "Function \"toPcm16\" uses an unencodable builtin: std/list.any",
+              "hint": "Z3 has no SMT-LIB encoding for std/list.any. Either remove its use, refactor to use a supported builtin, or narrow the function's contracts."
+            },
+            {
+              "code": "UNENCODABLE_TYPE",
+              "message": "Function \"toPcm16\" calls \"any\" whose signature uses an unencodable type \"*ast.FuncType\"",
+              "hint": "Cross-function verification cannot encode parametric ADTs (Option/Result) or type variables in a callee signature. Callees returning records/enum ADTs are also not yet inlinable and will skip. Rewrite the callee to return a primitive, or inline its logic into the caller."
+            }
+          ],
+          "function": "toPcm16",
+          "status": "skipped",
+          "reason": "Function \"toPcm16\" uses higher-order functions; Function \"toPcm16\" uses an unencodable builtin: std/list.any; Function \"toPcm16\" calls \"any\" whose signature uses an unencodable type \"*ast.FuncType\""
+        },
+        {
+          "reason_code": "unsupported_encoding",
+          "rejections": [
+            {
+              "code": "UNENCODABLE_TYPE",
+              "message": "Function \"toWav16\" calls \"any\" whose signature uses an unencodable type \"*ast.FuncType\"",
+              "hint": "Cross-function verification cannot encode parametric ADTs (Option/Result) or type variables in a callee signature. Callees returning records/enum ADTs are also not yet inlinable and will skip. Rewrite the callee to return a primitive, or inline its logic into the caller."
+            }
+          ],
+          "function": "toWav16",
+          "status": "skipped",
+          "reason": "Function \"toWav16\" calls \"any\" whose signature uses an unencodable type \"*ast.FuncType\""
+        }
+      ]
+    },
+    {
+      "reason_counts": {
+        "missing_postcondition": 2,
+        "uncontracted": 7,
+        "unsupported_encoding": 2
+      },
+      "module": "sunholo/audio/dsp",
+      "file": "dsp.ail",
+      "verified": 2,
+      "counterexample": 0,
+      "skipped": 4,
+      "errors": 0,
+      "uncontracted": 7,
+      "results": [
+        {
+          "reason_code": "missing_postcondition",
+          "function": "onePole",
+          "status": "skipped",
+          "reason": "no ensures clause (nothing to verify)"
+        },
+        {
+          "function": "absF",
+          "status": "verified"
+        },
+        {
+          "function": "clamp16",
+          "status": "verified"
+        },
+        {
+          "reason_code": "unsupported_encoding",
+          "rejections": [
+            {
+              "code": "UNENCODABLE_TYPE",
+              "message": "Function \"peakAbs\" uses an unencodable builtin: std/list.map",
+              "hint": "Z3 has no SMT-LIB encoding for std/list.map. Either remove its use, refactor to use a supported builtin, or narrow the function's contracts."
+            },
+            {
+              "code": "UNENCODABLE_TYPE",
+              "message": "Function \"peakAbs\" calls \"map\" whose signature uses an unencodable type \"Option[b]\"",
+              "hint": "Cross-function verification cannot encode parametric ADTs (Option/Result) or type variables in a callee signature. Callees returning records/enum ADTs are also not yet inlinable and will skip. Rewrite the callee to return a primitive, or inline its logic into the caller."
+            }
+          ],
+          "function": "peakAbs",
+          "status": "skipped",
+          "reason": "Function \"peakAbs\" uses an unencodable builtin: std/list.map; Function \"peakAbs\" calls \"map\" whose signature uses an unencodable type \"Option[b]\""
+        },
+        {
+          "reason_code": "missing_postcondition",
+          "function": "centiDb",
+          "status": "skipped",
+          "reason": "no ensures clause (nothing to verify)"
+        },
+        {
+          "reason_code": "unsupported_encoding",
+          "rejections": [
+            {
+              "code": "UNENCODABLE_TYPE",
+              "message": "cannot encode function body: let body: if else: let value: unresolvable SMT declaration types: calls user function \"log\" that is not SMT-encodable in this context",
+              "hint": "The function uses a type shape whose required SMT sorts cannot be declared"
+            }
+          ],
+          "function": "gainToDb",
+          "status": "skipped",
+          "reason": "SMT declaration closure could not resolve a required sort (cannot encode function body: let body: if else: let value: unresolvable SMT declaration types: calls user function \"log\" that is not SMT-encodable in this context)"
+        },
+        {
+          "reason_code": "uncontracted",
+          "function": "twoPi",
+          "status": "uncontracted",
+          "reason": "no contract annotations (not a verification candidate)"
+        },
+        {
+          "reason_code": "uncontracted",
+          "function": "dbToGain",
+          "status": "uncontracted",
+          "reason": "no contract annotations (not a verification candidate)"
+        },
+        {
+          "reason_code": "uncontracted",
+          "function": "lowpass",
+          "status": "uncontracted",
+          "reason": "no contract annotations (not a verification candidate)"
+        },
+        {
+          "reason_code": "uncontracted",
+          "function": "highpass",
+          "status": "uncontracted",
+          "reason": "no contract annotations (not a verification candidate)"
+        },
+        {
+          "reason_code": "uncontracted",
+          "function": "sweepLowpass",
+          "status": "uncontracted",
+          "reason": "no contract annotations (not a verification candidate)"
+        },
+        {
+          "reason_code": "uncontracted",
+          "function": "softSat",
+          "status": "uncontracted",
+          "reason": "no contract annotations (not a verification candidate)"
+        },
+        {
+          "reason_code": "uncontracted",
+          "function": "normalisePeak",
+          "status": "uncontracted",
+          "reason": "no contract annotations (not a verification candidate)"
+        }
+      ]
+    },
+    {
+      "reason_counts": {
+        "unsupported_encoding": 9
+      },
+      "module": "sunholo/audio/edit",
+      "file": "edit.ail",
+      "verified": 0,
+      "counterexample": 0,
+      "skipped": 9,
+      "errors": 0,
+      "uncontracted": 0,
+      "results": [
+        {
+          "reason_code": "unsupported_encoding",
+          "rejections": [
+            {
+              "code": "HIGHER_ORDER",
+              "message": "Function \"mixAt\" uses higher-order functions",
+              "hint": "Inline function arguments or extract to named functions"
+            },
+            {
+              "code": "UNENCODABLE_TYPE",
+              "message": "Function \"mixAt\" calls \"any\" whose signature uses an unencodable type \"*ast.FuncType\"",
+              "hint": "Cross-function verification cannot encode parametric ADTs (Option/Result) or type variables in a callee signature. Callees returning records/enum ADTs are also not yet inlinable and will skip. Rewrite the callee to return a primitive, or inline its logic into the caller."
+            }
+          ],
+          "function": "mixAt",
+          "status": "skipped",
+          "reason": "Function \"mixAt\" uses higher-order functions; Function \"mixAt\" calls \"any\" whose signature uses an unencodable type \"*ast.FuncType\""
+        },
+        {
+          "reason_code": "unsupported_encoding",
+          "rejections": [
+            {
+              "code": "HIGHER_ORDER",
+              "message": "Function \"append\" uses higher-order functions",
+              "hint": "Inline function arguments or extract to named functions"
+            },
+            {
+              "code": "UNENCODABLE_TYPE",
+              "message": "Function \"append\" calls \"any\" whose signature uses an unencodable type \"*ast.FuncType\"",
+              "hint": "Cross-function verification cannot encode parametric ADTs (Option/Result) or type variables in a callee signature. Callees returning records/enum ADTs are also not yet inlinable and will skip. Rewrite the callee to return a primitive, or inline its logic into the caller."
+            }
+          ],
+          "function": "append",
+          "status": "skipped",
+          "reason": "Function \"append\" uses higher-order functions; Function \"append\" calls \"any\" whose signature uses an unencodable type \"*ast.FuncType\""
+        },
+        {
+          "reason_code": "unsupported_encoding",
+          "rejections": [
+            {
+              "code": "UNENCODABLE_TYPE",
+              "message": "Function \"gain\" calls \"any\" whose signature uses an unencodable type \"*ast.FuncType\"",
+              "hint": "Cross-function verification cannot encode parametric ADTs (Option/Result) or type variables in a callee signature. Callees returning records/enum ADTs are also not yet inlinable and will skip. Rewrite the callee to return a primitive, or inline its logic into the caller."
+            }
+          ],
+          "function": "gain",
+          "status": "skipped",
+          "reason": "Function \"gain\" calls \"any\" whose signature uses an unencodable type \"*ast.FuncType\""
+        },
+        {
+          "reason_code": "unsupported_encoding",
+          "rejections": [
+            {
+              "code": "HIGHER_ORDER",
+              "message": "Function \"pad\" uses higher-order functions",
+              "hint": "Inline function arguments or extract to named functions"
+            },
+            {
+              "code": "UNENCODABLE_TYPE",
+              "message": "Function \"pad\" calls \"any\" whose signature uses an unencodable type \"*ast.FuncType\"",
+              "hint": "Cross-function verification cannot encode parametric ADTs (Option/Result) or type variables in a callee signature. Callees returning records/enum ADTs are also not yet inlinable and will skip. Rewrite the callee to return a primitive, or inline its logic into the caller."
+            }
+          ],
+          "function": "pad",
+          "status": "skipped",
+          "reason": "Function \"pad\" uses higher-order functions; Function \"pad\" calls \"any\" whose signature uses an unencodable type \"*ast.FuncType\""
+        },
+        {
+          "reason_code": "unsupported_encoding",
+          "rejections": [
+            {
+              "code": "HIGHER_ORDER",
+              "message": "Function \"crossfade\" uses higher-order functions",
+              "hint": "Inline function arguments or extract to named functions"
+            },
+            {
+              "code": "UNENCODABLE_TYPE",
+              "message": "Function \"crossfade\" calls \"any\" whose signature uses an unencodable type \"*ast.FuncType\"",
+              "hint": "Cross-function verification cannot encode parametric ADTs (Option/Result) or type variables in a callee signature. Callees returning records/enum ADTs are also not yet inlinable and will skip. Rewrite the callee to return a primitive, or inline its logic into the caller."
+            }
+          ],
+          "function": "crossfade",
+          "status": "skipped",
+          "reason": "Function \"crossfade\" uses higher-order functions; Function \"crossfade\" calls \"any\" whose signature uses an unencodable type \"*ast.FuncType\""
+        },
+        {
+          "reason_code": "unsupported_encoding",
+          "rejections": [
+            {
+              "code": "HIGHER_ORDER",
+              "message": "Function \"fade\" uses higher-order functions",
+              "hint": "Inline function arguments or extract to named functions"
+            },
+            {
+              "code": "UNENCODABLE_TYPE",
+              "message": "Function \"fade\" calls \"any\" whose signature uses an unencodable type \"*ast.FuncType\"",
+              "hint": "Cross-function verification cannot encode parametric ADTs (Option/Result) or type variables in a callee signature. Callees returning records/enum ADTs are also not yet inlinable and will skip. Rewrite the callee to return a primitive, or inline its logic into the caller."
+            }
+          ],
+          "function": "fade",
+          "status": "skipped",
+          "reason": "Function \"fade\" uses higher-order functions; Function \"fade\" calls \"any\" whose signature uses an unencodable type \"*ast.FuncType\""
+        },
+        {
+          "reason_code": "unsupported_encoding",
+          "rejections": [
+            {
+              "code": "HIGHER_ORDER",
+              "message": "Function \"trim\" uses higher-order functions",
+              "hint": "Inline function arguments or extract to named functions"
+            },
+            {
+              "code": "UNENCODABLE_TYPE",
+              "message": "Function \"trim\" calls \"any\" whose signature uses an unencodable type \"*ast.FuncType\"",
+              "hint": "Cross-function verification cannot encode parametric ADTs (Option/Result) or type variables in a callee signature. Callees returning records/enum ADTs are also not yet inlinable and will skip. Rewrite the callee to return a primitive, or inline its logic into the caller."
+            }
+          ],
+          "function": "trim",
+          "status": "skipped",
+          "reason": "Function \"trim\" uses higher-order functions; Function \"trim\" calls \"any\" whose signature uses an unencodable type \"*ast.FuncType\""
+        },
+        {
+          "reason_code": "unsupported_encoding",
+          "rejections": [
+            {
+              "code": "HIGHER_ORDER",
+              "message": "Function \"reverse\" uses higher-order functions",
+              "hint": "Inline function arguments or extract to named functions"
+            },
+            {
+              "code": "UNENCODABLE_TYPE",
+              "message": "Function \"reverse\" calls \"any\" whose signature uses an unencodable type \"*ast.FuncType\"",
+              "hint": "Cross-function verification cannot encode parametric ADTs (Option/Result) or type variables in a callee signature. Callees returning records/enum ADTs are also not yet inlinable and will skip. Rewrite the callee to return a primitive, or inline its logic into the caller."
+            }
+          ],
+          "function": "reverse",
+          "status": "skipped",
+          "reason": "Function \"reverse\" uses higher-order functions; Function \"reverse\" calls \"any\" whose signature uses an unencodable type \"*ast.FuncType\""
+        },
+        {
+          "reason_code": "unsupported_encoding",
+          "rejections": [
+            {
+              "code": "UNENCODABLE_TYPE",
+              "message": "Function \"panMono\" calls \"any\" whose signature uses an unencodable type \"*ast.FuncType\"",
+              "hint": "Cross-function verification cannot encode parametric ADTs (Option/Result) or type variables in a callee signature. Callees returning records/enum ADTs are also not yet inlinable and will skip. Rewrite the callee to return a primitive, or inline its logic into the caller."
+            }
+          ],
+          "function": "panMono",
+          "status": "skipped",
+          "reason": "Function \"panMono\" calls \"any\" whose signature uses an unencodable type \"*ast.FuncType\""
+        }
+      ]
+    },
+    {
+      "reason_counts": {
+        "missing_postcondition": 1,
+        "uncontracted": 1
+      },
+      "module": "sunholo/audio/mix",
+      "file": "mix.ail",
+      "verified": 0,
+      "counterexample": 0,
+      "skipped": 1,
+      "errors": 0,
+      "uncontracted": 1,
+      "results": [
+        {
+          "reason_code": "missing_postcondition",
+          "function": "tile",
+          "status": "skipped",
+          "reason": "no ensures clause (nothing to verify)"
+        },
+        {
+          "reason_code": "uncontracted",
+          "function": "sum",
+          "status": "uncontracted",
+          "reason": "no contract annotations (not a verification candidate)"
+        }
+      ]
+    },
+    {
+      "reason_counts": {
+        "uncontracted": 2
+      },
+      "module": "sunholo/audio/noise",
+      "file": "noise.ail",
+      "verified": 0,
+      "counterexample": 0,
+      "skipped": 0,
+      "errors": 0,
+      "uncontracted": 2,
+      "results": [
+        {
+          "reason_code": "uncontracted",
+          "function": "rampNoise",
+          "status": "uncontracted",
+          "reason": "no contract annotations (not a verification candidate)"
+        },
+        {
+          "reason_code": "uncontracted",
+          "function": "white",
+          "status": "uncontracted",
+          "reason": "no contract annotations (not a verification candidate)"
+        }
+      ]
+    },
+    {
+      "reason_counts": {
+        "missing_postcondition": 1,
+        "uncontracted": 3,
+        "unsupported_encoding": 3
+      },
+      "module": "sunholo/audio/pcm",
+      "file": "pcm.ail",
+      "verified": 0,
+      "counterexample": 0,
+      "skipped": 4,
+      "errors": 0,
+      "uncontracted": 3,
+      "results": [
+        {
+          "reason_code": "unsupported_encoding",
+          "rejections": [
+            {
+              "code": "UNENCODABLE_TYPE",
+              "message": "Function \"pcm16FloatsChecked\" calls \"byteAt\" whose signature uses an unencodable type \"Option[int]\"",
+              "hint": "Cross-function verification cannot encode parametric ADTs (Option/Result) or type variables in a callee signature. Callees returning records/enum ADTs are also not yet inlinable and will skip. Rewrite the callee to return a primitive, or inline its logic into the caller."
+            }
+          ],
+          "function": "pcm16FloatsChecked",
+          "status": "skipped",
+          "reason": "Function \"pcm16FloatsChecked\" calls \"byteAt\" whose signature uses an unencodable type \"Option[int]\""
+        },
+        {
+          "reason_code": "unsupported_encoding",
+          "rejections": [
+            {
+              "code": "UNENCODABLE_TYPE",
+              "message": "Function \"wav16Checked\" calls \"any\" whose signature uses an unencodable type \"*ast.FuncType\"",
+              "hint": "Cross-function verification cannot encode parametric ADTs (Option/Result) or type variables in a callee signature. Callees returning records/enum ADTs are also not yet inlinable and will skip. Rewrite the callee to return a primitive, or inline its logic into the caller."
+            }
+          ],
+          "function": "wav16Checked",
+          "status": "skipped",
+          "reason": "Function \"wav16Checked\" calls \"any\" whose signature uses an unencodable type \"*ast.FuncType\""
+        },
+        {
+          "reason_code": "unsupported_encoding",
+          "rejections": [
+            {
+              "code": "UNENCODABLE_TYPE",
+              "message": "Function \"pcm16Checked\" calls \"any\" whose signature uses an unencodable type \"*ast.FuncType\"",
+              "hint": "Cross-function verification cannot encode parametric ADTs (Option/Result) or type variables in a callee signature. Callees returning records/enum ADTs are also not yet inlinable and will skip. Rewrite the callee to return a primitive, or inline its logic into the caller."
+            }
+          ],
+          "function": "pcm16Checked",
+          "status": "skipped",
+          "reason": "Function \"pcm16Checked\" calls \"any\" whose signature uses an unencodable type \"*ast.FuncType\""
+        },
+        {
+          "reason_code": "missing_postcondition",
+          "function": "wav16",
+          "status": "skipped",
+          "reason": "no ensures clause (nothing to verify)"
+        },
+        {
+          "reason_code": "uncontracted",
+          "function": "pcm16",
+          "status": "uncontracted",
+          "reason": "no contract annotations (not a verification candidate)"
+        },
+        {
+          "reason_code": "uncontracted",
+          "function": "wavInfo",
+          "status": "uncontracted",
+          "reason": "no contract annotations (not a verification candidate)"
+        },
+        {
+          "reason_code": "uncontracted",
+          "function": "pcm16Floats",
+          "status": "uncontracted",
+          "reason": "no contract annotations (not a verification candidate)"
+        }
+      ]
+    },
+    {
+      "reason_counts": {
+        "uncontracted": 9,
+        "unsupported_encoding": 5
+      },
+      "module": "sunholo/audio/recipe",
+      "file": "recipe.ail",
+      "verified": 0,
+      "counterexample": 0,
+      "skipped": 5,
+      "errors": 0,
+      "uncontracted": 9,
+      "results": [
+        {
+          "reason_code": "unsupported_encoding",
+          "rejections": [
+            {
+              "code": "UNENCODABLE_TYPE",
+              "message": "Function \"parseRecipesChecked\" calls \"checkBudget\" whose signature uses an unencodable type \"Result[int, AudioError]\"",
+              "hint": "Cross-function verification cannot encode parametric ADTs (Option/Result) or type variables in a callee signature. Callees returning records/enum ADTs are also not yet inlinable and will skip. Rewrite the callee to return a primitive, or inline its logic into the caller."
+            }
+          ],
+          "function": "parseRecipesChecked",
+          "status": "skipped",
+          "reason": "Function \"parseRecipesChecked\" calls \"checkBudget\" whose signature uses an unencodable type \"Result[int, AudioError]\""
+        },
+        {
+          "reason_code": "unsupported_encoding",
+          "rejections": [
+            {
+              "code": "UNENCODABLE_TYPE",
+              "message": "Function \"validateRecipe\" uses an unencodable builtin: std/string.join",
+              "hint": "Z3 has no SMT-LIB encoding for std/string.join. Either remove its use, refactor to use a supported builtin, or narrow the function's contracts."
+            },
+            {
+              "code": "UNENCODABLE_TYPE",
+              "message": "Function \"validateRecipe\" calls \"flatMap\" whose signature uses an unencodable type \"Option[b]\"",
+              "hint": "Cross-function verification cannot encode parametric ADTs (Option/Result) or type variables in a callee signature. Callees returning records/enum ADTs are also not yet inlinable and will skip. Rewrite the callee to return a primitive, or inline its logic into the caller."
+            }
+          ],
+          "function": "validateRecipe",
+          "status": "skipped",
+          "reason": "Function \"validateRecipe\" uses an unencodable builtin: std/string.join; Function \"validateRecipe\" calls \"flatMap\" whose signature uses an unencodable type \"Option[b]\""
+        },
+        {
+          "reason_code": "unsupported_encoding",
+          "rejections": [
+            {
+              "code": "UNENCODABLE_TYPE",
+              "message": "Function \"renderChecked\" calls \"add\" whose signature uses an unencodable type \"*ast.ArrayType\"",
+              "hint": "Cross-function verification cannot encode parametric ADTs (Option/Result) or type variables in a callee signature. Callees returning records/enum ADTs are also not yet inlinable and will skip. Rewrite the callee to return a primitive, or inline its logic into the caller."
+            }
+          ],
+          "function": "renderChecked",
+          "status": "skipped",
+          "reason": "Function \"renderChecked\" calls \"add\" whose signature uses an unencodable type \"*ast.ArrayType\""
+        },
+        {
+          "reason_code": "unsupported_encoding",
+          "rejections": [
+            {
+              "code": "UNENCODABLE_TYPE",
+              "message": "Function \"parseRecipesAsChecked\" calls \"checkBudget\" whose signature uses an unencodable type \"Result[int, AudioError]\"",
+              "hint": "Cross-function verification cannot encode parametric ADTs (Option/Result) or type variables in a callee signature. Callees returning records/enum ADTs are also not yet inlinable and will skip. Rewrite the callee to return a primitive, or inline its logic into the caller."
+            }
+          ],
+          "function": "parseRecipesAsChecked",
+          "status": "skipped",
+          "reason": "Function \"parseRecipesAsChecked\" calls \"checkBudget\" whose signature uses an unencodable type \"Result[int, AudioError]\""
+        },
+        {
+          "reason_code": "unsupported_encoding",
+          "rejections": [
+            {
+              "code": "UNENCODABLE_TYPE",
+              "message": "cannot encode function body: let body: let body: let body: let body: let value: unresolvable SMT declaration types: calls user function \"round\" that is not SMT-encodable in this context",
+              "hint": "The function uses a type shape whose required SMT sorts cannot be declared"
+            }
+          ],
+          "function": "frames",
+          "status": "skipped",
+          "reason": "SMT declaration closure could not resolve a required sort (cannot encode function body: let body: let body: let body: let body: let value: unresolvable SMT declaration types: calls user function \"round\" that is not SMT-encodable in this context)"
+        },
+        {
+          "reason_code": "uncontracted",
+          "function": "defaultRate",
+          "status": "uncontracted",
+          "reason": "no contract annotations (not a verification candidate)"
+        },
+        {
+          "reason_code": "uncontracted",
+          "function": "envAt",
+          "status": "uncontracted",
+          "reason": "no contract annotations (not a verification candidate)"
+        },
+        {
+          "reason_code": "uncontracted",
+          "function": "phaseAt",
+          "status": "uncontracted",
+          "reason": "no contract annotations (not a verification candidate)"
+        },
+        {
+          "reason_code": "uncontracted",
+          "function": "layerSamples",
+          "status": "uncontracted",
+          "reason": "no contract annotations (not a verification candidate)"
+        },
+        {
+          "reason_code": "uncontracted",
+          "function": "render",
+          "status": "uncontracted",
+          "reason": "no contract annotations (not a verification candidate)"
+        },
+        {
+          "reason_code": "uncontracted",
+          "function": "loopErrors",
+          "status": "uncontracted",
+          "reason": "no contract annotations (not a verification candidate)"
+        },
+        {
+          "reason_code": "uncontracted",
+          "function": "parseRecipesAs",
+          "status": "uncontracted",
+          "reason": "no contract annotations (not a verification candidate)"
+        },
+        {
+          "reason_code": "uncontracted",
+          "function": "recipeSchema",
+          "status": "uncontracted",
+          "reason": "no contract annotations (not a verification candidate)"
+        },
+        {
+          "reason_code": "uncontracted",
+          "function": "parseRecipes",
+          "status": "uncontracted",
+          "reason": "no contract annotations (not a verification candidate)"
+        }
+      ]
+    },
+    {
+      "reason_counts": {
+        "uncontracted": 7
+      },
+      "module": "sunholo/audio/reference",
+      "file": "reference.ail",
+      "verified": 0,
+      "counterexample": 0,
+      "skipped": 0,
+      "errors": 0,
+      "uncontracted": 7,
+      "results": [
+        {
+          "reason_code": "uncontracted",
+          "function": "noEnv",
+          "status": "uncontracted",
+          "reason": "no contract annotations (not a verification candidate)"
+        },
+        {
+          "reason_code": "uncontracted",
+          "function": "sine",
+          "status": "uncontracted",
+          "reason": "no contract annotations (not a verification candidate)"
+        },
+        {
+          "reason_code": "uncontracted",
+          "function": "hiss",
+          "status": "uncontracted",
+          "reason": "no contract annotations (not a verification candidate)"
+        },
+        {
+          "reason_code": "uncontracted",
+          "function": "loopRecipe",
+          "status": "uncontracted",
+          "reason": "no contract annotations (not a verification candidate)"
+        },
+        {
+          "reason_code": "uncontracted",
+          "function": "shotRecipe",
+          "status": "uncontracted",
+          "reason": "no contract annotations (not a verification candidate)"
+        },
+        {
+          "reason_code": "uncontracted",
+          "function": "sineWave",
+          "status": "uncontracted",
+          "reason": "no contract annotations (not a verification candidate)"
+        },
+        {
+          "reason_code": "uncontracted",
+          "function": "loopPcmSha",
+          "status": "uncontracted",
+          "reason": "no contract annotations (not a verification candidate)"
+        }
+      ]
+    },
+    {
+      "reason_counts": {
+        "unsupported_encoding": 1
+      },
+      "module": "sunholo/audio/safety",
+      "file": "safety.ail",
+      "verified": 5,
+      "counterexample": 0,
+      "skipped": 1,
+      "errors": 0,
+      "uncontracted": 0,
+      "results": [
+        {
+          "function": "fitsWork",
+          "status": "verified"
+        },
+        {
+          "function": "pcm16ByteCount",
+          "status": "verified"
+        },
+        {
+          "function": "limitsValid",
+          "status": "verified"
+        },
+        {
+          "function": "defaultLimits",
+          "status": "verified"
+        },
+        {
+          "function": "inRange",
+          "status": "verified"
+        },
+        {
+          "reason_code": "unsupported_encoding",
+          "rejections": [
+            {
+              "code": "HIGHER_ORDER",
+              "message": "Function \"samplesInRange\" uses higher-order functions",
+              "hint": "Inline function arguments or extract to named functions"
+            },
+            {
+              "code": "UNENCODABLE_TYPE",
+              "message": "Function \"samplesInRange\" uses an unencodable builtin: std/list.any",
+              "hint": "Z3 has no SMT-LIB encoding for std/list.any. Either remove its use, refactor to use a supported builtin, or narrow the function's contracts."
+            },
+            {
+              "code": "UNENCODABLE_TYPE",
+              "message": "Function \"samplesInRange\" calls \"any\" whose signature uses an unencodable type \"*ast.FuncType\"",
+              "hint": "Cross-function verification cannot encode parametric ADTs (Option/Result) or type variables in a callee signature. Callees returning records/enum ADTs are also not yet inlinable and will skip. Rewrite the callee to return a primitive, or inline its logic into the caller."
+            }
+          ],
+          "function": "samplesInRange",
+          "status": "skipped",
+          "reason": "Function \"samplesInRange\" uses higher-order functions; Function \"samplesInRange\" uses an unencodable builtin: std/list.any; Function \"samplesInRange\" calls \"any\" whose signature uses an unencodable type \"*ast.FuncType\""
+        }
+      ]
+    }
+  ]
+}

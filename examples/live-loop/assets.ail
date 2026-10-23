@@ -1,0 +1,38 @@
+module sunholo/live_loop_lab/assets
+import std/list (map, range)
+import std/math (sin, exp)
+import std/fs (writeFileBytes)
+import std/io (println)
+import std/result (Result, Ok, Err)
+import pkg/sunholo/audio/pcm (wav16Checked)
+import pkg/sunholo/audio/noise (white)
+
+-- Original reference phrases. 16 kHz fixtures keep cold generation small;
+-- decodeAudioData explicitly resamples to the host rate before playback.
+pure func voice(part: int, i: int) -> float = {
+  let t = intToFloat(i) / 16000.0;
+  let beat = t - intToFloat(i / 8000) * 0.5;
+  let edge = if i < 160 then intToFloat(i) / 160.0 else if i > 127839 then intToFloat(127999 - i) / 160.0 else 1.0;
+  let x = if part == 1 then 0.48 * sin(6.283185307179586 * 65.0 * beat) * exp(0.0 - beat * 25.0) + 0.08 * white(i,17) * exp(0.0 - beat * 60.0)
+    else if part == 2 then 0.35 * sin(6.283185307179586 * (if i / 32000 % 2 == 0 then 110.0 else 82.5) * t) * exp(0.0 - beat * 5.0)
+    else if part == 3 then 0.12 * (sin(6.283185307179586 * 220.0 * t) + sin(6.283185307179586 * 275.0 * t) + sin(6.283185307179586 * 330.0 * t))
+    else 0.08 * white(i,71) * (0.5 + 0.5 * sin(6.283185307179586 * 0.5 * t));
+  x * edge
+}
+export func generate() -> () ! {FS @limit=4, IO @limit=1}
+{
+  let a = wav16Checked(map(\i. voice(1,i),range(0,128000)),16000,128000);
+  let b = wav16Checked(map(\i. voice(2,i),range(0,128000)),16000,128000);
+  let c = wav16Checked(map(\i. voice(3,i),range(0,128000)),16000,128000);
+  let d = wav16Checked(map(\i. voice(4,i),range(0,128000)),16000,128000);
+  match (a,b,c,d) {
+    (Ok(aa),Ok(bb),Ok(cc),Ok(dd)) => {
+      writeFileBytes("static/audio/demo-1.wav",aa);
+      writeFileBytes("static/audio/demo-2.wav",bb);
+      writeFileBytes("static/audio/demo-3.wav",cc);
+      writeFileBytes("static/audio/demo-4.wav",dd);
+      println("OK: four original 8-second phrases")
+    },
+    _ => println("FAIL: fixture validation")
+  }
+}

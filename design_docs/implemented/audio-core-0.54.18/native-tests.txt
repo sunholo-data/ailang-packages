@@ -1,0 +1,255 @@
+→ Package sunholo/audio
+  12 source modules, 10 test files
+
+
+[1mTest Results[0m
+Module: sunholo/audio
+
+[1mTests:[0m
+  [32m✓[0m gated RMS of a full-scale 1 kHz sine is -2.83 dB (sqrt(24/46)); peak 0 dB; 1 s (36.957208ms)
+      at [2manalysis_test.ail:13:1[0m
+  [32m✓[0m a gain shifts the level by the gain (-20 dB) (33.185375ms)
+      at [2manalysis_test.ail:17:1[0m
+  [32m✓[0m levelGain is exp(db ln10 / 20) (145.875µs)
+      at [2manalysis_test.ail:18:1[0m
+  [32m✓[0m rmsGated with no gate is the plain RMS; silence gives 0 (112.084µs)
+      at [2manalysis_test.ail:19:1[0m
+  [32m✓[0m a 1 kHz sine keeps the closed-form |H| through a 150 Hz one-pole high-pass (to 0.01 dB) (28.866584ms)
+      at [2manalysis_test.ail:22:1[0m
+  [32m✓[0m the teacup guard: a 60 Hz sine keeps more than -20 dB under four 120 Hz poles, a 2 kHz sine far less (the start-up transient bounds it near -58 dB) (192.312292ms)
+      at [2manalysis_test.ail:25:1[0m
+  [32m✓[0m one pole is the plain one-pole low-pass: a 120 Hz sine keeps about -3 dB (46.556875ms)
+      at [2manalysis_test.ail:28:1[0m
+  [32m✓[0m a whole-cycle sine joins cleanly; a cut one does not (7.431417ms)
+      at [2manalysis_test.ail:29:1[0m
+  [32m✓[0m WAV import preserves both channels of independent stereo PCM (2.903667ms)
+      at [2mclip_pcm_test.ail:19:1[0m
+  [32m✓[0m raw stereo PCM import rejects partial frames and respects sample limits (208.5µs)
+      at [2mclip_pcm_test.ail:25:1[0m
+  [32m✓[0m WAV import rejects malformed input and excessive output frames (210.333µs)
+      at [2mclip_pcm_test.ail:32:1[0m
+  [32m✓[0m PCM export preserves legacy in-range mono quantization (184.458µs)
+      at [2mclip_pcm_test.ail:37:1[0m
+  [32m✓[0m stereo PCM export interleaves channels in frame order (177.458µs)
+      at [2mclip_pcm_test.ail:42:1[0m
+  [32m✓[0m clipping rejection and saturation are explicit, including huge finite samples (165.333µs)
+      at [2mclip_pcm_test.ail:49:1[0m
+  [32m✓[0m WAV export preserves stereo metadata and expected byte length (204.416µs)
+      at [2mclip_pcm_test.ail:55:1[0m
+  [32m✓[0m clip export rejects forged channels before touching sample indices (180.041µs)
+      at [2mclip_pcm_test.ail:64:1[0m
+  [32m✓[0m WAV import explicitly refuses supported metadata with unsupported depth or channels (198.542µs)
+      at [2mclip_pcm_test.ail:87:1[0m
+  [32m✓[0m mono clips allow finite headroom and empty clips (1.287708ms)
+      at [2mclip_test.ail:12:1[0m
+  [32m✓[0m clip validation rejects forged metadata and mismatched planes (228.584µs)
+      at [2mclip_test.ail:17:1[0m
+  [32m✓[0m clip dimensions reject invalid limits and total sample overflow (178.834µs)
+      at [2mclip_test.ail:26:1[0m
+  [32m✓[0m clip constructors reject NaN and both infinities (188.417µs)
+      at [2mclip_test.ail:35:1[0m
+  [32m✓[0m stereo interleaving retains distinct left and right samples (184.167µs)
+      at [2mclip_test.ail:40:1[0m
+  [32m✓[0m interleaved input rejects a partial stereo frame and the output budget (172.041µs)
+      at [2mclip_test.ail:48:1[0m
+  [32m✓[0m channel selection bounds are checked (187.125µs)
+      at [2mclip_test.ail:54:1[0m
+  [32m✓[0m unity mono duplication and average downmix have explicit coefficients (183.958µs)
+      at [2mclip_test.ail:61:1[0m
+  [32m✓[0m stereo duplication checks its larger sample budget (199.208µs)
+      at [2mclip_test.ail:72:1[0m
+  [32m✓[0m average downmix avoids intermediate overflow for large finite channels (188.375µs)
+      at [2mclip_test.ail:76:1[0m
+  [32m✓[0m clamp16 keeps the int16 range (3.095833ms)
+      at [2mdsp_test.ail:11:1[0m
+  [32m✓[0m dbToGain(-3) = 10^(-3/20) and dbToGain(0) = 1 (136.375µs)
+      at [2mdsp_test.ail:12:1[0m
+  [32m✓[0m gainToDb: 0 dB at 1, -6.0206 at 0.5, the -120 floor at 1e-6 (119.708µs)
+      at [2mdsp_test.ail:13:1[0m
+  [32m✓[0m centiDb rounds as snappedf: -27.0612 -> -2706, -2.825 -> -282 (floor(-282.5 + 0.5)), 0 -> 0 (117.416µs)
+      at [2mdsp_test.ail:14:1[0m
+  [32m✓[0m onePole(150, 48000) = 1 - e^(-2 pi 150 / 48000) (117.292µs)
+      at [2mdsp_test.ail:15:1[0m
+  [32m✓[0m one-pole high-pass at 150 Hz passes a 1 kHz sine at the closed-form |H| (25.696083ms)
+      at [2mdsp_test.ail:19:1[0m
+  [32m✓[0m one-pole low-pass settles to a constant input (7.388375ms)
+      at [2mdsp_test.ail:26:1[0m
+  [32m✓[0m a sweep with c0 == c1 equals the fixed low-pass (2.042417ms)
+      at [2mdsp_test.ail:28:1[0m
+  [32m✓[0m softSat keeps 0 and +-1 fixed and compresses between (122.292µs)
+      at [2mdsp_test.ail:33:1[0m
+  [32m✓[0m normalisePeak puts the peak at the dB asked; silence stays silence (126.333µs)
+      at [2mdsp_test.ail:35:1[0m
+  [32m✓[0m gain retains headroom and leaves the immutable input unchanged (2.133208ms)
+      at [2medit_test.ail:15:1[0m
+  [32m✓[0m gain rejects nonfinite factors and nonfinite output (251.667µs)
+      at [2medit_test.ail:20:1[0m
+  [32m✓[0m trim uses end-exclusive frames and permits an empty interval (255.167µs)
+      at [2medit_test.ail:26:1[0m
+  [32m✓[0m padding and reverse retain both channel identities (243.541µs)
+      at [2medit_test.ail:33:1[0m
+  [32m✓[0m padding refuses negative and excessive dimensions before building output (394.375µs)
+      at [2medit_test.ail:41:1[0m
+  [32m✓[0m append places samples consecutively and rejects rate or layout mismatch (635.667µs)
+      at [2medit_test.ail:48:1[0m
+  [32m✓[0m fades include exact edge endpoints and handle zero and one frame (312.417µs)
+      at [2medit_test.ail:55:1[0m
+  [32m✓[0m crossfade uses complementary weights with explicit one-sample overlap (299.167µs)
+      at [2medit_test.ail:63:1[0m
+  [32m✓[0m mixAt adds headroom and extends with silence (279.709µs)
+      at [2medit_test.ail:71:1[0m
+  [32m✓[0m mix rejects rate/layout mismatch, over-budget placement and numeric overflow (274.375µs)
+      at [2medit_test.ail:78:1[0m
+  [32m✓[0m mono panning has exact hard endpoints and equal center gains (276.166µs)
+      at [2medit_test.ail:86:1[0m
+  [32m✓[0m all edits reject forged clip dimensions instead of indexing them (252.042µs)
+      at [2medit_test.ail:93:1[0m
+  [32m✓[0m stereo edits reject layout mismatch and check total output samples (266.084µs)
+      at [2medit_test.ail:116:1[0m
+  [32m✓[0m empty clip editing has explicit stable frame counts (290.75µs)
+      at [2medit_test.ail:128:1[0m
+  [32m✓[0m a loop tiles from 0 at its gain (530.625µs)
+      at [2mmix_test.ail:5:1[0m
+  [32m✓[0m a one-shot without starts plays once at 0 (68.458µs)
+      at [2mmix_test.ail:6:1[0m
+  [32m✓[0m a one-shot plays at each start (62.584µs)
+      at [2mmix_test.ail:7:1[0m
+  [32m✓[0m a later start cuts an earlier one short (53.292µs)
+      at [2mmix_test.ail:8:1[0m
+  [32m✓[0m an empty sound tiles to silence (51.333µs)
+      at [2mmix_test.ail:9:1[0m
+  [32m✓[0m sum pads short parts with silence (59.667µs)
+      at [2mmix_test.ail:10:1[0m
+  [32m✓[0m one-shot starts are independent of input ordering and duplicates (65.792µs)
+      at [2mmix_test.ail:12:1[0m
+  [32m✓[0m both generators are deterministic and seed- and index-sensitive (761.667µs)
+      at [2mnoise_test.ail:13:1[0m
+  [32m✓[0m both stay in [-1, 1) (13.521875ms)
+      at [2mnoise_test.ail:17:1[0m
+  [32m✓[0m white noise is uncorrelated at lag 1 (|r| < 0.03 over 20,000 samples) (11.524958ms)
+      at [2mnoise_test.ail:18:1[0m
+  [32m✓[0m the legacy ramp keeps its documented correlation (|r| > 0.03) (10.7015ms)
+      at [2mnoise_test.ail:19:1[0m
+  [32m✓[0m rampNoise(0, 1) is three affine LCG rounds from 12347 + 12345 (108.167µs)
+      at [2mnoise_test.ail:20:1[0m
+  [32m✓[0m pcm16: 0, full scale and minus full scale (4.83175ms)
+      at [2mpcm_test.ail:15:1[0m
+  [32m✓[0m wavInfo reads std/audio's header: 48 kHz mono 16-bit, data at 44 (260.25µs)
+      at [2mpcm_test.ail:17:1[0m
+  [32m✓[0m wavInfo skips a LIST chunk (odd size, padded) and finds fmt and data (264.333µs)
+      at [2mpcm_test.ail:29:1[0m
+  [32m✓[0m wavInfo refuses non-RIFF bytes and float PCM (tag 3) (234.708µs)
+      at [2mpcm_test.ail:33:1[0m
+  [32m✓[0m pcm16 then pcm16Floats is within 1/32767 + 1/32768 (963.416µs)
+      at [2mpcm_test.ail:40:1[0m
+  [32m✓[0m the reference loop's WAV is its header plus pin 1's PCM (93.294167ms)
+      at [2mpcm_test.ail:49:1[0m
+  [32m✓[0m wavInfo rejects zero sample rate and inconsistent alignment or byte rate (369.542µs)
+      at [2mpcm_test.ail:59:1[0m
+  [32m✓[0m wavInfo honors RIFF extent and refuses partial frames (244.458µs)
+      at [2mpcm_test.ail:67:1[0m
+  [32m✓[0m WAV rejects short fmt, duplicate fmt/data and truncated chunks after data (281.792µs)
+      at [2mpcm_test.ail:76:1[0m
+  [32m✓[0m WAV enforces its chunk ceiling without recursion failure (13.173416ms)
+      at [2mpcm_test.ail:88:1[0m
+  [32m✓[0m WAV permits trailing bytes outside RIFF but validates chunks inside it (258.25µs)
+      at [2mpcm_test.ail:94:1[0m
+  [32m✓[0m PCM16 decode retains the first channel of independent stereo bytes (237.958µs)
+      at [2mpcm_test.ail:99:1[0m
+  [32m✓[0m reference loop PCM sha256 is pinned (render stability) (51.72175ms)
+      at [2mrecipe_test.ail:23:1[0m
+  [32m✓[0m frames: 0.25 s at 48 kHz is 12,000; at 24 kHz 6,000 (42.089083ms)
+      at [2mrecipe_test.ail:25:1[0m
+  [32m✓[0m a loop's seam step is no larger than its largest inner step + 1 LSB (49.895042ms)
+      at [2mrecipe_test.ail:34:1[0m
+  [32m✓[0m a one-shot is normalised to -3 dBFS (0.70794578) (8.440416ms)
+      at [2mrecipe_test.ail:36:1[0m
+  [32m✓[0m a one-shot starts and ends at silence (9.058292ms)
+      at [2mrecipe_test.ail:38:1[0m
+  [32m✓[0m a loop sine with a fractional cycle count is rejected (326.083µs)
+      at [2mrecipe_test.ail:43:1[0m
+  [32m✓[0m a loop vibrato with a fractional cycle count is rejected (281.334µs)
+      at [2mrecipe_test.ail:44:1[0m
+  [32m✓[0m a whole-cycle loop beat is accepted (238.708µs)
+      at [2mrecipe_test.ail:45:1[0m
+  [32m✓[0m a loop cannot glide, have an envelope or sweep its filter (255.167µs)
+      at [2mrecipe_test.ail:46:1[0m
+  [32m✓[0m a one-shot has no loop rules (248.375µs)
+      at [2mrecipe_test.ail:51:1[0m
+  [32m✓[0m envelope: silent before delay, linear attack, e^-1 one tau after it, silent from stop (222.458µs)
+      at [2mrecipe_test.ail:53:1[0m
+  [32m✓[0m an exponential glide reaches freqTo: phase slope after glide1 is 2 pi freqTo (246.333µs)
+      at [2mrecipe_test.ail:58:1[0m
+  [32m✓[0m drive keeps the peak (11.13675ms)
+      at [2mrecipe_test.ail:63:1[0m
+  [32m✓[0m a filter sweep from 200 Hz to 8 kHz brightens white noise (54.229208ms)
+      at [2mrecipe_test.ail:65:1[0m
+  [32m✓[0m parse: defaults, rate and both schema ids (786.917µs)
+      at [2mrecipe_test.ail:71:1[0m
+  [32m✓[0m parse refuses an empty file, a bad loop, an unknown kind, no layers and no id (490.417µs)
+      at [2mrecipe_test.ail:80:1[0m
+  [32m✓[0m silent layers remain finite silence when drive is enabled (259.125µs)
+      at [2mrecipe_test.ail:88:1[0m
+  [32m✓[0m parse refuses wrong optional types and fractional integers (347µs)
+      at [2mrecipe_test.ail:93:1[0m
+  [32m✓[0m parse refuses invalid domains and a zero-frequency glide (360.083µs)
+      at [2mrecipe_test.ail:102:1[0m
+  [32m✓[0m loop modulation and filter restrictions are reported independently (227.666µs)
+      at [2mrecipe_test.ail:109:1[0m
+  [32m✓[0m checked render preserves the pinned reference PCM (56.6915ms)
+      at [2msafety_test.ail:14:1[0m
+  [32m✓[0m checked render has the expected frame count at the exact budget (422.209µs)
+      at [2msafety_test.ail:18:1[0m
+  [32m✓[0m checked render rejects each allocation budget before rendering (286.875µs)
+      at [2msafety_test.ail:23:1[0m
+  [32m✓[0m noise loops charge both filter warm-up periods (375.875µs)
+      at [2msafety_test.ail:32:1[0m
+  [32m✓[0m nonfinite parameters and zero-frame durations return typed errors (276.458µs)
+      at [2msafety_test.ail:38:1[0m
+  [32m✓[0m checked silent drive renders silence (346.833µs)
+      at [2msafety_test.ail:45:1[0m
+  [32m✓[0m checked parse guards UTF-8 bytes before JSON decode and supports host schema (425.875µs)
+      at [2msafety_test.ail:53:1[0m
+  [32m✓[0m checked PCM encoder preserves bytes and refuses clipping or nonfinite values (260.833µs)
+      at [2msafety_test.ail:61:1[0m
+  [32m✓[0m checked WAV rejects unrepresentable rates and supports empty PCM (430.458µs)
+      at [2msafety_test.ail:70:1[0m
+  [32m✓[0m checked decode refuses forged metadata and enforces output size (768.167µs)
+      at [2msafety_test.ail:76:1[0m
+  [32m✓[0m PCM8 metadata is readable but checked PCM16 decode explicitly refuses it (311.833µs)
+      at [2msafety_test.ail:106:1[0m
+  [32m✓[0m bounded guards reject unordered and infinite samples (261.792µs)
+      at [2msafety_test.ail:131:1[0m
+
+[1mProperties:[0m
+  [32m✓[0m stereo WAV roundtrip has the documented quantization error and no channel swap (100 cases, 64.080583ms)
+      at [2mclip_pcm_test.ail:68:1[0m
+  [32m✓[0m stereo deinterleave-interleave preserves arbitrary bounded frame data (100 cases, 59.694125ms)
+      at [2mclip_test.ail:83:1[0m
+  [32m✓[0m onePole coefficients are stable on explicitly generated positive domains (100 cases, 2.46275ms)
+      at [2mdsp_test.ail:39:1[0m
+  [32m✓[0m reversing a bounded clip twice restores exact samples (100 cases, 61.331375ms)
+      at [2medit_test.ail:100:1[0m
+  [32m✓[0m mono pan preserves unit-sample energy across bounded positions (100 cases, 21.071792ms)
+      at [2medit_test.ail:107:1[0m
+  [32m✓[0m one-shot placement is invariant under a permutation of starts (100 cases, 50.795459ms)
+      at [2mmix_test.ail:17:1[0m
+  [32m✓[0m checked PCM retains exact sample count for bounded arbitrary int-derived values (100 cases, 84.826625ms)
+      at [2msafety_test.ail:90:1[0m
+  [32m✓[0m work guard and byte count hold at bounded integer boundaries (100 cases, 1.775334ms)
+      at [2msafety_test.ail:98:1[0m
+  [32m✓[0m checked WAV round trips bounded signed samples within quantization error (100 cases, 68.93ms)
+      at [2msafety_test.ail:115:1[0m
+
+──────────────────────────────────────────────────
+[32m✓[0m [1mAll tests passed![0m
+
+116 tests: 116 passed, 0 failed, 0 skipped (1.25673625s)
+  [32m✓ Passed:[0m 116
+  [31m✗ Failed:[0m 0
+
+[1mSeed:[0m
+  mode: derived
+  master seed: 0
+  derivation: ailang-property-seed-v1
+  replay: ailang test --seed 0 --package .

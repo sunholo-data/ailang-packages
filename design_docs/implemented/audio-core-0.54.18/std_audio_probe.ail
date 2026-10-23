@@ -1,0 +1,25 @@
+module std_audio_probe
+import std/audio (wavFromPcm, wavFromPcmChecked, wavHeaderChecked, wavInfo, pcm16ToFloats, floatsToPcm16, RejectOutOfRange, ClipOutOfRange)
+import std/bytes (fromInts, toInts, byteAt, length as byteLength)
+import std/array (fromList, toList)
+import std/result (Result, Ok, Err)
+import std/option (Some, None)
+import std/string (formatFixed)
+import std/json (encode, jo, kv, jb)
+
+-- Independent closed-form boundary checks. No effects or contract flag needed.
+-- n=0 is the documented probe input; it keeps the overflow case out of u16 range.
+export pure func probe(n: int) -> string {
+  let odd = wavFromPcm(fromInts([128]),8000,1,8);
+  let padding = byteLength(odd)==46 && (match byteAt(odd,4) { Some(38)=>true,_=>false }) && (match byteAt(odd,45) { Some(0)=>true,_=>false });
+  let metadata = match wavInfo(odd) { Ok(i) => i.rate==8000 && i.channels==1 && i.containerBits==8 && i.frames==1 && i.dataBytes==1 && i.dataOffset==44, _=>false };
+  let width = match wavHeaderChecked(0,8000,65536+n,8) { Err(_)=>true,_=>false };
+  let partial = match wavFromPcmChecked(fromInts([0]),8000,1,16) { Err(_)=>true,_=>false };
+  let raw = fromInts([0,128,255,127,0,0,0,64]);
+  let packed = match pcm16ToFloats(raw,0,2,2) {
+    Ok(xs) => toList(xs)==[-1.0,32767.0/32768.0,0.0,0.5] && (match floatsToPcm16(xs,2,RejectOutOfRange) { Ok(b)=>toInts(b)==toInts(raw),_=>false }), _=>false
+  };
+  let nonfinite = match floatsToPcm16(fromList([1.0/0.0]),1,ClipOutOfRange) { Err(_)=>true,_=>false };
+  let fixed = formatFixed(2.5,0)=="2" && formatFixed(3.5,0)=="4" && formatFixed(3.125,2)=="3.12";
+  encode(jo([kv("oddPadding",jb(padding)),kv("wavMetadata",jb(metadata)),kv("fieldWidthRejected",jb(width)),kv("partialFrameRejected",jb(partial)),kv("packedStereoPcm",jb(packed)),kv("nonfiniteRejected",jb(nonfinite)),kv("fixedNearestEven",jb(fixed)),kv("allPassed",jb(padding && metadata && width && partial && packed && nonfinite && fixed))]))
+}

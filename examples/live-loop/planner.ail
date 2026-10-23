@@ -1,0 +1,146 @@
+module sunholo/live_loop_lab/planner
+import std/list (map, range, length as size, any, contains, take)
+import std/option (Option, Some, None)
+import std/result (Result, Ok, Err)
+import std/json (Json, decode, encode, get, getString, getNumber, getBool, getObject, getArray, JNull, JNumber, JString, keys, js, jint, jb, jn, ja, jo, kv)
+import std/string (length as textLength, chars, contains as textContains)
+import std/bytes (fromString, length as byteLength)
+import std/math (floor, floatToInt)
+
+export type Pending = {id: string, asset: string, hash: string, revision: int, at: int, scheduled: bool}
+export type Track = {id: int, revision: int, level: int, pan: int, muted: bool, asset: string, pending: Option[Pending]}
+export type State = {epoch: int, revision: int, rate: int, bpm: int, origin: int, running: bool, tracks: [Track], seen: [string]}
+export type Command = {id: string, kind: string, epoch: int, expected: int, track: int, base: int, now: int, ready: int, origin: int, rate: int, bpm: int, level: int, pan: int, muted: bool, asset: string, hash: string, pendingId: string, at: int, applied: int}
+
+export func ceilDiv(n: int, d: int) -> int ! {}
+requires { n >= 0 && n <= 1000000000000000 && d > 0 && d <= 200000000 }
+ensures { result >= 0 && result * d >= n && (result == 0 || (result - 1) * d < n) }
+{
+  (n + d - 1) / d
+}
+
+export func boundaryFrame(rate: int, bpm: int, origin: int, cycle: int) -> int ! {}
+requires { rate >= 8000 && rate <= 192000 && bpm >= 40 && bpm <= 240 && origin >= 0 && origin <= 1000000000000 && cycle >= 0 && cycle <= 1000000 }
+ensures { result >= origin }
+{
+  origin + cycle * rate * 960 / bpm
+}
+
+-- Absolute musical-cycle conversion avoids accumulated rounding drift.
+export func nextBoundary(rate: int, bpm: int, origin: int, threshold: int) -> int ! {}
+requires { rate >= 8000 && rate <= 192000 && bpm >= 40 && bpm <= 240 && origin >= 0 && origin <= 1000000000000 && threshold >= 0 && threshold <= 1000000000000 }
+ensures { result >= threshold && result >= origin }
+{
+  if threshold <= origin then origin
+  else origin + ceilDiv((threshold - origin) * bpm, rate * 960) * rate * 960 / bpm
+}
+
+pure func small(s: string) -> bool = textLength(s) > 0 && textLength(s) <= 96
+pure func hashValid(s: string) -> bool = textLength(s) == 64 && not any(\c. not textContains("0123456789abcdef",c),chars(s))
+pure func clock(n: int) -> bool = n >= 0 && n <= 1000000000000
+pure func pendingValid(p: Pending, t: Track) -> bool = small(p.id) && small(p.asset) && hashValid(p.hash) && p.revision == t.revision + 1 && clock(p.at)
+pure func trackValid(t: Track) -> bool = t.id >= 1 && t.id <= 4 && t.revision >= 0 && t.revision < 1000000 && t.level >= 0 && t.level <= 100 && t.pan >= -100 && t.pan <= 100 && small(t.asset)
+  && (match t.pending { None => true, Some(p) => pendingValid(p, t) })
+pure func stateValid(s: State) -> bool = s.epoch >= 0 && s.epoch < 1000000 && s.revision >= 0 && s.revision < 1000000000 && s.rate >= 8000 && s.rate <= 192000 && s.bpm >= 40 && s.bpm <= 240 && clock(s.origin)
+  && size(s.tracks) == 4 && size(s.seen) <= 64 && not any(\x. not small(x), s.seen)
+  && not any(\t. not trackValid(t), s.tracks)
+  && (match s.tracks { [a,b,c,d] => a.id == 1 && b.id == 2 && c.id == 3 && d.id == 4, _ => false })
+
+export func initial() -> State ! {}
+ensures { result.epoch == 0 && result.revision == 0 && not result.running && result.rate == 48000 && size(result.tracks) == 4 && size(result.seen) == 0 }
+{
+  {epoch: 0, revision: 0, rate: 48000, bpm: 120, origin: 0, running: false, tracks: map(\i. {id: i, revision: 0, level: if i == 1 then 60 else if i == 2 then 48 else if i == 3 then 38 else 28, pan: if i == 3 then -30 else if i == 4 then 35 else 0, muted: false, asset: "demo-${show(i)}", pending: None}, range(1, 5)), seen: []}
+}
+
+pure func remember(s: State, c: Command) -> State = {s | revision: s.revision + 1, seen: take(64, c.id :: s.seen)}
+pure func selected(s: State, id: int) -> Track = match s.tracks { [a,b,c,d] => if id == 1 then a else if id == 2 then b else if id == 3 then c else d, _ => {id: 0, revision: 0, level: 0, pan: 0, muted: true, asset: "invalid", pending: None} }
+pure func replace(s: State, t: Track) -> State = {s | tracks: map(\old. if old.id == t.id then t else old, s.tracks)}
+
+export func apply(s: State, c: Command) -> Result[State, string] ! {}
+ensures { match result { Ok(v) => (v.epoch == s.epoch || v.epoch == s.epoch + 1) && (v.revision == s.revision || v.revision == s.revision + 1) && size(v.tracks) == 4 && size(v.seen) <= 64, Err(_) => true } }
+{
+  if not stateValid(s) then Err("invalid session state")
+  else if not small(c.id) || not clock(c.now) then Err("invalid command id or frame")
+  else if c.epoch != s.epoch then Err("stale transport epoch")
+  else if contains(s.seen, c.id) then Ok(s)
+  else if c.expected != s.revision then Err("stale session revision")
+  else if s.revision >= 999999999 then Err("session revision limit")
+  else if c.kind == "configure" then {
+    if s.running || s.epoch >= 999999 then Err("stop before configuring")
+    else if c.rate < 8000 || c.rate > 192000 || c.bpm < 40 || c.bpm > 240 || not clock(c.origin) || c.origin <= c.now || c.origin - c.now > c.rate * 2 then Err("invalid transport configuration")
+    else { let fresh = initial(); Ok(remember({fresh | epoch: s.epoch + 1, revision: s.revision, rate: c.rate, bpm: c.bpm, origin: c.origin, running: true}, c)) }
+  } else if c.kind == "reset" then {
+    if s.epoch >= 999999 then Err("epoch limit") else { let fresh = initial(); Ok(remember({fresh | epoch: s.epoch + 1, revision: s.revision}, c)) }
+  } else if not s.running then Err("transport is stopped")
+  else if c.track < 1 || c.track > 4 then Err("invalid track")
+  else {
+    let t = selected(s, c.track);
+    if c.kind == "parameter" then
+      if c.level < 0 || c.level > 100 || c.pan < -100 || c.pan > 100 then Err("parameter outside range")
+      else Ok(remember(replace(s, {t | level: c.level, pan: c.pan, muted: c.muted}), c))
+    else if c.base != t.revision then Err("stale track revision")
+    else if c.kind == "prepare" then match t.pending {
+      Some(_) => Err("track already has a pending revision"),
+      None => if not small(c.asset) || not hashValid(c.hash) || not clock(c.ready) || t.revision >= 999998 then Err("invalid asset metadata")
+        else {
+          let ready = if c.ready > c.now then c.ready else c.now;
+          if ready > 1000000000000 - s.rate / 5 then Err("frame limit")
+          else {
+            let at = nextBoundary(s.rate, s.bpm, s.origin, ready + s.rate / 5);
+            if not clock(at) then Err("frame limit")
+            else Ok(remember(replace(s, {t | pending: Some({id: c.id, asset: c.asset, hash: c.hash, revision: t.revision + 1, at: at, scheduled: false})}), c))
+          }
+        }
+    } else match t.pending {
+      None => Err("no pending revision"),
+      Some(p) => if c.pendingId != p.id then Err("stale pending revision")
+        else if c.kind == "schedule" then
+          if p.scheduled || c.at != p.at || c.now > p.at - 128 then Err("missed staging deadline or invalid schedule")
+          else Ok(remember(replace(s, {t | pending: Some({p | scheduled: true})}), c))
+        else if c.kind == "activate" then
+          if not p.scheduled || c.at != p.at || c.applied != p.at || c.now < p.at then Err("activation not acknowledged at the planned frame")
+          else Ok(remember(replace(s, {t | revision: p.revision, asset: p.asset, pending: None}), c))
+        else if c.kind == "cancel" then
+          if p.scheduled then Err("already scheduled; reset to discard in L0")
+          else Ok(remember(replace(s, {t | pending: None}), c))
+        else Err("unknown command")
+    }
+  }
+}
+
+pure func num(j: Json, k: string) -> int = match getNumber(j,k) { Some(x) => if x >= -1000000000000.0 && x <= 1000000000000.0 && x == floor(x) then floatToInt(x) else -2000000000000, None => -2000000000000 }
+pure func text(j: Json, k: string) -> string = match getString(j,k) { Some(s) => s, None => "" }
+pure func flag(j: Json, k: string) -> bool = match getBool(j,k) { Some(b) => b, None => false }
+pure func pendingOf(j: Json) -> Option[Pending] = match j { JNull => None, _ => Some({id: text(j,"id"), asset: text(j,"asset"), hash: text(j,"hash"), revision: num(j,"revision"), at: num(j,"at"), scheduled: flag(j,"scheduled")}) }
+pure func trackOf(j: Json) -> Track = {id: num(j,"id"), revision: num(j,"revision"), level: num(j,"level"), pan: num(j,"pan"), muted: flag(j,"muted"), asset: text(j,"asset"), pending: match get(j,"pending") { Some(p) => pendingOf(p), None => None }}
+pure func stateOf(j: Json) -> State = {epoch: num(j,"epoch"), revision: num(j,"revision"), rate: num(j,"rate"), bpm: num(j,"bpm"), origin: num(j,"origin"), running: flag(j,"running"), tracks: match getArray(j,"tracks") { Some(ts) => map(trackOf,ts), None => [] }, seen: match getArray(j,"seen") { Some(ids) => map(\x. match x { JString(t) => t, _ => "" },ids), None => [] }}
+
+pure func boolPresent(j: Json, k: string) -> bool = match getBool(j,k) { Some(_) => true, None => false }
+pure func stateShape(j: Json) -> bool = boolPresent(j,"running") && (match getArray(j,"seen") { Some(_) => true, None => false }) && (match getArray(j,"tracks") {
+  None => false, Some(ts) => size(ts) == 4 && not any(\t. not boolPresent(t,"muted") || (match get(t,"pending") { None => true, Some(JNull) => false, Some(p) => not boolPresent(p,"scheduled") }), ts)
+})
+pure func commandOf(j: Json) -> Command = {id: text(j,"id"), kind: text(j,"kind"), epoch: num(j,"epoch"), expected: num(j,"expected"), track: num(j,"track"), base: num(j,"base"), now: num(j,"now"), ready: num(j,"ready"), origin: num(j,"origin"), rate: num(j,"rate"), bpm: num(j,"bpm"), level: num(j,"level"), pan: num(j,"pan"), muted: flag(j,"muted"), asset: text(j,"asset"), hash: text(j,"hash"), pendingId: text(j,"pendingId"), at: num(j,"at"), applied: num(j,"applied")}
+pure func commandShape(j: Json) -> bool = not any(\k. not contains(["id","kind","epoch","expected","track","base","now","ready","origin","rate","bpm","level","pan","muted","asset","hash","pendingId","at","applied"],k), keys(j)) && (text(j,"kind") != "parameter" || boolPresent(j,"muted"))
+pure func pendingJson(p: Pending) -> Json = jo([kv("id",js(p.id)),kv("asset",js(p.asset)),kv("hash",js(p.hash)),kv("revision",jint(p.revision)),kv("at",jint(p.at)),kv("scheduled",jb(p.scheduled))])
+pure func trackJson(t: Track) -> Json = jo([kv("id",jint(t.id)),kv("revision",jint(t.revision)),kv("level",jint(t.level)),kv("pan",jint(t.pan)),kv("muted",jb(t.muted)),kv("asset",js(t.asset)),kv("pending",match t.pending { None => jn(), Some(p) => pendingJson(p) })])
+pure func stateJson(s: State) -> Json = jo([kv("epoch",jint(s.epoch)),kv("revision",jint(s.revision)),kv("rate",jint(s.rate)),kv("bpm",jint(s.bpm)),kv("origin",jint(s.origin)),kv("running",jb(s.running)),kv("tracks",ja(map(trackJson,s.tracks))),kv("seen",ja(map(js,s.seen)))])
+pure func failure(e: string) -> string = encode(jo([kv("ok",jb(false)),kv("error",js(e))]))
+
+export func handle(input: string) -> string ! {}
+ensures { match decode(result) { Ok(j) => boolPresent(j,"ok"), Err(_) => false } }
+{
+  if textLength(input) > 65536 || byteLength(fromString(input)) > 65536 then failure("request too large")
+  else match decode(input) {
+    Err(_) => failure("invalid JSON"),
+    Ok(j) => if num(j,"schema") != 1 then failure("unsupported schema")
+      else if text(j,"op") == "init" then encode(jo([kv("ok",jb(true)),kv("state",stateJson(initial()))]))
+      else match (getObject(j,"state"), getObject(j,"command")) {
+        (Some(sj),Some(cj)) => if not stateShape(sj) || not commandShape(cj) then failure("invalid state or command shape")
+          else { let s = stateOf(sj); match apply(s,commandOf(cj)) {
+            Ok(v) => encode(jo([kv("ok",jb(true)),kv("state",stateJson(v))])),
+            Err(e) => failure(e)
+          } },
+        _ => failure("state and command objects required")
+      }
+  }
+}
