@@ -1,6 +1,6 @@
 {
   "sprint_id": "M-MAINTENANCE-EVAL-FOUNDATION",
-  "status": "in_progress",
+  "status": "completed",
   "created": "2026-10-23T13:37:12.629028+00:00",
   "design_doc": "design_docs/planned/m-maintenance-bench-evidence-ledger.md",
   "companion_design_docs": [
@@ -119,7 +119,13 @@
       8
     ],
     "actual_loc_per_day": null,
-    "basis": "Planning envelope, not measured productive-day velocity. Previous sprint 1544 physical AILANG LOC against 2160 planned; attended session elapsed time is not human engineering time."
+    "basis": "Planning envelope, not measured productive-day velocity. Previous sprint 1544 physical AILANG LOC against 2160 planned; attended session elapsed time is not human engineering time.",
+    "actual_net_code_loc": 4653,
+    "actual_code_added": 4665,
+    "actual_code_deleted": 12,
+    "actual_elapsed_session_seconds": 3906,
+    "actual_days": null,
+    "measurement_note": "Physical .ail/.py/.sh diff includes native checkpoint snapshots, tests and host qualifier glue. Elapsed attended-agent time is not human productive days; coding-agent usage was not inferred from commits or treated as zero."
   },
   "baseline": {
     "command": "make verify",
@@ -393,16 +399,26 @@
         "Verify clean dependency resolution and installed commands; provide scoped source PR with exact tested revision. Do not claim main/registry availability or CI success before verified.",
         "Run sprint-evaluator against both designs and acceptance controls; resolve material failures before calling the sprint complete. No core compiler/harness edits or default rotation changes belong to this sprint."
       ],
-      "passes": null,
+      "passes": true,
       "started": "2026-10-23T13:44:02.430053+00:00",
-      "completed": null,
-      "notes": "Local focused quality/packaging passed. StrictPUB011/75 remains;3/20maincontracts verified17unsupported. Pending exact-head PR CI and independent scored review."
+      "completed": "2026-10-23T14:49:09.064065+00:00",
+      "notes": "Independent PASS90/100 at162db525; exact-head CI39971346946 successful. All45 substantive criteria verified. Final docs/state-only closeout will receive exact-head CI before reporting completion; source release candidate, no registry/model campaign."
     }
   ],
   "execution_authorized_by": "Mark: execute sprint",
   "started": "2026-10-23T13:44:02.430053+00:00",
-  "last_checkpoint": "M13_REPLAY_COMPAT",
-  "last_session": "2026-10-23T14:35:52.854038+00:00",
+  "last_checkpoint": "M14_QUALITY_DOCS_CI",
+  "last_session": "2026-10-23T14:49:09.064065+00:00",
   "validation_directory": "packages/maintenance-bench/validation/v0.2.0",
-  "review_status": "targeted pre-pass controls passed; final scored review pending"
+  "review_status": "pass",
+  "completed": "2026-10-23T14:49:09.064065+00:00",
+  "evaluation_score": 90,
+  "evaluation_report": ".ailang/state/evaluations/eval_M-MAINTENANCE-EVAL-FOUNDATION_round_1.json",
+  "source_pr": "https://github.com/sunholo-data/ailang-packages/pull/160",
+  "reviewed_head": "162db5255f3b75d7d3ee2a309607b9ea0bf3c649",
+  "reviewed_implementation_revision": "40e1e74932a6e6860030d8fca5d78bba2b49248f",
+  "reviewed_ci": "https://github.com/sunholo-data/ailang-packages/actions/runs/39971346946",
+  "final_ci_policy": "Require current PR head CI success after docs/state closeout; exact final head/run is reported externally because this committed state cannot self-reference its commit.",
+  "publication_status": "0.2.0 source PR; registry0.1 remains published; no0.2 upload",
+  "model_campaign_started": false
 }

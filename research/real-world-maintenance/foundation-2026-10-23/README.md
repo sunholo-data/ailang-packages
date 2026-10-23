@@ -19,4 +19,4 @@ cmp research/real-world-maintenance/foundation-2026-10-23/parse.scoped-v2-source
 
 Taskpack qualification and artificial 8/24 ledger/economic controls are separate evidence. Their invented dollar/token differences validate accounting only and must not be combined with this observational sample into a language advantage claim.
 
-The original parse.scoped-v2.json is the earlier development replay before external source pinning. The source-pinned replay preserves identical metric values while binding declared analysis identity to tested implementation40e1e74; provenance.json records the full commit, lock and runtime fingerprints. The reportId is not a self-attesting build signature.
+The original parse.scoped-v2.json is the earlier development replay before external source pinning. The source-pinned replay preserves identical metric values while binding declared analysis identity to tested implementation 40e1e74; provenance.json records the full commit, lock and runtime fingerprints. The reportId is not a self-attesting build signature.

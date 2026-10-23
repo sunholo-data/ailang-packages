@@ -1,6 +1,6 @@
 # Sprint Plan: M-MAINTENANCE-EVAL-FOUNDATION
 
-**Status:** Execution approved by Mark on 2026-10-23: “execute sprint”. In progress.
+**Status:** Foundation implemented and independently evaluated PASS90/100 on2026-10-23; source PR#160. Registry publication and model campaign remain later work.
 **Goal:** Build the repeatable native AILANG evidence ledger and qualify two real-requirement maintenance task families offline, ready for later executor integration.
 **Repository:** `sunholo-data/ailang-packages`; package `packages/maintenance-bench`; task assets in `research/real-world-maintenance/taskpacks/v1/`.
 **Designs:** [Evidence ledger](m-maintenance-bench-evidence-ledger.md), [task pack](m-maintenance-eval-taskpack.md), [parent study](m-real-world-language-maintenance-study.md). Design review: [PR #159](https://github.com/sunholo-data/ailang-packages/pull/159), head `2a9e41edb5e4b45f7a34d0aea81a71ab1d520869`.
@@ -204,10 +204,10 @@ Run bounded no-model native qualification plus scripted ledger ingestion. Combin
 
 Prepare 0.2.0 feature release-candidate metadata and exports/assets, add explicit offline CI paths/gates for taskpacks and ledger, run focused quality/dry-run and independent sprint evaluation. Keep source PR reviewable via gh; no registry upload or model launch.
 
-- [ ] Record actual named/inline/property counts, compile/effects/interface/release/docs badges, smoke and SMT proved/counterexample/unknown/skipped outcomes. No undiscovered-test or vacuous-contract pass.
-- [ ] Keep baseline 75 uncontracted-export PUB011 limit from growing: add meaningful contracts to new exports or keep helpers internal. Disclose encoding skips as runtime assertions; no widened warning allowlist.
-- [ ] Verify clean dependency resolution and installed commands; provide scoped source PR with exact tested revision. Do not claim main/registry availability or CI success before verified.
-- [ ] Run sprint-evaluator against both designs and acceptance controls; resolve material failures before calling the sprint complete. No core compiler/harness edits or default rotation changes belong to this sprint.
+- [x] Record actual named/inline/property counts, compile/effects/interface/release/docs badges, smoke and SMT proved/counterexample/unknown/skipped outcomes. No undiscovered-test or vacuous-contract pass.
+- [x] Keep baseline 75 uncontracted-export PUB011 limit from growing: add meaningful contracts to new exports or keep helpers internal. Disclose encoding skips as runtime assertions; no widened warning allowlist.
+- [x] Verify clean dependency resolution and installed commands; provide scoped source PR with exact tested revision. Do not claim main/registry availability or CI success before verified.
+- [x] Run sprint-evaluator against both designs and acceptance controls; resolve material failures before calling the sprint complete. No core compiler/harness edits or default rotation changes belong to this sprint.
 
 ## Day-by-day schedule and exit points
 
@@ -250,7 +250,7 @@ Rows describe planned APIs/behavior, not verified current signatures. Contracts 
 
 ## Approval, state and handoff
 
-Progress state: `.ailang/state/sprints/sprint_M-MAINTENANCE-EVAL-FOUNDATION.json` in the isolated package checkout. It is populated and validated but `execution_authorized=false`; every milestone is unstarted. Do not overwrite the core repository's active sprint or dispatch remote agents. The standard creator was inspected; it syncs/imports GitHub issues and reads messages, so this plan uses its documented JSON schema directly without unrelated inbox mutations, as in the previous package sprint.
+Progress state: `.ailang/state/sprints/sprint_M-MAINTENANCE-EVAL-FOUNDATION.json` in the isolated package checkout. It was populated and validated during planning with execution unapproved. Mark subsequently approved execution; current JSON has `execution_authorized=true`, completed implementation milestones and final review/CI closeout state. Do not overwrite the core repository's active sprint or dispatch remote agents. The standard creator was inspected; it syncs/imports GitHub issues and reads messages, so this plan uses its documented JSON schema directly without unrelated inbox mutations, as in the previous package sprint.
 
 Mark's “ok continue” approves progressing from the designs into this concrete plan. The repository routing gate is `design-doc-creator → user approval → sprint-planner → user says "execute sprint" → sprint-executor → sprint-evaluator`. Planning approval is not silently recorded as approval of a plan that had not been written. After the user approves execution, load sprint-executor and execute this sprint locally; handoff can occur in-session without messaging or delegation. Prepare a clean implementation branch in a separate temporary worktree at the reviewed design revision, then copy the approved plan/state into it. Do not switch the dirty original package checkout or add implementation commits to design PR #159. Commit/push the plan with the approved scope, then create a scoped source PR using gh when checks pass. Registry publication and a model campaign are not part of this sprint.
 
@@ -258,6 +258,12 @@ Mark's “ok continue” approves progressing from the designs into this concret
 
 - 2026-10-23: Mark explicitly approved execution. Isolated implementation branch created; original working trees and active core sprint preserved. Independent taskpack/usage work is assigned to local workers under sprint-executor Phase 2B; integration and all shared manifest/CI changes stay with the controller.
 
-- Integration checkpoint: M1–M13 passed. Main185 native tests plus500 generated cases; both native task families and amended host controls pass; old six-report replay byte-identical. M14 final scoring/CI pending. Source0.2 remains a release candidate.
+- Integration checkpoint: M1–M13 passed. Main185 native tests plus500 generated cases; both native task families and amended host controls pass; old six-report replay byte-identical. M14 independent evaluation passed90/100 and implementation-head CI passed; final docs/state closeout receives its own CI. Source0.2 remains a release candidate.
 - Review amendments: immutable/distinct card IDs, standalone economic cards refused; fresh+generated headline versus fresh-input diagnostic; bounded follow-ups and rename lineage; typed JSON oracle equality; create-only evidence; exact edit sums. All pre-model changes and targeted controls are documented in VALIDATION.
 - Wrapper evidence amendment: scoped_index/usage_accounting use IO; trajectory/card examples read explicit checked-in fixtures under IO/FS. Pure owner modules hold contracts/native laws; wrappers contain no new pure logic. No vacuous wrapper contracts were added.
+
+## Foundation completion
+
+All14 milestones and45 substantive acceptance criteria passed. Independent evaluation:90/100 at162db525; implementation source40e1e74932a6e6860030d8fca5d78bba2b49248f, CI39971346946 successful. Full report is committed under .ailang/state/evaluations/. Main185 native tests and500 generated cases pass;3/20 SMT contracts proved,17unsupported, strictPUB011/75 explicitly retained. No new formatter waiver. Source/lock/runtime provenance binds the real metric-v2 replay.
+
+Actual net code is4,653 physical .ail/.py/.sh lines against3,700 planned (different scope units exclude docs/JSON/config). Human productive-day velocity and development billing are unmeasured. See docs/sprint-retros/M-MAINTENANCE-EVAL-FOUNDATION-retro.md. Both broad design docs and this companion remain in planned/ because staged executor integration, protected worker/oracle boundaries and live campaign qualification are still pending. Final exact-head CI is checked after this documentation-only closeout; no package source changes accompany it.
