@@ -13,3 +13,10 @@ transport. Added a muted planner/worker/worklet runner for 8-handoff trials or
 Fix: authorize activation from the exact renderer acknowledgement when the main
 AudioContext clock trails it. Runner v2 records hidden-tab intervals instead of
 cancelling synthetic background checks; microphone capture still cancels on hide.
+
+Fix: bind each asynchronous input request to its own capture identity. Close late
+permission grants, ignore obsolete failures, stop input on release/cancel/device loss,
+and scope worklet stop/cancel commands to the intended take. Add explicit microphone
+permission preflight, focus/device-change cancellation and bounded local lifecycle
+reports with a manual microphone/device check guide. The permission probe records
+no take and immediately releases its stream.

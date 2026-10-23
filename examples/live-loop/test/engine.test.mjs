@@ -76,3 +76,10 @@ test('malformed initialization is rejected without killing the render processor'
   assert.doesNotThrow(()=>p.message(m));assert.equal(p.ready,false);assert.equal(p.messages[0].type,'rejected');
   assert.doesNotThrow(()=>p.message({...m,tracks:'abcd'}));
 });
+test('old stop/cancel messages cannot terminate a newer worklet capture',()=> {
+  const c=new(processors.get('private-capture'))();c.port.onmessage({data:{type:'start',id:2,frames:8000}});
+  c.process([[new Float32Array(128).fill(.5)]],block());
+  c.port.onmessage({data:{type:'cancel',id:1}});c.port.onmessage({data:{type:'stop',id:1}});
+  assert.ok(c.buffer);assert.equal(c.messages.filter(m=>m.type==='take').length,0);
+  c.port.onmessage({data:{type:'stop',id:2}});assert.equal(c.messages.find(m=>m.type==='take').id,2);
+});

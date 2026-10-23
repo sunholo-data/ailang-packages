@@ -5,9 +5,9 @@ class Capture extends AudioWorkletProcessor {
     this.port.onmessage=e=> {
       if(e.data.type==='start' && !this.buffer) {
         const n=e.data.frames;
-        if(Number.isInteger(n) && n>0 && n<=sampleRate*16 && Number.isSafeInteger(e.data.id)) { this.buffer=new Float32Array(n); this.id=e.data.id; this.used=0; }
-      } else if(e.data.type==='stop') this.finish();
-      else if(e.data.type==='cancel') { this.buffer=null; this.used=0; }
+        if(Number.isInteger(n) && n>0 && n<=sampleRate*16 && Number.isSafeInteger(e.data.id)) { this.buffer=new Float32Array(n); this.id=e.data.id; this.used=0; this.peak=0; }
+      } else if(e.data.type==='stop' && (e.data.id===undefined || e.data.id===this.id)) this.finish();
+      else if(e.data.type==='cancel' && (e.data.id===undefined || e.data.id===this.id)) { this.buffer=null; this.id=null; this.used=0; this.peak=0; }
     };
   }
   finish() {
@@ -26,7 +26,7 @@ class Capture extends AudioWorkletProcessor {
       }
       if(this.used===this.buffer.length) this.finish();
     }
-    if(currentFrame>=this.meterAt) { this.port.postMessage({type:'capture-meter',peak:this.peak,frames:this.used}); this.peak=0; this.meterAt=currentFrame+Math.floor(sampleRate/16); }
+    if(currentFrame>=this.meterAt) { this.port.postMessage({type:'capture-meter',id:this.buffer?this.id:null,peak:this.peak,frames:this.used}); this.peak=0; this.meterAt=currentFrame+Math.floor(sampleRate/16); }
     return true;
   }
 }

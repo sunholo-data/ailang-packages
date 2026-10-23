@@ -30,3 +30,16 @@ tests, `ailang verify --package .`, `ailang pkg quality .`; `node --test test/*.
 `python3 -m unittest discover -s test -p '*_test.py'`. Browser/loopback measurements
 must identify the tested runtime/configuration and may not be called physical audio
 or microphone evidence when synthetic input was used.
+
+## Capture lifecycle follow-up
+
+`static/private-capture.mjs` owns each input request/source by a distinct take ID.
+Only one browser permission request may be outstanding. Cancellation invalidates
+ownership; a late stream is stopped and a late error cannot cancel a later take.
+The explicit microphone permission probe immediately stops its stream before any
+capture starts. The capture worklet accepts ID-scoped stop/cancel controls.
+
+The local microphone guide is `/microphone-check.html`. Its manual/device checks
+have not been attested by the automated tests. The inspector's capture report
+contains bounded metadata/events and aggregate peaks, not samples, device labels
+or IDs; it does not automatically report a physical/privacy pass.

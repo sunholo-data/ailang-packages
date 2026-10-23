@@ -1,7 +1,30 @@
 import {activationNow} from './engine.mjs';
+import {CaptureLifecycle,MicrophoneAccess,inputError} from './private-capture.mjs';
 const $=id=>document.getElementById(id), names=['Drums','Bass','Harmony','Texture'];
-let state=null,ctx=null,program=null,captureNode=null,source=null,stream=null,sink=null,worker=null,ready=null;
-let captureId=0,activeCaptureId=null;
+let state=null,ctx=null,program=null,captureNode=null,captureLifecycle=null,sink=null,worker=null,ready=null;
+const microphone=new MicrophoneAccess(constraints=> {
+  if(!navigator.mediaDevices?.getUserMedia)throw {name:'SecurityError'};
+  return navigator.mediaDevices.getUserMedia(constraints);
+});
+let authorizing=false,authorizationId=0,microphoneReady=false,lastCaptureSnapshot=null,captureObservation=null;
+let captureEventsDropped=0;
+const captureEvents=[],captureReportStartedAt=new Date().toISOString(),captureReportStartedMs=performance.now();
+function captureEvent(event) {
+  captureEvents.push({elapsedMs:performance.now()-captureReportStartedMs,...event});if(captureEvents.length>64){captureEvents.shift();captureEventsDropped++;}
+  renderPrivacy();
+}
+function renderPrivacy() {
+  const capture=captureLifecycle?.snapshot()||lastCaptureSnapshot||{phase:'idle',ownedLiveTracks:0};
+  $('privacy').textContent=`Capture → private worklet → zero output
+Microphone tracks owned: ${capture.ownedLiveTracks}
+Capture state: ${capture.phase}
+Permission request pending: ${microphone.pending}
+Prepared audio stays in browser memory
+API accepts command metadata only`;
+}
+function captureReport() {
+  return {kind:'Loop Lab capture lifecycle metadata',schema:1,startedAt:captureReportStartedAt,reportedAt:new Date().toISOString(),userAgent:navigator.userAgent,physicalDeviceLatencyMeasured:false,sampleRate:ctx?.sampleRate??captureObservation?.rate??null,transportRunning:!!ctx&&ctx.state==='running',epoch:state?.epoch??null,tracks:state?.tracks.map(t=>({id:t.id,revision:t.revision,muted:t.muted,pending:t.pending?{revision:t.pending.revision,scheduled:t.pending.scheduled,at:t.pending.at}:null}))??[],capture:{...(captureLifecycle?.snapshot()||lastCaptureSnapshot||{phase:'idle',ownedLiveTracks:0}),pendingPermission:microphone.pending},lastCapture:captureObservation?{...captureObservation}:null,readyTrack:ready?.track??null,preparing,programPeak:lastMeter.peak,activationErrorsFrames:[...activationErrors],events:captureEvents.map(e=>({...e})),eventsDropped:captureEventsDropped,rawAudioIncluded:false};
+}
 let selected=1,token=0,held=false,capturing=false,preparing=false,takeTrack=1,queue=Promise.resolve(),queued=0,sequence=0;
 let bridgeTimes=[],events=[],lastMeter={frame:0,peak:0,clipped:0,blocks:0},preparationMs=0,activationErrors=[],workerJob=0,stopping=false;
 const rows=[];
@@ -41,13 +64,17 @@ function render() {
     r.revision.textContent=t.pending?(t.pending.scheduled?'Scheduled for next loop':'Prepared · staging'):`${t.revision?'Take':'Original'} · active r${t.revision}`;
     for(const control of [r.level,r.pan,r.mute]) control.disabled=!ctx || !state.running || stopping;
   }
-  $('capture-title').textContent=`A new part for ${names[selected-1]}`;
-  $('start').disabled=!!ctx || stopping || state.running;
-  $('stop').disabled=(!ctx&&!state.running) || stopping;
-  $('capture').disabled=!ctx || !state.running || ctx.state!=='running' || !!ready || preparing || stopping || !!state.tracks[selected-1].pending;
+  const captureTarget=ready?.track??captureLifecycle?.active?.track??(preparing?takeTrack:selected);
+  $('capture-title').textContent=`A new part for ${names[captureTarget-1]}`;
+  $('start').disabled=!!ctx || stopping || state.running || authorizing;
+  $('stop').disabled=(!ctx&&!state.running&&!authorizing) || stopping;
+  $('capture').disabled=!ctx || !state.running || ctx.state!=='running' || !!ready || preparing || authorizing || captureLifecycle?.disposed || ($('input').value==='microphone'&&!microphoneReady) || stopping || !!state.tracks[selected-1].pending;
   $('commit').disabled=!ready || stopping || !ctx || ctx.state!=='running' || !!state.tracks[ready?.track-1]?.pending;
   $('discard').disabled=!ready;
-  $('input').disabled=capturing || held || preparing;
+  $('input').disabled=capturing || held || preparing || authorizing;
+  $('enable-mic').hidden=$('input').value!=='microphone';
+  $('enable-mic').disabled=authorizing || microphone.pending || held || capturing || preparing || !!ready || stopping;
+  $('enable-mic').textContent=authorizing?'Opening microphone permission…':microphoneReady?'Check microphone permission':'Enable microphone';
   $('capture').classList.toggle('recording',capturing);
   $('transport-state').textContent=ctx?(ctx.state==='running'?'Playing':'Audio suspended'):state.running?'Reset required':'Stopped';
   $('bridge').textContent=`Strict bytecode CLI · no fallback\n${stats(bridgeTimes)}\nPreparation worker: ${preparationMs.toFixed(1)} ms\nQueued controls: ${queued}`;
@@ -96,7 +123,24 @@ async function start() {
     program.port.postMessage({type:'init',epoch:state.epoch,origin,rate:audio.sampleRate,bpm:120,tracks:state.tracks.map((t,i)=>({...t,samples:samples[i]}))},samples.map(x=>x.buffer));
     captureNode=new AudioWorkletNode(audio,'private-capture',{numberOfInputs:1,outputChannelCount:[1]});
     sink=audio.createGain();sink.gain.value=0;captureNode.connect(sink).connect(audio.destination);
-    captureNode.port.onmessage=e=>captureMessage(e.data,sessionToken);
+    let owner;
+    owner=new CaptureLifecycle({context:audio,node:captureNode,microphone,
+      onPhase:m=> {
+        if(sessionToken!==token)return;
+        held=m.phase==='opening'||m.phase==='recording';capturing=m.phase==='recording';
+        if(m.phase==='opening')captureObservation={id:m.id,track:m.track,kind:m.kind,rate:audio.sampleRate,privateInputPeak:0,inputMeterSamples:0,programPeakDuringCapture:null,programMeterSamples:0};
+        if(m.phase==='finishing')preparing=true;
+        if(m.reason){preparing=false;workerJob++;$('capture-status').textContent=m.reason;}
+        else if(m.phase==='opening')$('capture-status').textContent='Opening private input…';
+        else if(m.phase==='recording')$('capture-status').textContent=`Recording privately for ${names[m.track-1]}…`;
+        else if(m.phase==='finishing')$('capture-status').textContent='Preparing privately…';
+        render();
+      },
+      onEvent:m=>{lastCaptureSnapshot=owner.snapshot();captureEvent(m);},
+      onError:message=>{if(sessionToken===token){microphoneReady=false;notice(message);render();}},
+      onMeter:m=>{if(sessionToken===token&&capturing){captureObservation.privateInputPeak=Math.max(captureObservation.privateInputPeak,m.peak);captureObservation.inputMeterSamples++;drawMeter(m.peak);}},
+      onTake:m=>captureMessage(m,sessionToken)
+    });captureLifecycle=owner;renderPrivacy();
     worker=new Worker('/prepare-worker.mjs',{type:'module'});worker.onmessage=e=>preparedMessage(e.data,sessionToken);
     worker.onerror=()=>{ready=null;preparing=false;render();notice('Preparation worker failed; reset and retry');};
     render();notice('Four parts playing. Select a part, then hold to capture privately.');
@@ -105,7 +149,7 @@ async function start() {
 }
 function programMessage(m,sessionToken) {
   if(sessionToken!==token) return;
-  if(m.type==='meter') { lastMeter=m; return; }
+  if(m.type==='meter') { lastMeter=m;if(captureLifecycle?.active&&captureObservation){captureObservation.programPeakDuringCapture=Math.max(captureObservation.programPeakDuringCapture??0,m.peak);captureObservation.programMeterSamples++;}return; }
   if(m.type==='initialized') {log(`Audio initialized at frame ${m.frame}`);return;}
   const t=state.tracks[m.track-1];
   if(m.type==='rejected') {
@@ -122,56 +166,52 @@ function programMessage(m,sessionToken) {
     try{now=activationNow(currentFrame(),t.pending.at,m.applied);}
     catch(error){notice(error.message);stop(false);return;}
     activationErrors.push(m.applied-m.at); activationErrors=activationErrors.slice(-128);
+    captureEvent({type:'take-activated',track:m.track,plannedFrame:m.at,appliedFrame:m.applied});
     log(`Part ${m.track} activated · planned ${m.at} / applied ${m.applied} / error ${m.applied-m.at} frames`);
-    command('activate',{track:m.track,base:t.revision,pendingId:m.id,at:m.at,applied:m.applied,now}).then(()=>notice(`${names[m.track-1]}: committed take is now active.`)).catch(error=>{notice(`Activation acknowledgement failed: ${error.message}. Reset required.`);stop(false);});
+    command('activate',{track:m.track,base:t.revision,pendingId:m.id,at:m.at,applied:m.applied,now}).then(()=>{notice(`${names[m.track-1]}: committed take is now active.`);if(!held&&!capturing&&!preparing&&!ready)$('capture-status').textContent='Committed take active · hold to capture again';}).catch(error=>{notice(`Activation acknowledgement failed: ${error.message}. Reset required.`);stop(false);});
   }
 }
-function releaseSource() { if(source) { try{source.disconnect();source.stop?.();}catch{} source=null; } if(stream){for(const t of stream.getTracks())t.stop();stream=null;} }
-function cancelCapture(message='Capture discarded') { held=false;capturing=false;preparing=false;activeCaptureId=null;workerJob++;captureNode?.port.postMessage({type:'cancel'});releaseSource();$('capture-status').textContent=message;render(); }
-async function beginCapture() {
-  if(!ctx || capturing || ready || held || preparing || state.tracks[selected-1].pending) return;
-  held=true;activeCaptureId=++captureId;takeTrack=selected;const sessionToken=token;
-  $('capture-status').textContent='Opening private input…';render();
+function cancelCapture(message='Capture discarded') {
+  held=false;capturing=false;preparing=false;workerJob++;captureLifecycle?.cancel(message);
+  $('capture-status').textContent=message;render();
+}
+async function authorizeMicrophone() {
+  if(authorizing||microphone.pending)return;
+  const id=++authorizationId,sessionToken=token;authorizing=true;render();
+  captureEvent({type:'permission-requested'});$('capture-status').textContent='Allow microphone access, then hold to capture';
   try {
-    if($('input').value==='microphone') {
-      const media=await navigator.mediaDevices.getUserMedia({audio:{channelCount:1,echoCancellation:false,noiseSuppression:false,autoGainControl:false}});
-      if(!held || sessionToken!==token) {media.getTracks().forEach(t=>t.stop());return;}
-      stream=media; source=ctx.createMediaStreamSource(media);
-      for(const track of media.getTracks()) track.onended=()=>cancelCapture('Input disconnected · take discarded');
-    } else { source=ctx.createOscillator();source.frequency.value=220;source.type='sine'; }
-    if(!held || sessionToken!==token) {releaseSource();return;}
-    captureNode.port.postMessage({type:'start',id:activeCaptureId,frames:ctx.sampleRate*16});source.connect(captureNode);source.start?.();capturing=true;
-    $('capture-status').textContent=`Recording privately for ${names[takeTrack-1]}…`;render();
-  } catch(error) { cancelCapture('Input unavailable');notice(error.message); }
+    await microphone.authorize();captureEvent({type:'permission-probe-released'});
+    if(id!==authorizationId||sessionToken!==token)return;
+    microphoneReady=true;$('capture-status').textContent='Microphone ready · hold to capture';notice('Permission checked. No recording started; the probe stream was released.');
+  } catch(error) {
+    captureEvent({type:'permission-error',reason:inputError(error)});
+    if(id===authorizationId&&sessionToken===token){microphoneReady=false;notice(inputError(error));$('capture-status').textContent='Microphone unavailable · enable it to retry';}
+  } finally {if(id===authorizationId)authorizing=false;render();renderPrivacy();}
 }
-function finishCapture() {
-  const wasCapturing=capturing;held=false;capturing=false;
-  if(wasCapturing) {preparing=true;captureNode.port.postMessage({type:'stop'});releaseSource();$('capture-status').textContent='Preparing privately…';}
-  render();
+function beginCapture() {
+  if(!ctx||ctx.state!=='running'||capturing||ready||held||preparing||authorizing||state.tracks[selected-1].pending)return;
+  if($('input').value==='microphone'&&!microphoneReady){notice('Enable microphone access before holding to capture.');return;}
+  captureLifecycle?.begin($('input').value,selected);
 }
+function finishCapture() {captureLifecycle?.release();render();}
 function captureMessage(m,sessionToken) {
-  if(sessionToken!==token)return;
-  if(m.type==='capture-meter') { if(capturing)drawMeter(m.peak);return; }
-  if(m.type==='take') {
-    if(m.id!==activeCaptureId)return;activeCaptureId=null;
-    held=false;capturing=false;releaseSource();
-    if(m.used<ctx.sampleRate*.1) {preparing=false;notice('Take too short. Hold for at least a tenth of a second.');render();return;}
-    preparing=true;const input=m.samples.subarray(0,m.used);workerJob++;
-    // Transfer the fixed capture buffer once. The worker sees only used frames.
-    worker.postMessage({id:workerJob,samples:input,rate:m.rate,frames:ctx.sampleRate*8},[input.buffer]);
-    $('capture-status').textContent='Preparing privately…';render();
-  }
+  if(sessionToken!==token||!ctx)return;
+  held=false;capturing=false;takeTrack=m.track;
+  if(m.used<ctx.sampleRate*.1){preparing=false;notice('Take too short. Hold for at least a tenth of a second.');render();return;}
+  preparing=true;const input=m.samples.subarray(0,m.used);workerJob++;
+  worker.postMessage({id:workerJob,samples:input,rate:m.rate,frames:ctx.sampleRate*8},[input.buffer]);
+  $('capture-status').textContent='Preparing privately…';render();
 }
 function preparedMessage(m,sessionToken) {
   if(sessionToken!==token || m.id!==workerJob)return;
   preparing=false;
   if(m.error) {notice(m.error);render();return;}
   ready={track:takeTrack,samples:m.samples,hash:m.hash};preparationMs=m.prepareMs;
-  drawWave(m.samples);$('capture-status').textContent=`Ready for ${names[takeTrack-1]} · still private`;notice('Prepared in memory. Commit when you want this take to join the loop.');render();
+  drawWave(m.samples);$('capture-status').textContent=`Ready for ${names[takeTrack-1]} · still private`;notice('Prepared in memory. Commit when you want this take to join the loop.');captureEvent({type:'take-prepared',track:takeTrack});render();
 }
 async function commit() {
   if(!ready || !ctx) return;
-  const take=ready;ready=null;render();$('capture-status').textContent='Planning the next loop…';
+  const take=ready;ready=null;captureEvent({type:'commit-requested',track:take.track});render();$('capture-status').textContent='Planning the next loop…';
   try {
     const t=state.tracks[take.track-1];
     await command('prepare',{track:t.id,base:t.revision,asset:`take-${crypto.randomUUID()}`,hash:take.hash,ready:currentFrame()});
@@ -183,6 +223,8 @@ async function commit() {
 }
 async function stop(clearNotice=true) {
   if(stopping)return;stopping=true;token++;workerJob++;ready=null;preparing=false;cancelCapture('Take discarded');
+  authorizationId++;authorizing=false;
+  captureLifecycle?.dispose();lastCaptureSnapshot=captureLifecycle?.snapshot()||lastCaptureSnapshot;captureLifecycle=null;
   worker?.terminate();worker=null;captureNode?.disconnect();captureNode=null;sink?.disconnect();sink=null;program?.disconnect();program=null;
   const old=ctx;ctx=null;if(old){old.onstatechange=null;await old.close();}
   await queue;
@@ -204,15 +246,20 @@ function tick() {
   $('master-meter').value=lastMeter.peak;$('master-text').textContent=lastMeter.peak>0?`${(20*Math.log10(lastMeter.peak)).toFixed(1)} dBFS`:'Silent';
   requestAnimationFrame(tick);
 }
+$('enable-mic').onclick=authorizeMicrophone;
+$('input').onchange=()=>{authorizationId++;microphoneReady=false;render();};
+$('capture-report-button').onclick=()=>{$('capture-report').textContent=JSON.stringify(captureReport(),null,2);};
 $('start').onclick=start;$('stop').onclick=()=>stop();$('commit').onclick=commit;
-$('discard').onclick=()=>{ready=null;workerJob++;drawWave(null);$('capture-status').textContent='Take discarded';render();};
+$('discard').onclick=()=>{captureEvent({type:'take-discarded',track:ready?.track??null});ready=null;workerJob++;drawWave(null);$('capture-status').textContent='Take discarded';render();};
 $('capture').onpointerdown=e=>{e.preventDefault();$('capture').setPointerCapture(e.pointerId);beginCapture();};
+$('capture').onblur=()=>{if(captureLifecycle?.active)cancelCapture('Capture control lost focus · take discarded');};
 $('capture').onpointerup=finishCapture;$('capture').onpointercancel=()=>cancelCapture();
 $('capture').onkeydown=e=>{if((e.key===' '||e.key==='Enter')&&!e.repeat){e.preventDefault();beginCapture();}};
 $('capture').onkeyup=e=>{if(e.key===' '||e.key==='Enter'){e.preventDefault();finishCapture();}};
-window.addEventListener('blur',()=>{if(held||capturing)cancelCapture('Focus lost · take discarded');});
-document.addEventListener('visibilitychange',()=>{if(document.hidden&&(held||capturing))cancelCapture('Page hidden · take discarded');});
-window.addEventListener('pagehide',()=>{releaseSource();worker?.terminate();ctx?.close();});
+window.addEventListener('blur',()=>{if(captureLifecycle?.active)cancelCapture('Focus lost · take discarded');});
+document.addEventListener('visibilitychange',()=>{if(document.hidden&&captureLifecycle?.active)cancelCapture('Page hidden · take discarded');});
+navigator.mediaDevices?.addEventListener('devicechange',()=>{if(captureLifecycle?.active?.kind==='microphone'){microphoneReady=false;cancelCapture('Audio devices changed · take discarded');}});
+window.addEventListener('pagehide',()=>{authorizationId++;captureLifecycle?.dispose();worker?.terminate();ctx?.close();});
 $('benchmark').onclick=async()=> {
   const button=$('benchmark');button.disabled=true;
   try {

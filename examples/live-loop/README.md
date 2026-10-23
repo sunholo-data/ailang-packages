@@ -35,7 +35,11 @@ AudioContext rate. No generated WAVs or runtimes are committed.
 4. Commit the ready take. The part changes at a planned four-bar loop boundary.
 5. Stop & reset clears active takes, pending changes and private browser buffers.
 
-Microphone is an explicit input selection and uses the browser's permission prompt.
+Microphone is an explicit input selection. Choose **Enable microphone** first and
+respond to the browser prompt before holding to capture. The permission probe stops
+its stream immediately and records no take; the capture hold then opens its own
+input. Only one permission request can be outstanding on this page. A cancelled
+request cannot attach its eventual stream to a later hold.
 No cue/monitor route exists. Capture is mono (first input channel), capped at 16 seconds;
 focus loss during capture, hidden page, cancellation and device-ended events discard
 it. A take binds to the selected part at capture start. Preparation trims/pads to
@@ -46,6 +50,37 @@ windows, overdub, undo, persistence or Notes/humming mode.
 The phrase lanes are schematic, not measured waveforms. The private ready take has
 its own waveform. The master meter is sample peak after final hard clamping, not
 perceptual loudness. Level is linear; live gain/pan smoothing is later work.
+
+## Real microphone and device checks
+
+Open `/microphone-check.html` for the step-by-step guide before recording. This
+follow-up hardens input ownership after the passed synthetic soak; the new browser
+microphone path still needs user-run hardware checks.
+
+- Enable microphone access, verify its permission-probe stream is released, then
+  mute all four parts before checking private input against a silent program bus.
+- Hold/release a take and discard it. Capture again, explicitly commit, then unmute
+  its part to listen after the acknowledged boundary.
+- Check keyboard focus loss, tab/application changes, external-device disconnect,
+  Stop/reset during opening/recording/preparation, and permission denial when a
+  prompt is available. Record only scenarios actually exercised.
+- In Timing & feasibility notes, choose **Show capture lifecycle report** after each
+  scenario. The JSON stays on the page. It includes current owned-track count,
+  permission/capture states, track revisions, a last-attempt meter summary and up
+  to 64 recent metadata events (with a dropped-event count). No samples, microphone
+  labels or device IDs are included. No automatic pass verdict is inferred.
+
+A late browser permission grant is stopped even after cancel/Stop; an obsolete
+failure cannot cancel a newer take. Pending permission prompts cannot be aborted
+by this app: resolve or dismiss the prompt before requesting microphone access
+again. ID-scoped worklet controls prevent old stop/cancel messages from terminating
+a later take. Normal capture releases its input immediately on release, then
+awaits the private buffer; a missing finish reply cancels after two seconds.
+
+The new controller has deferred-permission/device fakes plus an application-flow
+regression using the actual app module, real strict AILANG planner and fake
+DOM/audio/media APIs. Those tests are software evidence, not physical browser,
+microphone or speaker tests. See [follow-up evidence](evidence/capture-lifecycle/README.md).
 
 ## Sunholo / AILANG branding
 
