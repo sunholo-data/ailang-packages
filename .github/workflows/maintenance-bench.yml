@@ -4,6 +4,7 @@ on:
     paths:
       - 'packages/maintenance-bench/**'
       - 'research/real-world-maintenance/taskpacks/v1/**'
+      - 'examples/maintenance-ledger-source/**'
       - '.github/workflows/maintenance-bench.yml'
       - 'design_docs/planned/m-maintenance-bench-package-sprint-plan.md'
       - 'design_docs/planned/m-maintenance-eval-foundation-sprint-plan.md'
@@ -14,6 +15,7 @@ on:
     paths:
       - 'packages/maintenance-bench/**'
       - 'research/real-world-maintenance/taskpacks/v1/**'
+      - 'examples/maintenance-ledger-source/**'
       - '.github/workflows/maintenance-bench.yml'
 permissions:
   contents: read
@@ -45,7 +47,7 @@ jobs:
       - name: Installed CLI and offline Git/gh integration
         run: make integration
       - name: Strict ledger and independent native task qualification
-        run: make ledger-integration qualify-taskpacks
+        run: make ledger-integration qualify-taskpacks source-consumer
       - name: Bounded 1k/10k scale accounting
         run: make scale
       - name: Quality and explicit experimental contract limitation

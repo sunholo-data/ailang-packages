@@ -1,0 +1,61 @@
+module sunholo/maintenance_bench/run_checkpoint_test
+import ./run_validate (validateBundle)
+import ./run_types (RunBundle, StageRun)
+import std/result (Ok, Err)
+import std/option (Some, None)
+
+func hash() -> string = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+
+func invalidCandidate() -> StageRun =
+  { id: "S1", state: "invalid", priorDigest: Some(hash()), artifactDigest: None, visible: "not_run", oracle: "not_run", oracleDigest: None, oracleArtifact: None, provenance: "unsafe source could not be checkpointed; no model control", attempts: [{ id: "attempt-1", receiptIds: [], localEdits: None }], checkKinds: ["infrastructure"] }
+
+func blocked(id: string) -> StageRun =
+  { id: id, state: "blocked", priorDigest: Some(hash()), artifactDigest: None, visible: "not_run", oracle: "not_run", oracleDigest: None, oracleArtifact: None, provenance: "last owned source retained", attempts: [], checkKinds: [] }
+
+func bundle(first: StageRun) -> RunBundle =
+  { plan: { schema: "maintenance.trajectory/2", protocolId: "unsafe-checkpoint-control", role: "instrument_control", model: "scripted", harness: "offline", settingsDigest: hash(), retention: "fresh-session-owned-artifacts", treatment: "native-tools", leftLanguage: "ailang", rightLanguage: "python", trajectories: [{ id: "one", family: "text", variant: "development-v1", repeat: 1, language: "ailang", starterDigest: hash(), nativeToolDigest: hash(), stages: [{ id: "S1", requirementDigest: hash(), oracleDigest: hash() }, { id: "S2", requirementDigest: hash(), oracleDigest: hash() }, { id: "S3", requirementDigest: hash(), oracleDigest: hash() }] }] }, runs: [{ id: "one", model: "scripted", harness: "offline", settingsDigest: hash(), stages: [first, blocked("S2"), blocked("S3")] }] }
+
+func accepted(first: StageRun) -> bool = match validateBundle(bundle(first)) {
+  Ok(_) => true,
+  Err(_) => false
+}
+
+test "unsafe invalid source retains previous actual checkpoint without fake artifact" {
+  accepted(invalidCandidate())
+}
+
+test "missing artifact still requires actual attempt" {
+  not accepted({ invalidCandidate() | attempts: [] })
+}
+
+test "missing artifact still requires matching prior" {
+  not accepted({ invalidCandidate() | priorDigest: None })
+}
+
+test "missing artifact requires explicit infrastructure classification" {
+  not accepted({ invalidCandidate() | checkKinds: [] })
+}
+
+test "missing artifact cannot claim public success" {
+  not accepted({ invalidCandidate() | visible: "pass" })
+}
+
+test "missing artifact cannot claim oracle failure" {
+  not accepted({ invalidCandidate() | oracle: "fail", oracleDigest: Some(hash()) })
+}
+
+test "missing artifact cannot carry oracle artifact evidence" {
+  not accepted({ invalidCandidate() | oracleArtifact: Some(hash()) })
+}
+
+test "completed source still requires a candidate artifact" {
+  not accepted({ invalidCandidate() | state: "completed" })
+}
+
+test "failed source still requires a candidate artifact" {
+  not accepted({ invalidCandidate() | state: "failed", visible: "fail" })
+}
+
+test "budget-stopped source still requires a candidate artifact" {
+  not accepted({ invalidCandidate() | state: "budget_stopped" })
+}

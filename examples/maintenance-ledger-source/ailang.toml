@@ -1,0 +1,20 @@
+[package]
+name = "sunholo/maintenance_ledger_source"
+version = "0.1.0"
+edition = "1"
+ailang = ">=0.54.18"
+description = "Local source-pinned maintenance ledger consumer; never published"
+license = "Apache-2.0"
+[exports]
+modules = ["sunholo/maintenance_ledger_source/main"]
+[dependencies]
+"sunholo/maintenance_bench" = { path = "../../packages/maintenance-bench" }
+[effects]
+max = ["IO", "FS", "Env"]
+[stability]
+level = "experimental"
+[release]
+kind = "feature"
+[metadata]
+repository = "https://github.com/sunholo-data/ailang-packages/tree/main/examples/maintenance-ledger-source"
+ai_summary = "Thin local source consumer of native 0.2 ledger analysis; explicit paths and immutable output; no registry fallback, models or Process"

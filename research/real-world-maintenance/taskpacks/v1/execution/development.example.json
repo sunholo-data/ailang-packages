@@ -1,0 +1,4249 @@
+{
+  "schema": "maintenance.execution/1",
+  "packageSourceRevision": "a4163559a2e20dddc1a1bb0869a06e42372994a1",
+  "packageRoot": "../../../../../packages/maintenance-bench",
+  "settings": {
+    "path": "development.settings.json",
+    "sha256": "5807c2697de74c0d84902c3d177584ac84aab652c6810e7012ae9cff1d30e4a4"
+  },
+  "analysis": {
+    "path": "../../../../../packages/maintenance-bench/ledger_report.ail",
+    "sha256": "0b1a57857edeb0e211488a6821feebf0fd41dc4123ef162ed32fc29d80b2aa0b"
+  },
+  "toolchains": [
+    {
+      "language": "ailang",
+      "command": [
+        "ailang"
+      ],
+      "version": "AILANG v0.54.18\nCommit: cd33d05\nFull:   cd33d050b2276633c82624453309ebf7fcea9e2f\nBuilt:  2026-10-23_11:36:25\n\nThe AI-First Programming Language\nCopyright (c) 2025-2026",
+      "evidence": {
+        "path": "development.ailang-toolchain.json",
+        "sha256": "7667a8fbdecba53f0a89edf8ad2cb391e56a1c5ddf13428fac07786cb01abe13"
+      }
+    },
+    {
+      "language": "python",
+      "command": [
+        "python3"
+      ],
+      "version": "Python 3.13.7",
+      "evidence": {
+        "path": "development.python-toolchain.json",
+        "sha256": "7aa3bec2c08b0505bd2fd3c69e32ddbbe8fa0159e3c4e0dfc2a504cc490c01bd"
+      }
+    }
+  ],
+  "trajectories": [
+    {
+      "id": "resource-ownership-1-ailang",
+      "starter": [
+        {
+          "path": "../resource-ownership/starter/ailang/AGENT.md",
+          "destination": "AGENT.md",
+          "sha256": "30a1df33ea71c44469a18f8c1c8bec23af47278dac7fb10209bf26747a9f730a",
+          "executable": false
+        },
+        {
+          "path": "../resource-ownership/starter/ailang/CHANGELOG.md",
+          "destination": "CHANGELOG.md",
+          "sha256": "9964284599b923be6c8e68d6cf999380f94db3a14313f21ba0d245d167d29499",
+          "executable": false
+        },
+        {
+          "path": "../resource-ownership/starter/ailang/_smoke.ail",
+          "destination": "_smoke.ail",
+          "sha256": "04fa53310f9fd5e148c3b9cdaaf03b2d3d9ca91e0a50623ff1288807089e1b65",
+          "executable": false
+        },
+        {
+          "path": "../resource-ownership/starter/ailang/ailang.lock",
+          "destination": "ailang.lock",
+          "sha256": "0d705d8314022eed9cf40f9c9bd9ef2ffb4f2337af234e4a6bb0b1ff3f9c07cf",
+          "executable": false
+        },
+        {
+          "path": "../resource-ownership/starter/ailang/ailang.toml",
+          "destination": "ailang.toml",
+          "sha256": "33cfa0acf333665ede3cafaffb9faf10aea2fcb58826c5e33ce2b52cd5667231",
+          "executable": false
+        },
+        {
+          "path": "../resource-ownership/starter/ailang/engine.ail",
+          "destination": "engine.ail",
+          "sha256": "55843394f4906a7b04e78e64d086ff22df284b53171cf4e7fe4128b82a807bf4",
+          "executable": false
+        },
+        {
+          "path": "../resource-ownership/starter/ailang/engine_test.ail",
+          "destination": "engine_test.ail",
+          "sha256": "38e35ac48edcf3f721f831c13aa242bcc61d50a1f9f3f24482cc75780b059342",
+          "executable": false
+        },
+        {
+          "path": "../resource-ownership/starter/ailang/examples/qualify_f1.ail",
+          "destination": "examples/qualify_f1.ail",
+          "sha256": "060ff05484b9774cb56a1aeb3480c3ec5cbc2daa0ce2f172819b599c90afa508",
+          "executable": false
+        },
+        {
+          "path": "../resource-ownership/starter/ailang/main.ail",
+          "destination": "main.ail",
+          "sha256": "7de247edd043a37bbe4ff31d0149da540b7dd2d42cc29494150f9dc8bedcf06b",
+          "executable": false
+        }
+      ],
+      "carryFiles": [
+        "AGENT.md",
+        "CHANGELOG.md",
+        "_smoke.ail",
+        "ailang.lock",
+        "ailang.toml",
+        "engine.ail",
+        "engine_test.ail",
+        "examples/qualify_f1.ail",
+        "main.ail",
+        "HANDOVER.md"
+      ],
+      "stages": [
+        {
+          "id": "S1",
+          "request": {
+            "path": "../resource-ownership/stages/1-file-backing.md",
+            "sha256": "22a7a4dd899b7d28910f65a1e961173b0b71f848301fbe670e1ef3ad27c6cf66"
+          },
+          "publicCheck": {
+            "command": [
+              "python3",
+              "research/real-world-maintenance/taskpacks/v1/resource-ownership/grade_candidate.py",
+              "--candidate",
+              "{candidate}",
+              "--language",
+              "ailang",
+              "--stage",
+              "1",
+              "--output",
+              "{output}",
+              "--expected-source-digest",
+              "{candidateDigest}",
+              "--command-prefix-json",
+              "{commandPrefixJSON}",
+              "--containment-qualified",
+              "{containmentDigest}"
+            ],
+            "files": [
+              {
+                "path": "../resource-ownership/grade_candidate.py",
+                "sha256": "259b819fcdee8cbfe37c72a26ae9da2521a56688564b44cc72c21cde33071426"
+              },
+              {
+                "path": "../candidate_grade.py",
+                "sha256": "67f59738b2ef4e730269d71b6c00c09a5a2d88ef5aed4d35f03cf9d32a36e43f"
+              },
+              {
+                "path": "../resource-ownership/oracle.py",
+                "sha256": "e028365d6def15aa0b89de944b437d4bff39f465c049ef85ce026c0152de2fa8"
+              },
+              {
+                "path": "../resource-ownership/public_check.py",
+                "sha256": "7aba7a99a59784217c8244297a4aa75c82c3f202dc19625f7a5c1a343ecf71bf"
+              },
+              {
+                "path": "../resource-ownership/protocol.json",
+                "sha256": "a228f90e4f9246f541463ff9782d193b9c9827b7c44d1d763c6c93b06bff8e22"
+              },
+              {
+                "path": "../resource-ownership/fixtures/public.json",
+                "sha256": "f2764fb072d7599db6eb7f9fd1bb39f3e6f30ac4dd172484506d9c141ef21ed7"
+              },
+              {
+                "path": "../resource-ownership/fixtures/s0-normal.json",
+                "sha256": "c667bcb77f435380ec3e1ce6ff7af3716d0ea336e34afc7dcb5455ef29587816"
+              },
+              {
+                "path": "../resource-ownership/fixtures/s0-reordered.json",
+                "sha256": "36046e198726adc06a5e336af5d1b3ab80bf3aabc99ce14f205858563c1611a3"
+              },
+              {
+                "path": "../resource-ownership/fixtures/s1-normal.json",
+                "sha256": "c667bcb77f435380ec3e1ce6ff7af3716d0ea336e34afc7dcb5455ef29587816"
+              },
+              {
+                "path": "../resource-ownership/fixtures/s1-reordered.json",
+                "sha256": "36046e198726adc06a5e336af5d1b3ab80bf3aabc99ce14f205858563c1611a3"
+              },
+              {
+                "path": "../resource-ownership/fixtures/s2-normal.json",
+                "sha256": "149f930860483223704b31e1ab9d5213f1b7dae72826ebb3c9799bb735d0aa2d"
+              },
+              {
+                "path": "../resource-ownership/fixtures/s2-reordered.json",
+                "sha256": "869f9d4a2429e960605e0e831e1819094c7eadad56cf459478f28dbebe493411"
+              },
+              {
+                "path": "../resource-ownership/fixtures/s3-normal.json",
+                "sha256": "68f017268256e8a733a46eb757ed0b3a5d3530d7176bae6b487dfd5373efb658"
+              },
+              {
+                "path": "../resource-ownership/fixtures/s3-reordered.json",
+                "sha256": "f6aabce1399bac0982321963d5b35241b7111337e5952c6905a9033c7396f1c5"
+              }
+            ]
+          },
+          "oracle": {
+            "command": [
+              "python3",
+              "research/real-world-maintenance/taskpacks/v1/resource-ownership/grade_candidate.py",
+              "--candidate",
+              "{candidate}",
+              "--language",
+              "ailang",
+              "--stage",
+              "1",
+              "--output",
+              "{output}",
+              "--expected-source-digest",
+              "{candidateDigest}",
+              "--command-prefix-json",
+              "{commandPrefixJSON}",
+              "--containment-qualified",
+              "{containmentDigest}"
+            ],
+            "files": [
+              {
+                "path": "../resource-ownership/grade_candidate.py",
+                "sha256": "259b819fcdee8cbfe37c72a26ae9da2521a56688564b44cc72c21cde33071426"
+              },
+              {
+                "path": "../candidate_grade.py",
+                "sha256": "67f59738b2ef4e730269d71b6c00c09a5a2d88ef5aed4d35f03cf9d32a36e43f"
+              },
+              {
+                "path": "../resource-ownership/oracle.py",
+                "sha256": "e028365d6def15aa0b89de944b437d4bff39f465c049ef85ce026c0152de2fa8"
+              },
+              {
+                "path": "../resource-ownership/public_check.py",
+                "sha256": "7aba7a99a59784217c8244297a4aa75c82c3f202dc19625f7a5c1a343ecf71bf"
+              },
+              {
+                "path": "../resource-ownership/protocol.json",
+                "sha256": "a228f90e4f9246f541463ff9782d193b9c9827b7c44d1d763c6c93b06bff8e22"
+              },
+              {
+                "path": "../resource-ownership/fixtures/public.json",
+                "sha256": "f2764fb072d7599db6eb7f9fd1bb39f3e6f30ac4dd172484506d9c141ef21ed7"
+              },
+              {
+                "path": "../resource-ownership/fixtures/s0-normal.json",
+                "sha256": "c667bcb77f435380ec3e1ce6ff7af3716d0ea336e34afc7dcb5455ef29587816"
+              },
+              {
+                "path": "../resource-ownership/fixtures/s0-reordered.json",
+                "sha256": "36046e198726adc06a5e336af5d1b3ab80bf3aabc99ce14f205858563c1611a3"
+              },
+              {
+                "path": "../resource-ownership/fixtures/s1-normal.json",
+                "sha256": "c667bcb77f435380ec3e1ce6ff7af3716d0ea336e34afc7dcb5455ef29587816"
+              },
+              {
+                "path": "../resource-ownership/fixtures/s1-reordered.json",
+                "sha256": "36046e198726adc06a5e336af5d1b3ab80bf3aabc99ce14f205858563c1611a3"
+              },
+              {
+                "path": "../resource-ownership/fixtures/s2-normal.json",
+                "sha256": "149f930860483223704b31e1ab9d5213f1b7dae72826ebb3c9799bb735d0aa2d"
+              },
+              {
+                "path": "../resource-ownership/fixtures/s2-reordered.json",
+                "sha256": "869f9d4a2429e960605e0e831e1819094c7eadad56cf459478f28dbebe493411"
+              },
+              {
+                "path": "../resource-ownership/fixtures/s3-normal.json",
+                "sha256": "68f017268256e8a733a46eb757ed0b3a5d3530d7176bae6b487dfd5373efb658"
+              },
+              {
+                "path": "../resource-ownership/fixtures/s3-reordered.json",
+                "sha256": "f6aabce1399bac0982321963d5b35241b7111337e5952c6905a9033c7396f1c5"
+              }
+            ]
+          }
+        },
+        {
+          "id": "S2",
+          "request": {
+            "path": "../resource-ownership/stages/2-batch-cap.md",
+            "sha256": "e66763674acdb24cc5f259c49559c77651dbe9d5b5119ad59cae9eeec479e3b5"
+          },
+          "publicCheck": {
+            "command": [
+              "python3",
+              "research/real-world-maintenance/taskpacks/v1/resource-ownership/grade_candidate.py",
+              "--candidate",
+              "{candidate}",
+              "--language",
+              "ailang",
+              "--stage",
+              "2",
+              "--output",
+              "{output}",
+              "--expected-source-digest",
+              "{candidateDigest}",
+              "--command-prefix-json",
+              "{commandPrefixJSON}",
+              "--containment-qualified",
+              "{containmentDigest}"
+            ],
+            "files": [
+              {
+                "path": "../resource-ownership/grade_candidate.py",
+                "sha256": "259b819fcdee8cbfe37c72a26ae9da2521a56688564b44cc72c21cde33071426"
+              },
+              {
+                "path": "../candidate_grade.py",
+                "sha256": "67f59738b2ef4e730269d71b6c00c09a5a2d88ef5aed4d35f03cf9d32a36e43f"
+              },
+              {
+                "path": "../resource-ownership/oracle.py",
+                "sha256": "e028365d6def15aa0b89de944b437d4bff39f465c049ef85ce026c0152de2fa8"
+              },
+              {
+                "path": "../resource-ownership/public_check.py",
+                "sha256": "7aba7a99a59784217c8244297a4aa75c82c3f202dc19625f7a5c1a343ecf71bf"
+              },
+              {
+                "path": "../resource-ownership/protocol.json",
+                "sha256": "a228f90e4f9246f541463ff9782d193b9c9827b7c44d1d763c6c93b06bff8e22"
+              },
+              {
+                "path": "../resource-ownership/fixtures/public.json",
+                "sha256": "f2764fb072d7599db6eb7f9fd1bb39f3e6f30ac4dd172484506d9c141ef21ed7"
+              },
+              {
+                "path": "../resource-ownership/fixtures/s0-normal.json",
+                "sha256": "c667bcb77f435380ec3e1ce6ff7af3716d0ea336e34afc7dcb5455ef29587816"
+              },
+              {
+                "path": "../resource-ownership/fixtures/s0-reordered.json",
+                "sha256": "36046e198726adc06a5e336af5d1b3ab80bf3aabc99ce14f205858563c1611a3"
+              },
+              {
+                "path": "../resource-ownership/fixtures/s1-normal.json",
+                "sha256": "c667bcb77f435380ec3e1ce6ff7af3716d0ea336e34afc7dcb5455ef29587816"
+              },
+              {
+                "path": "../resource-ownership/fixtures/s1-reordered.json",
+                "sha256": "36046e198726adc06a5e336af5d1b3ab80bf3aabc99ce14f205858563c1611a3"
+              },
+              {
+                "path": "../resource-ownership/fixtures/s2-normal.json",
+                "sha256": "149f930860483223704b31e1ab9d5213f1b7dae72826ebb3c9799bb735d0aa2d"
+              },
+              {
+                "path": "../resource-ownership/fixtures/s2-reordered.json",
+                "sha256": "869f9d4a2429e960605e0e831e1819094c7eadad56cf459478f28dbebe493411"
+              },
+              {
+                "path": "../resource-ownership/fixtures/s3-normal.json",
+                "sha256": "68f017268256e8a733a46eb757ed0b3a5d3530d7176bae6b487dfd5373efb658"
+              },
+              {
+                "path": "../resource-ownership/fixtures/s3-reordered.json",
+                "sha256": "f6aabce1399bac0982321963d5b35241b7111337e5952c6905a9033c7396f1c5"
+              }
+            ]
+          },
+          "oracle": {
+            "command": [
+              "python3",
+              "research/real-world-maintenance/taskpacks/v1/resource-ownership/grade_candidate.py",
+              "--candidate",
+              "{candidate}",
+              "--language",
+              "ailang",
+              "--stage",
+              "2",
+              "--output",
+              "{output}",
+              "--expected-source-digest",
+              "{candidateDigest}",
+              "--command-prefix-json",
+              "{commandPrefixJSON}",
+              "--containment-qualified",
+              "{containmentDigest}"
+            ],
+            "files": [
+              {
+                "path": "../resource-ownership/grade_candidate.py",
+                "sha256": "259b819fcdee8cbfe37c72a26ae9da2521a56688564b44cc72c21cde33071426"
+              },
+              {
+                "path": "../candidate_grade.py",
+                "sha256": "67f59738b2ef4e730269d71b6c00c09a5a2d88ef5aed4d35f03cf9d32a36e43f"
+              },
+              {
+                "path": "../resource-ownership/oracle.py",
+                "sha256": "e028365d6def15aa0b89de944b437d4bff39f465c049ef85ce026c0152de2fa8"
+              },
+              {
+                "path": "../resource-ownership/public_check.py",
+                "sha256": "7aba7a99a59784217c8244297a4aa75c82c3f202dc19625f7a5c1a343ecf71bf"
+              },
+              {
+                "path": "../resource-ownership/protocol.json",
+                "sha256": "a228f90e4f9246f541463ff9782d193b9c9827b7c44d1d763c6c93b06bff8e22"
+              },
+              {
+                "path": "../resource-ownership/fixtures/public.json",
+                "sha256": "f2764fb072d7599db6eb7f9fd1bb39f3e6f30ac4dd172484506d9c141ef21ed7"
+              },
+              {
+                "path": "../resource-ownership/fixtures/s0-normal.json",
+                "sha256": "c667bcb77f435380ec3e1ce6ff7af3716d0ea336e34afc7dcb5455ef29587816"
+              },
+              {
+                "path": "../resource-ownership/fixtures/s0-reordered.json",
+                "sha256": "36046e198726adc06a5e336af5d1b3ab80bf3aabc99ce14f205858563c1611a3"
+              },
+              {
+                "path": "../resource-ownership/fixtures/s1-normal.json",
+                "sha256": "c667bcb77f435380ec3e1ce6ff7af3716d0ea336e34afc7dcb5455ef29587816"
+              },
+              {
+                "path": "../resource-ownership/fixtures/s1-reordered.json",
+                "sha256": "36046e198726adc06a5e336af5d1b3ab80bf3aabc99ce14f205858563c1611a3"
+              },
+              {
+                "path": "../resource-ownership/fixtures/s2-normal.json",
+                "sha256": "149f930860483223704b31e1ab9d5213f1b7dae72826ebb3c9799bb735d0aa2d"
+              },
+              {
+                "path": "../resource-ownership/fixtures/s2-reordered.json",
+                "sha256": "869f9d4a2429e960605e0e831e1819094c7eadad56cf459478f28dbebe493411"
+              },
+              {
+                "path": "../resource-ownership/fixtures/s3-normal.json",
+                "sha256": "68f017268256e8a733a46eb757ed0b3a5d3530d7176bae6b487dfd5373efb658"
+              },
+              {
+                "path": "../resource-ownership/fixtures/s3-reordered.json",
+                "sha256": "f6aabce1399bac0982321963d5b35241b7111337e5952c6905a9033c7396f1c5"
+              }
+            ]
+          }
+        },
+        {
+          "id": "S3",
+          "request": {
+            "path": "../resource-ownership/stages/3-release.md",
+            "sha256": "64ab3469d3e5890af2f299794066de1e7e5136e7fc98846d0795f8b4561d2b4a"
+          },
+          "publicCheck": {
+            "command": [
+              "python3",
+              "research/real-world-maintenance/taskpacks/v1/resource-ownership/grade_candidate.py",
+              "--candidate",
+              "{candidate}",
+              "--language",
+              "ailang",
+              "--stage",
+              "3",
+              "--output",
+              "{output}",
+              "--expected-source-digest",
+              "{candidateDigest}",
+              "--command-prefix-json",
+              "{commandPrefixJSON}",
+              "--containment-qualified",
+              "{containmentDigest}"
+            ],
+            "files": [
+              {
+                "path": "../resource-ownership/grade_candidate.py",
+                "sha256": "259b819fcdee8cbfe37c72a26ae9da2521a56688564b44cc72c21cde33071426"
+              },
+              {
+                "path": "../candidate_grade.py",
+                "sha256": "67f59738b2ef4e730269d71b6c00c09a5a2d88ef5aed4d35f03cf9d32a36e43f"
+              },
+              {
+                "path": "../resource-ownership/oracle.py",
+                "sha256": "e028365d6def15aa0b89de944b437d4bff39f465c049ef85ce026c0152de2fa8"
+              },
+              {
+                "path": "../resource-ownership/public_check.py",
+                "sha256": "7aba7a99a59784217c8244297a4aa75c82c3f202dc19625f7a5c1a343ecf71bf"
+              },
+              {
+                "path": "../resource-ownership/protocol.json",
+                "sha256": "a228f90e4f9246f541463ff9782d193b9c9827b7c44d1d763c6c93b06bff8e22"
+              },
+              {
+                "path": "../resource-ownership/fixtures/public.json",
+                "sha256": "f2764fb072d7599db6eb7f9fd1bb39f3e6f30ac4dd172484506d9c141ef21ed7"
+              },
+              {
+                "path": "../resource-ownership/fixtures/s0-normal.json",
+                "sha256": "c667bcb77f435380ec3e1ce6ff7af3716d0ea336e34afc7dcb5455ef29587816"
+              },
+              {
+                "path": "../resource-ownership/fixtures/s0-reordered.json",
+                "sha256": "36046e198726adc06a5e336af5d1b3ab80bf3aabc99ce14f205858563c1611a3"
+              },
+              {
+                "path": "../resource-ownership/fixtures/s1-normal.json",
+                "sha256": "c667bcb77f435380ec3e1ce6ff7af3716d0ea336e34afc7dcb5455ef29587816"
+              },
+              {
+                "path": "../resource-ownership/fixtures/s1-reordered.json",
+                "sha256": "36046e198726adc06a5e336af5d1b3ab80bf3aabc99ce14f205858563c1611a3"
+              },
+              {
+                "path": "../resource-ownership/fixtures/s2-normal.json",
+                "sha256": "149f930860483223704b31e1ab9d5213f1b7dae72826ebb3c9799bb735d0aa2d"
+              },
+              {
+                "path": "../resource-ownership/fixtures/s2-reordered.json",
+                "sha256": "869f9d4a2429e960605e0e831e1819094c7eadad56cf459478f28dbebe493411"
+              },
+              {
+                "path": "../resource-ownership/fixtures/s3-normal.json",
+                "sha256": "68f017268256e8a733a46eb757ed0b3a5d3530d7176bae6b487dfd5373efb658"
+              },
+              {
+                "path": "../resource-ownership/fixtures/s3-reordered.json",
+                "sha256": "f6aabce1399bac0982321963d5b35241b7111337e5952c6905a9033c7396f1c5"
+              }
+            ]
+          },
+          "oracle": {
+            "command": [
+              "python3",
+              "research/real-world-maintenance/taskpacks/v1/resource-ownership/grade_candidate.py",
+              "--candidate",
+              "{candidate}",
+              "--language",
+              "ailang",
+              "--stage",
+              "3",
+              "--output",
+              "{output}",
+              "--expected-source-digest",
+              "{candidateDigest}",
+              "--command-prefix-json",
+              "{commandPrefixJSON}",
+              "--containment-qualified",
+              "{containmentDigest}"
+            ],
+            "files": [
+              {
+                "path": "../resource-ownership/grade_candidate.py",
+                "sha256": "259b819fcdee8cbfe37c72a26ae9da2521a56688564b44cc72c21cde33071426"
+              },
+              {
+                "path": "../candidate_grade.py",
+                "sha256": "67f59738b2ef4e730269d71b6c00c09a5a2d88ef5aed4d35f03cf9d32a36e43f"
+              },
+              {
+                "path": "../resource-ownership/oracle.py",
+                "sha256": "e028365d6def15aa0b89de944b437d4bff39f465c049ef85ce026c0152de2fa8"
+              },
+              {
+                "path": "../resource-ownership/public_check.py",
+                "sha256": "7aba7a99a59784217c8244297a4aa75c82c3f202dc19625f7a5c1a343ecf71bf"
+              },
+              {
+                "path": "../resource-ownership/protocol.json",
+                "sha256": "a228f90e4f9246f541463ff9782d193b9c9827b7c44d1d763c6c93b06bff8e22"
+              },
+              {
+                "path": "../resource-ownership/fixtures/public.json",
+                "sha256": "f2764fb072d7599db6eb7f9fd1bb39f3e6f30ac4dd172484506d9c141ef21ed7"
+              },
+              {
+                "path": "../resource-ownership/fixtures/s0-normal.json",
+                "sha256": "c667bcb77f435380ec3e1ce6ff7af3716d0ea336e34afc7dcb5455ef29587816"
+              },
+              {
+                "path": "../resource-ownership/fixtures/s0-reordered.json",
+                "sha256": "36046e198726adc06a5e336af5d1b3ab80bf3aabc99ce14f205858563c1611a3"
+              },
+              {
+                "path": "../resource-ownership/fixtures/s1-normal.json",
+                "sha256": "c667bcb77f435380ec3e1ce6ff7af3716d0ea336e34afc7dcb5455ef29587816"
+              },
+              {
+                "path": "../resource-ownership/fixtures/s1-reordered.json",
+                "sha256": "36046e198726adc06a5e336af5d1b3ab80bf3aabc99ce14f205858563c1611a3"
+              },
+              {
+                "path": "../resource-ownership/fixtures/s2-normal.json",
+                "sha256": "149f930860483223704b31e1ab9d5213f1b7dae72826ebb3c9799bb735d0aa2d"
+              },
+              {
+                "path": "../resource-ownership/fixtures/s2-reordered.json",
+                "sha256": "869f9d4a2429e960605e0e831e1819094c7eadad56cf459478f28dbebe493411"
+              },
+              {
+                "path": "../resource-ownership/fixtures/s3-normal.json",
+                "sha256": "68f017268256e8a733a46eb757ed0b3a5d3530d7176bae6b487dfd5373efb658"
+              },
+              {
+                "path": "../resource-ownership/fixtures/s3-reordered.json",
+                "sha256": "f6aabce1399bac0982321963d5b35241b7111337e5952c6905a9033c7396f1c5"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "resource-ownership-1-python",
+      "starter": [
+        {
+          "path": "../resource-ownership/starter/python/main.py",
+          "destination": "main.py",
+          "sha256": "e7034453a1d9a7163e68594fdb03c163e42b8cd8cc26954406610ebdfb282047",
+          "executable": false
+        }
+      ],
+      "carryFiles": [
+        "main.py",
+        "HANDOVER.md"
+      ],
+      "stages": [
+        {
+          "id": "S1",
+          "request": {
+            "path": "../resource-ownership/stages/1-file-backing.md",
+            "sha256": "22a7a4dd899b7d28910f65a1e961173b0b71f848301fbe670e1ef3ad27c6cf66"
+          },
+          "publicCheck": {
+            "command": [
+              "python3",
+              "research/real-world-maintenance/taskpacks/v1/resource-ownership/grade_candidate.py",
+              "--candidate",
+              "{candidate}",
+              "--language",
+              "python",
+              "--stage",
+              "1",
+              "--output",
+              "{output}",
+              "--expected-source-digest",
+              "{candidateDigest}",
+              "--command-prefix-json",
+              "{commandPrefixJSON}",
+              "--containment-qualified",
+              "{containmentDigest}"
+            ],
+            "files": [
+              {
+                "path": "../resource-ownership/grade_candidate.py",
+                "sha256": "259b819fcdee8cbfe37c72a26ae9da2521a56688564b44cc72c21cde33071426"
+              },
+              {
+                "path": "../candidate_grade.py",
+                "sha256": "67f59738b2ef4e730269d71b6c00c09a5a2d88ef5aed4d35f03cf9d32a36e43f"
+              },
+              {
+                "path": "../resource-ownership/oracle.py",
+                "sha256": "e028365d6def15aa0b89de944b437d4bff39f465c049ef85ce026c0152de2fa8"
+              },
+              {
+                "path": "../resource-ownership/public_check.py",
+                "sha256": "7aba7a99a59784217c8244297a4aa75c82c3f202dc19625f7a5c1a343ecf71bf"
+              },
+              {
+                "path": "../resource-ownership/protocol.json",
+                "sha256": "a228f90e4f9246f541463ff9782d193b9c9827b7c44d1d763c6c93b06bff8e22"
+              },
+              {
+                "path": "../resource-ownership/fixtures/public.json",
+                "sha256": "f2764fb072d7599db6eb7f9fd1bb39f3e6f30ac4dd172484506d9c141ef21ed7"
+              },
+              {
+                "path": "../resource-ownership/fixtures/s0-normal.json",
+                "sha256": "c667bcb77f435380ec3e1ce6ff7af3716d0ea336e34afc7dcb5455ef29587816"
+              },
+              {
+                "path": "../resource-ownership/fixtures/s0-reordered.json",
+                "sha256": "36046e198726adc06a5e336af5d1b3ab80bf3aabc99ce14f205858563c1611a3"
+              },
+              {
+                "path": "../resource-ownership/fixtures/s1-normal.json",
+                "sha256": "c667bcb77f435380ec3e1ce6ff7af3716d0ea336e34afc7dcb5455ef29587816"
+              },
+              {
+                "path": "../resource-ownership/fixtures/s1-reordered.json",
+                "sha256": "36046e198726adc06a5e336af5d1b3ab80bf3aabc99ce14f205858563c1611a3"
+              },
+              {
+                "path": "../resource-ownership/fixtures/s2-normal.json",
+                "sha256": "149f930860483223704b31e1ab9d5213f1b7dae72826ebb3c9799bb735d0aa2d"
+              },
+              {
+                "path": "../resource-ownership/fixtures/s2-reordered.json",
+                "sha256": "869f9d4a2429e960605e0e831e1819094c7eadad56cf459478f28dbebe493411"
+              },
+              {
+                "path": "../resource-ownership/fixtures/s3-normal.json",
+                "sha256": "68f017268256e8a733a46eb757ed0b3a5d3530d7176bae6b487dfd5373efb658"
+              },
+              {
+                "path": "../resource-ownership/fixtures/s3-reordered.json",
+                "sha256": "f6aabce1399bac0982321963d5b35241b7111337e5952c6905a9033c7396f1c5"
+              }
+            ]
+          },
+          "oracle": {
+            "command": [
+              "python3",
+              "research/real-world-maintenance/taskpacks/v1/resource-ownership/grade_candidate.py",
+              "--candidate",
+              "{candidate}",
+              "--language",
+              "python",
+              "--stage",
+              "1",
+              "--output",
+              "{output}",
+              "--expected-source-digest",
+              "{candidateDigest}",
+              "--command-prefix-json",
+              "{commandPrefixJSON}",
+              "--containment-qualified",
+              "{containmentDigest}"
+            ],
+            "files": [
+              {
+                "path": "../resource-ownership/grade_candidate.py",
+                "sha256": "259b819fcdee8cbfe37c72a26ae9da2521a56688564b44cc72c21cde33071426"
+              },
+              {
+                "path": "../candidate_grade.py",
+                "sha256": "67f59738b2ef4e730269d71b6c00c09a5a2d88ef5aed4d35f03cf9d32a36e43f"
+              },
+              {
+                "path": "../resource-ownership/oracle.py",
+                "sha256": "e028365d6def15aa0b89de944b437d4bff39f465c049ef85ce026c0152de2fa8"
+              },
+              {
+                "path": "../resource-ownership/public_check.py",
+                "sha256": "7aba7a99a59784217c8244297a4aa75c82c3f202dc19625f7a5c1a343ecf71bf"
+              },
+              {
+                "path": "../resource-ownership/protocol.json",
+                "sha256": "a228f90e4f9246f541463ff9782d193b9c9827b7c44d1d763c6c93b06bff8e22"
+              },
+              {
+                "path": "../resource-ownership/fixtures/public.json",
+                "sha256": "f2764fb072d7599db6eb7f9fd1bb39f3e6f30ac4dd172484506d9c141ef21ed7"
+              },
+              {
+                "path": "../resource-ownership/fixtures/s0-normal.json",
+                "sha256": "c667bcb77f435380ec3e1ce6ff7af3716d0ea336e34afc7dcb5455ef29587816"
+              },
+              {
+                "path": "../resource-ownership/fixtures/s0-reordered.json",
+                "sha256": "36046e198726adc06a5e336af5d1b3ab80bf3aabc99ce14f205858563c1611a3"
+              },
+              {
+                "path": "../resource-ownership/fixtures/s1-normal.json",
+                "sha256": "c667bcb77f435380ec3e1ce6ff7af3716d0ea336e34afc7dcb5455ef29587816"
+              },
+              {
+                "path": "../resource-ownership/fixtures/s1-reordered.json",
+                "sha256": "36046e198726adc06a5e336af5d1b3ab80bf3aabc99ce14f205858563c1611a3"
+              },
+              {
+                "path": "../resource-ownership/fixtures/s2-normal.json",
+                "sha256": "149f930860483223704b31e1ab9d5213f1b7dae72826ebb3c9799bb735d0aa2d"
+              },
+              {
+                "path": "../resource-ownership/fixtures/s2-reordered.json",
+                "sha256": "869f9d4a2429e960605e0e831e1819094c7eadad56cf459478f28dbebe493411"
+              },
+              {
+                "path": "../resource-ownership/fixtures/s3-normal.json",
+                "sha256": "68f017268256e8a733a46eb757ed0b3a5d3530d7176bae6b487dfd5373efb658"
+              },
+              {
+                "path": "../resource-ownership/fixtures/s3-reordered.json",
+                "sha256": "f6aabce1399bac0982321963d5b35241b7111337e5952c6905a9033c7396f1c5"
+              }
+            ]
+          }
+        },
+        {
+          "id": "S2",
+          "request": {
+            "path": "../resource-ownership/stages/2-batch-cap.md",
+            "sha256": "e66763674acdb24cc5f259c49559c77651dbe9d5b5119ad59cae9eeec479e3b5"
+          },
+          "publicCheck": {
+            "command": [
+              "python3",
+              "research/real-world-maintenance/taskpacks/v1/resource-ownership/grade_candidate.py",
+              "--candidate",
+              "{candidate}",
+              "--language",
+              "python",
+              "--stage",
+              "2",
+              "--output",
+              "{output}",
+              "--expected-source-digest",
+              "{candidateDigest}",
+              "--command-prefix-json",
+              "{commandPrefixJSON}",
+              "--containment-qualified",
+              "{containmentDigest}"
+            ],
+            "files": [
+              {
+                "path": "../resource-ownership/grade_candidate.py",
+                "sha256": "259b819fcdee8cbfe37c72a26ae9da2521a56688564b44cc72c21cde33071426"
+              },
+              {
+                "path": "../candidate_grade.py",
+                "sha256": "67f59738b2ef4e730269d71b6c00c09a5a2d88ef5aed4d35f03cf9d32a36e43f"
+              },
+              {
+                "path": "../resource-ownership/oracle.py",
+                "sha256": "e028365d6def15aa0b89de944b437d4bff39f465c049ef85ce026c0152de2fa8"
+              },
+              {
+                "path": "../resource-ownership/public_check.py",
+                "sha256": "7aba7a99a59784217c8244297a4aa75c82c3f202dc19625f7a5c1a343ecf71bf"
+              },
+              {
+                "path": "../resource-ownership/protocol.json",
+                "sha256": "a228f90e4f9246f541463ff9782d193b9c9827b7c44d1d763c6c93b06bff8e22"
+              },
+              {
+                "path": "../resource-ownership/fixtures/public.json",
+                "sha256": "f2764fb072d7599db6eb7f9fd1bb39f3e6f30ac4dd172484506d9c141ef21ed7"
+              },
+              {
+                "path": "../resource-ownership/fixtures/s0-normal.json",
+                "sha256": "c667bcb77f435380ec3e1ce6ff7af3716d0ea336e34afc7dcb5455ef29587816"
+              },
+              {
+                "path": "../resource-ownership/fixtures/s0-reordered.json",
+                "sha256": "36046e198726adc06a5e336af5d1b3ab80bf3aabc99ce14f205858563c1611a3"
+              },
+              {
+                "path": "../resource-ownership/fixtures/s1-normal.json",
+                "sha256": "c667bcb77f435380ec3e1ce6ff7af3716d0ea336e34afc7dcb5455ef29587816"
+              },
+              {
+                "path": "../resource-ownership/fixtures/s1-reordered.json",
+                "sha256": "36046e198726adc06a5e336af5d1b3ab80bf3aabc99ce14f205858563c1611a3"
+              },
+              {
+                "path": "../resource-ownership/fixtures/s2-normal.json",
+                "sha256": "149f930860483223704b31e1ab9d5213f1b7dae72826ebb3c9799bb735d0aa2d"
+              },
+              {
+                "path": "../resource-ownership/fixtures/s2-reordered.json",
+                "sha256": "869f9d4a2429e960605e0e831e1819094c7eadad56cf459478f28dbebe493411"
+              },
+              {
+                "path": "../resource-ownership/fixtures/s3-normal.json",
+                "sha256": "68f017268256e8a733a46eb757ed0b3a5d3530d7176bae6b487dfd5373efb658"
+              },
+              {
+                "path": "../resource-ownership/fixtures/s3-reordered.json",
+                "sha256": "f6aabce1399bac0982321963d5b35241b7111337e5952c6905a9033c7396f1c5"
+              }
+            ]
+          },
+          "oracle": {
+            "command": [
+              "python3",
+              "research/real-world-maintenance/taskpacks/v1/resource-ownership/grade_candidate.py",
+              "--candidate",
+              "{candidate}",
+              "--language",
+              "python",
+              "--stage",
+              "2",
+              "--output",
+              "{output}",
+              "--expected-source-digest",
+              "{candidateDigest}",
+              "--command-prefix-json",
+              "{commandPrefixJSON}",
+              "--containment-qualified",
+              "{containmentDigest}"
+            ],
+            "files": [
+              {
+                "path": "../resource-ownership/grade_candidate.py",
+                "sha256": "259b819fcdee8cbfe37c72a26ae9da2521a56688564b44cc72c21cde33071426"
+              },
+              {
+                "path": "../candidate_grade.py",
+                "sha256": "67f59738b2ef4e730269d71b6c00c09a5a2d88ef5aed4d35f03cf9d32a36e43f"
+              },
+              {
+                "path": "../resource-ownership/oracle.py",
+                "sha256": "e028365d6def15aa0b89de944b437d4bff39f465c049ef85ce026c0152de2fa8"
+              },
+              {
+                "path": "../resource-ownership/public_check.py",
+                "sha256": "7aba7a99a59784217c8244297a4aa75c82c3f202dc19625f7a5c1a343ecf71bf"
+              },
+              {
+                "path": "../resource-ownership/protocol.json",
+                "sha256": "a228f90e4f9246f541463ff9782d193b9c9827b7c44d1d763c6c93b06bff8e22"
+              },
+              {
+                "path": "../resource-ownership/fixtures/public.json",
+                "sha256": "f2764fb072d7599db6eb7f9fd1bb39f3e6f30ac4dd172484506d9c141ef21ed7"
+              },
+              {
+                "path": "../resource-ownership/fixtures/s0-normal.json",
+                "sha256": "c667bcb77f435380ec3e1ce6ff7af3716d0ea336e34afc7dcb5455ef29587816"
+              },
+              {
+                "path": "../resource-ownership/fixtures/s0-reordered.json",
+                "sha256": "36046e198726adc06a5e336af5d1b3ab80bf3aabc99ce14f205858563c1611a3"
+              },
+              {
+                "path": "../resource-ownership/fixtures/s1-normal.json",
+                "sha256": "c667bcb77f435380ec3e1ce6ff7af3716d0ea336e34afc7dcb5455ef29587816"
+              },
+              {
+                "path": "../resource-ownership/fixtures/s1-reordered.json",
+                "sha256": "36046e198726adc06a5e336af5d1b3ab80bf3aabc99ce14f205858563c1611a3"
+              },
+              {
+                "path": "../resource-ownership/fixtures/s2-normal.json",
+                "sha256": "149f930860483223704b31e1ab9d5213f1b7dae72826ebb3c9799bb735d0aa2d"
+              },
+              {
+                "path": "../resource-ownership/fixtures/s2-reordered.json",
+                "sha256": "869f9d4a2429e960605e0e831e1819094c7eadad56cf459478f28dbebe493411"
+              },
+              {
+                "path": "../resource-ownership/fixtures/s3-normal.json",
+                "sha256": "68f017268256e8a733a46eb757ed0b3a5d3530d7176bae6b487dfd5373efb658"
+              },
+              {
+                "path": "../resource-ownership/fixtures/s3-reordered.json",
+                "sha256": "f6aabce1399bac0982321963d5b35241b7111337e5952c6905a9033c7396f1c5"
+              }
+            ]
+          }
+        },
+        {
+          "id": "S3",
+          "request": {
+            "path": "../resource-ownership/stages/3-release.md",
+            "sha256": "64ab3469d3e5890af2f299794066de1e7e5136e7fc98846d0795f8b4561d2b4a"
+          },
+          "publicCheck": {
+            "command": [
+              "python3",
+              "research/real-world-maintenance/taskpacks/v1/resource-ownership/grade_candidate.py",
+              "--candidate",
+              "{candidate}",
+              "--language",
+              "python",
+              "--stage",
+              "3",
+              "--output",
+              "{output}",
+              "--expected-source-digest",
+              "{candidateDigest}",
+              "--command-prefix-json",
+              "{commandPrefixJSON}",
+              "--containment-qualified",
+              "{containmentDigest}"
+            ],
+            "files": [
+              {
+                "path": "../resource-ownership/grade_candidate.py",
+                "sha256": "259b819fcdee8cbfe37c72a26ae9da2521a56688564b44cc72c21cde33071426"
+              },
+              {
+                "path": "../candidate_grade.py",
+                "sha256": "67f59738b2ef4e730269d71b6c00c09a5a2d88ef5aed4d35f03cf9d32a36e43f"
+              },
+              {
+                "path": "../resource-ownership/oracle.py",
+                "sha256": "e028365d6def15aa0b89de944b437d4bff39f465c049ef85ce026c0152de2fa8"
+              },
+              {
+                "path": "../resource-ownership/public_check.py",
+                "sha256": "7aba7a99a59784217c8244297a4aa75c82c3f202dc19625f7a5c1a343ecf71bf"
+              },
+              {
+                "path": "../resource-ownership/protocol.json",
+                "sha256": "a228f90e4f9246f541463ff9782d193b9c9827b7c44d1d763c6c93b06bff8e22"
+              },
+              {
+                "path": "../resource-ownership/fixtures/public.json",
+                "sha256": "f2764fb072d7599db6eb7f9fd1bb39f3e6f30ac4dd172484506d9c141ef21ed7"
+              },
+              {
+                "path": "../resource-ownership/fixtures/s0-normal.json",
+                "sha256": "c667bcb77f435380ec3e1ce6ff7af3716d0ea336e34afc7dcb5455ef29587816"
+              },
+              {
+                "path": "../resource-ownership/fixtures/s0-reordered.json",
+                "sha256": "36046e198726adc06a5e336af5d1b3ab80bf3aabc99ce14f205858563c1611a3"
+              },
+              {
+                "path": "../resource-ownership/fixtures/s1-normal.json",
+                "sha256": "c667bcb77f435380ec3e1ce6ff7af3716d0ea336e34afc7dcb5455ef29587816"
+              },
+              {
+                "path": "../resource-ownership/fixtures/s1-reordered.json",
+                "sha256": "36046e198726adc06a5e336af5d1b3ab80bf3aabc99ce14f205858563c1611a3"
+              },
+              {
+                "path": "../resource-ownership/fixtures/s2-normal.json",
+                "sha256": "149f930860483223704b31e1ab9d5213f1b7dae72826ebb3c9799bb735d0aa2d"
+              },
+              {
+                "path": "../resource-ownership/fixtures/s2-reordered.json",
+                "sha256": "869f9d4a2429e960605e0e831e1819094c7eadad56cf459478f28dbebe493411"
+              },
+              {
+                "path": "../resource-ownership/fixtures/s3-normal.json",
+                "sha256": "68f017268256e8a733a46eb757ed0b3a5d3530d7176bae6b487dfd5373efb658"
+              },
+              {
+                "path": "../resource-ownership/fixtures/s3-reordered.json",
+                "sha256": "f6aabce1399bac0982321963d5b35241b7111337e5952c6905a9033c7396f1c5"
+              }
+            ]
+          },
+          "oracle": {
+            "command": [
+              "python3",
+              "research/real-world-maintenance/taskpacks/v1/resource-ownership/grade_candidate.py",
+              "--candidate",
+              "{candidate}",
+              "--language",
+              "python",
+              "--stage",
+              "3",
+              "--output",
+              "{output}",
+              "--expected-source-digest",
+              "{candidateDigest}",
+              "--command-prefix-json",
+              "{commandPrefixJSON}",
+              "--containment-qualified",
+              "{containmentDigest}"
+            ],
+            "files": [
+              {
+                "path": "../resource-ownership/grade_candidate.py",
+                "sha256": "259b819fcdee8cbfe37c72a26ae9da2521a56688564b44cc72c21cde33071426"
+              },
+              {
+                "path": "../candidate_grade.py",
+                "sha256": "67f59738b2ef4e730269d71b6c00c09a5a2d88ef5aed4d35f03cf9d32a36e43f"
+              },
+              {
+                "path": "../resource-ownership/oracle.py",
+                "sha256": "e028365d6def15aa0b89de944b437d4bff39f465c049ef85ce026c0152de2fa8"
+              },
+              {
+                "path": "../resource-ownership/public_check.py",
+                "sha256": "7aba7a99a59784217c8244297a4aa75c82c3f202dc19625f7a5c1a343ecf71bf"
+              },
+              {
+                "path": "../resource-ownership/protocol.json",
+                "sha256": "a228f90e4f9246f541463ff9782d193b9c9827b7c44d1d763c6c93b06bff8e22"
+              },
+              {
+                "path": "../resource-ownership/fixtures/public.json",
+                "sha256": "f2764fb072d7599db6eb7f9fd1bb39f3e6f30ac4dd172484506d9c141ef21ed7"
+              },
+              {
+                "path": "../resource-ownership/fixtures/s0-normal.json",
+                "sha256": "c667bcb77f435380ec3e1ce6ff7af3716d0ea336e34afc7dcb5455ef29587816"
+              },
+              {
+                "path": "../resource-ownership/fixtures/s0-reordered.json",
+                "sha256": "36046e198726adc06a5e336af5d1b3ab80bf3aabc99ce14f205858563c1611a3"
+              },
+              {
+                "path": "../resource-ownership/fixtures/s1-normal.json",
+                "sha256": "c667bcb77f435380ec3e1ce6ff7af3716d0ea336e34afc7dcb5455ef29587816"
+              },
+              {
+                "path": "../resource-ownership/fixtures/s1-reordered.json",
+                "sha256": "36046e198726adc06a5e336af5d1b3ab80bf3aabc99ce14f205858563c1611a3"
+              },
+              {
+                "path": "../resource-ownership/fixtures/s2-normal.json",
+                "sha256": "149f930860483223704b31e1ab9d5213f1b7dae72826ebb3c9799bb735d0aa2d"
+              },
+              {
+                "path": "../resource-ownership/fixtures/s2-reordered.json",
+                "sha256": "869f9d4a2429e960605e0e831e1819094c7eadad56cf459478f28dbebe493411"
+              },
+              {
+                "path": "../resource-ownership/fixtures/s3-normal.json",
+                "sha256": "68f017268256e8a733a46eb757ed0b3a5d3530d7176bae6b487dfd5373efb658"
+              },
+              {
+                "path": "../resource-ownership/fixtures/s3-reordered.json",
+                "sha256": "f6aabce1399bac0982321963d5b35241b7111337e5952c6905a9033c7396f1c5"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "resource-ownership-2-ailang",
+      "starter": [
+        {
+          "path": "../resource-ownership/starter/ailang/AGENT.md",
+          "destination": "AGENT.md",
+          "sha256": "30a1df33ea71c44469a18f8c1c8bec23af47278dac7fb10209bf26747a9f730a",
+          "executable": false
+        },
+        {
+          "path": "../resource-ownership/starter/ailang/CHANGELOG.md",
+          "destination": "CHANGELOG.md",
+          "sha256": "9964284599b923be6c8e68d6cf999380f94db3a14313f21ba0d245d167d29499",
+          "executable": false
+        },
+        {
+          "path": "../resource-ownership/starter/ailang/_smoke.ail",
+          "destination": "_smoke.ail",
+          "sha256": "04fa53310f9fd5e148c3b9cdaaf03b2d3d9ca91e0a50623ff1288807089e1b65",
+          "executable": false
+        },
+        {
+          "path": "../resource-ownership/starter/ailang/ailang.lock",
+          "destination": "ailang.lock",
+          "sha256": "0d705d8314022eed9cf40f9c9bd9ef2ffb4f2337af234e4a6bb0b1ff3f9c07cf",
+          "executable": false
+        },
+        {
+          "path": "../resource-ownership/starter/ailang/ailang.toml",
+          "destination": "ailang.toml",
+          "sha256": "33cfa0acf333665ede3cafaffb9faf10aea2fcb58826c5e33ce2b52cd5667231",
+          "executable": false
+        },
+        {
+          "path": "../resource-ownership/starter/ailang/engine.ail",
+          "destination": "engine.ail",
+          "sha256": "55843394f4906a7b04e78e64d086ff22df284b53171cf4e7fe4128b82a807bf4",
+          "executable": false
+        },
+        {
+          "path": "../resource-ownership/starter/ailang/engine_test.ail",
+          "destination": "engine_test.ail",
+          "sha256": "38e35ac48edcf3f721f831c13aa242bcc61d50a1f9f3f24482cc75780b059342",
+          "executable": false
+        },
+        {
+          "path": "../resource-ownership/starter/ailang/examples/qualify_f1.ail",
+          "destination": "examples/qualify_f1.ail",
+          "sha256": "060ff05484b9774cb56a1aeb3480c3ec5cbc2daa0ce2f172819b599c90afa508",
+          "executable": false
+        },
+        {
+          "path": "../resource-ownership/starter/ailang/main.ail",
+          "destination": "main.ail",
+          "sha256": "7de247edd043a37bbe4ff31d0149da540b7dd2d42cc29494150f9dc8bedcf06b",
+          "executable": false
+        }
+      ],
+      "carryFiles": [
+        "AGENT.md",
+        "CHANGELOG.md",
+        "_smoke.ail",
+        "ailang.lock",
+        "ailang.toml",
+        "engine.ail",
+        "engine_test.ail",
+        "examples/qualify_f1.ail",
+        "main.ail",
+        "HANDOVER.md"
+      ],
+      "stages": [
+        {
+          "id": "S1",
+          "request": {
+            "path": "../resource-ownership/stages/1-file-backing.md",
+            "sha256": "22a7a4dd899b7d28910f65a1e961173b0b71f848301fbe670e1ef3ad27c6cf66"
+          },
+          "publicCheck": {
+            "command": [
+              "python3",
+              "research/real-world-maintenance/taskpacks/v1/resource-ownership/grade_candidate.py",
+              "--candidate",
+              "{candidate}",
+              "--language",
+              "ailang",
+              "--stage",
+              "1",
+              "--output",
+              "{output}",
+              "--expected-source-digest",
+              "{candidateDigest}",
+              "--command-prefix-json",
+              "{commandPrefixJSON}",
+              "--containment-qualified",
+              "{containmentDigest}"
+            ],
+            "files": [
+              {
+                "path": "../resource-ownership/grade_candidate.py",
+                "sha256": "259b819fcdee8cbfe37c72a26ae9da2521a56688564b44cc72c21cde33071426"
+              },
+              {
+                "path": "../candidate_grade.py",
+                "sha256": "67f59738b2ef4e730269d71b6c00c09a5a2d88ef5aed4d35f03cf9d32a36e43f"
+              },
+              {
+                "path": "../resource-ownership/oracle.py",
+                "sha256": "e028365d6def15aa0b89de944b437d4bff39f465c049ef85ce026c0152de2fa8"
+              },
+              {
+                "path": "../resource-ownership/public_check.py",
+                "sha256": "7aba7a99a59784217c8244297a4aa75c82c3f202dc19625f7a5c1a343ecf71bf"
+              },
+              {
+                "path": "../resource-ownership/protocol.json",
+                "sha256": "a228f90e4f9246f541463ff9782d193b9c9827b7c44d1d763c6c93b06bff8e22"
+              },
+              {
+                "path": "../resource-ownership/fixtures/public.json",
+                "sha256": "f2764fb072d7599db6eb7f9fd1bb39f3e6f30ac4dd172484506d9c141ef21ed7"
+              },
+              {
+                "path": "../resource-ownership/fixtures/s0-normal.json",
+                "sha256": "c667bcb77f435380ec3e1ce6ff7af3716d0ea336e34afc7dcb5455ef29587816"
+              },
+              {
+                "path": "../resource-ownership/fixtures/s0-reordered.json",
+                "sha256": "36046e198726adc06a5e336af5d1b3ab80bf3aabc99ce14f205858563c1611a3"
+              },
+              {
+                "path": "../resource-ownership/fixtures/s1-normal.json",
+                "sha256": "c667bcb77f435380ec3e1ce6ff7af3716d0ea336e34afc7dcb5455ef29587816"
+              },
+              {
+                "path": "../resource-ownership/fixtures/s1-reordered.json",
+                "sha256": "36046e198726adc06a5e336af5d1b3ab80bf3aabc99ce14f205858563c1611a3"
+              },
+              {
+                "path": "../resource-ownership/fixtures/s2-normal.json",
+                "sha256": "149f930860483223704b31e1ab9d5213f1b7dae72826ebb3c9799bb735d0aa2d"
+              },
+              {
+                "path": "../resource-ownership/fixtures/s2-reordered.json",
+                "sha256": "869f9d4a2429e960605e0e831e1819094c7eadad56cf459478f28dbebe493411"
+              },
+              {
+                "path": "../resource-ownership/fixtures/s3-normal.json",
+                "sha256": "68f017268256e8a733a46eb757ed0b3a5d3530d7176bae6b487dfd5373efb658"
+              },
+              {
+                "path": "../resource-ownership/fixtures/s3-reordered.json",
+                "sha256": "f6aabce1399bac0982321963d5b35241b7111337e5952c6905a9033c7396f1c5"
+              }
+            ]
+          },
+          "oracle": {
+            "command": [
+              "python3",
+              "research/real-world-maintenance/taskpacks/v1/resource-ownership/grade_candidate.py",
+              "--candidate",
+              "{candidate}",
+              "--language",
+              "ailang",
+              "--stage",
+              "1",
+              "--output",
+              "{output}",
+              "--expected-source-digest",
+              "{candidateDigest}",
+              "--command-prefix-json",
+              "{commandPrefixJSON}",
+              "--containment-qualified",
+              "{containmentDigest}"
+            ],
+            "files": [
+              {
+                "path": "../resource-ownership/grade_candidate.py",
+                "sha256": "259b819fcdee8cbfe37c72a26ae9da2521a56688564b44cc72c21cde33071426"
+              },
+              {
+                "path": "../candidate_grade.py",
+                "sha256": "67f59738b2ef4e730269d71b6c00c09a5a2d88ef5aed4d35f03cf9d32a36e43f"
+              },
+              {
+                "path": "../resource-ownership/oracle.py",
+                "sha256": "e028365d6def15aa0b89de944b437d4bff39f465c049ef85ce026c0152de2fa8"
+              },
+              {
+                "path": "../resource-ownership/public_check.py",
+                "sha256": "7aba7a99a59784217c8244297a4aa75c82c3f202dc19625f7a5c1a343ecf71bf"
+              },
+              {
+                "path": "../resource-ownership/protocol.json",
+                "sha256": "a228f90e4f9246f541463ff9782d193b9c9827b7c44d1d763c6c93b06bff8e22"
+              },
+              {
+                "path": "../resource-ownership/fixtures/public.json",
+                "sha256": "f2764fb072d7599db6eb7f9fd1bb39f3e6f30ac4dd172484506d9c141ef21ed7"
+              },
+              {
+                "path": "../resource-ownership/fixtures/s0-normal.json",
+                "sha256": "c667bcb77f435380ec3e1ce6ff7af3716d0ea336e34afc7dcb5455ef29587816"
+              },
+              {
+                "path": "../resource-ownership/fixtures/s0-reordered.json",
+                "sha256": "36046e198726adc06a5e336af5d1b3ab80bf3aabc99ce14f205858563c1611a3"
+              },
+              {
+                "path": "../resource-ownership/fixtures/s1-normal.json",
+                "sha256": "c667bcb77f435380ec3e1ce6ff7af3716d0ea336e34afc7dcb5455ef29587816"
+              },
+              {
+                "path": "../resource-ownership/fixtures/s1-reordered.json",
+                "sha256": "36046e198726adc06a5e336af5d1b3ab80bf3aabc99ce14f205858563c1611a3"
+              },
+              {
+                "path": "../resource-ownership/fixtures/s2-normal.json",
+                "sha256": "149f930860483223704b31e1ab9d5213f1b7dae72826ebb3c9799bb735d0aa2d"
+              },
+              {
+                "path": "../resource-ownership/fixtures/s2-reordered.json",
+                "sha256": "869f9d4a2429e960605e0e831e1819094c7eadad56cf459478f28dbebe493411"
+              },
+              {
+                "path": "../resource-ownership/fixtures/s3-normal.json",
+                "sha256": "68f017268256e8a733a46eb757ed0b3a5d3530d7176bae6b487dfd5373efb658"
+              },
+              {
+                "path": "../resource-ownership/fixtures/s3-reordered.json",
+                "sha256": "f6aabce1399bac0982321963d5b35241b7111337e5952c6905a9033c7396f1c5"
+              }
+            ]
+          }
+        },
+        {
+          "id": "S2",
+          "request": {
+            "path": "../resource-ownership/stages/2-batch-cap.md",
+            "sha256": "e66763674acdb24cc5f259c49559c77651dbe9d5b5119ad59cae9eeec479e3b5"
+          },
+          "publicCheck": {
+            "command": [
+              "python3",
+              "research/real-world-maintenance/taskpacks/v1/resource-ownership/grade_candidate.py",
+              "--candidate",
+              "{candidate}",
+              "--language",
+              "ailang",
+              "--stage",
+              "2",
+              "--output",
+              "{output}",
+              "--expected-source-digest",
+              "{candidateDigest}",
+              "--command-prefix-json",
+              "{commandPrefixJSON}",
+              "--containment-qualified",
+              "{containmentDigest}"
+            ],
+            "files": [
+              {
+                "path": "../resource-ownership/grade_candidate.py",
+                "sha256": "259b819fcdee8cbfe37c72a26ae9da2521a56688564b44cc72c21cde33071426"
+              },
+              {
+                "path": "../candidate_grade.py",
+                "sha256": "67f59738b2ef4e730269d71b6c00c09a5a2d88ef5aed4d35f03cf9d32a36e43f"
+              },
+              {
+                "path": "../resource-ownership/oracle.py",
+                "sha256": "e028365d6def15aa0b89de944b437d4bff39f465c049ef85ce026c0152de2fa8"
+              },
+              {
+                "path": "../resource-ownership/public_check.py",
+                "sha256": "7aba7a99a59784217c8244297a4aa75c82c3f202dc19625f7a5c1a343ecf71bf"
+              },
+              {
+                "path": "../resource-ownership/protocol.json",
+                "sha256": "a228f90e4f9246f541463ff9782d193b9c9827b7c44d1d763c6c93b06bff8e22"
+              },
+              {
+                "path": "../resource-ownership/fixtures/public.json",
+                "sha256": "f2764fb072d7599db6eb7f9fd1bb39f3e6f30ac4dd172484506d9c141ef21ed7"
+              },
+              {
+                "path": "../resource-ownership/fixtures/s0-normal.json",
+                "sha256": "c667bcb77f435380ec3e1ce6ff7af3716d0ea336e34afc7dcb5455ef29587816"
+              },
+              {
+                "path": "../resource-ownership/fixtures/s0-reordered.json",
+                "sha256": "36046e198726adc06a5e336af5d1b3ab80bf3aabc99ce14f205858563c1611a3"
+              },
+              {
+                "path": "../resource-ownership/fixtures/s1-normal.json",
+                "sha256": "c667bcb77f435380ec3e1ce6ff7af3716d0ea336e34afc7dcb5455ef29587816"
+              },
+              {
+                "path": "../resource-ownership/fixtures/s1-reordered.json",
+                "sha256": "36046e198726adc06a5e336af5d1b3ab80bf3aabc99ce14f205858563c1611a3"
+              },
+              {
+                "path": "../resource-ownership/fixtures/s2-normal.json",
+                "sha256": "149f930860483223704b31e1ab9d5213f1b7dae72826ebb3c9799bb735d0aa2d"
+              },
+              {
+                "path": "../resource-ownership/fixtures/s2-reordered.json",
+                "sha256": "869f9d4a2429e960605e0e831e1819094c7eadad56cf459478f28dbebe493411"
+              },
+              {
+                "path": "../resource-ownership/fixtures/s3-normal.json",
+                "sha256": "68f017268256e8a733a46eb757ed0b3a5d3530d7176bae6b487dfd5373efb658"
+              },
+              {
+                "path": "../resource-ownership/fixtures/s3-reordered.json",
+                "sha256": "f6aabce1399bac0982321963d5b35241b7111337e5952c6905a9033c7396f1c5"
+              }
+            ]
+          },
+          "oracle": {
+            "command": [
+              "python3",
+              "research/real-world-maintenance/taskpacks/v1/resource-ownership/grade_candidate.py",
+              "--candidate",
+              "{candidate}",
+              "--language",
+              "ailang",
+              "--stage",
+              "2",
+              "--output",
+              "{output}",
+              "--expected-source-digest",
+              "{candidateDigest}",
+              "--command-prefix-json",
+              "{commandPrefixJSON}",
+              "--containment-qualified",
+              "{containmentDigest}"
+            ],
+            "files": [
+              {
+                "path": "../resource-ownership/grade_candidate.py",
+                "sha256": "259b819fcdee8cbfe37c72a26ae9da2521a56688564b44cc72c21cde33071426"
+              },
+              {
+                "path": "../candidate_grade.py",
+                "sha256": "67f59738b2ef4e730269d71b6c00c09a5a2d88ef5aed4d35f03cf9d32a36e43f"
+              },
+              {
+                "path": "../resource-ownership/oracle.py",
+                "sha256": "e028365d6def15aa0b89de944b437d4bff39f465c049ef85ce026c0152de2fa8"
+              },
+              {
+                "path": "../resource-ownership/public_check.py",
+                "sha256": "7aba7a99a59784217c8244297a4aa75c82c3f202dc19625f7a5c1a343ecf71bf"
+              },
+              {
+                "path": "../resource-ownership/protocol.json",
+                "sha256": "a228f90e4f9246f541463ff9782d193b9c9827b7c44d1d763c6c93b06bff8e22"
+              },
+              {
+                "path": "../resource-ownership/fixtures/public.json",
+                "sha256": "f2764fb072d7599db6eb7f9fd1bb39f3e6f30ac4dd172484506d9c141ef21ed7"
+              },
+              {
+                "path": "../resource-ownership/fixtures/s0-normal.json",
+                "sha256": "c667bcb77f435380ec3e1ce6ff7af3716d0ea336e34afc7dcb5455ef29587816"
+              },
+              {
+                "path": "../resource-ownership/fixtures/s0-reordered.json",
+                "sha256": "36046e198726adc06a5e336af5d1b3ab80bf3aabc99ce14f205858563c1611a3"
+              },
+              {
+                "path": "../resource-ownership/fixtures/s1-normal.json",
+                "sha256": "c667bcb77f435380ec3e1ce6ff7af3716d0ea336e34afc7dcb5455ef29587816"
+              },
+              {
+                "path": "../resource-ownership/fixtures/s1-reordered.json",
+                "sha256": "36046e198726adc06a5e336af5d1b3ab80bf3aabc99ce14f205858563c1611a3"
+              },
+              {
+                "path": "../resource-ownership/fixtures/s2-normal.json",
+                "sha256": "149f930860483223704b31e1ab9d5213f1b7dae72826ebb3c9799bb735d0aa2d"
+              },
+              {
+                "path": "../resource-ownership/fixtures/s2-reordered.json",
+                "sha256": "869f9d4a2429e960605e0e831e1819094c7eadad56cf459478f28dbebe493411"
+              },
+              {
+                "path": "../resource-ownership/fixtures/s3-normal.json",
+                "sha256": "68f017268256e8a733a46eb757ed0b3a5d3530d7176bae6b487dfd5373efb658"
+              },
+              {
+                "path": "../resource-ownership/fixtures/s3-reordered.json",
+                "sha256": "f6aabce1399bac0982321963d5b35241b7111337e5952c6905a9033c7396f1c5"
+              }
+            ]
+          }
+        },
+        {
+          "id": "S3",
+          "request": {
+            "path": "../resource-ownership/stages/3-release.md",
+            "sha256": "64ab3469d3e5890af2f299794066de1e7e5136e7fc98846d0795f8b4561d2b4a"
+          },
+          "publicCheck": {
+            "command": [
+              "python3",
+              "research/real-world-maintenance/taskpacks/v1/resource-ownership/grade_candidate.py",
+              "--candidate",
+              "{candidate}",
+              "--language",
+              "ailang",
+              "--stage",
+              "3",
+              "--output",
+              "{output}",
+              "--expected-source-digest",
+              "{candidateDigest}",
+              "--command-prefix-json",
+              "{commandPrefixJSON}",
+              "--containment-qualified",
+              "{containmentDigest}"
+            ],
+            "files": [
+              {
+                "path": "../resource-ownership/grade_candidate.py",
+                "sha256": "259b819fcdee8cbfe37c72a26ae9da2521a56688564b44cc72c21cde33071426"
+              },
+              {
+                "path": "../candidate_grade.py",
+                "sha256": "67f59738b2ef4e730269d71b6c00c09a5a2d88ef5aed4d35f03cf9d32a36e43f"
+              },
+              {
+                "path": "../resource-ownership/oracle.py",
+                "sha256": "e028365d6def15aa0b89de944b437d4bff39f465c049ef85ce026c0152de2fa8"
+              },
+              {
+                "path": "../resource-ownership/public_check.py",
+                "sha256": "7aba7a99a59784217c8244297a4aa75c82c3f202dc19625f7a5c1a343ecf71bf"
+              },
+              {
+                "path": "../resource-ownership/protocol.json",
+                "sha256": "a228f90e4f9246f541463ff9782d193b9c9827b7c44d1d763c6c93b06bff8e22"
+              },
+              {
+                "path": "../resource-ownership/fixtures/public.json",
+                "sha256": "f2764fb072d7599db6eb7f9fd1bb39f3e6f30ac4dd172484506d9c141ef21ed7"
+              },
+              {
+                "path": "../resource-ownership/fixtures/s0-normal.json",
+                "sha256": "c667bcb77f435380ec3e1ce6ff7af3716d0ea336e34afc7dcb5455ef29587816"
+              },
+              {
+                "path": "../resource-ownership/fixtures/s0-reordered.json",
+                "sha256": "36046e198726adc06a5e336af5d1b3ab80bf3aabc99ce14f205858563c1611a3"
+              },
+              {
+                "path": "../resource-ownership/fixtures/s1-normal.json",
+                "sha256": "c667bcb77f435380ec3e1ce6ff7af3716d0ea336e34afc7dcb5455ef29587816"
+              },
+              {
+                "path": "../resource-ownership/fixtures/s1-reordered.json",
+                "sha256": "36046e198726adc06a5e336af5d1b3ab80bf3aabc99ce14f205858563c1611a3"
+              },
+              {
+                "path": "../resource-ownership/fixtures/s2-normal.json",
+                "sha256": "149f930860483223704b31e1ab9d5213f1b7dae72826ebb3c9799bb735d0aa2d"
+              },
+              {
+                "path": "../resource-ownership/fixtures/s2-reordered.json",
+                "sha256": "869f9d4a2429e960605e0e831e1819094c7eadad56cf459478f28dbebe493411"
+              },
+              {
+                "path": "../resource-ownership/fixtures/s3-normal.json",
+                "sha256": "68f017268256e8a733a46eb757ed0b3a5d3530d7176bae6b487dfd5373efb658"
+              },
+              {
+                "path": "../resource-ownership/fixtures/s3-reordered.json",
+                "sha256": "f6aabce1399bac0982321963d5b35241b7111337e5952c6905a9033c7396f1c5"
+              }
+            ]
+          },
+          "oracle": {
+            "command": [
+              "python3",
+              "research/real-world-maintenance/taskpacks/v1/resource-ownership/grade_candidate.py",
+              "--candidate",
+              "{candidate}",
+              "--language",
+              "ailang",
+              "--stage",
+              "3",
+              "--output",
+              "{output}",
+              "--expected-source-digest",
+              "{candidateDigest}",
+              "--command-prefix-json",
+              "{commandPrefixJSON}",
+              "--containment-qualified",
+              "{containmentDigest}"
+            ],
+            "files": [
+              {
+                "path": "../resource-ownership/grade_candidate.py",
+                "sha256": "259b819fcdee8cbfe37c72a26ae9da2521a56688564b44cc72c21cde33071426"
+              },
+              {
+                "path": "../candidate_grade.py",
+                "sha256": "67f59738b2ef4e730269d71b6c00c09a5a2d88ef5aed4d35f03cf9d32a36e43f"
+              },
+              {
+                "path": "../resource-ownership/oracle.py",
+                "sha256": "e028365d6def15aa0b89de944b437d4bff39f465c049ef85ce026c0152de2fa8"
+              },
+              {
+                "path": "../resource-ownership/public_check.py",
+                "sha256": "7aba7a99a59784217c8244297a4aa75c82c3f202dc19625f7a5c1a343ecf71bf"
+              },
+              {
+                "path": "../resource-ownership/protocol.json",
+                "sha256": "a228f90e4f9246f541463ff9782d193b9c9827b7c44d1d763c6c93b06bff8e22"
+              },
+              {
+                "path": "../resource-ownership/fixtures/public.json",
+                "sha256": "f2764fb072d7599db6eb7f9fd1bb39f3e6f30ac4dd172484506d9c141ef21ed7"
+              },
+              {
+                "path": "../resource-ownership/fixtures/s0-normal.json",
+                "sha256": "c667bcb77f435380ec3e1ce6ff7af3716d0ea336e34afc7dcb5455ef29587816"
+              },
+              {
+                "path": "../resource-ownership/fixtures/s0-reordered.json",
+                "sha256": "36046e198726adc06a5e336af5d1b3ab80bf3aabc99ce14f205858563c1611a3"
+              },
+              {
+                "path": "../resource-ownership/fixtures/s1-normal.json",
+                "sha256": "c667bcb77f435380ec3e1ce6ff7af3716d0ea336e34afc7dcb5455ef29587816"
+              },
+              {
+                "path": "../resource-ownership/fixtures/s1-reordered.json",
+                "sha256": "36046e198726adc06a5e336af5d1b3ab80bf3aabc99ce14f205858563c1611a3"
+              },
+              {
+                "path": "../resource-ownership/fixtures/s2-normal.json",
+                "sha256": "149f930860483223704b31e1ab9d5213f1b7dae72826ebb3c9799bb735d0aa2d"
+              },
+              {
+                "path": "../resource-ownership/fixtures/s2-reordered.json",
+                "sha256": "869f9d4a2429e960605e0e831e1819094c7eadad56cf459478f28dbebe493411"
+              },
+              {
+                "path": "../resource-ownership/fixtures/s3-normal.json",
+                "sha256": "68f017268256e8a733a46eb757ed0b3a5d3530d7176bae6b487dfd5373efb658"
+              },
+              {
+                "path": "../resource-ownership/fixtures/s3-reordered.json",
+                "sha256": "f6aabce1399bac0982321963d5b35241b7111337e5952c6905a9033c7396f1c5"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "resource-ownership-2-python",
+      "starter": [
+        {
+          "path": "../resource-ownership/starter/python/main.py",
+          "destination": "main.py",
+          "sha256": "e7034453a1d9a7163e68594fdb03c163e42b8cd8cc26954406610ebdfb282047",
+          "executable": false
+        }
+      ],
+      "carryFiles": [
+        "main.py",
+        "HANDOVER.md"
+      ],
+      "stages": [
+        {
+          "id": "S1",
+          "request": {
+            "path": "../resource-ownership/stages/1-file-backing.md",
+            "sha256": "22a7a4dd899b7d28910f65a1e961173b0b71f848301fbe670e1ef3ad27c6cf66"
+          },
+          "publicCheck": {
+            "command": [
+              "python3",
+              "research/real-world-maintenance/taskpacks/v1/resource-ownership/grade_candidate.py",
+              "--candidate",
+              "{candidate}",
+              "--language",
+              "python",
+              "--stage",
+              "1",
+              "--output",
+              "{output}",
+              "--expected-source-digest",
+              "{candidateDigest}",
+              "--command-prefix-json",
+              "{commandPrefixJSON}",
+              "--containment-qualified",
+              "{containmentDigest}"
+            ],
+            "files": [
+              {
+                "path": "../resource-ownership/grade_candidate.py",
+                "sha256": "259b819fcdee8cbfe37c72a26ae9da2521a56688564b44cc72c21cde33071426"
+              },
+              {
+                "path": "../candidate_grade.py",
+                "sha256": "67f59738b2ef4e730269d71b6c00c09a5a2d88ef5aed4d35f03cf9d32a36e43f"
+              },
+              {
+                "path": "../resource-ownership/oracle.py",
+                "sha256": "e028365d6def15aa0b89de944b437d4bff39f465c049ef85ce026c0152de2fa8"
+              },
+              {
+                "path": "../resource-ownership/public_check.py",
+                "sha256": "7aba7a99a59784217c8244297a4aa75c82c3f202dc19625f7a5c1a343ecf71bf"
+              },
+              {
+                "path": "../resource-ownership/protocol.json",
+                "sha256": "a228f90e4f9246f541463ff9782d193b9c9827b7c44d1d763c6c93b06bff8e22"
+              },
+              {
+                "path": "../resource-ownership/fixtures/public.json",
+                "sha256": "f2764fb072d7599db6eb7f9fd1bb39f3e6f30ac4dd172484506d9c141ef21ed7"
+              },
+              {
+                "path": "../resource-ownership/fixtures/s0-normal.json",
+                "sha256": "c667bcb77f435380ec3e1ce6ff7af3716d0ea336e34afc7dcb5455ef29587816"
+              },
+              {
+                "path": "../resource-ownership/fixtures/s0-reordered.json",
+                "sha256": "36046e198726adc06a5e336af5d1b3ab80bf3aabc99ce14f205858563c1611a3"
+              },
+              {
+                "path": "../resource-ownership/fixtures/s1-normal.json",
+                "sha256": "c667bcb77f435380ec3e1ce6ff7af3716d0ea336e34afc7dcb5455ef29587816"
+              },
+              {
+                "path": "../resource-ownership/fixtures/s1-reordered.json",
+                "sha256": "36046e198726adc06a5e336af5d1b3ab80bf3aabc99ce14f205858563c1611a3"
+              },
+              {
+                "path": "../resource-ownership/fixtures/s2-normal.json",
+                "sha256": "149f930860483223704b31e1ab9d5213f1b7dae72826ebb3c9799bb735d0aa2d"
+              },
+              {
+                "path": "../resource-ownership/fixtures/s2-reordered.json",
+                "sha256": "869f9d4a2429e960605e0e831e1819094c7eadad56cf459478f28dbebe493411"
+              },
+              {
+                "path": "../resource-ownership/fixtures/s3-normal.json",
+                "sha256": "68f017268256e8a733a46eb757ed0b3a5d3530d7176bae6b487dfd5373efb658"
+              },
+              {
+                "path": "../resource-ownership/fixtures/s3-reordered.json",
+                "sha256": "f6aabce1399bac0982321963d5b35241b7111337e5952c6905a9033c7396f1c5"
+              }
+            ]
+          },
+          "oracle": {
+            "command": [
+              "python3",
+              "research/real-world-maintenance/taskpacks/v1/resource-ownership/grade_candidate.py",
+              "--candidate",
+              "{candidate}",
+              "--language",
+              "python",
+              "--stage",
+              "1",
+              "--output",
+              "{output}",
+              "--expected-source-digest",
+              "{candidateDigest}",
+              "--command-prefix-json",
+              "{commandPrefixJSON}",
+              "--containment-qualified",
+              "{containmentDigest}"
+            ],
+            "files": [
+              {
+                "path": "../resource-ownership/grade_candidate.py",
+                "sha256": "259b819fcdee8cbfe37c72a26ae9da2521a56688564b44cc72c21cde33071426"
+              },
+              {
+                "path": "../candidate_grade.py",
+                "sha256": "67f59738b2ef4e730269d71b6c00c09a5a2d88ef5aed4d35f03cf9d32a36e43f"
+              },
+              {
+                "path": "../resource-ownership/oracle.py",
+                "sha256": "e028365d6def15aa0b89de944b437d4bff39f465c049ef85ce026c0152de2fa8"
+              },
+              {
+                "path": "../resource-ownership/public_check.py",
+                "sha256": "7aba7a99a59784217c8244297a4aa75c82c3f202dc19625f7a5c1a343ecf71bf"
+              },
+              {
+                "path": "../resource-ownership/protocol.json",
+                "sha256": "a228f90e4f9246f541463ff9782d193b9c9827b7c44d1d763c6c93b06bff8e22"
+              },
+              {
+                "path": "../resource-ownership/fixtures/public.json",
+                "sha256": "f2764fb072d7599db6eb7f9fd1bb39f3e6f30ac4dd172484506d9c141ef21ed7"
+              },
+              {
+                "path": "../resource-ownership/fixtures/s0-normal.json",
+                "sha256": "c667bcb77f435380ec3e1ce6ff7af3716d0ea336e34afc7dcb5455ef29587816"
+              },
+              {
+                "path": "../resource-ownership/fixtures/s0-reordered.json",
+                "sha256": "36046e198726adc06a5e336af5d1b3ab80bf3aabc99ce14f205858563c1611a3"
+              },
+              {
+                "path": "../resource-ownership/fixtures/s1-normal.json",
+                "sha256": "c667bcb77f435380ec3e1ce6ff7af3716d0ea336e34afc7dcb5455ef29587816"
+              },
+              {
+                "path": "../resource-ownership/fixtures/s1-reordered.json",
+                "sha256": "36046e198726adc06a5e336af5d1b3ab80bf3aabc99ce14f205858563c1611a3"
+              },
+              {
+                "path": "../resource-ownership/fixtures/s2-normal.json",
+                "sha256": "149f930860483223704b31e1ab9d5213f1b7dae72826ebb3c9799bb735d0aa2d"
+              },
+              {
+                "path": "../resource-ownership/fixtures/s2-reordered.json",
+                "sha256": "869f9d4a2429e960605e0e831e1819094c7eadad56cf459478f28dbebe493411"
+              },
+              {
+                "path": "../resource-ownership/fixtures/s3-normal.json",
+                "sha256": "68f017268256e8a733a46eb757ed0b3a5d3530d7176bae6b487dfd5373efb658"
+              },
+              {
+                "path": "../resource-ownership/fixtures/s3-reordered.json",
+                "sha256": "f6aabce1399bac0982321963d5b35241b7111337e5952c6905a9033c7396f1c5"
+              }
+            ]
+          }
+        },
+        {
+          "id": "S2",
+          "request": {
+            "path": "../resource-ownership/stages/2-batch-cap.md",
+            "sha256": "e66763674acdb24cc5f259c49559c77651dbe9d5b5119ad59cae9eeec479e3b5"
+          },
+          "publicCheck": {
+            "command": [
+              "python3",
+              "research/real-world-maintenance/taskpacks/v1/resource-ownership/grade_candidate.py",
+              "--candidate",
+              "{candidate}",
+              "--language",
+              "python",
+              "--stage",
+              "2",
+              "--output",
+              "{output}",
+              "--expected-source-digest",
+              "{candidateDigest}",
+              "--command-prefix-json",
+              "{commandPrefixJSON}",
+              "--containment-qualified",
+              "{containmentDigest}"
+            ],
+            "files": [
+              {
+                "path": "../resource-ownership/grade_candidate.py",
+                "sha256": "259b819fcdee8cbfe37c72a26ae9da2521a56688564b44cc72c21cde33071426"
+              },
+              {
+                "path": "../candidate_grade.py",
+                "sha256": "67f59738b2ef4e730269d71b6c00c09a5a2d88ef5aed4d35f03cf9d32a36e43f"
+              },
+              {
+                "path": "../resource-ownership/oracle.py",
+                "sha256": "e028365d6def15aa0b89de944b437d4bff39f465c049ef85ce026c0152de2fa8"
+              },
+              {
+                "path": "../resource-ownership/public_check.py",
+                "sha256": "7aba7a99a59784217c8244297a4aa75c82c3f202dc19625f7a5c1a343ecf71bf"
+              },
+              {
+                "path": "../resource-ownership/protocol.json",
+                "sha256": "a228f90e4f9246f541463ff9782d193b9c9827b7c44d1d763c6c93b06bff8e22"
+              },
+              {
+                "path": "../resource-ownership/fixtures/public.json",
+                "sha256": "f2764fb072d7599db6eb7f9fd1bb39f3e6f30ac4dd172484506d9c141ef21ed7"
+              },
+              {
+                "path": "../resource-ownership/fixtures/s0-normal.json",
+                "sha256": "c667bcb77f435380ec3e1ce6ff7af3716d0ea336e34afc7dcb5455ef29587816"
+              },
+              {
+                "path": "../resource-ownership/fixtures/s0-reordered.json",
+                "sha256": "36046e198726adc06a5e336af5d1b3ab80bf3aabc99ce14f205858563c1611a3"
+              },
+              {
+                "path": "../resource-ownership/fixtures/s1-normal.json",
+                "sha256": "c667bcb77f435380ec3e1ce6ff7af3716d0ea336e34afc7dcb5455ef29587816"
+              },
+              {
+                "path": "../resource-ownership/fixtures/s1-reordered.json",
+                "sha256": "36046e198726adc06a5e336af5d1b3ab80bf3aabc99ce14f205858563c1611a3"
+              },
+              {
+                "path": "../resource-ownership/fixtures/s2-normal.json",
+                "sha256": "149f930860483223704b31e1ab9d5213f1b7dae72826ebb3c9799bb735d0aa2d"
+              },
+              {
+                "path": "../resource-ownership/fixtures/s2-reordered.json",
+                "sha256": "869f9d4a2429e960605e0e831e1819094c7eadad56cf459478f28dbebe493411"
+              },
+              {
+                "path": "../resource-ownership/fixtures/s3-normal.json",
+                "sha256": "68f017268256e8a733a46eb757ed0b3a5d3530d7176bae6b487dfd5373efb658"
+              },
+              {
+                "path": "../resource-ownership/fixtures/s3-reordered.json",
+                "sha256": "f6aabce1399bac0982321963d5b35241b7111337e5952c6905a9033c7396f1c5"
+              }
+            ]
+          },
+          "oracle": {
+            "command": [
+              "python3",
+              "research/real-world-maintenance/taskpacks/v1/resource-ownership/grade_candidate.py",
+              "--candidate",
+              "{candidate}",
+              "--language",
+              "python",
+              "--stage",
+              "2",
+              "--output",
+              "{output}",
+              "--expected-source-digest",
+              "{candidateDigest}",
+              "--command-prefix-json",
+              "{commandPrefixJSON}",
+              "--containment-qualified",
+              "{containmentDigest}"
+            ],
+            "files": [
+              {
+                "path": "../resource-ownership/grade_candidate.py",
+                "sha256": "259b819fcdee8cbfe37c72a26ae9da2521a56688564b44cc72c21cde33071426"
+              },
+              {
+                "path": "../candidate_grade.py",
+                "sha256": "67f59738b2ef4e730269d71b6c00c09a5a2d88ef5aed4d35f03cf9d32a36e43f"
+              },
+              {
+                "path": "../resource-ownership/oracle.py",
+                "sha256": "e028365d6def15aa0b89de944b437d4bff39f465c049ef85ce026c0152de2fa8"
+              },
+              {
+                "path": "../resource-ownership/public_check.py",
+                "sha256": "7aba7a99a59784217c8244297a4aa75c82c3f202dc19625f7a5c1a343ecf71bf"
+              },
+              {
+                "path": "../resource-ownership/protocol.json",
+                "sha256": "a228f90e4f9246f541463ff9782d193b9c9827b7c44d1d763c6c93b06bff8e22"
+              },
+              {
+                "path": "../resource-ownership/fixtures/public.json",
+                "sha256": "f2764fb072d7599db6eb7f9fd1bb39f3e6f30ac4dd172484506d9c141ef21ed7"
+              },
+              {
+                "path": "../resource-ownership/fixtures/s0-normal.json",
+                "sha256": "c667bcb77f435380ec3e1ce6ff7af3716d0ea336e34afc7dcb5455ef29587816"
+              },
+              {
+                "path": "../resource-ownership/fixtures/s0-reordered.json",
+                "sha256": "36046e198726adc06a5e336af5d1b3ab80bf3aabc99ce14f205858563c1611a3"
+              },
+              {
+                "path": "../resource-ownership/fixtures/s1-normal.json",
+                "sha256": "c667bcb77f435380ec3e1ce6ff7af3716d0ea336e34afc7dcb5455ef29587816"
+              },
+              {
+                "path": "../resource-ownership/fixtures/s1-reordered.json",
+                "sha256": "36046e198726adc06a5e336af5d1b3ab80bf3aabc99ce14f205858563c1611a3"
+              },
+              {
+                "path": "../resource-ownership/fixtures/s2-normal.json",
+                "sha256": "149f930860483223704b31e1ab9d5213f1b7dae72826ebb3c9799bb735d0aa2d"
+              },
+              {
+                "path": "../resource-ownership/fixtures/s2-reordered.json",
+                "sha256": "869f9d4a2429e960605e0e831e1819094c7eadad56cf459478f28dbebe493411"
+              },
+              {
+                "path": "../resource-ownership/fixtures/s3-normal.json",
+                "sha256": "68f017268256e8a733a46eb757ed0b3a5d3530d7176bae6b487dfd5373efb658"
+              },
+              {
+                "path": "../resource-ownership/fixtures/s3-reordered.json",
+                "sha256": "f6aabce1399bac0982321963d5b35241b7111337e5952c6905a9033c7396f1c5"
+              }
+            ]
+          }
+        },
+        {
+          "id": "S3",
+          "request": {
+            "path": "../resource-ownership/stages/3-release.md",
+            "sha256": "64ab3469d3e5890af2f299794066de1e7e5136e7fc98846d0795f8b4561d2b4a"
+          },
+          "publicCheck": {
+            "command": [
+              "python3",
+              "research/real-world-maintenance/taskpacks/v1/resource-ownership/grade_candidate.py",
+              "--candidate",
+              "{candidate}",
+              "--language",
+              "python",
+              "--stage",
+              "3",
+              "--output",
+              "{output}",
+              "--expected-source-digest",
+              "{candidateDigest}",
+              "--command-prefix-json",
+              "{commandPrefixJSON}",
+              "--containment-qualified",
+              "{containmentDigest}"
+            ],
+            "files": [
+              {
+                "path": "../resource-ownership/grade_candidate.py",
+                "sha256": "259b819fcdee8cbfe37c72a26ae9da2521a56688564b44cc72c21cde33071426"
+              },
+              {
+                "path": "../candidate_grade.py",
+                "sha256": "67f59738b2ef4e730269d71b6c00c09a5a2d88ef5aed4d35f03cf9d32a36e43f"
+              },
+              {
+                "path": "../resource-ownership/oracle.py",
+                "sha256": "e028365d6def15aa0b89de944b437d4bff39f465c049ef85ce026c0152de2fa8"
+              },
+              {
+                "path": "../resource-ownership/public_check.py",
+                "sha256": "7aba7a99a59784217c8244297a4aa75c82c3f202dc19625f7a5c1a343ecf71bf"
+              },
+              {
+                "path": "../resource-ownership/protocol.json",
+                "sha256": "a228f90e4f9246f541463ff9782d193b9c9827b7c44d1d763c6c93b06bff8e22"
+              },
+              {
+                "path": "../resource-ownership/fixtures/public.json",
+                "sha256": "f2764fb072d7599db6eb7f9fd1bb39f3e6f30ac4dd172484506d9c141ef21ed7"
+              },
+              {
+                "path": "../resource-ownership/fixtures/s0-normal.json",
+                "sha256": "c667bcb77f435380ec3e1ce6ff7af3716d0ea336e34afc7dcb5455ef29587816"
+              },
+              {
+                "path": "../resource-ownership/fixtures/s0-reordered.json",
+                "sha256": "36046e198726adc06a5e336af5d1b3ab80bf3aabc99ce14f205858563c1611a3"
+              },
+              {
+                "path": "../resource-ownership/fixtures/s1-normal.json",
+                "sha256": "c667bcb77f435380ec3e1ce6ff7af3716d0ea336e34afc7dcb5455ef29587816"
+              },
+              {
+                "path": "../resource-ownership/fixtures/s1-reordered.json",
+                "sha256": "36046e198726adc06a5e336af5d1b3ab80bf3aabc99ce14f205858563c1611a3"
+              },
+              {
+                "path": "../resource-ownership/fixtures/s2-normal.json",
+                "sha256": "149f930860483223704b31e1ab9d5213f1b7dae72826ebb3c9799bb735d0aa2d"
+              },
+              {
+                "path": "../resource-ownership/fixtures/s2-reordered.json",
+                "sha256": "869f9d4a2429e960605e0e831e1819094c7eadad56cf459478f28dbebe493411"
+              },
+              {
+                "path": "../resource-ownership/fixtures/s3-normal.json",
+                "sha256": "68f017268256e8a733a46eb757ed0b3a5d3530d7176bae6b487dfd5373efb658"
+              },
+              {
+                "path": "../resource-ownership/fixtures/s3-reordered.json",
+                "sha256": "f6aabce1399bac0982321963d5b35241b7111337e5952c6905a9033c7396f1c5"
+              }
+            ]
+          },
+          "oracle": {
+            "command": [
+              "python3",
+              "research/real-world-maintenance/taskpacks/v1/resource-ownership/grade_candidate.py",
+              "--candidate",
+              "{candidate}",
+              "--language",
+              "python",
+              "--stage",
+              "3",
+              "--output",
+              "{output}",
+              "--expected-source-digest",
+              "{candidateDigest}",
+              "--command-prefix-json",
+              "{commandPrefixJSON}",
+              "--containment-qualified",
+              "{containmentDigest}"
+            ],
+            "files": [
+              {
+                "path": "../resource-ownership/grade_candidate.py",
+                "sha256": "259b819fcdee8cbfe37c72a26ae9da2521a56688564b44cc72c21cde33071426"
+              },
+              {
+                "path": "../candidate_grade.py",
+                "sha256": "67f59738b2ef4e730269d71b6c00c09a5a2d88ef5aed4d35f03cf9d32a36e43f"
+              },
+              {
+                "path": "../resource-ownership/oracle.py",
+                "sha256": "e028365d6def15aa0b89de944b437d4bff39f465c049ef85ce026c0152de2fa8"
+              },
+              {
+                "path": "../resource-ownership/public_check.py",
+                "sha256": "7aba7a99a59784217c8244297a4aa75c82c3f202dc19625f7a5c1a343ecf71bf"
+              },
+              {
+                "path": "../resource-ownership/protocol.json",
+                "sha256": "a228f90e4f9246f541463ff9782d193b9c9827b7c44d1d763c6c93b06bff8e22"
+              },
+              {
+                "path": "../resource-ownership/fixtures/public.json",
+                "sha256": "f2764fb072d7599db6eb7f9fd1bb39f3e6f30ac4dd172484506d9c141ef21ed7"
+              },
+              {
+                "path": "../resource-ownership/fixtures/s0-normal.json",
+                "sha256": "c667bcb77f435380ec3e1ce6ff7af3716d0ea336e34afc7dcb5455ef29587816"
+              },
+              {
+                "path": "../resource-ownership/fixtures/s0-reordered.json",
+                "sha256": "36046e198726adc06a5e336af5d1b3ab80bf3aabc99ce14f205858563c1611a3"
+              },
+              {
+                "path": "../resource-ownership/fixtures/s1-normal.json",
+                "sha256": "c667bcb77f435380ec3e1ce6ff7af3716d0ea336e34afc7dcb5455ef29587816"
+              },
+              {
+                "path": "../resource-ownership/fixtures/s1-reordered.json",
+                "sha256": "36046e198726adc06a5e336af5d1b3ab80bf3aabc99ce14f205858563c1611a3"
+              },
+              {
+                "path": "../resource-ownership/fixtures/s2-normal.json",
+                "sha256": "149f930860483223704b31e1ab9d5213f1b7dae72826ebb3c9799bb735d0aa2d"
+              },
+              {
+                "path": "../resource-ownership/fixtures/s2-reordered.json",
+                "sha256": "869f9d4a2429e960605e0e831e1819094c7eadad56cf459478f28dbebe493411"
+              },
+              {
+                "path": "../resource-ownership/fixtures/s3-normal.json",
+                "sha256": "68f017268256e8a733a46eb757ed0b3a5d3530d7176bae6b487dfd5373efb658"
+              },
+              {
+                "path": "../resource-ownership/fixtures/s3-reordered.json",
+                "sha256": "f6aabce1399bac0982321963d5b35241b7111337e5952c6905a9033c7396f1c5"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "text-fidelity-1-ailang",
+      "starter": [
+        {
+          "path": "../text-fidelity/starter/ailang/AGENT.md",
+          "destination": "AGENT.md",
+          "sha256": "89f9cda55482c806380f0bcf386b6b14096836843351f0e0994020ea75092fd7",
+          "executable": false
+        },
+        {
+          "path": "../text-fidelity/starter/ailang/CHANGELOG.md",
+          "destination": "CHANGELOG.md",
+          "sha256": "1b46887034a31de9537fddbd074859828f306a1fdf039f74efbcafe29703fc38",
+          "executable": false
+        },
+        {
+          "path": "../text-fidelity/starter/ailang/_smoke.ail",
+          "destination": "_smoke.ail",
+          "sha256": "1e2c14ac794780f14804b714d7672c040bee8f5fd0e3cb053062502dd8fe6d5f",
+          "executable": false
+        },
+        {
+          "path": "../text-fidelity/starter/ailang/ailang.lock",
+          "destination": "ailang.lock",
+          "sha256": "dd8c7392ed2a2d77decf3feb07785f7437a06c944f668ec0db2f68de573f2bf7",
+          "executable": false
+        },
+        {
+          "path": "../text-fidelity/starter/ailang/ailang.toml",
+          "destination": "ailang.toml",
+          "sha256": "276e743967e832471803eb46447d74c40fac80f818f5dc67f76633fc55fc3b0a",
+          "executable": false
+        },
+        {
+          "path": "../text-fidelity/starter/ailang/examples/qualify_f2.ail",
+          "destination": "examples/qualify_f2.ail",
+          "sha256": "29e622f35a4909d7b1c8ba0398d76d0940955c71bc8f9bf364f0e7a2f823caec",
+          "executable": false
+        },
+        {
+          "path": "../text-fidelity/starter/ailang/main.ail",
+          "destination": "main.ail",
+          "sha256": "c7700bbc4ef5e7dce7e440beb4af18109d989337162cbc0d174254de3eb8bdf5",
+          "executable": false
+        },
+        {
+          "path": "../text-fidelity/starter/ailang/text.ail",
+          "destination": "text.ail",
+          "sha256": "065b42de583812242b7bb13fcf45d56caf17f40007e9df3034861c3bcdea6f8d",
+          "executable": false
+        },
+        {
+          "path": "../text-fidelity/starter/ailang/text_test.ail",
+          "destination": "text_test.ail",
+          "sha256": "07e517e0b7b993284bd3c806be549e486ef3af5a3a73aba445f065fefa6e15d6",
+          "executable": false
+        }
+      ],
+      "carryFiles": [
+        "AGENT.md",
+        "CHANGELOG.md",
+        "_smoke.ail",
+        "ailang.lock",
+        "ailang.toml",
+        "examples/qualify_f2.ail",
+        "main.ail",
+        "text.ail",
+        "text_test.ail",
+        "HANDOVER.md"
+      ],
+      "stages": [
+        {
+          "id": "S1",
+          "request": {
+            "path": "../text-fidelity/stages/s1.md",
+            "sha256": "e45de719e2c2e95c445c50f01482bf29fee67533325ab0f858354f06824bad8e"
+          },
+          "publicCheck": {
+            "command": [
+              "python3",
+              "research/real-world-maintenance/taskpacks/v1/text-fidelity/grade_candidate.py",
+              "--candidate",
+              "{candidate}",
+              "--language",
+              "ailang",
+              "--stage",
+              "1",
+              "--output",
+              "{output}",
+              "--expected-source-digest",
+              "{candidateDigest}",
+              "--command-prefix-json",
+              "{commandPrefixJSON}",
+              "--containment-qualified",
+              "{containmentDigest}"
+            ],
+            "files": [
+              {
+                "path": "../text-fidelity/grade_candidate.py",
+                "sha256": "259b819fcdee8cbfe37c72a26ae9da2521a56688564b44cc72c21cde33071426"
+              },
+              {
+                "path": "../candidate_grade.py",
+                "sha256": "67f59738b2ef4e730269d71b6c00c09a5a2d88ef5aed4d35f03cf9d32a36e43f"
+              },
+              {
+                "path": "../text-fidelity/qualify.py",
+                "sha256": "a942bed0a8c40025fcc8b90e40fc6576653ef58a3148d85ef38a457d83e36488"
+              },
+              {
+                "path": "../text-fidelity/taskpack.json",
+                "sha256": "2ac6309b001cba94cb1ec2a5e6be55223366fcaaf0246fa0154eafafc57d0fb4"
+              },
+              {
+                "path": "../text-fidelity/stages/contract.md",
+                "sha256": "4fa21594c90b0e467338520af1d9faeea8cf7d4eaea04241d0984f4a5478f772"
+              },
+              {
+                "path": "../text-fidelity/fixtures/baseline.expected.json",
+                "sha256": "421f2b8209283c4aec9b441696e7a438085c07deb379481a021ec3947048f257"
+              },
+              {
+                "path": "../text-fidelity/fixtures/baseline.input.json",
+                "sha256": "be8d970139db935be2ea869956136f7ab42eb96cf2354ba24360ab6b17cf7950"
+              },
+              {
+                "path": "../text-fidelity/fixtures/s1.expected.json",
+                "sha256": "6d56722dec2dcc1d3accf127521d105f85a251ca484548dd2ead783a92162f80"
+              },
+              {
+                "path": "../text-fidelity/fixtures/s1.input.json",
+                "sha256": "1c46184326a7d2335f85befbdc07726b48c8d90e9535cb0d28416831da66f35b"
+              },
+              {
+                "path": "../text-fidelity/fixtures/s2.expected.json",
+                "sha256": "7eef7800e4479f4d8afa974dfe18e2bef42daa806d166d6260c00a3270641dc2"
+              },
+              {
+                "path": "../text-fidelity/fixtures/s2.input.json",
+                "sha256": "a747fed3af561598ccf6bd76c8c0454f5a5bf963fe2ca29637ac31fc06b2af63"
+              },
+              {
+                "path": "../text-fidelity/fixtures/s3.expected.json",
+                "sha256": "77c1e523530680d674f4d3824216ce95ae9c87623d1325cab5c1dff815b7397c"
+              },
+              {
+                "path": "../text-fidelity/fixtures/s3.input.json",
+                "sha256": "6bbecf7084ec490c3d086696729d0c3d0be2c1fa90411582e7b548036bac1a5e"
+              }
+            ]
+          },
+          "oracle": {
+            "command": [
+              "python3",
+              "research/real-world-maintenance/taskpacks/v1/text-fidelity/grade_candidate.py",
+              "--candidate",
+              "{candidate}",
+              "--language",
+              "ailang",
+              "--stage",
+              "1",
+              "--output",
+              "{output}",
+              "--expected-source-digest",
+              "{candidateDigest}",
+              "--command-prefix-json",
+              "{commandPrefixJSON}",
+              "--containment-qualified",
+              "{containmentDigest}"
+            ],
+            "files": [
+              {
+                "path": "../text-fidelity/grade_candidate.py",
+                "sha256": "259b819fcdee8cbfe37c72a26ae9da2521a56688564b44cc72c21cde33071426"
+              },
+              {
+                "path": "../candidate_grade.py",
+                "sha256": "67f59738b2ef4e730269d71b6c00c09a5a2d88ef5aed4d35f03cf9d32a36e43f"
+              },
+              {
+                "path": "../text-fidelity/qualify.py",
+                "sha256": "a942bed0a8c40025fcc8b90e40fc6576653ef58a3148d85ef38a457d83e36488"
+              },
+              {
+                "path": "../text-fidelity/taskpack.json",
+                "sha256": "2ac6309b001cba94cb1ec2a5e6be55223366fcaaf0246fa0154eafafc57d0fb4"
+              },
+              {
+                "path": "../text-fidelity/stages/contract.md",
+                "sha256": "4fa21594c90b0e467338520af1d9faeea8cf7d4eaea04241d0984f4a5478f772"
+              },
+              {
+                "path": "../text-fidelity/fixtures/baseline.expected.json",
+                "sha256": "421f2b8209283c4aec9b441696e7a438085c07deb379481a021ec3947048f257"
+              },
+              {
+                "path": "../text-fidelity/fixtures/baseline.input.json",
+                "sha256": "be8d970139db935be2ea869956136f7ab42eb96cf2354ba24360ab6b17cf7950"
+              },
+              {
+                "path": "../text-fidelity/fixtures/s1.expected.json",
+                "sha256": "6d56722dec2dcc1d3accf127521d105f85a251ca484548dd2ead783a92162f80"
+              },
+              {
+                "path": "../text-fidelity/fixtures/s1.input.json",
+                "sha256": "1c46184326a7d2335f85befbdc07726b48c8d90e9535cb0d28416831da66f35b"
+              },
+              {
+                "path": "../text-fidelity/fixtures/s2.expected.json",
+                "sha256": "7eef7800e4479f4d8afa974dfe18e2bef42daa806d166d6260c00a3270641dc2"
+              },
+              {
+                "path": "../text-fidelity/fixtures/s2.input.json",
+                "sha256": "a747fed3af561598ccf6bd76c8c0454f5a5bf963fe2ca29637ac31fc06b2af63"
+              },
+              {
+                "path": "../text-fidelity/fixtures/s3.expected.json",
+                "sha256": "77c1e523530680d674f4d3824216ce95ae9c87623d1325cab5c1dff815b7397c"
+              },
+              {
+                "path": "../text-fidelity/fixtures/s3.input.json",
+                "sha256": "6bbecf7084ec490c3d086696729d0c3d0be2c1fa90411582e7b548036bac1a5e"
+              }
+            ]
+          }
+        },
+        {
+          "id": "S2",
+          "request": {
+            "path": "../text-fidelity/stages/s2.md",
+            "sha256": "2c18cc2b87988c91c49f3b3aa7a2a8fc74052e65ad16c369db1d080b08c934f4"
+          },
+          "publicCheck": {
+            "command": [
+              "python3",
+              "research/real-world-maintenance/taskpacks/v1/text-fidelity/grade_candidate.py",
+              "--candidate",
+              "{candidate}",
+              "--language",
+              "ailang",
+              "--stage",
+              "2",
+              "--output",
+              "{output}",
+              "--expected-source-digest",
+              "{candidateDigest}",
+              "--command-prefix-json",
+              "{commandPrefixJSON}",
+              "--containment-qualified",
+              "{containmentDigest}"
+            ],
+            "files": [
+              {
+                "path": "../text-fidelity/grade_candidate.py",
+                "sha256": "259b819fcdee8cbfe37c72a26ae9da2521a56688564b44cc72c21cde33071426"
+              },
+              {
+                "path": "../candidate_grade.py",
+                "sha256": "67f59738b2ef4e730269d71b6c00c09a5a2d88ef5aed4d35f03cf9d32a36e43f"
+              },
+              {
+                "path": "../text-fidelity/qualify.py",
+                "sha256": "a942bed0a8c40025fcc8b90e40fc6576653ef58a3148d85ef38a457d83e36488"
+              },
+              {
+                "path": "../text-fidelity/taskpack.json",
+                "sha256": "2ac6309b001cba94cb1ec2a5e6be55223366fcaaf0246fa0154eafafc57d0fb4"
+              },
+              {
+                "path": "../text-fidelity/stages/contract.md",
+                "sha256": "4fa21594c90b0e467338520af1d9faeea8cf7d4eaea04241d0984f4a5478f772"
+              },
+              {
+                "path": "../text-fidelity/fixtures/baseline.expected.json",
+                "sha256": "421f2b8209283c4aec9b441696e7a438085c07deb379481a021ec3947048f257"
+              },
+              {
+                "path": "../text-fidelity/fixtures/baseline.input.json",
+                "sha256": "be8d970139db935be2ea869956136f7ab42eb96cf2354ba24360ab6b17cf7950"
+              },
+              {
+                "path": "../text-fidelity/fixtures/s1.expected.json",
+                "sha256": "6d56722dec2dcc1d3accf127521d105f85a251ca484548dd2ead783a92162f80"
+              },
+              {
+                "path": "../text-fidelity/fixtures/s1.input.json",
+                "sha256": "1c46184326a7d2335f85befbdc07726b48c8d90e9535cb0d28416831da66f35b"
+              },
+              {
+                "path": "../text-fidelity/fixtures/s2.expected.json",
+                "sha256": "7eef7800e4479f4d8afa974dfe18e2bef42daa806d166d6260c00a3270641dc2"
+              },
+              {
+                "path": "../text-fidelity/fixtures/s2.input.json",
+                "sha256": "a747fed3af561598ccf6bd76c8c0454f5a5bf963fe2ca29637ac31fc06b2af63"
+              },
+              {
+                "path": "../text-fidelity/fixtures/s3.expected.json",
+                "sha256": "77c1e523530680d674f4d3824216ce95ae9c87623d1325cab5c1dff815b7397c"
+              },
+              {
+                "path": "../text-fidelity/fixtures/s3.input.json",
+                "sha256": "6bbecf7084ec490c3d086696729d0c3d0be2c1fa90411582e7b548036bac1a5e"
+              }
+            ]
+          },
+          "oracle": {
+            "command": [
+              "python3",
+              "research/real-world-maintenance/taskpacks/v1/text-fidelity/grade_candidate.py",
+              "--candidate",
+              "{candidate}",
+              "--language",
+              "ailang",
+              "--stage",
+              "2",
+              "--output",
+              "{output}",
+              "--expected-source-digest",
+              "{candidateDigest}",
+              "--command-prefix-json",
+              "{commandPrefixJSON}",
+              "--containment-qualified",
+              "{containmentDigest}"
+            ],
+            "files": [
+              {
+                "path": "../text-fidelity/grade_candidate.py",
+                "sha256": "259b819fcdee8cbfe37c72a26ae9da2521a56688564b44cc72c21cde33071426"
+              },
+              {
+                "path": "../candidate_grade.py",
+                "sha256": "67f59738b2ef4e730269d71b6c00c09a5a2d88ef5aed4d35f03cf9d32a36e43f"
+              },
+              {
+                "path": "../text-fidelity/qualify.py",
+                "sha256": "a942bed0a8c40025fcc8b90e40fc6576653ef58a3148d85ef38a457d83e36488"
+              },
+              {
+                "path": "../text-fidelity/taskpack.json",
+                "sha256": "2ac6309b001cba94cb1ec2a5e6be55223366fcaaf0246fa0154eafafc57d0fb4"
+              },
+              {
+                "path": "../text-fidelity/stages/contract.md",
+                "sha256": "4fa21594c90b0e467338520af1d9faeea8cf7d4eaea04241d0984f4a5478f772"
+              },
+              {
+                "path": "../text-fidelity/fixtures/baseline.expected.json",
+                "sha256": "421f2b8209283c4aec9b441696e7a438085c07deb379481a021ec3947048f257"
+              },
+              {
+                "path": "../text-fidelity/fixtures/baseline.input.json",
+                "sha256": "be8d970139db935be2ea869956136f7ab42eb96cf2354ba24360ab6b17cf7950"
+              },
+              {
+                "path": "../text-fidelity/fixtures/s1.expected.json",
+                "sha256": "6d56722dec2dcc1d3accf127521d105f85a251ca484548dd2ead783a92162f80"
+              },
+              {
+                "path": "../text-fidelity/fixtures/s1.input.json",
+                "sha256": "1c46184326a7d2335f85befbdc07726b48c8d90e9535cb0d28416831da66f35b"
+              },
+              {
+                "path": "../text-fidelity/fixtures/s2.expected.json",
+                "sha256": "7eef7800e4479f4d8afa974dfe18e2bef42daa806d166d6260c00a3270641dc2"
+              },
+              {
+                "path": "../text-fidelity/fixtures/s2.input.json",
+                "sha256": "a747fed3af561598ccf6bd76c8c0454f5a5bf963fe2ca29637ac31fc06b2af63"
+              },
+              {
+                "path": "../text-fidelity/fixtures/s3.expected.json",
+                "sha256": "77c1e523530680d674f4d3824216ce95ae9c87623d1325cab5c1dff815b7397c"
+              },
+              {
+                "path": "../text-fidelity/fixtures/s3.input.json",
+                "sha256": "6bbecf7084ec490c3d086696729d0c3d0be2c1fa90411582e7b548036bac1a5e"
+              }
+            ]
+          }
+        },
+        {
+          "id": "S3",
+          "request": {
+            "path": "../text-fidelity/stages/s3.md",
+            "sha256": "f7ad1e59d9660b7f576d151e521583daa444f90238c88d376838485b6952022f"
+          },
+          "publicCheck": {
+            "command": [
+              "python3",
+              "research/real-world-maintenance/taskpacks/v1/text-fidelity/grade_candidate.py",
+              "--candidate",
+              "{candidate}",
+              "--language",
+              "ailang",
+              "--stage",
+              "3",
+              "--output",
+              "{output}",
+              "--expected-source-digest",
+              "{candidateDigest}",
+              "--command-prefix-json",
+              "{commandPrefixJSON}",
+              "--containment-qualified",
+              "{containmentDigest}"
+            ],
+            "files": [
+              {
+                "path": "../text-fidelity/grade_candidate.py",
+                "sha256": "259b819fcdee8cbfe37c72a26ae9da2521a56688564b44cc72c21cde33071426"
+              },
+              {
+                "path": "../candidate_grade.py",
+                "sha256": "67f59738b2ef4e730269d71b6c00c09a5a2d88ef5aed4d35f03cf9d32a36e43f"
+              },
+              {
+                "path": "../text-fidelity/qualify.py",
+                "sha256": "a942bed0a8c40025fcc8b90e40fc6576653ef58a3148d85ef38a457d83e36488"
+              },
+              {
+                "path": "../text-fidelity/taskpack.json",
+                "sha256": "2ac6309b001cba94cb1ec2a5e6be55223366fcaaf0246fa0154eafafc57d0fb4"
+              },
+              {
+                "path": "../text-fidelity/stages/contract.md",
+                "sha256": "4fa21594c90b0e467338520af1d9faeea8cf7d4eaea04241d0984f4a5478f772"
+              },
+              {
+                "path": "../text-fidelity/fixtures/baseline.expected.json",
+                "sha256": "421f2b8209283c4aec9b441696e7a438085c07deb379481a021ec3947048f257"
+              },
+              {
+                "path": "../text-fidelity/fixtures/baseline.input.json",
+                "sha256": "be8d970139db935be2ea869956136f7ab42eb96cf2354ba24360ab6b17cf7950"
+              },
+              {
+                "path": "../text-fidelity/fixtures/s1.expected.json",
+                "sha256": "6d56722dec2dcc1d3accf127521d105f85a251ca484548dd2ead783a92162f80"
+              },
+              {
+                "path": "../text-fidelity/fixtures/s1.input.json",
+                "sha256": "1c46184326a7d2335f85befbdc07726b48c8d90e9535cb0d28416831da66f35b"
+              },
+              {
+                "path": "../text-fidelity/fixtures/s2.expected.json",
+                "sha256": "7eef7800e4479f4d8afa974dfe18e2bef42daa806d166d6260c00a3270641dc2"
+              },
+              {
+                "path": "../text-fidelity/fixtures/s2.input.json",
+                "sha256": "a747fed3af561598ccf6bd76c8c0454f5a5bf963fe2ca29637ac31fc06b2af63"
+              },
+              {
+                "path": "../text-fidelity/fixtures/s3.expected.json",
+                "sha256": "77c1e523530680d674f4d3824216ce95ae9c87623d1325cab5c1dff815b7397c"
+              },
+              {
+                "path": "../text-fidelity/fixtures/s3.input.json",
+                "sha256": "6bbecf7084ec490c3d086696729d0c3d0be2c1fa90411582e7b548036bac1a5e"
+              }
+            ]
+          },
+          "oracle": {
+            "command": [
+              "python3",
+              "research/real-world-maintenance/taskpacks/v1/text-fidelity/grade_candidate.py",
+              "--candidate",
+              "{candidate}",
+              "--language",
+              "ailang",
+              "--stage",
+              "3",
+              "--output",
+              "{output}",
+              "--expected-source-digest",
+              "{candidateDigest}",
+              "--command-prefix-json",
+              "{commandPrefixJSON}",
+              "--containment-qualified",
+              "{containmentDigest}"
+            ],
+            "files": [
+              {
+                "path": "../text-fidelity/grade_candidate.py",
+                "sha256": "259b819fcdee8cbfe37c72a26ae9da2521a56688564b44cc72c21cde33071426"
+              },
+              {
+                "path": "../candidate_grade.py",
+                "sha256": "67f59738b2ef4e730269d71b6c00c09a5a2d88ef5aed4d35f03cf9d32a36e43f"
+              },
+              {
+                "path": "../text-fidelity/qualify.py",
+                "sha256": "a942bed0a8c40025fcc8b90e40fc6576653ef58a3148d85ef38a457d83e36488"
+              },
+              {
+                "path": "../text-fidelity/taskpack.json",
+                "sha256": "2ac6309b001cba94cb1ec2a5e6be55223366fcaaf0246fa0154eafafc57d0fb4"
+              },
+              {
+                "path": "../text-fidelity/stages/contract.md",
+                "sha256": "4fa21594c90b0e467338520af1d9faeea8cf7d4eaea04241d0984f4a5478f772"
+              },
+              {
+                "path": "../text-fidelity/fixtures/baseline.expected.json",
+                "sha256": "421f2b8209283c4aec9b441696e7a438085c07deb379481a021ec3947048f257"
+              },
+              {
+                "path": "../text-fidelity/fixtures/baseline.input.json",
+                "sha256": "be8d970139db935be2ea869956136f7ab42eb96cf2354ba24360ab6b17cf7950"
+              },
+              {
+                "path": "../text-fidelity/fixtures/s1.expected.json",
+                "sha256": "6d56722dec2dcc1d3accf127521d105f85a251ca484548dd2ead783a92162f80"
+              },
+              {
+                "path": "../text-fidelity/fixtures/s1.input.json",
+                "sha256": "1c46184326a7d2335f85befbdc07726b48c8d90e9535cb0d28416831da66f35b"
+              },
+              {
+                "path": "../text-fidelity/fixtures/s2.expected.json",
+                "sha256": "7eef7800e4479f4d8afa974dfe18e2bef42daa806d166d6260c00a3270641dc2"
+              },
+              {
+                "path": "../text-fidelity/fixtures/s2.input.json",
+                "sha256": "a747fed3af561598ccf6bd76c8c0454f5a5bf963fe2ca29637ac31fc06b2af63"
+              },
+              {
+                "path": "../text-fidelity/fixtures/s3.expected.json",
+                "sha256": "77c1e523530680d674f4d3824216ce95ae9c87623d1325cab5c1dff815b7397c"
+              },
+              {
+                "path": "../text-fidelity/fixtures/s3.input.json",
+                "sha256": "6bbecf7084ec490c3d086696729d0c3d0be2c1fa90411582e7b548036bac1a5e"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "text-fidelity-1-python",
+      "starter": [
+        {
+          "path": "../text-fidelity/starter/python/main.py",
+          "destination": "main.py",
+          "sha256": "6c48b14fc251ca729a8dc77b5ab0ee5b76adf11b9d7882413164698ce7476d4e",
+          "executable": false
+        },
+        {
+          "path": "../text-fidelity/starter/python/test_text.py",
+          "destination": "test_text.py",
+          "sha256": "afcb19d7aac950c45c3f4f848629810877909f1d764646f7147b9b12152a8332",
+          "executable": false
+        }
+      ],
+      "carryFiles": [
+        "main.py",
+        "test_text.py",
+        "HANDOVER.md"
+      ],
+      "stages": [
+        {
+          "id": "S1",
+          "request": {
+            "path": "../text-fidelity/stages/s1.md",
+            "sha256": "e45de719e2c2e95c445c50f01482bf29fee67533325ab0f858354f06824bad8e"
+          },
+          "publicCheck": {
+            "command": [
+              "python3",
+              "research/real-world-maintenance/taskpacks/v1/text-fidelity/grade_candidate.py",
+              "--candidate",
+              "{candidate}",
+              "--language",
+              "python",
+              "--stage",
+              "1",
+              "--output",
+              "{output}",
+              "--expected-source-digest",
+              "{candidateDigest}",
+              "--command-prefix-json",
+              "{commandPrefixJSON}",
+              "--containment-qualified",
+              "{containmentDigest}"
+            ],
+            "files": [
+              {
+                "path": "../text-fidelity/grade_candidate.py",
+                "sha256": "259b819fcdee8cbfe37c72a26ae9da2521a56688564b44cc72c21cde33071426"
+              },
+              {
+                "path": "../candidate_grade.py",
+                "sha256": "67f59738b2ef4e730269d71b6c00c09a5a2d88ef5aed4d35f03cf9d32a36e43f"
+              },
+              {
+                "path": "../text-fidelity/qualify.py",
+                "sha256": "a942bed0a8c40025fcc8b90e40fc6576653ef58a3148d85ef38a457d83e36488"
+              },
+              {
+                "path": "../text-fidelity/taskpack.json",
+                "sha256": "2ac6309b001cba94cb1ec2a5e6be55223366fcaaf0246fa0154eafafc57d0fb4"
+              },
+              {
+                "path": "../text-fidelity/stages/contract.md",
+                "sha256": "4fa21594c90b0e467338520af1d9faeea8cf7d4eaea04241d0984f4a5478f772"
+              },
+              {
+                "path": "../text-fidelity/fixtures/baseline.expected.json",
+                "sha256": "421f2b8209283c4aec9b441696e7a438085c07deb379481a021ec3947048f257"
+              },
+              {
+                "path": "../text-fidelity/fixtures/baseline.input.json",
+                "sha256": "be8d970139db935be2ea869956136f7ab42eb96cf2354ba24360ab6b17cf7950"
+              },
+              {
+                "path": "../text-fidelity/fixtures/s1.expected.json",
+                "sha256": "6d56722dec2dcc1d3accf127521d105f85a251ca484548dd2ead783a92162f80"
+              },
+              {
+                "path": "../text-fidelity/fixtures/s1.input.json",
+                "sha256": "1c46184326a7d2335f85befbdc07726b48c8d90e9535cb0d28416831da66f35b"
+              },
+              {
+                "path": "../text-fidelity/fixtures/s2.expected.json",
+                "sha256": "7eef7800e4479f4d8afa974dfe18e2bef42daa806d166d6260c00a3270641dc2"
+              },
+              {
+                "path": "../text-fidelity/fixtures/s2.input.json",
+                "sha256": "a747fed3af561598ccf6bd76c8c0454f5a5bf963fe2ca29637ac31fc06b2af63"
+              },
+              {
+                "path": "../text-fidelity/fixtures/s3.expected.json",
+                "sha256": "77c1e523530680d674f4d3824216ce95ae9c87623d1325cab5c1dff815b7397c"
+              },
+              {
+                "path": "../text-fidelity/fixtures/s3.input.json",
+                "sha256": "6bbecf7084ec490c3d086696729d0c3d0be2c1fa90411582e7b548036bac1a5e"
+              }
+            ]
+          },
+          "oracle": {
+            "command": [
+              "python3",
+              "research/real-world-maintenance/taskpacks/v1/text-fidelity/grade_candidate.py",
+              "--candidate",
+              "{candidate}",
+              "--language",
+              "python",
+              "--stage",
+              "1",
+              "--output",
+              "{output}",
+              "--expected-source-digest",
+              "{candidateDigest}",
+              "--command-prefix-json",
+              "{commandPrefixJSON}",
+              "--containment-qualified",
+              "{containmentDigest}"
+            ],
+            "files": [
+              {
+                "path": "../text-fidelity/grade_candidate.py",
+                "sha256": "259b819fcdee8cbfe37c72a26ae9da2521a56688564b44cc72c21cde33071426"
+              },
+              {
+                "path": "../candidate_grade.py",
+                "sha256": "67f59738b2ef4e730269d71b6c00c09a5a2d88ef5aed4d35f03cf9d32a36e43f"
+              },
+              {
+                "path": "../text-fidelity/qualify.py",
+                "sha256": "a942bed0a8c40025fcc8b90e40fc6576653ef58a3148d85ef38a457d83e36488"
+              },
+              {
+                "path": "../text-fidelity/taskpack.json",
+                "sha256": "2ac6309b001cba94cb1ec2a5e6be55223366fcaaf0246fa0154eafafc57d0fb4"
+              },
+              {
+                "path": "../text-fidelity/stages/contract.md",
+                "sha256": "4fa21594c90b0e467338520af1d9faeea8cf7d4eaea04241d0984f4a5478f772"
+              },
+              {
+                "path": "../text-fidelity/fixtures/baseline.expected.json",
+                "sha256": "421f2b8209283c4aec9b441696e7a438085c07deb379481a021ec3947048f257"
+              },
+              {
+                "path": "../text-fidelity/fixtures/baseline.input.json",
+                "sha256": "be8d970139db935be2ea869956136f7ab42eb96cf2354ba24360ab6b17cf7950"
+              },
+              {
+                "path": "../text-fidelity/fixtures/s1.expected.json",
+                "sha256": "6d56722dec2dcc1d3accf127521d105f85a251ca484548dd2ead783a92162f80"
+              },
+              {
+                "path": "../text-fidelity/fixtures/s1.input.json",
+                "sha256": "1c46184326a7d2335f85befbdc07726b48c8d90e9535cb0d28416831da66f35b"
+              },
+              {
+                "path": "../text-fidelity/fixtures/s2.expected.json",
+                "sha256": "7eef7800e4479f4d8afa974dfe18e2bef42daa806d166d6260c00a3270641dc2"
+              },
+              {
+                "path": "../text-fidelity/fixtures/s2.input.json",
+                "sha256": "a747fed3af561598ccf6bd76c8c0454f5a5bf963fe2ca29637ac31fc06b2af63"
+              },
+              {
+                "path": "../text-fidelity/fixtures/s3.expected.json",
+                "sha256": "77c1e523530680d674f4d3824216ce95ae9c87623d1325cab5c1dff815b7397c"
+              },
+              {
+                "path": "../text-fidelity/fixtures/s3.input.json",
+                "sha256": "6bbecf7084ec490c3d086696729d0c3d0be2c1fa90411582e7b548036bac1a5e"
+              }
+            ]
+          }
+        },
+        {
+          "id": "S2",
+          "request": {
+            "path": "../text-fidelity/stages/s2.md",
+            "sha256": "2c18cc2b87988c91c49f3b3aa7a2a8fc74052e65ad16c369db1d080b08c934f4"
+          },
+          "publicCheck": {
+            "command": [
+              "python3",
+              "research/real-world-maintenance/taskpacks/v1/text-fidelity/grade_candidate.py",
+              "--candidate",
+              "{candidate}",
+              "--language",
+              "python",
+              "--stage",
+              "2",
+              "--output",
+              "{output}",
+              "--expected-source-digest",
+              "{candidateDigest}",
+              "--command-prefix-json",
+              "{commandPrefixJSON}",
+              "--containment-qualified",
+              "{containmentDigest}"
+            ],
+            "files": [
+              {
+                "path": "../text-fidelity/grade_candidate.py",
+                "sha256": "259b819fcdee8cbfe37c72a26ae9da2521a56688564b44cc72c21cde33071426"
+              },
+              {
+                "path": "../candidate_grade.py",
+                "sha256": "67f59738b2ef4e730269d71b6c00c09a5a2d88ef5aed4d35f03cf9d32a36e43f"
+              },
+              {
+                "path": "../text-fidelity/qualify.py",
+                "sha256": "a942bed0a8c40025fcc8b90e40fc6576653ef58a3148d85ef38a457d83e36488"
+              },
+              {
+                "path": "../text-fidelity/taskpack.json",
+                "sha256": "2ac6309b001cba94cb1ec2a5e6be55223366fcaaf0246fa0154eafafc57d0fb4"
+              },
+              {
+                "path": "../text-fidelity/stages/contract.md",
+                "sha256": "4fa21594c90b0e467338520af1d9faeea8cf7d4eaea04241d0984f4a5478f772"
+              },
+              {
+                "path": "../text-fidelity/fixtures/baseline.expected.json",
+                "sha256": "421f2b8209283c4aec9b441696e7a438085c07deb379481a021ec3947048f257"
+              },
+              {
+                "path": "../text-fidelity/fixtures/baseline.input.json",
+                "sha256": "be8d970139db935be2ea869956136f7ab42eb96cf2354ba24360ab6b17cf7950"
+              },
+              {
+                "path": "../text-fidelity/fixtures/s1.expected.json",
+                "sha256": "6d56722dec2dcc1d3accf127521d105f85a251ca484548dd2ead783a92162f80"
+              },
+              {
+                "path": "../text-fidelity/fixtures/s1.input.json",
+                "sha256": "1c46184326a7d2335f85befbdc07726b48c8d90e9535cb0d28416831da66f35b"
+              },
+              {
+                "path": "../text-fidelity/fixtures/s2.expected.json",
+                "sha256": "7eef7800e4479f4d8afa974dfe18e2bef42daa806d166d6260c00a3270641dc2"
+              },
+              {
+                "path": "../text-fidelity/fixtures/s2.input.json",
+                "sha256": "a747fed3af561598ccf6bd76c8c0454f5a5bf963fe2ca29637ac31fc06b2af63"
+              },
+              {
+                "path": "../text-fidelity/fixtures/s3.expected.json",
+                "sha256": "77c1e523530680d674f4d3824216ce95ae9c87623d1325cab5c1dff815b7397c"
+              },
+              {
+                "path": "../text-fidelity/fixtures/s3.input.json",
+                "sha256": "6bbecf7084ec490c3d086696729d0c3d0be2c1fa90411582e7b548036bac1a5e"
+              }
+            ]
+          },
+          "oracle": {
+            "command": [
+              "python3",
+              "research/real-world-maintenance/taskpacks/v1/text-fidelity/grade_candidate.py",
+              "--candidate",
+              "{candidate}",
+              "--language",
+              "python",
+              "--stage",
+              "2",
+              "--output",
+              "{output}",
+              "--expected-source-digest",
+              "{candidateDigest}",
+              "--command-prefix-json",
+              "{commandPrefixJSON}",
+              "--containment-qualified",
+              "{containmentDigest}"
+            ],
+            "files": [
+              {
+                "path": "../text-fidelity/grade_candidate.py",
+                "sha256": "259b819fcdee8cbfe37c72a26ae9da2521a56688564b44cc72c21cde33071426"
+              },
+              {
+                "path": "../candidate_grade.py",
+                "sha256": "67f59738b2ef4e730269d71b6c00c09a5a2d88ef5aed4d35f03cf9d32a36e43f"
+              },
+              {
+                "path": "../text-fidelity/qualify.py",
+                "sha256": "a942bed0a8c40025fcc8b90e40fc6576653ef58a3148d85ef38a457d83e36488"
+              },
+              {
+                "path": "../text-fidelity/taskpack.json",
+                "sha256": "2ac6309b001cba94cb1ec2a5e6be55223366fcaaf0246fa0154eafafc57d0fb4"
+              },
+              {
+                "path": "../text-fidelity/stages/contract.md",
+                "sha256": "4fa21594c90b0e467338520af1d9faeea8cf7d4eaea04241d0984f4a5478f772"
+              },
+              {
+                "path": "../text-fidelity/fixtures/baseline.expected.json",
+                "sha256": "421f2b8209283c4aec9b441696e7a438085c07deb379481a021ec3947048f257"
+              },
+              {
+                "path": "../text-fidelity/fixtures/baseline.input.json",
+                "sha256": "be8d970139db935be2ea869956136f7ab42eb96cf2354ba24360ab6b17cf7950"
+              },
+              {
+                "path": "../text-fidelity/fixtures/s1.expected.json",
+                "sha256": "6d56722dec2dcc1d3accf127521d105f85a251ca484548dd2ead783a92162f80"
+              },
+              {
+                "path": "../text-fidelity/fixtures/s1.input.json",
+                "sha256": "1c46184326a7d2335f85befbdc07726b48c8d90e9535cb0d28416831da66f35b"
+              },
+              {
+                "path": "../text-fidelity/fixtures/s2.expected.json",
+                "sha256": "7eef7800e4479f4d8afa974dfe18e2bef42daa806d166d6260c00a3270641dc2"
+              },
+              {
+                "path": "../text-fidelity/fixtures/s2.input.json",
+                "sha256": "a747fed3af561598ccf6bd76c8c0454f5a5bf963fe2ca29637ac31fc06b2af63"
+              },
+              {
+                "path": "../text-fidelity/fixtures/s3.expected.json",
+                "sha256": "77c1e523530680d674f4d3824216ce95ae9c87623d1325cab5c1dff815b7397c"
+              },
+              {
+                "path": "../text-fidelity/fixtures/s3.input.json",
+                "sha256": "6bbecf7084ec490c3d086696729d0c3d0be2c1fa90411582e7b548036bac1a5e"
+              }
+            ]
+          }
+        },
+        {
+          "id": "S3",
+          "request": {
+            "path": "../text-fidelity/stages/s3.md",
+            "sha256": "f7ad1e59d9660b7f576d151e521583daa444f90238c88d376838485b6952022f"
+          },
+          "publicCheck": {
+            "command": [
+              "python3",
+              "research/real-world-maintenance/taskpacks/v1/text-fidelity/grade_candidate.py",
+              "--candidate",
+              "{candidate}",
+              "--language",
+              "python",
+              "--stage",
+              "3",
+              "--output",
+              "{output}",
+              "--expected-source-digest",
+              "{candidateDigest}",
+              "--command-prefix-json",
+              "{commandPrefixJSON}",
+              "--containment-qualified",
+              "{containmentDigest}"
+            ],
+            "files": [
+              {
+                "path": "../text-fidelity/grade_candidate.py",
+                "sha256": "259b819fcdee8cbfe37c72a26ae9da2521a56688564b44cc72c21cde33071426"
+              },
+              {
+                "path": "../candidate_grade.py",
+                "sha256": "67f59738b2ef4e730269d71b6c00c09a5a2d88ef5aed4d35f03cf9d32a36e43f"
+              },
+              {
+                "path": "../text-fidelity/qualify.py",
+                "sha256": "a942bed0a8c40025fcc8b90e40fc6576653ef58a3148d85ef38a457d83e36488"
+              },
+              {
+                "path": "../text-fidelity/taskpack.json",
+                "sha256": "2ac6309b001cba94cb1ec2a5e6be55223366fcaaf0246fa0154eafafc57d0fb4"
+              },
+              {
+                "path": "../text-fidelity/stages/contract.md",
+                "sha256": "4fa21594c90b0e467338520af1d9faeea8cf7d4eaea04241d0984f4a5478f772"
+              },
+              {
+                "path": "../text-fidelity/fixtures/baseline.expected.json",
+                "sha256": "421f2b8209283c4aec9b441696e7a438085c07deb379481a021ec3947048f257"
+              },
+              {
+                "path": "../text-fidelity/fixtures/baseline.input.json",
+                "sha256": "be8d970139db935be2ea869956136f7ab42eb96cf2354ba24360ab6b17cf7950"
+              },
+              {
+                "path": "../text-fidelity/fixtures/s1.expected.json",
+                "sha256": "6d56722dec2dcc1d3accf127521d105f85a251ca484548dd2ead783a92162f80"
+              },
+              {
+                "path": "../text-fidelity/fixtures/s1.input.json",
+                "sha256": "1c46184326a7d2335f85befbdc07726b48c8d90e9535cb0d28416831da66f35b"
+              },
+              {
+                "path": "../text-fidelity/fixtures/s2.expected.json",
+                "sha256": "7eef7800e4479f4d8afa974dfe18e2bef42daa806d166d6260c00a3270641dc2"
+              },
+              {
+                "path": "../text-fidelity/fixtures/s2.input.json",
+                "sha256": "a747fed3af561598ccf6bd76c8c0454f5a5bf963fe2ca29637ac31fc06b2af63"
+              },
+              {
+                "path": "../text-fidelity/fixtures/s3.expected.json",
+                "sha256": "77c1e523530680d674f4d3824216ce95ae9c87623d1325cab5c1dff815b7397c"
+              },
+              {
+                "path": "../text-fidelity/fixtures/s3.input.json",
+                "sha256": "6bbecf7084ec490c3d086696729d0c3d0be2c1fa90411582e7b548036bac1a5e"
+              }
+            ]
+          },
+          "oracle": {
+            "command": [
+              "python3",
+              "research/real-world-maintenance/taskpacks/v1/text-fidelity/grade_candidate.py",
+              "--candidate",
+              "{candidate}",
+              "--language",
+              "python",
+              "--stage",
+              "3",
+              "--output",
+              "{output}",
+              "--expected-source-digest",
+              "{candidateDigest}",
+              "--command-prefix-json",
+              "{commandPrefixJSON}",
+              "--containment-qualified",
+              "{containmentDigest}"
+            ],
+            "files": [
+              {
+                "path": "../text-fidelity/grade_candidate.py",
+                "sha256": "259b819fcdee8cbfe37c72a26ae9da2521a56688564b44cc72c21cde33071426"
+              },
+              {
+                "path": "../candidate_grade.py",
+                "sha256": "67f59738b2ef4e730269d71b6c00c09a5a2d88ef5aed4d35f03cf9d32a36e43f"
+              },
+              {
+                "path": "../text-fidelity/qualify.py",
+                "sha256": "a942bed0a8c40025fcc8b90e40fc6576653ef58a3148d85ef38a457d83e36488"
+              },
+              {
+                "path": "../text-fidelity/taskpack.json",
+                "sha256": "2ac6309b001cba94cb1ec2a5e6be55223366fcaaf0246fa0154eafafc57d0fb4"
+              },
+              {
+                "path": "../text-fidelity/stages/contract.md",
+                "sha256": "4fa21594c90b0e467338520af1d9faeea8cf7d4eaea04241d0984f4a5478f772"
+              },
+              {
+                "path": "../text-fidelity/fixtures/baseline.expected.json",
+                "sha256": "421f2b8209283c4aec9b441696e7a438085c07deb379481a021ec3947048f257"
+              },
+              {
+                "path": "../text-fidelity/fixtures/baseline.input.json",
+                "sha256": "be8d970139db935be2ea869956136f7ab42eb96cf2354ba24360ab6b17cf7950"
+              },
+              {
+                "path": "../text-fidelity/fixtures/s1.expected.json",
+                "sha256": "6d56722dec2dcc1d3accf127521d105f85a251ca484548dd2ead783a92162f80"
+              },
+              {
+                "path": "../text-fidelity/fixtures/s1.input.json",
+                "sha256": "1c46184326a7d2335f85befbdc07726b48c8d90e9535cb0d28416831da66f35b"
+              },
+              {
+                "path": "../text-fidelity/fixtures/s2.expected.json",
+                "sha256": "7eef7800e4479f4d8afa974dfe18e2bef42daa806d166d6260c00a3270641dc2"
+              },
+              {
+                "path": "../text-fidelity/fixtures/s2.input.json",
+                "sha256": "a747fed3af561598ccf6bd76c8c0454f5a5bf963fe2ca29637ac31fc06b2af63"
+              },
+              {
+                "path": "../text-fidelity/fixtures/s3.expected.json",
+                "sha256": "77c1e523530680d674f4d3824216ce95ae9c87623d1325cab5c1dff815b7397c"
+              },
+              {
+                "path": "../text-fidelity/fixtures/s3.input.json",
+                "sha256": "6bbecf7084ec490c3d086696729d0c3d0be2c1fa90411582e7b548036bac1a5e"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "text-fidelity-2-ailang",
+      "starter": [
+        {
+          "path": "../text-fidelity/starter/ailang/AGENT.md",
+          "destination": "AGENT.md",
+          "sha256": "89f9cda55482c806380f0bcf386b6b14096836843351f0e0994020ea75092fd7",
+          "executable": false
+        },
+        {
+          "path": "../text-fidelity/starter/ailang/CHANGELOG.md",
+          "destination": "CHANGELOG.md",
+          "sha256": "1b46887034a31de9537fddbd074859828f306a1fdf039f74efbcafe29703fc38",
+          "executable": false
+        },
+        {
+          "path": "../text-fidelity/starter/ailang/_smoke.ail",
+          "destination": "_smoke.ail",
+          "sha256": "1e2c14ac794780f14804b714d7672c040bee8f5fd0e3cb053062502dd8fe6d5f",
+          "executable": false
+        },
+        {
+          "path": "../text-fidelity/starter/ailang/ailang.lock",
+          "destination": "ailang.lock",
+          "sha256": "dd8c7392ed2a2d77decf3feb07785f7437a06c944f668ec0db2f68de573f2bf7",
+          "executable": false
+        },
+        {
+          "path": "../text-fidelity/starter/ailang/ailang.toml",
+          "destination": "ailang.toml",
+          "sha256": "276e743967e832471803eb46447d74c40fac80f818f5dc67f76633fc55fc3b0a",
+          "executable": false
+        },
+        {
+          "path": "../text-fidelity/starter/ailang/examples/qualify_f2.ail",
+          "destination": "examples/qualify_f2.ail",
+          "sha256": "29e622f35a4909d7b1c8ba0398d76d0940955c71bc8f9bf364f0e7a2f823caec",
+          "executable": false
+        },
+        {
+          "path": "../text-fidelity/starter/ailang/main.ail",
+          "destination": "main.ail",
+          "sha256": "c7700bbc4ef5e7dce7e440beb4af18109d989337162cbc0d174254de3eb8bdf5",
+          "executable": false
+        },
+        {
+          "path": "../text-fidelity/starter/ailang/text.ail",
+          "destination": "text.ail",
+          "sha256": "065b42de583812242b7bb13fcf45d56caf17f40007e9df3034861c3bcdea6f8d",
+          "executable": false
+        },
+        {
+          "path": "../text-fidelity/starter/ailang/text_test.ail",
+          "destination": "text_test.ail",
+          "sha256": "07e517e0b7b993284bd3c806be549e486ef3af5a3a73aba445f065fefa6e15d6",
+          "executable": false
+        }
+      ],
+      "carryFiles": [
+        "AGENT.md",
+        "CHANGELOG.md",
+        "_smoke.ail",
+        "ailang.lock",
+        "ailang.toml",
+        "examples/qualify_f2.ail",
+        "main.ail",
+        "text.ail",
+        "text_test.ail",
+        "HANDOVER.md"
+      ],
+      "stages": [
+        {
+          "id": "S1",
+          "request": {
+            "path": "../text-fidelity/stages/s1.md",
+            "sha256": "e45de719e2c2e95c445c50f01482bf29fee67533325ab0f858354f06824bad8e"
+          },
+          "publicCheck": {
+            "command": [
+              "python3",
+              "research/real-world-maintenance/taskpacks/v1/text-fidelity/grade_candidate.py",
+              "--candidate",
+              "{candidate}",
+              "--language",
+              "ailang",
+              "--stage",
+              "1",
+              "--output",
+              "{output}",
+              "--expected-source-digest",
+              "{candidateDigest}",
+              "--command-prefix-json",
+              "{commandPrefixJSON}",
+              "--containment-qualified",
+              "{containmentDigest}"
+            ],
+            "files": [
+              {
+                "path": "../text-fidelity/grade_candidate.py",
+                "sha256": "259b819fcdee8cbfe37c72a26ae9da2521a56688564b44cc72c21cde33071426"
+              },
+              {
+                "path": "../candidate_grade.py",
+                "sha256": "67f59738b2ef4e730269d71b6c00c09a5a2d88ef5aed4d35f03cf9d32a36e43f"
+              },
+              {
+                "path": "../text-fidelity/qualify.py",
+                "sha256": "a942bed0a8c40025fcc8b90e40fc6576653ef58a3148d85ef38a457d83e36488"
+              },
+              {
+                "path": "../text-fidelity/taskpack.json",
+                "sha256": "2ac6309b001cba94cb1ec2a5e6be55223366fcaaf0246fa0154eafafc57d0fb4"
+              },
+              {
+                "path": "../text-fidelity/stages/contract.md",
+                "sha256": "4fa21594c90b0e467338520af1d9faeea8cf7d4eaea04241d0984f4a5478f772"
+              },
+              {
+                "path": "../text-fidelity/fixtures/baseline.expected.json",
+                "sha256": "421f2b8209283c4aec9b441696e7a438085c07deb379481a021ec3947048f257"
+              },
+              {
+                "path": "../text-fidelity/fixtures/baseline.input.json",
+                "sha256": "be8d970139db935be2ea869956136f7ab42eb96cf2354ba24360ab6b17cf7950"
+              },
+              {
+                "path": "../text-fidelity/fixtures/s1.expected.json",
+                "sha256": "6d56722dec2dcc1d3accf127521d105f85a251ca484548dd2ead783a92162f80"
+              },
+              {
+                "path": "../text-fidelity/fixtures/s1.input.json",
+                "sha256": "1c46184326a7d2335f85befbdc07726b48c8d90e9535cb0d28416831da66f35b"
+              },
+              {
+                "path": "../text-fidelity/fixtures/s2.expected.json",
+                "sha256": "7eef7800e4479f4d8afa974dfe18e2bef42daa806d166d6260c00a3270641dc2"
+              },
+              {
+                "path": "../text-fidelity/fixtures/s2.input.json",
+                "sha256": "a747fed3af561598ccf6bd76c8c0454f5a5bf963fe2ca29637ac31fc06b2af63"
+              },
+              {
+                "path": "../text-fidelity/fixtures/s3.expected.json",
+                "sha256": "77c1e523530680d674f4d3824216ce95ae9c87623d1325cab5c1dff815b7397c"
+              },
+              {
+                "path": "../text-fidelity/fixtures/s3.input.json",
+                "sha256": "6bbecf7084ec490c3d086696729d0c3d0be2c1fa90411582e7b548036bac1a5e"
+              }
+            ]
+          },
+          "oracle": {
+            "command": [
+              "python3",
+              "research/real-world-maintenance/taskpacks/v1/text-fidelity/grade_candidate.py",
+              "--candidate",
+              "{candidate}",
+              "--language",
+              "ailang",
+              "--stage",
+              "1",
+              "--output",
+              "{output}",
+              "--expected-source-digest",
+              "{candidateDigest}",
+              "--command-prefix-json",
+              "{commandPrefixJSON}",
+              "--containment-qualified",
+              "{containmentDigest}"
+            ],
+            "files": [
+              {
+                "path": "../text-fidelity/grade_candidate.py",
+                "sha256": "259b819fcdee8cbfe37c72a26ae9da2521a56688564b44cc72c21cde33071426"
+              },
+              {
+                "path": "../candidate_grade.py",
+                "sha256": "67f59738b2ef4e730269d71b6c00c09a5a2d88ef5aed4d35f03cf9d32a36e43f"
+              },
+              {
+                "path": "../text-fidelity/qualify.py",
+                "sha256": "a942bed0a8c40025fcc8b90e40fc6576653ef58a3148d85ef38a457d83e36488"
+              },
+              {
+                "path": "../text-fidelity/taskpack.json",
+                "sha256": "2ac6309b001cba94cb1ec2a5e6be55223366fcaaf0246fa0154eafafc57d0fb4"
+              },
+              {
+                "path": "../text-fidelity/stages/contract.md",
+                "sha256": "4fa21594c90b0e467338520af1d9faeea8cf7d4eaea04241d0984f4a5478f772"
+              },
+              {
+                "path": "../text-fidelity/fixtures/baseline.expected.json",
+                "sha256": "421f2b8209283c4aec9b441696e7a438085c07deb379481a021ec3947048f257"
+              },
+              {
+                "path": "../text-fidelity/fixtures/baseline.input.json",
+                "sha256": "be8d970139db935be2ea869956136f7ab42eb96cf2354ba24360ab6b17cf7950"
+              },
+              {
+                "path": "../text-fidelity/fixtures/s1.expected.json",
+                "sha256": "6d56722dec2dcc1d3accf127521d105f85a251ca484548dd2ead783a92162f80"
+              },
+              {
+                "path": "../text-fidelity/fixtures/s1.input.json",
+                "sha256": "1c46184326a7d2335f85befbdc07726b48c8d90e9535cb0d28416831da66f35b"
+              },
+              {
+                "path": "../text-fidelity/fixtures/s2.expected.json",
+                "sha256": "7eef7800e4479f4d8afa974dfe18e2bef42daa806d166d6260c00a3270641dc2"
+              },
+              {
+                "path": "../text-fidelity/fixtures/s2.input.json",
+                "sha256": "a747fed3af561598ccf6bd76c8c0454f5a5bf963fe2ca29637ac31fc06b2af63"
+              },
+              {
+                "path": "../text-fidelity/fixtures/s3.expected.json",
+                "sha256": "77c1e523530680d674f4d3824216ce95ae9c87623d1325cab5c1dff815b7397c"
+              },
+              {
+                "path": "../text-fidelity/fixtures/s3.input.json",
+                "sha256": "6bbecf7084ec490c3d086696729d0c3d0be2c1fa90411582e7b548036bac1a5e"
+              }
+            ]
+          }
+        },
+        {
+          "id": "S2",
+          "request": {
+            "path": "../text-fidelity/stages/s2.md",
+            "sha256": "2c18cc2b87988c91c49f3b3aa7a2a8fc74052e65ad16c369db1d080b08c934f4"
+          },
+          "publicCheck": {
+            "command": [
+              "python3",
+              "research/real-world-maintenance/taskpacks/v1/text-fidelity/grade_candidate.py",
+              "--candidate",
+              "{candidate}",
+              "--language",
+              "ailang",
+              "--stage",
+              "2",
+              "--output",
+              "{output}",
+              "--expected-source-digest",
+              "{candidateDigest}",
+              "--command-prefix-json",
+              "{commandPrefixJSON}",
+              "--containment-qualified",
+              "{containmentDigest}"
+            ],
+            "files": [
+              {
+                "path": "../text-fidelity/grade_candidate.py",
+                "sha256": "259b819fcdee8cbfe37c72a26ae9da2521a56688564b44cc72c21cde33071426"
+              },
+              {
+                "path": "../candidate_grade.py",
+                "sha256": "67f59738b2ef4e730269d71b6c00c09a5a2d88ef5aed4d35f03cf9d32a36e43f"
+              },
+              {
+                "path": "../text-fidelity/qualify.py",
+                "sha256": "a942bed0a8c40025fcc8b90e40fc6576653ef58a3148d85ef38a457d83e36488"
+              },
+              {
+                "path": "../text-fidelity/taskpack.json",
+                "sha256": "2ac6309b001cba94cb1ec2a5e6be55223366fcaaf0246fa0154eafafc57d0fb4"
+              },
+              {
+                "path": "../text-fidelity/stages/contract.md",
+                "sha256": "4fa21594c90b0e467338520af1d9faeea8cf7d4eaea04241d0984f4a5478f772"
+              },
+              {
+                "path": "../text-fidelity/fixtures/baseline.expected.json",
+                "sha256": "421f2b8209283c4aec9b441696e7a438085c07deb379481a021ec3947048f257"
+              },
+              {
+                "path": "../text-fidelity/fixtures/baseline.input.json",
+                "sha256": "be8d970139db935be2ea869956136f7ab42eb96cf2354ba24360ab6b17cf7950"
+              },
+              {
+                "path": "../text-fidelity/fixtures/s1.expected.json",
+                "sha256": "6d56722dec2dcc1d3accf127521d105f85a251ca484548dd2ead783a92162f80"
+              },
+              {
+                "path": "../text-fidelity/fixtures/s1.input.json",
+                "sha256": "1c46184326a7d2335f85befbdc07726b48c8d90e9535cb0d28416831da66f35b"
+              },
+              {
+                "path": "../text-fidelity/fixtures/s2.expected.json",
+                "sha256": "7eef7800e4479f4d8afa974dfe18e2bef42daa806d166d6260c00a3270641dc2"
+              },
+              {
+                "path": "../text-fidelity/fixtures/s2.input.json",
+                "sha256": "a747fed3af561598ccf6bd76c8c0454f5a5bf963fe2ca29637ac31fc06b2af63"
+              },
+              {
+                "path": "../text-fidelity/fixtures/s3.expected.json",
+                "sha256": "77c1e523530680d674f4d3824216ce95ae9c87623d1325cab5c1dff815b7397c"
+              },
+              {
+                "path": "../text-fidelity/fixtures/s3.input.json",
+                "sha256": "6bbecf7084ec490c3d086696729d0c3d0be2c1fa90411582e7b548036bac1a5e"
+              }
+            ]
+          },
+          "oracle": {
+            "command": [
+              "python3",
+              "research/real-world-maintenance/taskpacks/v1/text-fidelity/grade_candidate.py",
+              "--candidate",
+              "{candidate}",
+              "--language",
+              "ailang",
+              "--stage",
+              "2",
+              "--output",
+              "{output}",
+              "--expected-source-digest",
+              "{candidateDigest}",
+              "--command-prefix-json",
+              "{commandPrefixJSON}",
+              "--containment-qualified",
+              "{containmentDigest}"
+            ],
+            "files": [
+              {
+                "path": "../text-fidelity/grade_candidate.py",
+                "sha256": "259b819fcdee8cbfe37c72a26ae9da2521a56688564b44cc72c21cde33071426"
+              },
+              {
+                "path": "../candidate_grade.py",
+                "sha256": "67f59738b2ef4e730269d71b6c00c09a5a2d88ef5aed4d35f03cf9d32a36e43f"
+              },
+              {
+                "path": "../text-fidelity/qualify.py",
+                "sha256": "a942bed0a8c40025fcc8b90e40fc6576653ef58a3148d85ef38a457d83e36488"
+              },
+              {
+                "path": "../text-fidelity/taskpack.json",
+                "sha256": "2ac6309b001cba94cb1ec2a5e6be55223366fcaaf0246fa0154eafafc57d0fb4"
+              },
+              {
+                "path": "../text-fidelity/stages/contract.md",
+                "sha256": "4fa21594c90b0e467338520af1d9faeea8cf7d4eaea04241d0984f4a5478f772"
+              },
+              {
+                "path": "../text-fidelity/fixtures/baseline.expected.json",
+                "sha256": "421f2b8209283c4aec9b441696e7a438085c07deb379481a021ec3947048f257"
+              },
+              {
+                "path": "../text-fidelity/fixtures/baseline.input.json",
+                "sha256": "be8d970139db935be2ea869956136f7ab42eb96cf2354ba24360ab6b17cf7950"
+              },
+              {
+                "path": "../text-fidelity/fixtures/s1.expected.json",
+                "sha256": "6d56722dec2dcc1d3accf127521d105f85a251ca484548dd2ead783a92162f80"
+              },
+              {
+                "path": "../text-fidelity/fixtures/s1.input.json",
+                "sha256": "1c46184326a7d2335f85befbdc07726b48c8d90e9535cb0d28416831da66f35b"
+              },
+              {
+                "path": "../text-fidelity/fixtures/s2.expected.json",
+                "sha256": "7eef7800e4479f4d8afa974dfe18e2bef42daa806d166d6260c00a3270641dc2"
+              },
+              {
+                "path": "../text-fidelity/fixtures/s2.input.json",
+                "sha256": "a747fed3af561598ccf6bd76c8c0454f5a5bf963fe2ca29637ac31fc06b2af63"
+              },
+              {
+                "path": "../text-fidelity/fixtures/s3.expected.json",
+                "sha256": "77c1e523530680d674f4d3824216ce95ae9c87623d1325cab5c1dff815b7397c"
+              },
+              {
+                "path": "../text-fidelity/fixtures/s3.input.json",
+                "sha256": "6bbecf7084ec490c3d086696729d0c3d0be2c1fa90411582e7b548036bac1a5e"
+              }
+            ]
+          }
+        },
+        {
+          "id": "S3",
+          "request": {
+            "path": "../text-fidelity/stages/s3.md",
+            "sha256": "f7ad1e59d9660b7f576d151e521583daa444f90238c88d376838485b6952022f"
+          },
+          "publicCheck": {
+            "command": [
+              "python3",
+              "research/real-world-maintenance/taskpacks/v1/text-fidelity/grade_candidate.py",
+              "--candidate",
+              "{candidate}",
+              "--language",
+              "ailang",
+              "--stage",
+              "3",
+              "--output",
+              "{output}",
+              "--expected-source-digest",
+              "{candidateDigest}",
+              "--command-prefix-json",
+              "{commandPrefixJSON}",
+              "--containment-qualified",
+              "{containmentDigest}"
+            ],
+            "files": [
+              {
+                "path": "../text-fidelity/grade_candidate.py",
+                "sha256": "259b819fcdee8cbfe37c72a26ae9da2521a56688564b44cc72c21cde33071426"
+              },
+              {
+                "path": "../candidate_grade.py",
+                "sha256": "67f59738b2ef4e730269d71b6c00c09a5a2d88ef5aed4d35f03cf9d32a36e43f"
+              },
+              {
+                "path": "../text-fidelity/qualify.py",
+                "sha256": "a942bed0a8c40025fcc8b90e40fc6576653ef58a3148d85ef38a457d83e36488"
+              },
+              {
+                "path": "../text-fidelity/taskpack.json",
+                "sha256": "2ac6309b001cba94cb1ec2a5e6be55223366fcaaf0246fa0154eafafc57d0fb4"
+              },
+              {
+                "path": "../text-fidelity/stages/contract.md",
+                "sha256": "4fa21594c90b0e467338520af1d9faeea8cf7d4eaea04241d0984f4a5478f772"
+              },
+              {
+                "path": "../text-fidelity/fixtures/baseline.expected.json",
+                "sha256": "421f2b8209283c4aec9b441696e7a438085c07deb379481a021ec3947048f257"
+              },
+              {
+                "path": "../text-fidelity/fixtures/baseline.input.json",
+                "sha256": "be8d970139db935be2ea869956136f7ab42eb96cf2354ba24360ab6b17cf7950"
+              },
+              {
+                "path": "../text-fidelity/fixtures/s1.expected.json",
+                "sha256": "6d56722dec2dcc1d3accf127521d105f85a251ca484548dd2ead783a92162f80"
+              },
+              {
+                "path": "../text-fidelity/fixtures/s1.input.json",
+                "sha256": "1c46184326a7d2335f85befbdc07726b48c8d90e9535cb0d28416831da66f35b"
+              },
+              {
+                "path": "../text-fidelity/fixtures/s2.expected.json",
+                "sha256": "7eef7800e4479f4d8afa974dfe18e2bef42daa806d166d6260c00a3270641dc2"
+              },
+              {
+                "path": "../text-fidelity/fixtures/s2.input.json",
+                "sha256": "a747fed3af561598ccf6bd76c8c0454f5a5bf963fe2ca29637ac31fc06b2af63"
+              },
+              {
+                "path": "../text-fidelity/fixtures/s3.expected.json",
+                "sha256": "77c1e523530680d674f4d3824216ce95ae9c87623d1325cab5c1dff815b7397c"
+              },
+              {
+                "path": "../text-fidelity/fixtures/s3.input.json",
+                "sha256": "6bbecf7084ec490c3d086696729d0c3d0be2c1fa90411582e7b548036bac1a5e"
+              }
+            ]
+          },
+          "oracle": {
+            "command": [
+              "python3",
+              "research/real-world-maintenance/taskpacks/v1/text-fidelity/grade_candidate.py",
+              "--candidate",
+              "{candidate}",
+              "--language",
+              "ailang",
+              "--stage",
+              "3",
+              "--output",
+              "{output}",
+              "--expected-source-digest",
+              "{candidateDigest}",
+              "--command-prefix-json",
+              "{commandPrefixJSON}",
+              "--containment-qualified",
+              "{containmentDigest}"
+            ],
+            "files": [
+              {
+                "path": "../text-fidelity/grade_candidate.py",
+                "sha256": "259b819fcdee8cbfe37c72a26ae9da2521a56688564b44cc72c21cde33071426"
+              },
+              {
+                "path": "../candidate_grade.py",
+                "sha256": "67f59738b2ef4e730269d71b6c00c09a5a2d88ef5aed4d35f03cf9d32a36e43f"
+              },
+              {
+                "path": "../text-fidelity/qualify.py",
+                "sha256": "a942bed0a8c40025fcc8b90e40fc6576653ef58a3148d85ef38a457d83e36488"
+              },
+              {
+                "path": "../text-fidelity/taskpack.json",
+                "sha256": "2ac6309b001cba94cb1ec2a5e6be55223366fcaaf0246fa0154eafafc57d0fb4"
+              },
+              {
+                "path": "../text-fidelity/stages/contract.md",
+                "sha256": "4fa21594c90b0e467338520af1d9faeea8cf7d4eaea04241d0984f4a5478f772"
+              },
+              {
+                "path": "../text-fidelity/fixtures/baseline.expected.json",
+                "sha256": "421f2b8209283c4aec9b441696e7a438085c07deb379481a021ec3947048f257"
+              },
+              {
+                "path": "../text-fidelity/fixtures/baseline.input.json",
+                "sha256": "be8d970139db935be2ea869956136f7ab42eb96cf2354ba24360ab6b17cf7950"
+              },
+              {
+                "path": "../text-fidelity/fixtures/s1.expected.json",
+                "sha256": "6d56722dec2dcc1d3accf127521d105f85a251ca484548dd2ead783a92162f80"
+              },
+              {
+                "path": "../text-fidelity/fixtures/s1.input.json",
+                "sha256": "1c46184326a7d2335f85befbdc07726b48c8d90e9535cb0d28416831da66f35b"
+              },
+              {
+                "path": "../text-fidelity/fixtures/s2.expected.json",
+                "sha256": "7eef7800e4479f4d8afa974dfe18e2bef42daa806d166d6260c00a3270641dc2"
+              },
+              {
+                "path": "../text-fidelity/fixtures/s2.input.json",
+                "sha256": "a747fed3af561598ccf6bd76c8c0454f5a5bf963fe2ca29637ac31fc06b2af63"
+              },
+              {
+                "path": "../text-fidelity/fixtures/s3.expected.json",
+                "sha256": "77c1e523530680d674f4d3824216ce95ae9c87623d1325cab5c1dff815b7397c"
+              },
+              {
+                "path": "../text-fidelity/fixtures/s3.input.json",
+                "sha256": "6bbecf7084ec490c3d086696729d0c3d0be2c1fa90411582e7b548036bac1a5e"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "text-fidelity-2-python",
+      "starter": [
+        {
+          "path": "../text-fidelity/starter/python/main.py",
+          "destination": "main.py",
+          "sha256": "6c48b14fc251ca729a8dc77b5ab0ee5b76adf11b9d7882413164698ce7476d4e",
+          "executable": false
+        },
+        {
+          "path": "../text-fidelity/starter/python/test_text.py",
+          "destination": "test_text.py",
+          "sha256": "afcb19d7aac950c45c3f4f848629810877909f1d764646f7147b9b12152a8332",
+          "executable": false
+        }
+      ],
+      "carryFiles": [
+        "main.py",
+        "test_text.py",
+        "HANDOVER.md"
+      ],
+      "stages": [
+        {
+          "id": "S1",
+          "request": {
+            "path": "../text-fidelity/stages/s1.md",
+            "sha256": "e45de719e2c2e95c445c50f01482bf29fee67533325ab0f858354f06824bad8e"
+          },
+          "publicCheck": {
+            "command": [
+              "python3",
+              "research/real-world-maintenance/taskpacks/v1/text-fidelity/grade_candidate.py",
+              "--candidate",
+              "{candidate}",
+              "--language",
+              "python",
+              "--stage",
+              "1",
+              "--output",
+              "{output}",
+              "--expected-source-digest",
+              "{candidateDigest}",
+              "--command-prefix-json",
+              "{commandPrefixJSON}",
+              "--containment-qualified",
+              "{containmentDigest}"
+            ],
+            "files": [
+              {
+                "path": "../text-fidelity/grade_candidate.py",
+                "sha256": "259b819fcdee8cbfe37c72a26ae9da2521a56688564b44cc72c21cde33071426"
+              },
+              {
+                "path": "../candidate_grade.py",
+                "sha256": "67f59738b2ef4e730269d71b6c00c09a5a2d88ef5aed4d35f03cf9d32a36e43f"
+              },
+              {
+                "path": "../text-fidelity/qualify.py",
+                "sha256": "a942bed0a8c40025fcc8b90e40fc6576653ef58a3148d85ef38a457d83e36488"
+              },
+              {
+                "path": "../text-fidelity/taskpack.json",
+                "sha256": "2ac6309b001cba94cb1ec2a5e6be55223366fcaaf0246fa0154eafafc57d0fb4"
+              },
+              {
+                "path": "../text-fidelity/stages/contract.md",
+                "sha256": "4fa21594c90b0e467338520af1d9faeea8cf7d4eaea04241d0984f4a5478f772"
+              },
+              {
+                "path": "../text-fidelity/fixtures/baseline.expected.json",
+                "sha256": "421f2b8209283c4aec9b441696e7a438085c07deb379481a021ec3947048f257"
+              },
+              {
+                "path": "../text-fidelity/fixtures/baseline.input.json",
+                "sha256": "be8d970139db935be2ea869956136f7ab42eb96cf2354ba24360ab6b17cf7950"
+              },
+              {
+                "path": "../text-fidelity/fixtures/s1.expected.json",
+                "sha256": "6d56722dec2dcc1d3accf127521d105f85a251ca484548dd2ead783a92162f80"
+              },
+              {
+                "path": "../text-fidelity/fixtures/s1.input.json",
+                "sha256": "1c46184326a7d2335f85befbdc07726b48c8d90e9535cb0d28416831da66f35b"
+              },
+              {
+                "path": "../text-fidelity/fixtures/s2.expected.json",
+                "sha256": "7eef7800e4479f4d8afa974dfe18e2bef42daa806d166d6260c00a3270641dc2"
+              },
+              {
+                "path": "../text-fidelity/fixtures/s2.input.json",
+                "sha256": "a747fed3af561598ccf6bd76c8c0454f5a5bf963fe2ca29637ac31fc06b2af63"
+              },
+              {
+                "path": "../text-fidelity/fixtures/s3.expected.json",
+                "sha256": "77c1e523530680d674f4d3824216ce95ae9c87623d1325cab5c1dff815b7397c"
+              },
+              {
+                "path": "../text-fidelity/fixtures/s3.input.json",
+                "sha256": "6bbecf7084ec490c3d086696729d0c3d0be2c1fa90411582e7b548036bac1a5e"
+              }
+            ]
+          },
+          "oracle": {
+            "command": [
+              "python3",
+              "research/real-world-maintenance/taskpacks/v1/text-fidelity/grade_candidate.py",
+              "--candidate",
+              "{candidate}",
+              "--language",
+              "python",
+              "--stage",
+              "1",
+              "--output",
+              "{output}",
+              "--expected-source-digest",
+              "{candidateDigest}",
+              "--command-prefix-json",
+              "{commandPrefixJSON}",
+              "--containment-qualified",
+              "{containmentDigest}"
+            ],
+            "files": [
+              {
+                "path": "../text-fidelity/grade_candidate.py",
+                "sha256": "259b819fcdee8cbfe37c72a26ae9da2521a56688564b44cc72c21cde33071426"
+              },
+              {
+                "path": "../candidate_grade.py",
+                "sha256": "67f59738b2ef4e730269d71b6c00c09a5a2d88ef5aed4d35f03cf9d32a36e43f"
+              },
+              {
+                "path": "../text-fidelity/qualify.py",
+                "sha256": "a942bed0a8c40025fcc8b90e40fc6576653ef58a3148d85ef38a457d83e36488"
+              },
+              {
+                "path": "../text-fidelity/taskpack.json",
+                "sha256": "2ac6309b001cba94cb1ec2a5e6be55223366fcaaf0246fa0154eafafc57d0fb4"
+              },
+              {
+                "path": "../text-fidelity/stages/contract.md",
+                "sha256": "4fa21594c90b0e467338520af1d9faeea8cf7d4eaea04241d0984f4a5478f772"
+              },
+              {
+                "path": "../text-fidelity/fixtures/baseline.expected.json",
+                "sha256": "421f2b8209283c4aec9b441696e7a438085c07deb379481a021ec3947048f257"
+              },
+              {
+                "path": "../text-fidelity/fixtures/baseline.input.json",
+                "sha256": "be8d970139db935be2ea869956136f7ab42eb96cf2354ba24360ab6b17cf7950"
+              },
+              {
+                "path": "../text-fidelity/fixtures/s1.expected.json",
+                "sha256": "6d56722dec2dcc1d3accf127521d105f85a251ca484548dd2ead783a92162f80"
+              },
+              {
+                "path": "../text-fidelity/fixtures/s1.input.json",
+                "sha256": "1c46184326a7d2335f85befbdc07726b48c8d90e9535cb0d28416831da66f35b"
+              },
+              {
+                "path": "../text-fidelity/fixtures/s2.expected.json",
+                "sha256": "7eef7800e4479f4d8afa974dfe18e2bef42daa806d166d6260c00a3270641dc2"
+              },
+              {
+                "path": "../text-fidelity/fixtures/s2.input.json",
+                "sha256": "a747fed3af561598ccf6bd76c8c0454f5a5bf963fe2ca29637ac31fc06b2af63"
+              },
+              {
+                "path": "../text-fidelity/fixtures/s3.expected.json",
+                "sha256": "77c1e523530680d674f4d3824216ce95ae9c87623d1325cab5c1dff815b7397c"
+              },
+              {
+                "path": "../text-fidelity/fixtures/s3.input.json",
+                "sha256": "6bbecf7084ec490c3d086696729d0c3d0be2c1fa90411582e7b548036bac1a5e"
+              }
+            ]
+          }
+        },
+        {
+          "id": "S2",
+          "request": {
+            "path": "../text-fidelity/stages/s2.md",
+            "sha256": "2c18cc2b87988c91c49f3b3aa7a2a8fc74052e65ad16c369db1d080b08c934f4"
+          },
+          "publicCheck": {
+            "command": [
+              "python3",
+              "research/real-world-maintenance/taskpacks/v1/text-fidelity/grade_candidate.py",
+              "--candidate",
+              "{candidate}",
+              "--language",
+              "python",
+              "--stage",
+              "2",
+              "--output",
+              "{output}",
+              "--expected-source-digest",
+              "{candidateDigest}",
+              "--command-prefix-json",
+              "{commandPrefixJSON}",
+              "--containment-qualified",
+              "{containmentDigest}"
+            ],
+            "files": [
+              {
+                "path": "../text-fidelity/grade_candidate.py",
+                "sha256": "259b819fcdee8cbfe37c72a26ae9da2521a56688564b44cc72c21cde33071426"
+              },
+              {
+                "path": "../candidate_grade.py",
+                "sha256": "67f59738b2ef4e730269d71b6c00c09a5a2d88ef5aed4d35f03cf9d32a36e43f"
+              },
+              {
+                "path": "../text-fidelity/qualify.py",
+                "sha256": "a942bed0a8c40025fcc8b90e40fc6576653ef58a3148d85ef38a457d83e36488"
+              },
+              {
+                "path": "../text-fidelity/taskpack.json",
+                "sha256": "2ac6309b001cba94cb1ec2a5e6be55223366fcaaf0246fa0154eafafc57d0fb4"
+              },
+              {
+                "path": "../text-fidelity/stages/contract.md",
+                "sha256": "4fa21594c90b0e467338520af1d9faeea8cf7d4eaea04241d0984f4a5478f772"
+              },
+              {
+                "path": "../text-fidelity/fixtures/baseline.expected.json",
+                "sha256": "421f2b8209283c4aec9b441696e7a438085c07deb379481a021ec3947048f257"
+              },
+              {
+                "path": "../text-fidelity/fixtures/baseline.input.json",
+                "sha256": "be8d970139db935be2ea869956136f7ab42eb96cf2354ba24360ab6b17cf7950"
+              },
+              {
+                "path": "../text-fidelity/fixtures/s1.expected.json",
+                "sha256": "6d56722dec2dcc1d3accf127521d105f85a251ca484548dd2ead783a92162f80"
+              },
+              {
+                "path": "../text-fidelity/fixtures/s1.input.json",
+                "sha256": "1c46184326a7d2335f85befbdc07726b48c8d90e9535cb0d28416831da66f35b"
+              },
+              {
+                "path": "../text-fidelity/fixtures/s2.expected.json",
+                "sha256": "7eef7800e4479f4d8afa974dfe18e2bef42daa806d166d6260c00a3270641dc2"
+              },
+              {
+                "path": "../text-fidelity/fixtures/s2.input.json",
+                "sha256": "a747fed3af561598ccf6bd76c8c0454f5a5bf963fe2ca29637ac31fc06b2af63"
+              },
+              {
+                "path": "../text-fidelity/fixtures/s3.expected.json",
+                "sha256": "77c1e523530680d674f4d3824216ce95ae9c87623d1325cab5c1dff815b7397c"
+              },
+              {
+                "path": "../text-fidelity/fixtures/s3.input.json",
+                "sha256": "6bbecf7084ec490c3d086696729d0c3d0be2c1fa90411582e7b548036bac1a5e"
+              }
+            ]
+          },
+          "oracle": {
+            "command": [
+              "python3",
+              "research/real-world-maintenance/taskpacks/v1/text-fidelity/grade_candidate.py",
+              "--candidate",
+              "{candidate}",
+              "--language",
+              "python",
+              "--stage",
+              "2",
+              "--output",
+              "{output}",
+              "--expected-source-digest",
+              "{candidateDigest}",
+              "--command-prefix-json",
+              "{commandPrefixJSON}",
+              "--containment-qualified",
+              "{containmentDigest}"
+            ],
+            "files": [
+              {
+                "path": "../text-fidelity/grade_candidate.py",
+                "sha256": "259b819fcdee8cbfe37c72a26ae9da2521a56688564b44cc72c21cde33071426"
+              },
+              {
+                "path": "../candidate_grade.py",
+                "sha256": "67f59738b2ef4e730269d71b6c00c09a5a2d88ef5aed4d35f03cf9d32a36e43f"
+              },
+              {
+                "path": "../text-fidelity/qualify.py",
+                "sha256": "a942bed0a8c40025fcc8b90e40fc6576653ef58a3148d85ef38a457d83e36488"
+              },
+              {
+                "path": "../text-fidelity/taskpack.json",
+                "sha256": "2ac6309b001cba94cb1ec2a5e6be55223366fcaaf0246fa0154eafafc57d0fb4"
+              },
+              {
+                "path": "../text-fidelity/stages/contract.md",
+                "sha256": "4fa21594c90b0e467338520af1d9faeea8cf7d4eaea04241d0984f4a5478f772"
+              },
+              {
+                "path": "../text-fidelity/fixtures/baseline.expected.json",
+                "sha256": "421f2b8209283c4aec9b441696e7a438085c07deb379481a021ec3947048f257"
+              },
+              {
+                "path": "../text-fidelity/fixtures/baseline.input.json",
+                "sha256": "be8d970139db935be2ea869956136f7ab42eb96cf2354ba24360ab6b17cf7950"
+              },
+              {
+                "path": "../text-fidelity/fixtures/s1.expected.json",
+                "sha256": "6d56722dec2dcc1d3accf127521d105f85a251ca484548dd2ead783a92162f80"
+              },
+              {
+                "path": "../text-fidelity/fixtures/s1.input.json",
+                "sha256": "1c46184326a7d2335f85befbdc07726b48c8d90e9535cb0d28416831da66f35b"
+              },
+              {
+                "path": "../text-fidelity/fixtures/s2.expected.json",
+                "sha256": "7eef7800e4479f4d8afa974dfe18e2bef42daa806d166d6260c00a3270641dc2"
+              },
+              {
+                "path": "../text-fidelity/fixtures/s2.input.json",
+                "sha256": "a747fed3af561598ccf6bd76c8c0454f5a5bf963fe2ca29637ac31fc06b2af63"
+              },
+              {
+                "path": "../text-fidelity/fixtures/s3.expected.json",
+                "sha256": "77c1e523530680d674f4d3824216ce95ae9c87623d1325cab5c1dff815b7397c"
+              },
+              {
+                "path": "../text-fidelity/fixtures/s3.input.json",
+                "sha256": "6bbecf7084ec490c3d086696729d0c3d0be2c1fa90411582e7b548036bac1a5e"
+              }
+            ]
+          }
+        },
+        {
+          "id": "S3",
+          "request": {
+            "path": "../text-fidelity/stages/s3.md",
+            "sha256": "f7ad1e59d9660b7f576d151e521583daa444f90238c88d376838485b6952022f"
+          },
+          "publicCheck": {
+            "command": [
+              "python3",
+              "research/real-world-maintenance/taskpacks/v1/text-fidelity/grade_candidate.py",
+              "--candidate",
+              "{candidate}",
+              "--language",
+              "python",
+              "--stage",
+              "3",
+              "--output",
+              "{output}",
+              "--expected-source-digest",
+              "{candidateDigest}",
+              "--command-prefix-json",
+              "{commandPrefixJSON}",
+              "--containment-qualified",
+              "{containmentDigest}"
+            ],
+            "files": [
+              {
+                "path": "../text-fidelity/grade_candidate.py",
+                "sha256": "259b819fcdee8cbfe37c72a26ae9da2521a56688564b44cc72c21cde33071426"
+              },
+              {
+                "path": "../candidate_grade.py",
+                "sha256": "67f59738b2ef4e730269d71b6c00c09a5a2d88ef5aed4d35f03cf9d32a36e43f"
+              },
+              {
+                "path": "../text-fidelity/qualify.py",
+                "sha256": "a942bed0a8c40025fcc8b90e40fc6576653ef58a3148d85ef38a457d83e36488"
+              },
+              {
+                "path": "../text-fidelity/taskpack.json",
+                "sha256": "2ac6309b001cba94cb1ec2a5e6be55223366fcaaf0246fa0154eafafc57d0fb4"
+              },
+              {
+                "path": "../text-fidelity/stages/contract.md",
+                "sha256": "4fa21594c90b0e467338520af1d9faeea8cf7d4eaea04241d0984f4a5478f772"
+              },
+              {
+                "path": "../text-fidelity/fixtures/baseline.expected.json",
+                "sha256": "421f2b8209283c4aec9b441696e7a438085c07deb379481a021ec3947048f257"
+              },
+              {
+                "path": "../text-fidelity/fixtures/baseline.input.json",
+                "sha256": "be8d970139db935be2ea869956136f7ab42eb96cf2354ba24360ab6b17cf7950"
+              },
+              {
+                "path": "../text-fidelity/fixtures/s1.expected.json",
+                "sha256": "6d56722dec2dcc1d3accf127521d105f85a251ca484548dd2ead783a92162f80"
+              },
+              {
+                "path": "../text-fidelity/fixtures/s1.input.json",
+                "sha256": "1c46184326a7d2335f85befbdc07726b48c8d90e9535cb0d28416831da66f35b"
+              },
+              {
+                "path": "../text-fidelity/fixtures/s2.expected.json",
+                "sha256": "7eef7800e4479f4d8afa974dfe18e2bef42daa806d166d6260c00a3270641dc2"
+              },
+              {
+                "path": "../text-fidelity/fixtures/s2.input.json",
+                "sha256": "a747fed3af561598ccf6bd76c8c0454f5a5bf963fe2ca29637ac31fc06b2af63"
+              },
+              {
+                "path": "../text-fidelity/fixtures/s3.expected.json",
+                "sha256": "77c1e523530680d674f4d3824216ce95ae9c87623d1325cab5c1dff815b7397c"
+              },
+              {
+                "path": "../text-fidelity/fixtures/s3.input.json",
+                "sha256": "6bbecf7084ec490c3d086696729d0c3d0be2c1fa90411582e7b548036bac1a5e"
+              }
+            ]
+          },
+          "oracle": {
+            "command": [
+              "python3",
+              "research/real-world-maintenance/taskpacks/v1/text-fidelity/grade_candidate.py",
+              "--candidate",
+              "{candidate}",
+              "--language",
+              "python",
+              "--stage",
+              "3",
+              "--output",
+              "{output}",
+              "--expected-source-digest",
+              "{candidateDigest}",
+              "--command-prefix-json",
+              "{commandPrefixJSON}",
+              "--containment-qualified",
+              "{containmentDigest}"
+            ],
+            "files": [
+              {
+                "path": "../text-fidelity/grade_candidate.py",
+                "sha256": "259b819fcdee8cbfe37c72a26ae9da2521a56688564b44cc72c21cde33071426"
+              },
+              {
+                "path": "../candidate_grade.py",
+                "sha256": "67f59738b2ef4e730269d71b6c00c09a5a2d88ef5aed4d35f03cf9d32a36e43f"
+              },
+              {
+                "path": "../text-fidelity/qualify.py",
+                "sha256": "a942bed0a8c40025fcc8b90e40fc6576653ef58a3148d85ef38a457d83e36488"
+              },
+              {
+                "path": "../text-fidelity/taskpack.json",
+                "sha256": "2ac6309b001cba94cb1ec2a5e6be55223366fcaaf0246fa0154eafafc57d0fb4"
+              },
+              {
+                "path": "../text-fidelity/stages/contract.md",
+                "sha256": "4fa21594c90b0e467338520af1d9faeea8cf7d4eaea04241d0984f4a5478f772"
+              },
+              {
+                "path": "../text-fidelity/fixtures/baseline.expected.json",
+                "sha256": "421f2b8209283c4aec9b441696e7a438085c07deb379481a021ec3947048f257"
+              },
+              {
+                "path": "../text-fidelity/fixtures/baseline.input.json",
+                "sha256": "be8d970139db935be2ea869956136f7ab42eb96cf2354ba24360ab6b17cf7950"
+              },
+              {
+                "path": "../text-fidelity/fixtures/s1.expected.json",
+                "sha256": "6d56722dec2dcc1d3accf127521d105f85a251ca484548dd2ead783a92162f80"
+              },
+              {
+                "path": "../text-fidelity/fixtures/s1.input.json",
+                "sha256": "1c46184326a7d2335f85befbdc07726b48c8d90e9535cb0d28416831da66f35b"
+              },
+              {
+                "path": "../text-fidelity/fixtures/s2.expected.json",
+                "sha256": "7eef7800e4479f4d8afa974dfe18e2bef42daa806d166d6260c00a3270641dc2"
+              },
+              {
+                "path": "../text-fidelity/fixtures/s2.input.json",
+                "sha256": "a747fed3af561598ccf6bd76c8c0454f5a5bf963fe2ca29637ac31fc06b2af63"
+              },
+              {
+                "path": "../text-fidelity/fixtures/s3.expected.json",
+                "sha256": "77c1e523530680d674f4d3824216ce95ae9c87623d1325cab5c1dff815b7397c"
+              },
+              {
+                "path": "../text-fidelity/fixtures/s3.input.json",
+                "sha256": "6bbecf7084ec490c3d086696729d0c3d0be2c1fa90411582e7b548036bac1a5e"
+              }
+            ]
+          }
+        }
+      ]
+    }
+  ],
+  "protectedRoots": [
+    "../../../../.."
+  ],
+  "limits": {
+    "maxTrajectories": 8,
+    "maxStages": 24,
+    "maxStageSeconds": 120,
+    "maxCampaignSeconds": 3600,
+    "maxRequests": 240,
+    "maxTokens": 240000
+  },
+  "isolation": {
+    "backend": "pi",
+    "status": "unqualified",
+    "policyDigest": "3c519c95279087db9967015646e5dc1a2bac0db2af6d2a7cc31dfea2d30670c8"
+  },
+  "plan": {
+    "path": "development.plan.json",
+    "sha256": "28b7fed29d3004d2e7927252faa453db266cc4c9281a4abe4caca9432472625b"
+  }
+}

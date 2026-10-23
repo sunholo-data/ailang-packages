@@ -1,0 +1,38 @@
+module sunholo/maintenance_ledger_source/main
+import pkg/sunholo/maintenance_bench/ledger_report (analyseRuns)
+import pkg/sunholo/maintenance_bench/snapshot_io (writeNew)
+import std/fs (readFileResult)
+import std/result (Ok, Err)
+import std/env (getArgs)
+import std/io (println, eprintln, exit)
+
+func fail(message: string) -> () ! {IO} {
+  eprintln(message)
+  exit(1)
+}
+
+func analyse(plan: string, runs: string, usage: string, compiler: string, output: string) -> () ! {IO, FS} =
+  match readFileResult(plan) {
+    Err(e) => fail(e),
+    Ok(p) => match readFileResult(runs) {
+      Err(e) => fail(e),
+      Ok(r) => match readFileResult(usage) {
+        Err(e) => fail(e),
+        Ok(u) => match analyseRuns(p, r, u, compiler) {
+          Err(e) => fail(e),
+          Ok(a) => match writeNew(output, "${a.json}\n") {
+            Err(e) => fail(e),
+            Ok(_) => println("wrote ${output}")
+          }
+        }
+      }
+    }
+  }
+
+export func main() -> () ! {IO, FS, Env} = match getArgs() {
+  [p, r, u, c, o] => analyse(p, r, u, c, o),
+  _ => {
+    eprintln("usage: main.ail PLAN RUNS USAGE DECLARED_COMPILER NEW_OUTPUT")
+    exit(2)
+  }
+}
