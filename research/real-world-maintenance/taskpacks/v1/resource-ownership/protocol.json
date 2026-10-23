@@ -1,0 +1,20 @@
+{
+  "schema": "maintenance.resource-ownership/1",
+  "role": "public-development-adaptation",
+  "transport": "One JSON input file and writable resource directory as two CLI arguments. One JSON output object with results in operation order.",
+  "extract": {"op":"extract","doc":"unique-active-document-id","cap":16,"images":[{"name":"consumer-visible-name","bytes":"canonical-base64"}]},
+  "batch": {"op":"batch","cap":16,"docs":[{"doc":"document-id","images":[]}]},
+  "read": {"op":"read","doc":"document-id"},
+  "release": {"op":"release","doc":"document-id"},
+  "limits": {"operations":64,"images_per_document":16,"decoded_bytes_per_document":16777216},
+  "obligations": [
+    "Input image bytes are authoritative. Different documents and repeated names never alias mutable storage.",
+    "Active document IDs are unique; duplicate extraction returns document_exists without modifying the active document.",
+    "Reads return original bytes in image order. Missing or released document reads return document_missing.",
+    "S0 inline bytes; S1 onward file references have null inline bytes and unique paths under the supplied resource directory.",
+    "S2 batch returns one extraction result per document. A document exceeding cap fails byte_cap atomically before storing any resource, without undoing other successful documents.",
+    "The cap counts decoded bytes, not base64 characters, and accepts equality. Retry after a rejected document is allowed.",
+    "S3 release removes only the document's resources. Other documents remain readable even when image content is identical. Released IDs may be reused.",
+    "No concurrency, deduplication optimization, RSS threshold, whole-platform parsing or protected-holdout claim is included."
+  ]
+}

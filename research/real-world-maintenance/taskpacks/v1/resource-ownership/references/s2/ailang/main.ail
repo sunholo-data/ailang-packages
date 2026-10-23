@@ -1,0 +1,27 @@
+module study/resource_ownership/main
+import ./engine (run)
+import std/fs (readFileResult)
+import std/env (getArgs)
+import std/result (Ok, Err)
+import std/json (encode)
+import std/io (println, exit)
+
+export func main() -> () ! {IO, FS, Env} = match getArgs() {
+  [input, root] => match readFileResult(input) {
+    Err(e) => {
+      println(e)
+      exit(1)
+    },
+    Ok(text) => match run(text, root) {
+      Err(e) => {
+        println(e)
+        exit(1)
+      },
+      Ok(value) => println(encode(value))
+    }
+  },
+  _ => {
+    println("expected input JSON and resource directory")
+    exit(1)
+  }
+}
