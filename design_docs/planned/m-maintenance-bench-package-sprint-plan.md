@@ -135,7 +135,7 @@ Files: `README.md`, `AGENT.md`, `CHANGELOG.md` with 0.1.0 entry, package metadat
 - [x] Record actual compile, named/inline test, property and SMT verified/unknown/skipped totals; run pkg quality --strict and publish --dry-run, reporting gates honestly.
 - [x] Repository metadata points to the package's actual GitHub tree path; changelog/release kind/docs/exports/effects are complete; no credentials or private transcripts in fixtures.
 - [x] Verify gh account before push, push only scoped changes to the requested repository, and create a reviewable PR using gh with exact validation evidence. Do not claim main-branch availability while only a PR exists.
-- [x] Registry upload is not performed without separate release authorisation; dry-run is not registry acceptance. Independent sprint evaluation reviews design and evidence before completion.
+- [ ] Registry upload is not performed without separate release authorisation; dry-run is not registry acceptance. Independent sprint evaluation reviews design and evidence before completion. (Final review/publication evidence is pending.)
 
 ## Example Evidence Checklist (Syntax Gate)
 
@@ -171,9 +171,9 @@ Dependencies are sequential for v0.1; no delegation is requested. Statistical in
 
 ## Handoff and Progress State
 
-Progress JSON: `.ailang/state/sprints/sprint_M-MAINTENANCE-BENCH-PACKAGE.json`. Status not_started; every passes field starts null, and execution_authorized is false. The current active sprint is left unchanged. The standard JSON creator was inspected; it imports GitHub messages and can mark message reads, so the equivalent documented schema is written directly without unrelated inbox mutations. Validate using the existing sprint-executor validator.
+Progress JSON: `.ailang/state/sprints/sprint_M-MAINTENANCE-BENCH-PACKAGE.json`. Execution is authorised and progress is in review; completed milestone evidence is recorded in the JSON. The current active sprint is left unchanged. The standard JSON creator was inspected; it imports GitHub messages and can mark message reads, so the equivalent documented schema is written directly without unrelated inbox mutations. Validate using the existing sprint-executor validator.
 
-**Next execution gate:** Mark's explicit `execute sprint` instruction, as required by the user-provided AGENTS.md work-routing table. No autonomous dispatch or implementation starts merely because this plan/JSON exists. Repository source publication is within the requested destination after implementation checks; immutable registry upload is a separate release decision.
+**Execution gate satisfied:** Mark explicitly requested sprint planning and execution in the attended session. No autonomous dispatch or implementation starts merely because this plan/JSON exists. Repository source publication is within the requested destination after implementation checks; immutable registry upload is a separate release decision.
 
 ## Execution decisions and evidence amendments
 
