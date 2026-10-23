@@ -2,7 +2,7 @@
 
 ## 0.3.0
 
-Feature candidate: checked offline level preparation and stateful block filters. Not yet published.
+Feature: checked offline level preparation and stateful block filters.
 
 - `levels`: whole-clip RMS and active-window RMS with sample peaks, frame/sample
   counts and full-scale/over-range counts. Scaled energy supports finite headroom

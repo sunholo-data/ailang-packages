@@ -341,7 +341,7 @@ and forged-clip rejection. The previous verifier constructor error on `checkSize
 is fixed in v0.54.18, where that function verifies. Larger operations still have
 unsupported-encoding skips; consult the retained version-specific quality evidence.
 
-## Offline level plans in 0.3.0 (feature candidate)
+## Offline level plans in 0.3.0
 
 `levels` is pure, offline preparation, not a microphone AGC, compressor, LUFS meter
 or true-peak limiter. It never alters the legacy `analysis.level`/`rmsGated` meaning.
