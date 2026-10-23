@@ -3,8 +3,9 @@
 A local L0 feasibility prototype for the [live-loop instrument](../../design_docs/planned/live-loop-instrument.md).
 Four original parts share a browser audio clock. Capture stays private until an
 explicit commit, and a pure AILANG planner authorizes the revision and loop boundary.
-**L0 acceptance is still open:** automated kernel/transport checks pass, but the
-browser, physical loopback, device lifecycle and soak checks have not been run here.
+**L0 acceptance is still open:** automated kernel/transport checks and a user-run
+Firefox 158 synthetic browser check pass. Physical loopback, the full device
+lifecycle matrix, 100 actual handoffs and a soak remain open.
 
 ## Run locally
 
@@ -77,9 +78,11 @@ bridge's session until Stop & reset; the UI offers that reset before a new start
 Open **Timing & feasibility notes** for render-clock messages and bridge timings.
 [The muted synthetic host check](http://127.0.0.1:8976/host-check.html) exercises the
 real browser AudioWorklets, a nonzero private tone and an acknowledged boundary
-replacement. It closes its context afterwards and displays a JSON report. It has
-not been executed in this development session: the computer-use service exposed no
-accessible browser windows. Run it on the reference laptop before accepting L0.
+replacement. It closes its context afterwards and displays a JSON report. The user
+ran it successfully in Firefox 158 at 44.1 kHz: program peak 0 before commit,
+nonzero afterwards, and 0-frame activation error. The [user-supplied report](evidence/2026-10-23/browser-firefox158-user-run.json)
+is preserved with its scope in the evidence notes. Browser coverage and physical
+device acceptance remain open.
 
 ```sh
 ailang check --package .
@@ -140,10 +143,12 @@ Loopback is the default bind. A laptop on another machine needs an explicitly
 approved private HTTPS proxy, with its exact origin passed as `--public-origin`.
 A Tailscale Serve route is persistent and exposes the metadata controls/static demo
 to authorized devices on that tailnet; setting it up is separate from running this
-local server. No public route has been created for this prototype.
+local server. The user approved a private Serve preview on port 8449 during this
+review session; its page, worklet and planner probe responded successfully over
+HTTPS. No public route has been created for this prototype.
 
-Before L0 acceptance, run the browser check and real capture/playback on the reference
-hardware, listen to four parts/replacements, measure physical loopback and deadline
+Before L0 acceptance, broaden browser coverage and run real capture/playback on the
+reference hardware, listen to four parts/replacements, measure physical loopback and deadline
 misses, test permissions/device loss/focus/suspend/reset, run at least 100 actual
 handoffs, and a 30-minute soak. Then use the measured render/worker/transfer costs to
 prioritize `sunholo/audio` 0.3.0 block processing and the minimum `music_patterns`

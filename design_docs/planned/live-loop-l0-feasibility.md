@@ -1,6 +1,7 @@
 # Live-loop L0: host prototype and measurement plan
 
-Status: prototype implemented on 2026-10-23; browser/hardware acceptance remains open.
+Status: prototype implemented on 2026-10-23; one user-run Firefox synthetic check
+passed. Full browser/device acceptance remains open.
 This implements the first experiment in the [long-term instrument plan](live-loop-instrument.md),
 not a new registry audio release. [Loop Lab](../../examples/live-loop/README.md) is a
 buildless local application with its own package root and a path dependency on the
@@ -49,13 +50,19 @@ guards and tests; raw sample arithmetic, audible quality and device timing are n
 formally proved.
 
 The kernel simulated 100 exact-frame handoffs and zero private signal in program
-output. This is not the plan's requirement for actual host/physical loopback. No
-browser window was accessible through the UI tool, so browser and listening checks
-remain unexecuted. A muted `/host-check.html` harness is included for that next check.
+output. The user then ran the real muted browser harness in Firefox 158 at
+44.1 kHz: private input peak 1, program peak 0 before commit and nonzero after,
+planned/applied frame 382530, activation error 0 frames, preparation 4 ms. The
+[user-supplied report](../../examples/live-loop/evidence/2026-10-23/browser-firefox158-user-run.json)
+is one actual browser handoff, not physical loopback or the 100-handoff acceptance
+run. The 4 ms times the harness's inline preparation, excluding worker/hash/transfer
+costs; reported output latency 28.798 ms is a browser estimate. The user also
+reported the Loop Lab working. The agent did not independently rerun browser tests.
 
 Before accepting L0:
 
-- Run the muted synthetic harness and listen to four-part playback/replacements.
+- Extend the passed Firefox synthetic check to other reference browsers/rates and
+  confirm four-part playback/replacement listening checks.
 - Measure actual browser worker load/call/transfer/preparation costs and physical
   input/output loopback, distinguishing clocks, reported latency and measured latency.
 - Exercise microphone permission rejection, focus loss, key/pointer cancellation,

@@ -1,10 +1,37 @@
 # L0 prototype evidence — 2026-10-23
 
-This is local software evidence, **not L0 acceptance**. No accessible browser
-window was available through computer use (native Chrome/Firefox returned
-`cgWindowNotFound`, and no in-app browser was available). The real browser
-synthetic harness, microphone/speaker loopback, listening, device lifecycle and
-30-minute soak remain unexecuted. No physical audio timing has been measured.
+This is software evidence, **not full L0 acceptance**. The user ran the real
+browser synthetic harness and reported Loop Lab working through the approved
+private HTTPS preview. The [supplied Firefox report](browser-firefox158-user-run.json)
+is preserved as user-run evidence; the agent did not independently rerun it.
+Physical microphone/speaker loopback, the full lifecycle matrix, 100 actual host
+handoffs and a 30-minute soak remain open. No physical audio timing has been measured.
+
+## User-run browser check
+
+The supplied report identifies Firefox 158 and a 44.1 kHz AudioContext, started at
+2026-10-23T10:50:46.926Z. Do not infer actual hardware or macOS version from the user
+agent string. One real browser handoff passed:
+
+| Observation | Reported result |
+|---|---:|
+| Private input peak | 1.0 |
+| Program peak before commit | 0.0 |
+| Captured frames | 14336 (about 325 ms at 44.1 kHz) |
+| Harness preparation | 4 ms |
+| Staged at frame | 23808 |
+| Planned / applied frame | 382530 / 382530 |
+| Activation error | 0 frames |
+| Program peak after commit | 0.203407883644104 |
+| Harness verdict | passed |
+
+This observes a nonzero private input while the measured program path stays
+silent, followed by a nonzero committed program signal at the exact planned frame.
+The harness deliberately mutes speaker output. Its preparation measurement times
+`prepareTake` inline; it does not include the application's preparation worker,
+SHA-256 or buffer-transfer costs. This is one sample, not a latency percentile or
+long-session guarantee. The reported 28.798 ms output latency is a browser estimate;
+reported base latency 0 does not establish zero physical latency.
 
 ## Toolchain and checks
 
@@ -91,7 +118,8 @@ activity outside the audio render callback.
 ## Reproduction and next evidence
 
 See the [example README](../../README.md) for commands. Raw reports are preserved
-next to this file. Run `/host-check.html` on the reference browser for a muted
-synthetic routing/render-frame report; it never opens the microphone. Then run real
-capture/playback and physical loopback checks, the device/lifecycle matrix, at least
-100 actual handoffs, and a 30-minute soak before accepting L0.
+next to this file. Repeat `/host-check.html` across the reference browsers/rates;
+it never opens the microphone. The user-run Firefox check above is the first real
+browser result. Next run real capture/playback and physical loopback checks, the
+device/lifecycle matrix, at least 100 actual handoffs, and a 30-minute soak before
+accepting L0.
