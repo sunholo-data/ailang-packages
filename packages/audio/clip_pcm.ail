@@ -1,0 +1,75 @@
+module sunholo/audio/clip_pcm
+-- Channel-preserving PCM16/WAV adapters. Pure package fallbacks use existing
+-- bytes/array primitives until shared std/audio conversions are available.
+import std/array (fromList, toList)
+import std/list (map, range, flatMap, any)
+import std/bytes (byteAt, fromInts, length as byteLength)
+import std/option (Some, None)
+import std/result (Result, Ok, Err)
+import std/math (round, floatToInt)
+import std/audio (wavFromPcm)
+import ./safety (AudioError, InvalidWav, InvalidSamples, UnsupportedFormat, ResourceLimit)
+import ./clip (Clip, ClipLimits, ChannelLayout, Mono, Stereo, channelCount, checkSize, validate, fromInterleaved, interleave)
+import ./pcm (wavInfo)
+
+export type ClippingPolicy = Reject | Saturate deriving (Eq)
+
+pure func u8(b: bytes, i: int) -> int = match byteAt(b, i) { Some(v) => v, None => 0 }
+pure func sample(b: bytes, i: int) -> float {
+  let u = u8(b, i) + 256 * u8(b, i + 1);
+  intToFloat(if u >= 32768 then u - 65536 else u) / 32768.0
+}
+
+pure func decode(b: bytes, offset: int, rate: int, layout: ChannelLayout, frames: int, limits: ClipLimits) -> Result[Clip, AudioError] =
+  match checkSize(rate, layout, frames, limits) {
+    Err(e) => Err(e),
+    Ok(total) => fromInterleaved(rate, layout, fromList(map(\i. sample(b, offset + i * 2), range(0, total))), limits)
+  }
+
+export func fromPcm16(b: bytes, rate: int, layout: ChannelLayout, limits: ClipLimits) -> Result[Clip, AudioError] ! {}
+ensures { match result { Ok(c) => c.rate == rate && c.layout == layout && c.frames * channelCount(layout) * 2 == byteLength(b), Err(_) => true } }
+{
+  let stride = 2 * channelCount(layout);
+  if byteLength(b) % stride != 0 then Err(InvalidSamples("partial PCM16 frame"))
+  else decode(b, 0, rate, layout, byteLength(b) / stride, limits)
+}
+
+export func fromWav16(b: bytes, limits: ClipLimits) -> Result[Clip, AudioError] ! {}
+ensures { match result { Ok(c) => c.frames >= 0 && c.frames <= limits.maxFrames && c.frames * channelCount(c.layout) <= limits.maxSamples, Err(_) => true } }
+{
+  match wavInfo(b) {
+    Err(e) => Err(InvalidWav(e)),
+    Ok(i) => if i.bits != 16 || (i.channels != 1 && i.channels != 2) then Err(UnsupportedFormat("clip import requires mono/stereo integer PCM16 WAV"))
+      else decode(b, i.dataOffset, i.rate, if i.channels == 1 then Mono else Stereo, i.frames, limits)
+  }
+}
+
+-- Match the legacy *32767/round/clamp convention, guarding conversion before
+-- multiplying very large finite headroom samples. Saturate does not normalize.
+pure func quantize(x: float) -> int =
+  if x >= 1.0 then 32767 else if x <= -32768.0 / 32767.0 then -32768 else floatToInt(round(x * 32767.0))
+
+export func toPcm16(c: Clip, policy: ClippingPolicy, limits: ClipLimits) -> Result[bytes, AudioError] ! {}
+ensures { match result { Ok(b) => byteLength(b) == c.frames * channelCount(c.layout) * 2, Err(_) => true } }
+{
+  match interleave(c, limits) {
+    Err(e) => Err(e),
+    Ok(samples) => {
+      let xs = toList(samples);
+      if policy == Reject && any(\x. x < -1.0 || x > 1.0, xs) then Err(InvalidSamples("PCM16 clipping rejected"))
+      else Ok(fromInts(flatMap(\x. { let v = quantize(x); let u = if v < 0 then v + 65536 else v; [u % 256, u / 256] }, xs)))
+    }
+  }
+}
+
+export func toWav16(c: Clip, policy: ClippingPolicy, limits: ClipLimits) -> Result[bytes, AudioError] ! {}
+ensures { match result { Ok(b) => byteLength(b) == 44 + c.frames * channelCount(c.layout) * 2, Err(_) => true } }
+{
+  match validate(c, limits) {
+    Err(e) => Err(e),
+    Ok(v) => if v.frames * channelCount(v.layout) > 2147483629 then Err(ResourceLimit("clip exceeds classic WAV size"))
+      else match toPcm16(v, policy, limits) {
+        Err(e) => Err(e), Ok(pcm) => Ok(wavFromPcm(pcm, v.rate, channelCount(v.layout), 16))
+      }
+  }
+}

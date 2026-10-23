@@ -1,6 +1,32 @@
 # Changelog
 
+## 0.2.0
+
+Feature: checked mono/stereo clips, channel-preserving PCM16/WAV adapters and editing.
+This release candidate groups the unpublished 0.1.1 hardening milestone with a useful
+set of offline audio features; publication is deferred until the group is reviewed.
+
+- `clip`: planar `Array[float]` clips, explicit Mono/Stereo layouts, input/output frame
+  and sample budgets, finite headroom, channel selection and interleaving. Unity
+  mono duplication and 0.5L+0.5R downmix use explicit conversion functions.
+- `edit`: gain, trim, padding, reverse, append, endpoint-defined fades, complementary
+  linear crossfades, bounded placement/mixing and equal-power mono panning. Every
+  public operation revalidates clip records; rates/layouts must match for composition.
+- `clip_pcm`: preserve both stereo channels on PCM16/WAV import and export; choose
+  Reject or Saturate clipping explicitly. In-range mono quantization keeps the old
+  *32767/round convention; decode uses /32768. Huge finite samples saturate before
+  integer conversion. Partial frames, unsupported depth/channel counts, excessive
+  allocations and malformed RIFF return typed errors.
+- Keep all v1 recipe record shapes and existing mono render behavior. Internal
+  headroom is finite but can exceed full scale; integer encoding is the explicit
+  clipping boundary. No implicit resampling or normalization is added.
+- Add InvalidClip to the new, still-unpublished AudioError type. Keep DSP pure and
+  reuse existing std/array and std/bytes; core changes are developed separately.
+
+
 ## 0.1.1
+
+Unpublished hardening milestone, included in 0.2.0.
 
 Fix: harden the mono audio boundary without changing existing valid sound samples.
 

@@ -13,6 +13,11 @@ module sunholo/audio/_smoke
 
 import std/io (println)
 import std/crypto (sha256Bytes)
+import std/array (toList)
+import std/bytes (toInts, length as byteLength)
+import ./clip (fromMono, defaultClipLimits)
+import ./edit (gain, panMono)
+import ./clip_pcm (Reject, toPcm16, toWav16, fromWav16)
 import std/list (map, range, foldl, take, zipWith)
 import std/result (Result, Ok, Err)
 import ./recipe (render, frames, renderChecked, validateRecipe)
@@ -21,7 +26,7 @@ import ./analysis (level, highpassKeepDb, lowbandDb, seam)
 import ./noise (white, rampNoise)
 import ./mix (tile, sum)
 import ./reference (loopRecipe, shotRecipe, sineWave, loopPcmSha)
-import ./safety (defaultLimits, ResourceLimit, InvalidRecipe, InvalidWav)
+import ./safety (defaultLimits, ResourceLimit, InvalidRecipe, InvalidWav, InvalidClip)
 
 -- The reference loop and one-shot as PCM hashes, and the first n samples of the one-shot as int16.
 export pure func renderProbe(n: int) -> string {
@@ -59,9 +64,9 @@ export func main() -> () ! {IO @limit=1} {
   let lv = level(sineWave(1000.0, 1.0, 48000), 0.0, 48000);
   let rmsOk = lv.rmsCdb == -283 && lv.peakCdb == 0;
   let whiteOk = absF(lag1(map(\i. white(i, 3), range(0, 20000)))) < 0.03;
-  if pinOk && wavOk && rmsOk && whiteOk && checkedProbe(0) == "true true true true"
-  then println("OK: audio reference loop PCM sha256 28ee281f...7467 (render stability), WAV round trip 480 frames, gated RMS of a full-scale 1 kHz sine -2.83 dB (sqrt(24/46)), white noise lag-1 |r| < 0.03; checked boundaries passed")
-  else println("FAIL: pin ${show(pinOk)} wav ${show(wavOk)} rms ${show(lv.rmsCdb)} peak ${show(lv.peakCdb)} white ${show(whiteOk)} checked ${checkedProbe(0)}")
+  if pinOk && wavOk && rmsOk && whiteOk && checkedProbe(0) == "true true true true" && clipProbe(0) == "true true true"
+  then println("OK: audio reference loop PCM sha256 28ee281f...7467 (render stability), WAV round trip 480 frames, gated RMS of a full-scale 1 kHz sine -2.83 dB (sqrt(24/46)), white noise lag-1 |r| < 0.03; checked boundaries and stereo clips passed")
+  else println("FAIL: pin ${show(pinOk)} wav ${show(wavOk)} rms ${show(lv.rmsCdb)} peak ${show(lv.peakCdb)} white ${show(whiteOk)} checked ${checkedProbe(0)} clips ${clipProbe(0)}")
 }
 
 
@@ -79,4 +84,31 @@ export pure func checkedProbe(n: int) -> string {
     }
   };
   "${show(pin)} ${show(budget)} ${show(invalid)} ${show(metadata)}"
+}
+
+
+-- Full stereo workflow: float clip -> gain -> pan -> PCM/WAV -> import. The
+-- expected PCM bytes are independently rounded 0.5*sqrt(0.5)*32767 = 11585.
+export pure func clipProbe(n: int) -> string {
+  let l = defaultClipLimits();
+  match fromMono(24000, [0.0, 0.25, -0.25], l) {
+    Err(_) => "mono failed",
+    Ok(c) => match gain(c, 2.0, l) {
+      Err(_) => "gain failed",
+      Ok(g) => match panMono(g, 0.0, l) {
+        Err(_) => "pan failed",
+        Ok(st) => {
+          let bytesOk = match toPcm16(st, Reject, l) { Ok(b) => toInts(b) == [0,0,0,0,65,45,65,45,191,210,191,210], _ => false };
+          let imported = match toWav16(st, Reject, l) {
+            Err(_) => false,
+            Ok(b) => byteLength(b) == 56 && (match fromWav16(b, l) {
+              Ok(out) => out.rate == 24000 && out.frames == 3 && map(toList, out.planes) == [[0.0,11585.0/32768.0,-11585.0/32768.0],[0.0,11585.0/32768.0,-11585.0/32768.0]], _ => false
+            })
+          };
+          let invalid = match gain({st | frames: n + 99}, 1.0, l) { Err(InvalidClip(_)) => true, _ => false };
+          "${show(bytesOk)} ${show(imported)} ${show(invalid)}"
+        }
+      }
+    }
+  }
 }

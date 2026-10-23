@@ -1,6 +1,6 @@
 # Audio hardening 0.1.1
 
-**Status:** Implemented and validated on `fix/audio-0.1.1`, 2026-10-23. Release candidate; not published. Core changes and Stapledon's migration are owned separately.
+**Status:** Implemented and validated on `fix/audio-0.1.1`, 2026-10-23. Historical milestone evidence, now included in the grouped 0.2.0 candidate; 0.1.1 was not published. Core changes and Stapledon's migration are owned separately.
 **Roadmap:** [First class audio support](first-class-audio-roadmap.md), first milestone.
 
 ## Result
@@ -43,4 +43,4 @@ This completes the package hardening milestone. Stereo clips, block processing, 
 
 Checked limits bound frame/list sizes and layer passes, not exact heap use or execution time. The default frame limit is 30 seconds at 48 kHz, so the historical 32-second cue requires caller-supplied limits when opting into checked rendering. Raw render/encode functions remain compatibility primitives. The reader deliberately rejects malformed WAVs and supports integer PCM metadata only; PCM16 decode returns the first channel.
 
-Release 0.1.1 is prepared for review. Publication and merging this implementation are separate from the earlier 0.1.0 merge.
+The hardening work is included in the [0.2.0 feature group](audio-clips-0.2.0.md); 0.1.1 is not a separate registry release. Publication remains deferred.

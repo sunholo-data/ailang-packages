@@ -2,13 +2,16 @@
 
 ## When to use
 
-Use this package when you need sound that is **made, not recorded**, and must come out the same
-every time:
+Use this package for deterministic mono sound synthesis and checked offline mono/stereo
+clip processing:
 - Rendering tonal sounds and textures from a small JSON recipe: sines that glide, waver and beat,
   noise through filters, envelopes, a slow swell, a soft saturation, normalised to a peak
   (`recipe`).
 - Loop authoring: `loopErrors` checks structural rules; measure the rendered join with `analysis.seam`.
-- Writing 16-bit WAVs (`pcm.wav16`) and reading them back (`pcm.wavInfo`, `pcm.pcm16Floats`).
+- Channel-preserving PCM16/WAV import/export with `clip_pcm`, explicit clipping policy,
+  and bounded planar mono/stereo clips (`clip`). The `pcm` module keeps the mono compatibility API.
+- Editing clips with gain, trim, padding, reverse, fades, crossfades, append, placement/mixing
+  and equal-power mono panning (`edit`).
 - Mixing renders into a bed or a preview: loops tiled, one-shots placed at start times (`mix`).
 - Measuring loudness offline, headless, with no audio device: peak, gated RMS, how much a
   high-pass keeps (small speakers), how much sits under a low-pass cascade (rumble guards), and a
@@ -22,16 +25,18 @@ other package; WAV headers and Ogg Opus encoding are `std/audio` (call `std/audi
 Do NOT use it for:
 - Realtime or streaming synthesis, or anything sample-accurate against a clock: it renders whole
   lists of floats.
-- Stereo or multichannel rendering (mono only; `pcm16Floats` reads the first channel of a
-  multichannel file), resampling, or compressed formats other than what `std/audio` encodes
-  (no QOA, MP3 or Vorbis; a game engine's importer usually does those).
+- Multichannel layouts beyond Mono/Stereo, resampling, or compressed input formats.
+  The recipe renderer remains mono; convert/pan its output through the clip API.
+  `std/audio` can encode supported raw PCM rates to Ogg Opus.
 - Perceptual loudness (LUFS / ITU-R BS.1770 K-weighting): the measures here are plain dBFS peak
   and RMS, with one-pole filters.
 - Speech: route TTS output through `std/audio`; this package does not generate voices.
 
 ## Units and conventions
 
-- Samples are floats in [-1, 1]; time in seconds; frequencies in Hz; levels in dBFS.
+- Recipe output is normalized around full scale [-1,1]. Clips preserve any finite float
+  headroom; integer output uses an explicit clipping policy. Time is seconds or integer
+  frame positions as stated by each API; frequencies are Hz and levels are dBFS.
 - `Recipe.rate` is the sample rate (default 48000); every time step is `i / rate`.
 - `pcm16` writes `round(x * 32767)` clamped to int16, little-endian. `pcm16Floats` reads
   `s16 / 32768`. The asymmetry is deliberate: the encode is what existing sounds were made with
@@ -140,10 +145,13 @@ loopErrors, recipeSchema, parseRecipes, parseRecipesAs, validateRecipe, renderCh
 `analysis`: levelGain, peak, rmsGated, Level, level, highpassKeepDb, lowbandDb, Seam, seam.
 `reference`: noEnv, sine, hiss, loopRecipe, shotRecipe, sineWave, loopPcmSha.
 `safety`: AudioError, RenderLimits, defaultLimits, inRange, samplesInRange, fitsWork, pcm16ByteCount, limitsValid.
+`clip`: ChannelLayout (Mono/Stereo), Clip, ClipLimits, channelCount, defaultClipLimits, checkSize, validate, create, fromMono, selectChannel, interleave, fromInterleaved, toStereo, toMono.
+`edit`: gain, trim, pad, reverse, append, fade, crossfade, mixAt, panMono.
+`clip_pcm`: ClippingPolicy (Reject/Saturate), fromPcm16, fromWav16, toPcm16, toWav16.
 
 ## Validation
 
-`ailang test --package .` runs 79 checks against closed forms and two byte pins; `_smoke.ail`
+`ailang test --package .` runs 116 checks against closed forms and two byte pins; `_smoke.ail`
 prints `OK:` and its three probes give the same bytes on `--strict-bytecode` and the interpreter.
 The first consumer, stapledons-godot, regenerates its 19 shipped WAVs byte for byte from this
 package (`make sound-synth-check`) and compares `analysis` with its GDScript loudness checks on
@@ -173,7 +181,7 @@ import pkg/sunholo/audio/pcm (wav16Checked)
 -- wav16Checked(samples, recipe.rate, limits.maxFrames) -> Result[bytes, AudioError]
 ```
 
-`AudioError` variants: `InvalidRecipe(string)`, `InvalidWav(string)`,
+`AudioError` variants: `InvalidClip(string)`, `InvalidRecipe(string)`, `InvalidWav(string)`,
 `UnsupportedFormat(string)`, `ResourceLimit(string)`, `InvalidSamples(string)`.
 Failures are ordinary Result values in both engines; no contract flag is required.
 `validateRecipe` checks programmatic records too. The raw `render`, `pcm16` and `wav16`
@@ -238,3 +246,83 @@ Real/Int models and bounded recursion: its proofs are not IEEE-754, NaN, overflo
 or cross-architecture byte-equality guarantees. The report records unsupported/missing
 postcondition skips separately from counterexamples and errors. Do not claim fully
 verified audio from a passing package quality badge.
+
+
+## Mono and stereo clips in 0.2.0
+
+`Clip = {rate: int, layout: ChannelLayout, frames: int, planes: [Array[float]]}`.
+A Mono clip has one plane; Stereo has left then right. Each plane has exactly
+`frames` samples. Empty clips contain the required number of empty planes. Samples
+must be finite, but can exceed [-1,1] internally; gain and mixing retain headroom.
+Public records can be forged, so every operation validates its input and output.
+NaNs, infinities, shape errors and numeric overflow return typed errors.
+
+`ClipLimits = {maxFrames: int, maxSamples: int}` bounds both inputs and outputs.
+`defaultClipLimits()` allows 1440000 frames and 2880000 total samples (30 seconds
+of stereo at 48 kHz). Both fields may be 0..2147483647; choose limits suitable
+for the host. A clip with f frames and c channels requires f*c <= maxSamples.
+Dimensions are checked before constructing output sample arrays. Current validation
+and array construction can use bounded temporary boxed lists; this is not an exact
+heap-byte or realtime guarantee. Rates are 1..384000 Hz; conversion is explicit.
+
+| Function | Signature and behavior |
+|---|---|
+| `channelCount` | `(layout) -> int`, 1 or 2 |
+| `checkSize` | `(rate, layout, frames, limits) -> Result[int, AudioError]`, returns validated total sample count |
+| `create` | `(rate, layout, planes, limits) -> Result[Clip, AudioError]`, validates equal plane lengths and finite samples |
+| `fromMono` | `(rate, [float], limits) -> Result[Clip, AudioError]`, bridge from recipe render output |
+| `validate` | `(clip, limits) -> Result[Clip, AudioError]`, revalidates direct record construction |
+| `selectChannel` | `(clip, index, limits) -> Result[Array[float], AudioError]`, zero-based checked selection |
+| `interleave` | `(clip, limits) -> Result[Array[float], AudioError]`, L0,R0,L1,R1 for stereo |
+| `fromInterleaved` | `(rate, layout, Array[float], limits) -> Result[Clip, AudioError]`, rejects partial frames |
+| `toStereo` | `(clip, limits) -> Result[Clip, AudioError]`, duplicates Mono at unity; Stereo is unchanged |
+| `toMono` | `(clip, limits) -> Result[Clip, AudioError]`, averages 0.5L+0.5R; Mono is unchanged |
+
+The unity duplication shares immutable arrays. `toMono` scales before adding so
+large correlated finite channels do not overflow at an intermediate sum. Neither
+conversion changes the sample rate. Pairwise composition rejects differing rates
+or layouts; it never drops a channel or resamples implicitly.
+
+All editing functions return `Result[Clip, AudioError]` and take ClipLimits last:
+
+| Function | Policy |
+|---|---|
+| `gain(c, factor, limits)` | Finite linear factor, including negative polarity inversion; rejects non-finite output |
+| `trim(c, start, end, limits)` | Integer [start,end) frame interval; empty intervals allowed |
+| `pad(c, before, after, limits)` | Nonnegative silence frames before/after |
+| `reverse(c, limits)` | Reverse frame order within every plane, preserving channel identity |
+| `append(a, b, limits)` | Consecutive clips with matching rate/layout |
+| `fade(c, fadeIn, fadeOut, limits)` | Frame counts include endpoints; 0 disables, 1 mutes the edge sample; N>=2 ramps 0..1; overlapping fades multiply |
+| `crossfade(a, b, overlap, limits)` | Complementary linear weights across N frames; N=0 appends; N=1 uses 0.5/0.5; N>=2 includes exact endpoints |
+| `mixAt(base, overlay, start, limits)` | Nonnegative frame start, sum overlaps, extend with silence; empty overlays leave the base unchanged; start still must fit limits |
+| `panMono(c, position, limits)` | Mono only, position -1..1; equal-power gains, exact hard endpoints, identical sqrt(0.5) center gains; returns Stereo |
+
+Integer output is the clipping boundary. `clip_pcm.fromPcm16(bytes, rate, layout,
+limits)` imports raw s16le, retaining every channel; `fromWav16(bytes, limits)`
+uses validated RIFF metadata and supports integer PCM16 mono/stereo. Unsupported
+metadata depths/channel counts are `UnsupportedFormat`; failures of the legacy
+RIFF parser, including unsupported format tags, are `InvalidWav` with the parser's
+reason. Empty PCM is valid. Acquisition/input bytes are bounded by the caller;
+the limits here bound decoded sample allocation.
+
+`toPcm16(c, policy, limits)` and `toWav16(c, policy, limits)` require an explicit
+`ClippingPolicy`: `Reject` refuses samples outside [-1,1]; `Saturate` clips integer
+output to int16 without peak normalization. Both use legacy *32767/round quantization
+for in-range samples (so -1 encodes as -32767), while decode uses /32768. Saturation
+handles huge finite values before integer conversion and reaches -32768 for excess
+negative input. WAV output also checks classic RIFF size limits before encoding.
+A PCM decode/encode round trip is not generally byte-identical; its sample error is
+bounded by 1/32767 + 1/32768. Full recipe PCM pins stay unchanged.
+
+From this package root, the complete stereo pipeline can be exercised with:
+
+```sh
+ailang run --quiet --relax-modules --verify-contracts --entry clipProbe --args-json 0 _smoke.ail
+ailang run --quiet --relax-modules --bytecode --strict-bytecode --verify-contracts --entry clipProbe --args-json 0 _smoke.ail
+```
+
+Both print `true true true`: independent expected PCM bytes, stereo WAV reimport,
+and forged-clip rejection. Static verification currently has an upstream constructor
+declaration error on `checkSize`; retain that error separately from skipped proofs
+and passing native/runtime-contract checks. Publication is deferred for this grouped
+release candidate. See the roadmap's 0.2.0 report for actual proof/test counts.

@@ -1,6 +1,6 @@
 # First class audio support in AILANG
 
-**Status:** Roadmap accepted in session, 2026-10-23. Package hardening (0.1.1) is implemented on `fix/audio-0.1.1`; validation is being recorded in the [hardening report](audio-hardening-0.1.1.md). Core changes are assigned to another agent. Later milestones remain planned.
+**Status:** Roadmap accepted in session, 2026-10-23. Hardening and mono/stereo clips/editing are implemented in the unpublished 0.2.0 feature group; see [hardening evidence](audio-hardening-0.1.1.md) and [clip milestone](audio-clips-0.2.0.md). Core updates are assigned to another agent. Later milestones remain planned.
 **Scope:** `sunholo/audio`, `std/audio`, and the small runtime boundaries needed by their consumers. Stapledon's game port remains with that project.
 
 AILANG already supports deterministic sound generation, audio file output, offline measurements, and AI speech output. The next step should make these facilities safe to compose: validated formats, explicit channels and rates, bounded rendering, and evidence attached to the resulting bytes. Most sound processing should live in `sunholo/audio`; common file and sample conversions belong in `std/audio`. Runtime changes should serve a measured performance need or provide access to a host device.
