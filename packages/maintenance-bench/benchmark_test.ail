@@ -1,0 +1,8 @@
+module sunholo/maintenance_bench/benchmark_test
+import ./benchmark (scaleSnapshot, measuredReport)
+import std/list (length)
+import std/result (Ok, Err)
+test "scale preserves scheduled population" { length(scaleSnapshot(24).episodes)==24 }
+test "small scale pipeline validates accounting" { match measuredReport(24) {Ok(_)=>true,_=>false} }
+test "unbounded scale is refused" { match measuredReport(10001) {Err(_)=>true,_=>false} }
+test "zero rows not reported as success" { match measuredReport(0) {Err(_)=>true,_=>false} }

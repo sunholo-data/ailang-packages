@@ -1,0 +1,21 @@
+module sunholo/maintenance_bench/verify_snapshot
+import ./codec (requiredCount, requiredText)
+import std/result (Result, Ok, Err, flatMap)
+import std/json (decode, get, Json, JArray, JNumber, JString)
+import std/option (Some, None)
+import std/list (foldl, filter, length as size)
+func equalCount(actual: Json, expected: Json, key: string) -> Result[(),string] = flatMap(\a. flatMap(\e. if a==e then Ok(()) else Err("expectation mismatch: ${key}; actual ${show(a)}, expected ${show(e)}"),requiredCount(expected,key)),requiredCount(actual,key))
+export pure func verifySnapshot(reportText: string, expectedText: string) -> Result[(),string] = flatMap(\actual. flatMap(\expected.
+ flatMap(\schema. if schema!="maintenance.expectation/1" then Err("unsupported expectation schema") else
+ match (get(actual,"groups"),get(expected,"groups")) {
+  (Some(JArray(groups)),Some(JArray(wanted)))=>
+  if size(groups)!=size(wanted) then Err("expectation mismatch: group count") else {
+   let totals=foldl(\state key. match state {Err(e)=>Err(e),Ok(_)=>equalCount(actual,expected,key)},Ok(()),["eligible","mature","censored","excluded"]);
+   match totals {Err(e)=>Err(e),Ok(_)=>foldl(\state target. match state {Err(e)=>Err(e),Ok(_)=>
+    flatMap(\repo. flatMap(\language. {
+     let matching=filter(\g. match (get(g,"repo"),get(g,"language")) {(Some(JString(r)),Some(JString(l)))=>r==repo && l==language,_=>false},groups);
+     match matching { [g]=>foldl(\acc key. match acc {Err(e)=>Err(e),Ok(_)=>equalCount(g,target,key)},Ok(()),["mature","linkedRepairChanges","knownRepairDefects","knownRepairRounds","interceptedRepairs"]), _=>Err("expectation group missing or duplicate") }
+    },requiredText(target,"language")),requiredText(target,"repo"))
+   },Ok(()),wanted)}
+  }, _=>Err("missing expected/actual groups")
+ },requiredText(expected,"schema")),decode(expectedText)),decode(reportText))

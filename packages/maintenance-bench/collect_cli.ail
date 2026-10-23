@@ -1,0 +1,18 @@
+module sunholo/maintenance_bench/collect_cli
+import ./collect_git (collectGit)
+import ./collect_github (collectGithub)
+import ./codec (encodeSnapshot)
+import ./types (Snapshot)
+import ./snapshot_io (writeNew)
+import std/result (Result, Ok, Err)
+import std/option (Some, None)
+import std/string (stringToInt)
+import std/env (getArgs)
+import std/io (println, eprintln, exit)
+func save(result: Result[Snapshot,string], path: string) -> () ! {IO,FS} = match result {Err(e)=>{eprintln(e);exit(1)},Ok(s)=>match writeNew(path,"${encodeSnapshot(s)}\n") {Err(e)=>{eprintln(e);exit(1)},Ok(_)=>println("wrote ${path}; complete=${show(s.complete)}")}}
+export func main() -> () ! {IO,FS,Env,Process} = match getArgs() {
+ ["git",path,repo,language,ref,cutoff,limit,out]=>match (stringToInt(cutoff),stringToInt(limit)) {(Some(ms),Some(n))=>save(collectGit(path,repo,language,ref,ms,n),out),_=>{eprintln("invalid integer cutoff or limit");exit(2)}},
+ ["github",repo,language,cutoff,pageSize,maxPages,out]=>match (stringToInt(cutoff),stringToInt(pageSize),stringToInt(maxPages)) {(Some(ms),Some(n),Some(pages))=>save(collectGithub(repo,language,ms,n,pages),out),_=>{eprintln("invalid integer bounds");exit(2)}},
+ ["--help"]=>println("maintenance-collect git PATH REPO LANGUAGE REF CUTOFF_MS LIMIT(1..1000) NEW_JSON\nmaintenance-collect github OWNER/REPO LANGUAGE CUTOFF_MS PAGE_SIZE(1..20) MAX_PAGES(1..5) NEW_JSON\nRead-only gh GET/Git. Bounded snapshots may be incomplete. No annotation inference."),
+ _=>{eprintln("invalid arguments; use --help");exit(2)}
+}
