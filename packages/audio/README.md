@@ -4,6 +4,11 @@ Deterministic, pure sound synthesis and measurement for AILANG: JSON recipes of 
 and filtered noise rendered to floats, checked mono/stereo clips, PCM16/WAV import/export,
 editing, mixing, and offline measurements. The same bits on the strict bytecode VM and the interpreter, on the tested host. Cross-architecture claims require their own evidence.
 
+The checked clip APIs do not depend on where samples came from: game assets,
+recordings, TTS and AI-generated audio can share the same processing pipeline.
+Procedural synthesis is included; model inference belongs to `std/ai` or provider
+adapters. Loop Lab is an application/reference consumer, not the package's domain.
+
 ```sh
 ailang install sunholo/audio
 ailang pkg-docs sunholo/audio   # AGENT.md: the recipe schema, conventions, pitfalls

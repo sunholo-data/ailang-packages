@@ -3,13 +3,20 @@
 **Status:** Roadmap accepted in session, 2026-10-23. Hardening and mono/stereo clips/editing are implemented in the 0.2.0 feature group; see [hardening evidence](audio-hardening-0.1.1.md) and [clip milestone](audio-clips-0.2.0.md). The 0.2.0 group is merged and published. Core updates were developed separately and are now released in v0.54.18; [consumer retesting](../implemented/audio-core-0.54.18/README.md) confirms the WAV fixes and resolves the imported-ADT verifier error. A [live-loop L0 host prototype](live-loop-l0-feasibility.md) is now implemented; user-run Firefox 158 passed 100 exact-frame handoffs and a 30-minute synthetic soak with background intervals. Physical/device and broader-platform acceptance remain open. Later milestones remain planned.
 **Scope:** `sunholo/audio`, `std/audio`, and the small runtime boundaries needed by their consumers. Stapledon's game port remains with that project.
 
+**Application boundary:** Loop Lab is an application and reference consumer, with
+a [proposed standalone-repository split](loop-lab-repository-split.md). Its session
+save/load, UI, device lifecycle and Live workflow are application features, not
+requirements or public types of the generic audio package. General release scope
+must also serve headless generation, AI/TTS output processing and other consumers.
+See the [generic 0.3 scope](audio-0.3-generic-scope.md).
+
 AILANG already supports deterministic sound generation, audio file output, offline measurements, and AI speech output. The next step should make these facilities safe to compose: validated formats, explicit channels and rates, bounded rendering, and evidence attached to the resulting bytes. Most sound processing should live in `sunholo/audio`; common file and sample conversions belong in `std/audio`. Runtime changes should serve a measured performance need or provide access to a host device.
 
-## Priority from the live-loop instrument
+## Reference consumer: the live-loop instrument
 
-The [long-term instrument plan](live-loop-instrument.md) makes host feasibility the
-next experiment: four-part playback, private capture, clock mapping and a minimal
-pure revision planner, before expanding the DSP API by guesswork. The local
+The [long-term instrument plan](live-loop-instrument.md) motivated the first host
+experiment: four-part playback, private capture, clock mapping and a minimal
+pure revision planner. The local
 [Loop Lab example](../../examples/live-loop/README.md) supplies that prototype and
 [measured software evidence](../../examples/live-loop/evidence/2026-10-23/README.md).
 It does not establish device latency or finish L0 acceptance. After browser/loopback
@@ -117,8 +124,9 @@ humming as other instruments/sounds, and effects. The [next musical roadmap](liv
 turns this into level planning and recovery first, a local hum-to-bass note workflow
 second, then sound patches and stateful effects. It reuses the block/state foundation
 below. Resampling remains coordinated/deferred and must not block level preparation.
-The earlier broad version ordering is a planning scaffold; the musical feature groups
-now guide delivery and candidate release boundaries.
+The musical feature groups guide the application. Generic package release
+boundaries follow [source-independent audio scope](audio-0.3-generic-scope.md),
+including game assets, speech/model output and headless processing consumers.
 
 ## Proposed roadmap
 

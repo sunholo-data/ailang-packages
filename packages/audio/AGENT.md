@@ -3,7 +3,9 @@
 ## When to use
 
 Use this package for deterministic mono sound synthesis and checked offline mono/stereo
-clip processing:
+clip processing. Clips are source-independent: procedural/game audio, imported
+recordings, TTS PCM and model-generated samples use the same checked representation.
+Provider inference and device/session handling belong to consumers or adapters.
 - Rendering tonal sounds and textures from a small JSON recipe: sines that glide, waver and beat,
   noise through filters, envelopes, a slow swell, a soft saturation, normalised to a peak
   (`recipe`).
@@ -25,14 +27,17 @@ other package; WAV headers and Ogg Opus encoding are `std/audio` (call `std/audi
 `pcm16(...)` for Opus).
 
 Do NOT use it for:
-- Realtime or streaming synthesis, or anything sample-accurate against a clock: it renders whole
-  lists of floats.
+- Realtime device I/O or a general streaming synthesis engine. Block-based level
+  measurement is available; synthesis/clip edits are offline. Host clocks and device
+  callbacks are separate from these pure APIs.
 - Multichannel layouts beyond Mono/Stereo, resampling, or compressed input formats.
   The recipe renderer remains mono; convert/pan its output through the clip API.
   `std/audio` can encode supported raw PCM rates to Ogg Opus.
 - Perceptual loudness (LUFS / ITU-R BS.1770 K-weighting): the measures here are plain dBFS peak
   and RMS, with one-pole filters.
-- Speech: route TTS output through `std/audio`; this package does not generate voices.
+- Model inference, transcription or neural voice generation. Use `std/ai`/provider
+  adapters for those effects; supported PCM/WAV speech can be imported, edited,
+  levelled and mixed here like any other audio. Use `std/audio` for shared codecs.
 
 ## Units and conventions
 

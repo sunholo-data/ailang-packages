@@ -1,0 +1,45 @@
+→ Package sunholo/live_loop_lab
+  4 source modules, 1 test files
+
+→ bytecode: 9 named-test bodies ran on the VM, 0 fell back to the evaluator; inline tests and properties run on the evaluator
+
+Test Results
+Module: sunholo/live_loop_lab
+
+Tests:
+  ✓ absolute boundary conversion covers exact and fractional cycles (3.924541ms)
+      at planner_test.ail:13:1
+  ✓ configure increments epoch and duplicate commands do not increment revision (283.25µs)
+      at planner_test.ail:18:1
+  ✓ idempotence precedes revision check within the current epoch (206.167µs)
+      at planner_test.ail:24:1
+  ✓ stale revision invalid parameter stopped and forged state are rejected (218.042µs)
+      at planner_test.ail:28:1
+  ✓ prepare uses a future boundary and refuses a second pending revision (226.5µs)
+      at planner_test.ail:35:1
+  ✓ late staging retains old track and refuses false activation (259.792µs)
+      at planner_test.ail:40:1
+  ✓ schedule then exact render acknowledgement activates once (276.875µs)
+      at planner_test.ail:46:1
+  ✓ reset rejects stale callbacks and clears pending state (238.459µs)
+      at planner_test.ail:51:1
+  ✓ JSON boundary rejects malformed missing schema fractional numbers and extra payload (243.667µs)
+      at planner_test.ail:55:1
+
+Properties:
+  ✓ next boundary never precedes a bounded arbitrary threshold (100 cases, 2.669417ms)
+      at planner_test.ail:60:1
+
+──────────────────────────────────────────────────
+✓ All tests passed!
+
+10 tests: 10 passed, 0 failed, 0 skipped (8.54671ms)
+  ✓ Passed: 10
+  ✗ Failed: 0
+
+Seed:
+  mode: derived
+  master seed: 0
+  derivation: ailang-property-seed-v1
+  replay: ailang test --seed 0 --package .
+

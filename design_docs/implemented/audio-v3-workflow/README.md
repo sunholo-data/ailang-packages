@@ -6,6 +6,11 @@ It combines the capture-ownership fixes with the existing level-plan API and add
 three usable host features. No AILANG core change or external plugin dependency
 was required. Audio package source/content is unchanged from the level-API milestone.
 
+Later [boundary/extraction validation](../audio-application-boundary/README.md)
+moves the consumer fixture into the application (five compiling files), confirms
+isolated consumer tests and clarifies generic package versus application scope.
+The four-file quality snapshot below predates that fixture relocation.
+
 ## What the user can do
 
 1. Capture privately and select Off, Peak-safe or Matched. Read the gain reason,
@@ -131,6 +136,8 @@ python3 -m unittest discover -s test -p '*_test.py'
 ailang pkg quality --json .
 ```
 
-The standalone [adapter_probe.ail](adapter_probe.ail) uses `--package-dir
-packages/audio` and relaxed modules because it is evidence source outside the
-package tree. The Node parity test supplies only bounded fixture IDs 0..17.
+The consumer-owned [adapter_probe.ail](../../../examples/live-loop/test/fixtures/adapter_probe.ail)
+uses the application's `--package-dir` and declared dependency. The Node parity
+test supplies only bounded fixture IDs 0..17 and no longer reaches into this repo's
+package source or design-document directories. A later boundary/migration report
+records the five-file app quality report after relocating this fixture.

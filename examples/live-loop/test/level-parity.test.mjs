@@ -5,9 +5,9 @@ import {fileURLToPath} from 'node:url';
 import path from 'node:path';
 import {planLevels,capturePolicy,LEVEL_CONFIG} from '../static/levels.mjs';
 import {wav16Mono} from '../static/take-workflow.mjs';
-const repo=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'../../..');
+const application=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
 function invoke(entry,index){
-  const p=spawnSync('ailang',['run','--quiet','--strict-bytecode','--verify-contracts','--relax-modules','--package-dir',path.join(repo,'packages/audio'),'--entry',entry,'--args-json',String(index),path.join(repo,'design_docs/implemented/audio-v3-workflow/adapter_probe.ail')],{cwd:repo,encoding:'utf8',timeout:10000});
+  const p=spawnSync('ailang',['run','--quiet','--strict-bytecode','--verify-contracts','--package-dir',application,'--entry',entry,'--args-json',String(index),path.join(application,'test/fixtures/adapter_probe.ail')],{cwd:application,encoding:'utf8',timeout:10000});
   assert.equal(p.status,0,p.stderr);return JSON.parse(p.stdout);
 }
 function fixture(index){

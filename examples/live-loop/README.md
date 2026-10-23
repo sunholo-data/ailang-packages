@@ -1,6 +1,8 @@
 # Loop Lab
 
-A local L0 feasibility prototype for the [live-loop instrument](../../design_docs/planned/live-loop-instrument.md).
+A local application and reference consumer for the [live-loop instrument](../../design_docs/planned/live-loop-instrument.md).
+Its [proposed standalone-repository split](../../design_docs/planned/loop-lab-repository-split.md)
+separates application releases from the source-independent audio package.
 Four original parts share a browser audio clock. Capture stays private until an
 explicit commit, and a pure AILANG planner authorizes the revision and loop boundary.
 **Earlier software host baseline passed:** user-run Firefox 158 at 44.1 kHz completed

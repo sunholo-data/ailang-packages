@@ -6,6 +6,10 @@ instruments/sounds, and effects. Version numbers are candidates, not release pro
 Related: [instrument design](live-loop-instrument.md), [audio roadmap](first-class-audio-roadmap.md),
 [capture ownership](live-loop-capture-lifecycle.md).
 
+This is an application roadmap. Loop Lab is a reference consumer with a
+[proposed own-repository boundary](loop-lab-repository-split.md); the
+[generic audio 0.3 scope](audio-0.3-generic-scope.md) independently guides package releases.
+
 Implementation checkpoint: the audio 0.3 candidate now has checked level plans;
 the local host 0.2 candidate adds private mode/gain reports, boundary-staged undo/redo
 and active committed WAV downloads for a manual Live handoff. See
