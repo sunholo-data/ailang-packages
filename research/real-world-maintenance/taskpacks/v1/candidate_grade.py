@@ -44,11 +44,20 @@ def source_files(root):
     return files
 
 
+def canonical(value):
+    """Match Go encoding/json.Marshal, including HTML and JS line separators."""
+    text = json.dumps(value, ensure_ascii=False, separators=(',', ':'))
+    for char, escaped in [('&', r'\u0026'), ('<', r'\u003c'), ('>', r'\u003e'),
+                          ('\u2028', r'\u2028'), ('\u2029', r'\u2029')]:
+        text = text.replace(char, escaped)
+    return text.encode()
+
+
 def source_digest(root):
     root = Path(root)
     rows = [dict(path=p.relative_to(root).as_posix(), sha256=digest(p),
                  executable=bool(p.stat().st_mode & 0o111)) for p in source_files(root)]
-    return hashlib.sha256(json.dumps(rows, ensure_ascii=False, separators=(',', ':')).encode()).hexdigest()
+    return hashlib.sha256(canonical(rows)).hexdigest()
 
 
 def load_module(path, name):

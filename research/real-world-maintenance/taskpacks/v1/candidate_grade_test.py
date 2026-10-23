@@ -191,5 +191,9 @@ class CandidateBridge(unittest.TestCase):
             before=out.read_bytes();self.assertNotEqual(subprocess.run(args,capture_output=True).returncode,0)
             self.assertEqual(before,out.read_bytes())
 
+    def test_canonical_matches_go_html_unicode_escaping(self):
+        wanted = ('"' + r'\u0026\u003c\u003e' + '🍉' + r'\u2028\u2029' + '"').encode()
+        self.assertEqual(grade.canonical('&<>🍉  '),wanted)
+
 
 if __name__ == '__main__': unittest.main()
