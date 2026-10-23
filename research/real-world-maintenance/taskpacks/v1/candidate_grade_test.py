@@ -206,5 +206,18 @@ class CandidateBridge(unittest.TestCase):
             self.assertEqual(report['status'],'invalid_setup')
             self.assertFalse(report['compiled'])
 
+    def test_ailang_compiled_semantic_mutation_is_not_compile_failure(self):
+        if not shutil.which('ailang'):
+            self.skipTest('AILANG native control requires installed runtime')
+        with tempfile.TemporaryDirectory() as d:
+            candidate=Path(d)/'candidate';shutil.copytree(ROOT/'text-fidelity/reference/ailang',candidate)
+            p=candidate/'main.ail';before=p.read_text();anchor='["s1", file] => run(1, "", file)'
+            self.assertIn(anchor,before)
+            p.write_text(before.replace(anchor,'["s1", file] => run(1, "internal_drop", file)'))
+            report=self.run_grade(language='ailang',source=candidate)
+            self.assertTrue(report['compiled'],report)
+            self.assertEqual(report['status'],'semantic_failure',report)
+            self.assertEqual(report['cases'][0]['mismatchIds'],['B1','B2','B4','B5','B6','B8'])
+
 
 if __name__ == '__main__': unittest.main()
