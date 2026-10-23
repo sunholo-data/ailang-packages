@@ -1,19 +1,33 @@
 # Instrument surface
 
-Palette: ink #21354A, porcelain #F5F7F8, aluminium #E6ECF0, capture #D95161,
-signal #247D80, ochre #C28D32. Avenir Next (system fallback) supplies the interface;
-tabular numerals make the transport readable. Code text is restricted to inspection.
+Source: https://www.sunholo.com/assets.html, token revision `aa420f4c1ebd`
+(September 2026 kit, retrieved 2026-10-23). The user's brand guide supersedes
+the prototype's initial teal/Avenir palette. Approved original AILANG SVG and
+Montserrat Regular/Bold are served locally with the font's SIL OFL licence.
 
-The distinctive element is a four-lane phrase score with a shared moving playhead.
-The capture area sits beside it as an open, visibly private take. Controls use the
-language of recording: hold, release, commit, cancel. Technical IDs stay in inspection.
+Palette: Paper #FFFFFF; Pale ground #F6F8FA; Ink #2C3E50; Slate #314352;
+Muted slate #526677; Action orange #BD3012. Rule #DCE3E8 is decorative only;
+meaningful control edges use muted slate. Brand orange #E73C17 is reserved for
+artwork/the original logo; ordinary links/actions use the darker action token.
 
-    transport / start / tempo / musical position
-    selected track / 16-beat lane       | private capture / waveform
-    four independent part strips       | ready take / commit boundary
-    input and program meters           | short status
-    inspection (collapsed): routing / clock / bridge measurements
+Type: Montserrat 400 for reading and controls, 700 for headings and the product
+name; system monospace for technical inspection. Sentence case, visible underlined
+links, tabular transport numerals, 44 px touch targets and visible focus.
 
-Review: this is an instrument workspace, not a landing page or a card dashboard.
-No decorative motion, external assets or font requests. Motion reports the audio clock.
-Sentence-case controls, explicit state, visible focus and reduced motion are required.
+Layout: white instrument workspace, maximum 1200 px with 32 px sides / 20 px on
+mobile. A quiet transport spans the four-lane phrase score and private capture.
+Flat supporting ground, fine rules and 3 px corners; no decorative badges/shadows.
+The logo keeps its original SVG geometry/colours, a 40 px box with 10 px clear space.
+
+    AILANG logo / Loop Lab
+    transport / play / reset / musical position
+    selected part / 16-beat lane       | private capture / waveform
+    four independent part strips      | ready take / explicit commit
+    program meter / status
+    collapsed timing / routing / browser checks
+
+Review against the brief: keep the distinctive four-part score rather than adding
+an unrelated illustration or marketing layout. Remove the initial extra part colours,
+tracked capitals and small type. Orange identifies action/selection/capture, while
+text, button states and direct part labels also convey meaning. Keep technical IDs
+in inspection. Reduced-motion users see the bar counter without a sweeping playhead.

@@ -1,4 +1,15 @@
 {
+  "evidence_schema": "ailang.verification-evidence/v1",
+  "numeric_model": {
+    "float_sort": "Real",
+    "int_sort": "Int",
+    "runtime_equivalence": "not_established"
+  },
+  "runtime_contracts": "not_measured",
+  "reason_counts": {
+    "uncontracted": 1,
+    "unsupported_encoding": 3
+  },
   "schema": "ailang.package-verify/v1",
   "package": "sunholo/live_loop_lab",
   "version": "0.1.0",
@@ -8,9 +19,12 @@
   "skipped": 3,
   "errors": 0,
   "uncontracted": 1,
-  "wall_seconds": 0.049885958,
+  "wall_seconds": 0.050012917,
   "modules": [
     {
+      "reason_counts": {
+        "uncontracted": 1
+      },
       "module": "sunholo/live_loop_lab/assets",
       "file": "assets.ail",
       "verified": 0,
@@ -20,6 +34,7 @@
       "uncontracted": 1,
       "results": [
         {
+          "reason_code": "uncontracted",
           "function": "generate",
           "status": "uncontracted",
           "reason": "no contract annotations (not a verification candidate)"
@@ -27,6 +42,9 @@
       ]
     },
     {
+      "reason_counts": {
+        "unsupported_encoding": 3
+      },
       "module": "sunholo/live_loop_lab/planner",
       "file": "planner.ail",
       "verified": 3,
@@ -36,31 +54,60 @@
       "uncontracted": 0,
       "results": [
         {
-          "function": "handle",
-          "status": "skipped",
-          "reason": "Function \"handle\" has deeply nested patterns; Function \"handle\" calls \"any\" whose signature uses an unencodable type \"*ast.FuncType\""
-        },
-        {
-          "function": "ceilDiv",
-          "status": "verified"
-        },
-        {
           "function": "nextBoundary",
           "status": "verified"
-        },
-        {
-          "function": "initial",
-          "status": "skipped",
-          "reason": "Function \"initial\" uses an unencodable builtin: std/list.range; Function \"initial\" calls \"map\" whose signature uses an unencodable type \"Option[b]\""
         },
         {
           "function": "boundaryFrame",
           "status": "verified"
         },
         {
+          "reason_code": "unsupported_encoding",
+          "rejections": [
+            {
+              "code": "UNENCODABLE_TYPE",
+              "message": "Function \"apply\" calls \"any\" whose signature uses an unencodable type \"*ast.FuncType\"",
+              "hint": "Cross-function verification cannot encode parametric ADTs (Option/Result) or type variables in a callee signature. Callees returning records/enum ADTs are also not yet inlinable and will skip. Rewrite the callee to return a primitive, or inline its logic into the caller."
+            }
+          ],
           "function": "apply",
           "status": "skipped",
           "reason": "Function \"apply\" calls \"any\" whose signature uses an unencodable type \"*ast.FuncType\""
+        },
+        {
+          "function": "ceilDiv",
+          "status": "verified"
+        },
+        {
+          "reason_code": "unsupported_encoding",
+          "rejections": [
+            {
+              "code": "UNENCODABLE_TYPE",
+              "message": "Function \"handle\" calls \"any\" whose signature uses an unencodable type \"*ast.FuncType\"",
+              "hint": "Cross-function verification cannot encode parametric ADTs (Option/Result) or type variables in a callee signature. Callees returning records/enum ADTs are also not yet inlinable and will skip. Rewrite the callee to return a primitive, or inline its logic into the caller."
+            }
+          ],
+          "function": "handle",
+          "status": "skipped",
+          "reason": "Function \"handle\" calls \"any\" whose signature uses an unencodable type \"*ast.FuncType\""
+        },
+        {
+          "reason_code": "unsupported_encoding",
+          "rejections": [
+            {
+              "code": "UNENCODABLE_TYPE",
+              "message": "Function \"initial\" uses an unencodable builtin: std/list.range",
+              "hint": "Z3 has no SMT-LIB encoding for std/list.range. Either remove its use, refactor to use a supported builtin, or narrow the function's contracts."
+            },
+            {
+              "code": "UNENCODABLE_TYPE",
+              "message": "Function \"initial\" calls \"map\" whose signature uses an unencodable type \"Option[b]\"",
+              "hint": "Cross-function verification cannot encode parametric ADTs (Option/Result) or type variables in a callee signature. Callees returning records/enum ADTs are also not yet inlinable and will skip. Rewrite the callee to return a primitive, or inline its logic into the caller."
+            }
+          ],
+          "function": "initial",
+          "status": "skipped",
+          "reason": "Function \"initial\" uses an unencodable builtin: std/list.range; Function \"initial\" calls \"map\" whose signature uses an unencodable type \"Option[b]\""
         }
       ]
     }

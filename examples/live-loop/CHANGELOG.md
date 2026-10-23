@@ -5,3 +5,7 @@
 Feature: local L0 host feasibility lab with four generated parts, private bounded capture,
 a pure AILANG revision planner, audio-render-clock acknowledgements, synthetic-input
 routing checks, and local/optional WASM bridge measurements. Never published as a package.
+
+Official local Sunholo tokens/Montserrat/AILANG logo; accessible controls and reduced-motion
+transport. Added a muted planner/worker/worklet runner for 8-handoff trials or
+100 handoffs plus a 30-minute software soak, with cancellation and epoch-scoped cleanup.

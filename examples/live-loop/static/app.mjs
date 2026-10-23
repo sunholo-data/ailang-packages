@@ -187,10 +187,10 @@ async function stop(clearNotice=true) {
   if(clearNotice)notice('Stopped. Private takes, pending changes and active recordings cleared.');
 }
 function drawWave(xs) {
-  const canvas=$('wave'),g=canvas.getContext('2d');g.clearRect(0,0,canvas.width,canvas.height);g.strokeStyle='#bacbd3';g.beginPath();g.moveTo(0,55);g.lineTo(600,55);g.stroke();
-  if(!xs)return;g.strokeStyle='#247d80';g.beginPath();for(let x=0;x<600;x++){let peak=0;const from=Math.floor(x*xs.length/600),to=Math.floor((x+1)*xs.length/600);for(let i=from;i<to;i++)peak=Math.max(peak,Math.abs(xs[i]));g.moveTo(x,55-peak*50);g.lineTo(x,55+peak*50);}g.stroke();
+  const canvas=$('wave'),g=canvas.getContext('2d');g.clearRect(0,0,canvas.width,canvas.height);g.strokeStyle='#dce3e8';g.beginPath();g.moveTo(0,55);g.lineTo(600,55);g.stroke();
+  if(!xs)return;g.strokeStyle='#314352';g.beginPath();for(let x=0;x<600;x++){let peak=0;const from=Math.floor(x*xs.length/600),to=Math.floor((x+1)*xs.length/600);for(let i=from;i<to;i++)peak=Math.max(peak,Math.abs(xs[i]));g.moveTo(x,55-peak*50);g.lineTo(x,55+peak*50);}g.stroke();
 }
-function drawMeter(peak) {drawWave(null);const g=$('wave').getContext('2d');g.fillStyle='#d95161';g.fillRect(0,48,600*peak,14);}
+function drawMeter(peak) {drawWave(null);const g=$('wave').getContext('2d');g.fillStyle='#bd3012';g.fillRect(0,48,600*peak,14);}
 function tick() {
   if(ctx&&state?.running) {
     const frame=currentFrame(),phase=Math.max(0,frame-state.origin)%(ctx.sampleRate*8);

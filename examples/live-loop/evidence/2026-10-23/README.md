@@ -35,8 +35,12 @@ reported base latency 0 does not establish zero physical latency.
 
 ## Toolchain and checks
 
-AILANG `v0.54.17-dirty`, commit `8f58117f265471584176e2aeb45996c2c9822577`,
+The initial benchmarks/browser baseline used AILANG `v0.54.17-dirty`, commit `8f58117f265471584176e2aeb45996c2c9822577`,
 built 2026-10-22. macOS 26.6.2 arm64, Python 3.13.7, Node 26.12.1.
+The current `quality.json`, `verify.json`, native and integration tests were rerun
+on `v0.54.18-dirty`, commit `19e33da02f99d9912e199dfb2c35817b88e786fe`,
+built 2026-10-23 10:59:56. The numerical benchmark samples remain the historical
+v0.54.17 measurements; they have not been relabelled as v0.54.18 performance.
 The optional current WASM binary was built from a **clean archive of that same
 commit**, not the concurrently modified core checkout, using Go 1.26.10 and its
 matching `wasm_exec.js`. Its version API reports `v0.54.17-8f58117` and its
@@ -65,12 +69,16 @@ pattern or JSON encodings; their guards execute normally and are tested.
 The effectful `generate() -> ()` has a fixed capability budget and checked WAV
 construction, but no postcondition: a vacuous Unit assertion would add no evidence.
 The smoke module passed the quality run; `handle(init)` also executed with strict
-bytecode and runtime contract checking. No whole-state-machine proof is claimed.
+bytecode and runtime contract checking on v0.54.18; its output is preserved in
+`runtime-contract-init.json`. That init probe does not measure contracts for every
+command path. No whole-state-machine proof is claimed.
 
-`host-kernel-tests.txt`: 10/10 Node tests, 0 failed/skipped. Tests cover bounded
+`host-kernel-tests.txt`: 14/14 Node tests, 0 failed/skipped. Tests cover bounded
 preparation, finite domains, four-part mixing, zero private output with nonzero
 private input, cancellation, fixed capacity, exact in-block replacement, late/stale
-rejection, malformed initialization and 100 handoffs. The clock and processor
+rejection, malformed initialization and 100 handoffs, plus four orchestration
+tests for bounded waiters, timeout/cancellation cleanup and timing-summary validity.
+The clock and processor
 base class are fakes: these exercise the actual kernel code but do not measure
 Web Audio, speaker sound, GC deadlines or device behavior.
 
@@ -123,3 +131,19 @@ it never opens the microphone. The user-run Firefox check above is the first rea
 browser result. Next run real capture/playback and physical loopback checks, the
 device/lifecycle matrix, at least 100 actual handoffs, and a 30-minute soak before
 accepting L0.
+
+## Brand update and new browser runner
+
+The user supplied the current Sunholo guide and authorized the AILANG logo. Original
+local tokens, SVG and licensed Montserrat files are preserved with SHA-256 provenance.
+HTML asset references and SVG parsing were checked; the private HTTPS preview served
+the page, SVG, both fonts, token CSS, runner module and helper module with HTTP 200
+and appropriate MIME types. The computer-use service still had no accessible browser
+window, so the updated layout has not been visually reviewed by the agent.
+
+`/soak-check.html` adds real planner/worker/worklet orchestration for 8-handoff trials
+or 100 handoffs plus 30 audio minutes. It includes worker hashing/transfer round trips,
+rotates all four tracks, rejects taking over an active session, and cleans up its own
+epoch. The agent has **not run this new runner in a browser**. The 14 Node tests do
+not stand in for that run, and the earlier single-handoff Firefox result does not
+validate this new page. Start with its short profile before the full soak.

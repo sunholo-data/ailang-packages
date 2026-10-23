@@ -12,6 +12,7 @@ lifecycle matrix, 100 actual handoffs and a soak remain open.
 Requires AILANG >=0.54.17, Python 3 (tested 3.13.7), and a browser with AudioWorklet.
 Node (tested 26.12.1) is needed only for host-kernel tests and the optional WASM probe.
 No npm install, model service, microphone access or cloud deployment is required.
+The current planner/quality checks also pass on the installed v0.54.18-dirty CLI.
 
 ```sh
 cd examples/live-loop
@@ -44,6 +45,42 @@ windows, overdub, undo, persistence or Notes/humming mode.
 The phrase lanes are schematic, not measured waveforms. The private ready take has
 its own waveform. The master meter is sample peak after final hard clamping, not
 perceptual loudness. Level is linear; live gain/pan smoothing is later work.
+
+## Sunholo / AILANG branding
+
+The interface follows https://www.sunholo.com/assets.html, token revision
+`aa420f4c1ebd`: white/slate surfaces, Montserrat and restrained action orange.
+The original AILANG SVG, official CSS/JSON tokens and Montserrat Regular/Bold
+are served locally from `static/brand/`. The font licence and downloaded-file
+hashes are included. The logo is not redrawn/recoloured and no runtime requests
+go to third-party asset/font servers. See `DESIGN.md` for the instrument layout.
+
+## Repeated handoffs and soak
+
+Open `/soak-check.html` through the same local or approved private HTTPS origin.
+This new runner has **not yet been executed in a browser**; it is provided to collect
+the remaining evidence after the passed single-handoff Firefox check.
+
+- Stop & reset Loop Lab first. The runner refuses to take over a running planner
+  session. Keep this check tab visible and the machine awake.
+- **Short:** 8 replacements across all four tracks, about one minute. Use this to
+  check the runner before spending 30 minutes on a soak.
+- **Soak:** 100 replacements, then continued rendering until 30 audio minutes have
+  elapsed from the transport origin. Only the full profile can pass that soak.
+- **Stop check:** cancels and releases its graph/worker. It resets only its own
+  planner epoch. A hidden page or suspended context interrupts the check instead
+  of producing a successful result. Refresh Loop Lab after the check finishes.
+
+The muted graph uses a private synthetic capture and the real `prepare-worker`,
+including SHA-256, then the real AILANG Prepare→Schedule→Activate bridge. It rotates
+tracks, records each planned/applied frame and staging lead, and reports worker,
+worker round-trip and CLI bridge timings. Report arrays are bounded (100 handoffs,
+100 worker samples, up to 512 bridge samples); waits cap at 8 outstanding. A short,
+interrupted or incomplete run is never presented as a passed 30-minute run.
+
+The report contains metadata only and stays on the page. No microphone permission
+is requested. This tests the software path; physical loopback, audible quality and
+the microphone/device lifecycle matrix remain separate acceptance requirements.
 
 ## Ownership and protocol
 
