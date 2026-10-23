@@ -4,6 +4,11 @@ Deterministic, pure sound synthesis and measurement for AILANG: JSON recipes of 
 and filtered noise rendered to floats, checked mono/stereo clips, PCM16/WAV import/export,
 editing, mixing, and offline measurements. The same bits on the strict bytecode VM and the interpreter, on the tested host. Cross-architecture claims require their own evidence.
 
+The checked clip APIs do not depend on where samples came from: game assets,
+recordings, TTS and AI-generated audio can share the same processing pipeline.
+Procedural synthesis is included; model inference belongs to `std/ai` or provider
+adapters. Loop Lab is an application/reference consumer, not the package's domain.
+
 ```sh
 ailang install sunholo/audio
 ailang pkg-docs sunholo/audio   # AGENT.md: the recipe schema, conventions, pitfalls
@@ -12,6 +17,10 @@ ailang pkg-docs sunholo/audio   # AGENT.md: the recipe schema, conventions, pitf
 - `clip`: validated planar mono/stereo arrays, explicit channel selection/conversion and interleaving.
 - `edit`: gain, trim, padding, reverse, append, fades, crossfades, mixAt and equal-power mono panning.
 - `clip_pcm`: channel-preserving PCM16/WAV adapters with explicit Reject/Saturate clipping policy.
+- `levels` (0.3.0): whole-signal/active-window RMS, block accumulation,
+  and explicit Off/PeakSafe/MatchRms preparation with bounded boost and peak ceilings.
+- `block` (0.3.0): checked stateful mono/stereo low-pass/high-pass/bypass,
+  independent channel histories, reset and per-block/cumulative budgets.
 - `recipe`: layers (sine with glide, vibrato, beat; white or legacy noise), envelopes, filters
   and sweeps, swell, drive, edge fades, peak normalisation; loop rules that refuse clicks.
 - `pcm`: `pcm16`, `wav16`, strict `wavInfo`, `pcm16Floats`; checked encoding and bounded decoding.
@@ -32,3 +41,11 @@ and export with `clip_pcm.toWav16` using an explicit clipping policy. Every chec
 See [AGENT.md](AGENT.md) for domains, resource limits, error variants and compatibility behavior.
 
 0.2.0 groups the clip/editing features with the 0.1.1 hardening work.
+0.3.0 adds offline level preparation and generic stateful block filters.
+It exposes gain decisions for a host-owned private preview/undo/commit flow;
+it does not add that UI or microphone gain control itself. See the
+[validation evidence](../../design_docs/implemented/audio-levels-0.3.0/README.md).
+See [block processing evidence](../../design_docs/implemented/audio-blocks-0.3.0/README.md)
+and `examples/block_pipeline.ail` for headless recipe and speech/model PCM fixtures.
+Loop Lab has [its own application repository](https://github.com/sunholo-data/ailang-loop-lab)
+and consumes this package; its UI/session features are independently versioned.

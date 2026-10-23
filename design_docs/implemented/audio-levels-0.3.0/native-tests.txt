@@ -1,0 +1,315 @@
+→ Package sunholo/audio
+  13 source modules, 11 test files
+
+→ bytecode: 134 named-test bodies ran on the VM, 0 fell back to the evaluator; inline tests and properties run on the evaluator
+
+Test Results
+Module: sunholo/audio
+
+Tests:
+  ✓ gated RMS of a full-scale 1 kHz sine is -2.83 dB (sqrt(24/46)); peak 0 dB; 1 s (39.397125ms)
+      at packages/audio/analysis_test.ail:13:1
+  ✓ a gain shifts the level by the gain (-20 dB) (35.140458ms)
+      at packages/audio/analysis_test.ail:17:1
+  ✓ levelGain is exp(db ln10 / 20) (207.125µs)
+      at packages/audio/analysis_test.ail:18:1
+  ✓ rmsGated with no gate is the plain RMS; silence gives 0 (134.459µs)
+      at packages/audio/analysis_test.ail:19:1
+  ✓ a 1 kHz sine keeps the closed-form |H| through a 150 Hz one-pole high-pass (to 0.01 dB) (30.507125ms)
+      at packages/audio/analysis_test.ail:22:1
+  ✓ the teacup guard: a 60 Hz sine keeps more than -20 dB under four 120 Hz poles, a 2 kHz sine far less (the start-up transient bounds it near -58 dB) (209.493084ms)
+      at packages/audio/analysis_test.ail:25:1
+  ✓ one pole is the plain one-pole low-pass: a 120 Hz sine keeps about -3 dB (48.888917ms)
+      at packages/audio/analysis_test.ail:28:1
+  ✓ a whole-cycle sine joins cleanly; a cut one does not (8.266417ms)
+      at packages/audio/analysis_test.ail:29:1
+  ✓ WAV import preserves both channels of independent stereo PCM (3.000709ms)
+      at packages/audio/clip_pcm_test.ail:19:1
+  ✓ raw stereo PCM import rejects partial frames and respects sample limits (345.25µs)
+      at packages/audio/clip_pcm_test.ail:25:1
+  ✓ WAV import rejects malformed input and excessive output frames (226.625µs)
+      at packages/audio/clip_pcm_test.ail:32:1
+  ✓ PCM export preserves legacy in-range mono quantization (226.625µs)
+      at packages/audio/clip_pcm_test.ail:37:1
+  ✓ stereo PCM export interleaves channels in frame order (189.208µs)
+      at packages/audio/clip_pcm_test.ail:42:1
+  ✓ clipping rejection and saturation are explicit, including huge finite samples (207.375µs)
+      at packages/audio/clip_pcm_test.ail:49:1
+  ✓ WAV export preserves stereo metadata and expected byte length (229.625µs)
+      at packages/audio/clip_pcm_test.ail:55:1
+  ✓ clip export rejects forged channels before touching sample indices (316.084µs)
+      at packages/audio/clip_pcm_test.ail:64:1
+  ✓ WAV import explicitly refuses supported metadata with unsupported depth or channels (463.75µs)
+      at packages/audio/clip_pcm_test.ail:87:1
+  ✓ mono clips allow finite headroom and empty clips (1.989333ms)
+      at packages/audio/clip_test.ail:12:1
+  ✓ clip validation rejects forged metadata and mismatched planes (432.667µs)
+      at packages/audio/clip_test.ail:17:1
+  ✓ clip dimensions reject invalid limits and total sample overflow (292.875µs)
+      at packages/audio/clip_test.ail:26:1
+  ✓ clip constructors reject NaN and both infinities (282.541µs)
+      at packages/audio/clip_test.ail:35:1
+  ✓ stereo interleaving retains distinct left and right samples (247.75µs)
+      at packages/audio/clip_test.ail:40:1
+  ✓ interleaved input rejects a partial stereo frame and the output budget (207.5µs)
+      at packages/audio/clip_test.ail:48:1
+  ✓ channel selection bounds are checked (230.708µs)
+      at packages/audio/clip_test.ail:54:1
+  ✓ unity mono duplication and average downmix have explicit coefficients (250.375µs)
+      at packages/audio/clip_test.ail:61:1
+  ✓ stereo duplication checks its larger sample budget (215µs)
+      at packages/audio/clip_test.ail:72:1
+  ✓ average downmix avoids intermediate overflow for large finite channels (235.75µs)
+      at packages/audio/clip_test.ail:76:1
+  ✓ clamp16 keeps the int16 range (3.315209ms)
+      at packages/audio/dsp_test.ail:11:1
+  ✓ dbToGain(-3) = 10^(-3/20) and dbToGain(0) = 1 (181.208µs)
+      at packages/audio/dsp_test.ail:12:1
+  ✓ gainToDb: 0 dB at 1, -6.0206 at 0.5, the -120 floor at 1e-6 (130.667µs)
+      at packages/audio/dsp_test.ail:13:1
+  ✓ centiDb rounds as snappedf: -27.0612 -> -2706, -2.825 -> -282 (floor(-282.5 + 0.5)), 0 -> 0 (134.709µs)
+      at packages/audio/dsp_test.ail:14:1
+  ✓ onePole(150, 48000) = 1 - e^(-2 pi 150 / 48000) (204.792µs)
+      at packages/audio/dsp_test.ail:15:1
+  ✓ one-pole high-pass at 150 Hz passes a 1 kHz sine at the closed-form |H| (28.053792ms)
+      at packages/audio/dsp_test.ail:19:1
+  ✓ one-pole low-pass settles to a constant input (9.208625ms)
+      at packages/audio/dsp_test.ail:26:1
+  ✓ a sweep with c0 == c1 equals the fixed low-pass (2.455166ms)
+      at packages/audio/dsp_test.ail:28:1
+  ✓ softSat keeps 0 and +-1 fixed and compresses between (170.667µs)
+      at packages/audio/dsp_test.ail:33:1
+  ✓ normalisePeak puts the peak at the dB asked; silence stays silence (152.458µs)
+      at packages/audio/dsp_test.ail:35:1
+  ✓ gain retains headroom and leaves the immutable input unchanged (3.558833ms)
+      at packages/audio/edit_test.ail:15:1
+  ✓ gain rejects nonfinite factors and nonfinite output (343.792µs)
+      at packages/audio/edit_test.ail:20:1
+  ✓ trim uses end-exclusive frames and permits an empty interval (319.959µs)
+      at packages/audio/edit_test.ail:26:1
+  ✓ padding and reverse retain both channel identities (317.5µs)
+      at packages/audio/edit_test.ail:33:1
+  ✓ padding refuses negative and excessive dimensions before building output (282.959µs)
+      at packages/audio/edit_test.ail:41:1
+  ✓ append places samples consecutively and rejects rate or layout mismatch (304.458µs)
+      at packages/audio/edit_test.ail:48:1
+  ✓ fades include exact edge endpoints and handle zero and one frame (321.916µs)
+      at packages/audio/edit_test.ail:55:1
+  ✓ crossfade uses complementary weights with explicit one-sample overlap (351.417µs)
+      at packages/audio/edit_test.ail:63:1
+  ✓ mixAt adds headroom and extends with silence (332.541µs)
+      at packages/audio/edit_test.ail:71:1
+  ✓ mix rejects rate/layout mismatch, over-budget placement and numeric overflow (711.375µs)
+      at packages/audio/edit_test.ail:78:1
+  ✓ mono panning has exact hard endpoints and equal center gains (539.959µs)
+      at packages/audio/edit_test.ail:86:1
+  ✓ all edits reject forged clip dimensions instead of indexing them (316.459µs)
+      at packages/audio/edit_test.ail:93:1
+  ✓ stereo edits reject layout mismatch and check total output samples (310.458µs)
+      at packages/audio/edit_test.ail:116:1
+  ✓ empty clip editing has explicit stable frame counts (314.917µs)
+      at packages/audio/edit_test.ail:128:1
+  ✓ empty and silent clips have zero RMS and no active frames even at zero floor (8.414041ms)
+      at packages/audio/levels_test.ail:41:1
+  ✓ DC and alternating polarity have the closed-form full RMS (980.208µs)
+      at packages/audio/levels_test.ail:47:1
+  ✓ whole-signal RMS includes silence while active-window RMS includes every sample in qualifying windows (1.46975ms)
+      at packages/audio/levels_test.ail:55:1
+  ✓ an impulse qualifies its entire window, not only the nonzero sample (1.345459ms)
+      at packages/audio/levels_test.ail:62:1
+  ✓ activity floor is inclusive and final partial windows use actual frame count (971.084µs)
+      at packages/audio/levels_test.ail:69:1
+  ✓ a full-cycle sine has ordinary RMS A over sqrt two without the legacy sample gate (2.909583ms)
+      at packages/audio/levels_test.ail:75:1
+  ✓ stereo energies are pooled without downmix cancellation and counts use frames versus channel samples (972.542µs)
+      at packages/audio/levels_test.ail:82:1
+  ✓ stereo silent channel contributes to pooled RMS (904µs)
+      at packages/audio/levels_test.ail:92:1
+  ✓ full-scale and over-range counts do not claim clipping history (1.387167ms)
+      at packages/audio/levels_test.ail:99:1
+  ✓ scaled energy supports huge finite headroom and tiny signals without squaring them directly (1.49475ms)
+      at packages/audio/levels_test.ail:105:1
+  ✓ analysis rejects NaN, infinities and forged clip dimensions (853.959µs)
+      at packages/audio/levels_test.ail:111:1
+  ✓ analysis configuration rejects invalid windows and nonfinite or out-of-range floors (1.031583ms)
+      at packages/audio/levels_test.ail:118:1
+  ✓ accumulation checks cumulative budgets, empty blocks and rate/layout mismatches (1.320917ms)
+      at packages/audio/levels_test.ail:126:1
+  ✓ stereo accumulation enforces cumulative channel sample limit (833.917µs)
+      at packages/audio/levels_test.ail:139:1
+  ✓ public accumulator records are revalidated before finish and append (1.096667ms)
+      at packages/audio/levels_test.ail:148:1
+  ✓ finish does not flush a partial window or alter future classification (1.171208ms)
+      at packages/audio/levels_test.ail:159:1
+  ✓ partitions 1 127 128 1024 and whole preserve windows and report (310.106875ms)
+      at packages/audio/levels_test.ail:172:1
+  ✓ Off retains exact original samples including finite headroom (1.787916ms)
+      at packages/audio/levels_test.ail:183:1
+  ✓ stereo partitions preserve pooled activity windows across channel boundaries (170.981583ms)
+      at packages/audio/levels_test.ail:190:1
+  ✓ PeakSafe attenuates strong takes and never raises quiet ones (931.875µs)
+      at packages/audio/levels_test.ail:205:1
+  ✓ Matched raises an active quiet take to the requested RMS without mutating the original (823.875µs)
+      at packages/audio/levels_test.ail:213:1
+  ✓ Matched caps boost, leaves below-floor noise alone and requires enough active frames (1.825792ms)
+      at packages/audio/levels_test.ail:221:1
+  ✓ Matched never boosts silence and still peak-protects an insufficiently active transient (793.667µs)
+      at packages/audio/levels_test.ail:228:1
+  ✓ peak ceiling wins when target RMS would over-amplify a transient (846.958µs)
+      at packages/audio/levels_test.ail:234:1
+  ✓ Matched uses one linked gain for stereo and preserves polarity rate and channel identity (754.041µs)
+      at packages/audio/levels_test.ail:242:1
+  ✓ huge finite takes attenuate safely and tiny eligible takes hit the boost cap without infinite ratios (1.572708ms)
+      at packages/audio/levels_test.ail:253:1
+  ✓ invalid policies fail on empty input as well as nonempty input (842.792µs)
+      at packages/audio/levels_test.ail:260:1
+  ✓ a loop tiles from 0 at its gain (590.417µs)
+      at packages/audio/mix_test.ail:5:1
+  ✓ a one-shot without starts plays once at 0 (71.292µs)
+      at packages/audio/mix_test.ail:6:1
+  ✓ a one-shot plays at each start (66.042µs)
+      at packages/audio/mix_test.ail:7:1
+  ✓ a later start cuts an earlier one short (59.458µs)
+      at packages/audio/mix_test.ail:8:1
+  ✓ an empty sound tiles to silence (55.958µs)
+      at packages/audio/mix_test.ail:9:1
+  ✓ sum pads short parts with silence (65.166µs)
+      at packages/audio/mix_test.ail:10:1
+  ✓ one-shot starts are independent of input ordering and duplicates (61.5µs)
+      at packages/audio/mix_test.ail:12:1
+  ✓ both generators are deterministic and seed- and index-sensitive (571.833µs)
+      at packages/audio/noise_test.ail:13:1
+  ✓ both stay in [-1, 1) (14.426875ms)
+      at packages/audio/noise_test.ail:17:1
+  ✓ white noise is uncorrelated at lag 1 (|r| < 0.03 over 20,000 samples) (12.593667ms)
+      at packages/audio/noise_test.ail:18:1
+  ✓ the legacy ramp keeps its documented correlation (|r| > 0.03) (11.558458ms)
+      at packages/audio/noise_test.ail:19:1
+  ✓ rampNoise(0, 1) is three affine LCG rounds from 12347 + 12345 (151.334µs)
+      at packages/audio/noise_test.ail:20:1
+  ✓ pcm16: 0, full scale and minus full scale (5.226792ms)
+      at packages/audio/pcm_test.ail:15:1
+  ✓ wavInfo reads std/audio's header: 48 kHz mono 16-bit, data at 44 (305.125µs)
+      at packages/audio/pcm_test.ail:17:1
+  ✓ wavInfo skips a LIST chunk (odd size, padded) and finds fmt and data (276.834µs)
+      at packages/audio/pcm_test.ail:29:1
+  ✓ wavInfo refuses non-RIFF bytes and float PCM (tag 3) (262.542µs)
+      at packages/audio/pcm_test.ail:33:1
+  ✓ pcm16 then pcm16Floats is within 1/32767 + 1/32768 (1.022417ms)
+      at packages/audio/pcm_test.ail:40:1
+  ✓ the reference loop's WAV is its header plus pin 1's PCM (101.023416ms)
+      at packages/audio/pcm_test.ail:49:1
+  ✓ wavInfo rejects zero sample rate and inconsistent alignment or byte rate (438.709µs)
+      at packages/audio/pcm_test.ail:59:1
+  ✓ wavInfo honors RIFF extent and refuses partial frames (309.5µs)
+      at packages/audio/pcm_test.ail:67:1
+  ✓ WAV rejects short fmt, duplicate fmt/data and truncated chunks after data (340.875µs)
+      at packages/audio/pcm_test.ail:76:1
+  ✓ WAV enforces its chunk ceiling without recursion failure (14.205584ms)
+      at packages/audio/pcm_test.ail:88:1
+  ✓ WAV permits trailing bytes outside RIFF but validates chunks inside it (351.25µs)
+      at packages/audio/pcm_test.ail:94:1
+  ✓ PCM16 decode retains the first channel of independent stereo bytes (278.167µs)
+      at packages/audio/pcm_test.ail:99:1
+  ✓ reference loop PCM sha256 is pinned (render stability) (55.726083ms)
+      at packages/audio/recipe_test.ail:23:1
+  ✓ frames: 0.25 s at 48 kHz is 12,000; at 24 kHz 6,000 (46.129917ms)
+      at packages/audio/recipe_test.ail:25:1
+  ✓ a loop's seam step is no larger than its largest inner step + 1 LSB (55.686667ms)
+      at packages/audio/recipe_test.ail:34:1
+  ✓ a one-shot is normalised to -3 dBFS (0.70794578) (9.853375ms)
+      at packages/audio/recipe_test.ail:36:1
+  ✓ a one-shot starts and ends at silence (9.007291ms)
+      at packages/audio/recipe_test.ail:38:1
+  ✓ a loop sine with a fractional cycle count is rejected (340.584µs)
+      at packages/audio/recipe_test.ail:43:1
+  ✓ a loop vibrato with a fractional cycle count is rejected (295.042µs)
+      at packages/audio/recipe_test.ail:44:1
+  ✓ a whole-cycle loop beat is accepted (531.583µs)
+      at packages/audio/recipe_test.ail:45:1
+  ✓ a loop cannot glide, have an envelope or sweep its filter (589.292µs)
+      at packages/audio/recipe_test.ail:46:1
+  ✓ a one-shot has no loop rules (324.667µs)
+      at packages/audio/recipe_test.ail:51:1
+  ✓ envelope: silent before delay, linear attack, e^-1 one tau after it, silent from stop (303.333µs)
+      at packages/audio/recipe_test.ail:53:1
+  ✓ an exponential glide reaches freqTo: phase slope after glide1 is 2 pi freqTo (258.625µs)
+      at packages/audio/recipe_test.ail:58:1
+  ✓ drive keeps the peak (11.29175ms)
+      at packages/audio/recipe_test.ail:63:1
+  ✓ a filter sweep from 200 Hz to 8 kHz brightens white noise (59.191917ms)
+      at packages/audio/recipe_test.ail:65:1
+  ✓ parse: defaults, rate and both schema ids (534.875µs)
+      at packages/audio/recipe_test.ail:71:1
+  ✓ parse refuses an empty file, a bad loop, an unknown kind, no layers and no id (517.209µs)
+      at packages/audio/recipe_test.ail:80:1
+  ✓ silent layers remain finite silence when drive is enabled (320.042µs)
+      at packages/audio/recipe_test.ail:88:1
+  ✓ parse refuses wrong optional types and fractional integers (415.875µs)
+      at packages/audio/recipe_test.ail:93:1
+  ✓ parse refuses invalid domains and a zero-frequency glide (458.291µs)
+      at packages/audio/recipe_test.ail:102:1
+  ✓ loop modulation and filter restrictions are reported independently (509µs)
+      at packages/audio/recipe_test.ail:109:1
+  ✓ checked render preserves the pinned reference PCM (59.53ms)
+      at packages/audio/safety_test.ail:14:1
+  ✓ checked render has the expected frame count at the exact budget (555.042µs)
+      at packages/audio/safety_test.ail:18:1
+  ✓ checked render rejects each allocation budget before rendering (373.166µs)
+      at packages/audio/safety_test.ail:23:1
+  ✓ noise loops charge both filter warm-up periods (456.125µs)
+      at packages/audio/safety_test.ail:32:1
+  ✓ nonfinite parameters and zero-frame durations return typed errors (336.041µs)
+      at packages/audio/safety_test.ail:38:1
+  ✓ checked silent drive renders silence (413.333µs)
+      at packages/audio/safety_test.ail:45:1
+  ✓ checked parse guards UTF-8 bytes before JSON decode and supports host schema (461.791µs)
+      at packages/audio/safety_test.ail:53:1
+  ✓ checked PCM encoder preserves bytes and refuses clipping or nonfinite values (302.625µs)
+      at packages/audio/safety_test.ail:61:1
+  ✓ checked WAV rejects unrepresentable rates and supports empty PCM (281.917µs)
+      at packages/audio/safety_test.ail:70:1
+  ✓ checked decode refuses forged metadata and enforces output size (830µs)
+      at packages/audio/safety_test.ail:76:1
+  ✓ PCM8 metadata is readable but checked PCM16 decode explicitly refuses it (858.75µs)
+      at packages/audio/safety_test.ail:106:1
+  ✓ bounded guards reject unordered and infinite samples (425.875µs)
+      at packages/audio/safety_test.ail:131:1
+
+Properties:
+  ✓ stereo WAV roundtrip has the documented quantization error and no channel swap (100 cases, 68.852875ms)
+      at packages/audio/clip_pcm_test.ail:68:1
+  ✓ stereo deinterleave-interleave preserves arbitrary bounded frame data (100 cases, 64.7025ms)
+      at packages/audio/clip_test.ail:83:1
+  ✓ onePole coefficients are stable on explicitly generated positive domains (100 cases, 2.86275ms)
+      at packages/audio/dsp_test.ail:39:1
+  ✓ reversing a bounded clip twice restores exact samples (100 cases, 68.081833ms)
+      at packages/audio/edit_test.ail:100:1
+  ✓ mono pan preserves unit-sample energy across bounded positions (100 cases, 21.739167ms)
+      at packages/audio/edit_test.ail:107:1
+  ✓ partitioning arbitrary small signals leaves measurement unchanged (100 cases, 1.561687s)
+      at packages/audio/levels_test.ail:269:1
+  ✓ prepared matched output respects headroom and never exceeds the chosen boost (100 cases, 379.874417ms)
+      at packages/audio/levels_test.ail:279:1
+  ✓ one-shot placement is invariant under a permutation of starts (100 cases, 53.8705ms)
+      at packages/audio/mix_test.ail:17:1
+  ✓ checked PCM retains exact sample count for bounded arbitrary int-derived values (100 cases, 90.535375ms)
+      at packages/audio/safety_test.ail:90:1
+  ✓ work guard and byte count hold at bounded integer boundaries (100 cases, 1.824333ms)
+      at packages/audio/safety_test.ail:98:1
+  ✓ checked WAV round trips bounded signed samples within quantization error (100 cases, 74.937708ms)
+      at packages/audio/safety_test.ail:115:1
+
+──────────────────────────────────────────────────
+✓ All tests passed!
+
+145 tests: 145 passed, 0 failed, 0 skipped (3.822774965s)
+  ✓ Passed: 145
+  ✗ Failed: 0
+
+Seed:
+  mode: derived
+  master seed: 0
+  derivation: ailang-property-seed-v1
+  replay: ailang test --seed 0 --package packages/audio
+

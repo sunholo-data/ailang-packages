@@ -1,0 +1,103 @@
+module sunholo/audio/block
+-- Source-independent stateful processing. No devices, clocks, sessions or AI
+-- effects. Limits bound each block and cumulative frames since start/reset.
+import std/array (fromList, toList)
+import std/list (map, mapAccumL, range, length as size, any, zipWith)
+import std/result (Result, Ok, Err)
+import ./clip (Clip, ClipLimits, ChannelLayout, channelCount, checkSize, validate, create)
+import ./dsp (onePole)
+import ./safety (AudioError, InvalidClip, InvalidSamples, ResourceLimit, inRange)
+
+export type FilterKind = FilterBypass | LowPass | HighPass deriving (Eq)
+export type BlockLimits = {maxFrames: int, maxSamples: int, maxTotalFrames: int}
+export type FilterState = {rate: int, layout: ChannelLayout, kind: FilterKind, cutoffHz: float, processedFrames: int, history: [float]}
+export type FilterBlock = {clip: Clip, state: FilterState}
+
+export func defaultBlockLimits() -> BlockLimits ! {}
+ensures { result.maxFrames == 4096 && result.maxSamples == 8192 && result.maxTotalFrames >= result.maxFrames }
+{
+  {maxFrames: 4096, maxSamples: 8192, maxTotalFrames: 2147483647}
+}
+
+pure func limitsValid(l: BlockLimits) -> bool =
+  l.maxFrames >= 0 && l.maxFrames <= 2147483647 && l.maxSamples >= 0 && l.maxSamples <= 2147483647
+  && l.maxTotalFrames >= 0 && l.maxTotalFrames <= 2147483647
+
+pure func clipLimits(l: BlockLimits) -> ClipLimits = {maxFrames: l.maxFrames, maxSamples: l.maxSamples}
+
+pure func stateValid(s: FilterState, l: BlockLimits) -> Result[FilterState, AudioError] =
+  if not limitsValid(l) then Err(ResourceLimit("invalid block limits"))
+  else match checkSize(s.rate, s.layout, 0, clipLimits(l)) {
+    Err(e) => Err(e),
+    Ok(_) => {
+      let minimum = match s.kind { FilterBypass => 0.0, _ => 1.0e-6 };
+      if not inRange(s.cutoffHz, minimum, intToFloat(s.rate) / 2.0) then Err(InvalidSamples("filter cutoff outside supported rate domain"))
+      else if s.processedFrames < 0 then Err(InvalidClip("negative processed-frame count"))
+      else if s.processedFrames > l.maxTotalFrames then Err(ResourceLimit("filter state exceeds cumulative frame budget"))
+      else if size(s.history) != channelCount(s.layout) then Err(InvalidClip("filter history must contain one value per channel"))
+      else if any(\x. x - x != 0.0, s.history) then Err(InvalidSamples("filter history must be finite"))
+      else Ok(s)
+    }
+  }
+
+export func startFilter(rate: int, layout: ChannelLayout, kind: FilterKind, cutoffHz: float, limits: BlockLimits) -> Result[FilterState, AudioError] ! {}
+ensures { match result { Ok(s) => s.rate == rate && s.layout == layout && s.kind == kind && s.processedFrames == 0 && size(s.history) == channelCount(layout), Err(_) => true } }
+{
+  stateValid({rate: rate, layout: layout, kind: kind, cutoffHz: cutoffHz, processedFrames: 0,
+    history: map(\i. 0.0, range(0, channelCount(layout)))}, limits)
+}
+
+pure func canAdvance(processed: int, count: int, limit: int) -> bool
+requires { processed >= 0 && processed <= 2147483647 && count >= 0 && count <= 2147483647 && limit >= 0 && limit <= 2147483647 }
+ensures { not result || processed + count <= limit }
+{
+  count <= limit - processed
+}
+
+type PlaneResult = {samples: Array[float], history: float}
+
+pure func filterPlane(samples: Array[float], history: float, coefficient: float, kind: FilterKind) -> PlaneResult =
+  match mapAccumL(\previous x. {
+    -- Scale before adding: x-previous can overflow for opposite finite extremes.
+    -- This new API does not change legacy dsp.lowpass's pinned operation order.
+    let low = (1.0 - coefficient) * previous + coefficient * x;
+    let out = match kind { LowPass => low, HighPass => x - low, FilterBypass => x };
+    (out, low)
+  }, history, toList(samples)) {
+    (out, last) => {samples: fromList(out), history: last}
+  }
+
+export func processFilter(state: FilterState, input: Clip, limits: BlockLimits) -> Result[FilterBlock, AudioError] ! {}
+ensures { match result { Ok(v) => v.clip.rate == input.rate && v.clip.layout == input.layout && v.clip.frames == input.frames && v.state.processedFrames == state.processedFrames + input.frames && v.state.processedFrames <= limits.maxTotalFrames, Err(_) => true } }
+{
+  match stateValid(state, limits) {
+    Err(e) => Err(e),
+    Ok(s) => match validate(input, clipLimits(limits)) {
+      Err(e) => Err(e),
+      Ok(c) => if c.rate != s.rate || c.layout != s.layout then Err(InvalidClip("filter block rate/layout mismatch"))
+        else if not canAdvance(s.processedFrames, c.frames, limits.maxTotalFrames) then Err(ResourceLimit("filter cumulative frame budget exceeded"))
+        else match s.kind {
+          FilterBypass => Ok({clip: c, state: {s | processedFrames: s.processedFrames + c.frames}}),
+          _ => {
+            let coefficient = onePole(s.cutoffHz, intToFloat(s.rate));
+            let channels = zipWith(\plane previous. filterPlane(plane, previous, coefficient, s.kind), c.planes, s.history);
+            match create(c.rate, c.layout, map(\p. p.samples, channels), clipLimits(limits)) {
+              Err(e) => Err(e),
+              Ok(out) => match stateValid({s | processedFrames: s.processedFrames + c.frames, history: map(\p. p.history, channels)}, limits) {
+                Err(e) => Err(e), Ok(next) => Ok({clip: out, state: next})
+              }
+            }
+          }
+        }
+    }
+  }
+}
+
+-- A new logical stream: preserve configuration, flush history, restart its budget.
+export func resetFilter(state: FilterState, limits: BlockLimits) -> Result[FilterState, AudioError] ! {}
+ensures { match result { Ok(s) => s.processedFrames == 0 && s.rate == state.rate && s.layout == state.layout && s.kind == state.kind && s.cutoffHz == state.cutoffHz, Err(_) => true } }
+{
+  match stateValid(state, limits) {
+    Err(e) => Err(e), Ok(s) => startFilter(s.rate, s.layout, s.kind, s.cutoffHz, limits)
+  }
+}

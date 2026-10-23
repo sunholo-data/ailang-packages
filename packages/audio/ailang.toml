@@ -1,23 +1,23 @@
 [package]
 name = "sunholo/audio"
-version = "0.2.0"
+version = "0.3.0"
 edition = "1"
 ailang = ">=0.54.14"
-description = "Deterministic mono synthesis and checked mono/stereo audio clips: planar float buffers, channel conversion, editing, panning and mixing, PCM16/WAV import/export, bounded rendering and offline measurements"
+description = "Generic deterministic synthesis, checked mono/stereo clips, PCM16/WAV, editing, bounded level preparation and stateful block filters for procedural, recorded and model-produced audio"
 license = "Apache-2.0"
 
 [exports]
-modules = ["sunholo/audio/dsp", "sunholo/audio/noise", "sunholo/audio/recipe", "sunholo/audio/pcm", "sunholo/audio/mix", "sunholo/audio/analysis", "sunholo/audio/reference", "sunholo/audio/safety", "sunholo/audio/clip", "sunholo/audio/edit", "sunholo/audio/clip_pcm"]
+modules = ["sunholo/audio/dsp", "sunholo/audio/noise", "sunholo/audio/recipe", "sunholo/audio/pcm", "sunholo/audio/mix", "sunholo/audio/analysis", "sunholo/audio/reference", "sunholo/audio/safety", "sunholo/audio/clip", "sunholo/audio/edit", "sunholo/audio/clip_pcm", "sunholo/audio/levels", "sunholo/audio/block"]
 
 [effects]
 max = ["IO"]  # every export is pure; IO is used only by _smoke.ail to print its verdict
 
 [metadata]
-tags = ["audio", "synthesis", "dsp", "wav", "pcm", "loudness", "games", "procedural"]
-ai_summary = "Pure audio processing with typed errors and explicit limits. clip: validated mono/stereo planar Array[float], finite headroom, channel selection, interleave/deinterleave, unity mono duplication and average stereo downmix. edit: gain, end-exclusive trim, silence padding, reverse, append, endpoint-defined fades, complementary crossfades, bounded mixAt and equal-power mono panning. clip_pcm: channel-preserving s16le PCM and integer PCM16 WAV import/export with explicit Reject/Saturate clipping policy, legacy-compatible in-range quantization, frame/rate/layout validation and classic RIFF size checks. recipe: existing deterministic mono sine/glide/noise synthesis, filters, envelopes and peak normalization; checked parsing/rendering enforce UTF-8 input, frame, layer and work limits. pcm retains the mono compatibility surface and validates WAV chunks. analysis provides peak, gated RMS and seam/low-band checks, not LUFS. Every new export carries a contract; proof, runtime checks and tests are reported separately. Pure DSP, IO only for smoke. No resampling, device access or third-party package dependencies. Existing recipe samples retain their pinned bytes."
+tags = ["audio", "synthesis", "dsp", "wav", "pcm", "loudness", "games", "procedural", "speech", "ai-audio"]
+ai_summary = "Generic pure audio processing; no provider/device/session dependency. block: checked per-channel stateful mono/stereo low-pass/high-pass/bypass, reset, per-block/cumulative frame budgets. levels: full and active-window RMS, peak/count reports, bounded Off/PeakSafe/MatchRms plans and checked preparation. clip/edit: validated planar finite-headroom clips and checked edits. clip_pcm: channel-preserving PCM16/WAV with explicit Reject/Saturate and legacy quantization. recipe: bounded deterministic procedural rendering; model-proposed recipes are data. Headless examples process recipe and speech/model PCM fixtures without inference. Legacy analysis and byte pins preserved. Contracts, runtime guards, tests and mathematical proofs are distinct. No resampling or general streaming engine. IO only for smoke."
 repository = "https://github.com/sunholo-data/ailang-packages/tree/main/packages/audio"
 homepage = "https://ailang.sunholo.com/docs/packages/sunholo/audio"
-license_url = "https://github.com/sunholo-data/ailang-packages/blob/main/LICENSE"
+license_url = "https://github.com/sunholo-data/ailang-packages/blob/main/packages/audio/LICENSE"
 
 [stability]
 level = "experimental"

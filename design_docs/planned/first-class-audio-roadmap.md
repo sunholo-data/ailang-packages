@@ -3,15 +3,29 @@
 **Status:** Roadmap accepted in session, 2026-10-23. Hardening and mono/stereo clips/editing are implemented in the 0.2.0 feature group; see [hardening evidence](audio-hardening-0.1.1.md) and [clip milestone](audio-clips-0.2.0.md). The 0.2.0 group is merged and published. Core updates were developed separately and are now released in v0.54.18; [consumer retesting](../implemented/audio-core-0.54.18/README.md) confirms the WAV fixes and resolves the imported-ADT verifier error. A [live-loop L0 host prototype](live-loop-l0-feasibility.md) is now implemented; user-run Firefox 158 passed 100 exact-frame handoffs and a 30-minute synthetic soak with background intervals. Physical/device and broader-platform acceptance remain open. Later milestones remain planned.
 **Scope:** `sunholo/audio`, `std/audio`, and the small runtime boundaries needed by their consumers. Stapledon's game port remains with that project.
 
+**Application boundary:** Loop Lab is an application and reference consumer, with
+a [proposed standalone-repository split](loop-lab-repository-split.md). Its session
+save/load, UI, device lifecycle and Live workflow are application features, not
+requirements or public types of the generic audio package. General release scope
+must also serve headless generation, AI/TTS output processing and other consumers.
+See the [generic 0.3 scope](audio-0.3-generic-scope.md).
+
+**0.3 candidate checkpoint:** checked levels, mono/stereo stateful block filters,
+reset/budgets and headless recipe/speech-PCM fixture consumers are now implemented.
+[Block evidence](../implemented/audio-blocks-0.3.0/README.md): 164 package checks,
+14/62 contracts proved, 48 skipped, 0 refuted/errors. Loop Lab has been
+[extracted](../implemented/loop-lab-repository-split/README.md). Delay, parameter
+smoothing, shared reports and broader conversions remain planned.
+
 AILANG already supports deterministic sound generation, audio file output, offline measurements, and AI speech output. The next step should make these facilities safe to compose: validated formats, explicit channels and rates, bounded rendering, and evidence attached to the resulting bytes. Most sound processing should live in `sunholo/audio`; common file and sample conversions belong in `std/audio`. Runtime changes should serve a measured performance need or provide access to a host device.
 
-## Priority from the live-loop instrument
+## Reference consumer: the live-loop instrument
 
-The [long-term instrument plan](live-loop-instrument.md) makes host feasibility the
-next experiment: four-part playback, private capture, clock mapping and a minimal
-pure revision planner, before expanding the DSP API by guesswork. The local
+The [long-term instrument plan](live-loop-instrument.md) motivated the first host
+experiment: four-part playback, private capture, clock mapping and a minimal
+pure revision planner. The local
 [Loop Lab example](../../examples/live-loop/README.md) supplies that prototype and
-[measured software evidence](../../examples/live-loop/evidence/2026-10-23/README.md).
+[measured software evidence](https://github.com/sunholo-data/ailang-packages/blob/93314fc581a7ee2fefdc82392a92228f8b01a2dd/examples/live-loop/evidence/2026-10-23/README.md).
 It does not establish device latency or finish L0 acceptance. After browser/loopback
 and lifecycle measurements, prioritize the 0.3.0 block-processing milestone and the
 minimum music/session timing model; then the L1 direct Audio capture workflow.
@@ -109,6 +123,17 @@ The initial trust milestone is a reliable checked API and more useful proofs at 
 | Application adapters | Godot export/import settings, browser playback, CLI commands, asset manifests | The game remains a consumer; its cues, engine settings and rollout stay in its repository |
 
 No new language syntax or compiler change is required for hardening, stereo clips, basic effects, or pure block processing. Native PCM kernels and a resampler are possible runtime optimizations, not prerequisites for designing those package APIs.
+
+## Musical priorities after the working prototype
+
+The user reports that the microphone workflow works and asks to prioritize auto-levels,
+humming as other instruments/sounds, and effects. The [next musical roadmap](live-loop-musical-roadmap.md)
+turns this into level planning and recovery first, a local hum-to-bass note workflow
+second, then sound patches and stateful effects. It reuses the block/state foundation
+below. Resampling remains coordinated/deferred and must not block level preparation.
+The musical feature groups guide the application. Generic package release
+boundaries follow [source-independent audio scope](audio-0.3-generic-scope.md),
+including game assets, speech/model output and headless processing consumers.
 
 ## Proposed roadmap
 

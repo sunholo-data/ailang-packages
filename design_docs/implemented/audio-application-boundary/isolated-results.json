@@ -1,0 +1,82 @@
+{
+  "kind": "isolated local application consumer check",
+  "runs": [
+    {
+      "command": [
+        "ailang",
+        "lock"
+      ],
+      "exit": 0,
+      "elapsedMs": 17.705,
+      "log": "isolated-1.txt"
+    },
+    {
+      "command": [
+        "ailang",
+        "check",
+        "--package",
+        "."
+      ],
+      "exit": 0,
+      "elapsedMs": 912.88,
+      "log": "isolated-2.txt"
+    },
+    {
+      "command": [
+        "ailang",
+        "test",
+        "--strict-bytecode",
+        "--package",
+        "."
+      ],
+      "exit": 0,
+      "elapsedMs": 145.588,
+      "log": "isolated-3.txt"
+    },
+    {
+      "command": [
+        "node",
+        "--test",
+        "test/activation-clock.test.mjs",
+        "test/check-utils.test.mjs",
+        "test/engine.test.mjs",
+        "test/instrument-flow.test.mjs",
+        "test/level-parity.test.mjs",
+        "test/private-capture.test.mjs",
+        "test/take-workflow.test.mjs"
+      ],
+      "exit": 0,
+      "elapsedMs": 1076.667,
+      "log": "isolated-4.txt"
+    },
+    {
+      "command": [
+        "python3",
+        "-m",
+        "unittest",
+        "discover",
+        "-s",
+        "test",
+        "-p",
+        "*_test.py"
+      ],
+      "exit": 0,
+      "elapsedMs": 1406.792,
+      "log": "isolated-5.txt"
+    },
+    {
+      "command": [
+        "ailang",
+        "pkg",
+        "quality",
+        "--json",
+        "."
+      ],
+      "exit": 0,
+      "elapsedMs": 723.983,
+      "log": "isolated-app-quality.json"
+    }
+  ],
+  "passed": true,
+  "registryInstallTested": false
+}
