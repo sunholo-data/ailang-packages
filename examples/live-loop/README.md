@@ -3,10 +3,11 @@
 A local L0 feasibility prototype for the [live-loop instrument](../../design_docs/planned/live-loop-instrument.md).
 Four original parts share a browser audio clock. Capture stays private until an
 explicit commit, and a pure AILANG planner authorizes the revision and loop boundary.
-**Software host checks passed:** user-run Firefox 158 at 44.1 kHz completed
+**Earlier software host baseline passed:** user-run Firefox 158 at 44.1 kHz completed
 100 exact-frame handoffs and 30 audio minutes, with zero clamping and 260.413
 seconds in background tabs. Automated kernel/transport checks pass. Physical
-loopback, microphone/device lifecycle and broader platform acceptance remain open.
+loopback and broader platform acceptance remain open. The level/undo/export candidate
+has separate automated evidence below; it does not inherit a new browser soak pass.
 
 ## Run locally
 
@@ -22,7 +23,8 @@ python3 server.py
 ```
 
 Open **http://127.0.0.1:8976** on the machine running the server. First startup renders
-four 8-second mono WAV fixtures at 16 kHz through `sunholo/audio@0.2.0`. The generator
+four 8-second mono WAV fixtures at 16 kHz through the local `sunholo/audio@0.3.0`
+candidate (unchanged synthesis/PCM byte behavior). The generator
 uses the evaluator to retain its `FS @limit=4, IO @limit=1` budget; this toolchain
 explicitly refuses that effect frame in strict bytecode. Fixture generation has a
 180-second timeout and is offline. Delete `static/audio/*.wav` after changing
@@ -32,8 +34,14 @@ AudioContext rate. No generated WAVs or runtimes are committed.
 1. Play the four parts. Select a part; adjust its level, pan or mute.
 2. Leave **Test tone** selected to try private capture without a microphone.
 3. Hold the capture button (pointer, Space or Enter); release to prepare privately.
-4. Commit the ready take. The part changes at a planned four-bar loop boundary.
-5. Stop & reset clears active takes, pending changes and private browser buffers.
+4. Choose **Peak-safe**, **Matched** or **Off** and inspect the private gain/level
+   report. Changing the mode re-prepares from the unlevelled shaped original.
+5. Commit the ready take. The part changes at a planned four-bar loop boundary.
+6. **Undo take** restores the previous committed part at the next boundary;
+   **Redo take** swaps it back. Capture a new part to replace that one-step history.
+7. **Download WAV** saves the active committed part, including its prepared gain but
+   before track level/pan/mute. Import the file into Live at 120 BPM / four bars.
+8. Stop & reset clears active takes, pending changes, history and private buffers.
 
 Microphone is an explicit input selection. Choose **Enable microphone** first and
 respond to the browser prompt before holding to capture. The permission probe stops
@@ -43,13 +51,45 @@ request cannot attach its eventual stream to a later hold.
 No cue/monitor route exists. Capture is mono (first input channel), capped at 16 seconds;
 focus loss during capture, hidden page, cancellation and device-ended events discard
 it. A take binds to the selected part at capture start. Preparation trims/pads to
-8 seconds, applies 10 ms edge fades and limits peaks to -6 dBFS without boosting.
-This simple Audio replacement is a feasibility fixture, before quantized record
-windows, overdub, undo, persistence or Notes/humming mode.
+8 seconds and applies 10 ms edge fades once. Peak-safe only reduces peaks to about
+-6 dBFS; Matched uses the audio 0.3 active-window RMS policy with bounded boost and
+peak protection; Off retains the shaped input level. Quantized recording windows,
+overdub, project save/load and Notes/humming mode remain future work.
 
 The phrase lanes are schematic, not measured waveforms. The private ready take has
 its own waveform. The master meter is sample peak after final hard clamping, not
 perceptual loudness. Level is linear; live gain/pan smoothing is later work.
+
+## Level decisions, recovery and Live handoff
+
+Matched targets linear active-window RMS 0.125 (about -18.1 dBFS), permits at most
+4x gain (about +12 dB), requires 1024 active frames and keeps sample peak <=0.501187
+(about -6 dBFS). Activity uses 1024-frame windows with RMS >=0.001 (-60 dBFS).
+Silence/below-floor takes are not boosted; noise above that floor can still qualify.
+This is a preparation preset, not LUFS, true peak, noise removal or compression.
+The worker checks actual Float32 stored-sample peaks and may reserve a little extra
+headroom after rounding. The AILANG proofs do not apply to its JavaScript adapter;
+18 cross-language fixtures compare measurements/decisions against the package.
+
+Ready takes and their unlevelled shaped originals remain private in memory. No
+audible cue/monitor is added. Discard also invalidates an outstanding worker reply.
+Undo/redo stages the previous **committed** buffer through the existing planner;
+the export/history pointer changes only after exact-frame activation is acknowledged.
+Exporting during private preparation or a scheduled change still downloads the old
+active part. Current/previous/pending slots are bounded to three buffers per part;
+copies in workers, transfers and the renderer add temporary/browser memory.
+
+WAV is mono PCM16 at the AudioContext rate with the package's legacy *32767,
+half-away-from-zero quantization. The filename records part, active revision,
+120 BPM and four bars; no tempo/warp marker is embedded. In Live, check import/warp
+settings so the eight-second file spans four bars at 120 BPM. This is an explicit
+file handoff, not a plugin host or an automatic/continuous Live connection. Only
+this explicit download saves a recording. Project save/load is not implemented.
+
+See [workflow evidence](../../design_docs/implemented/audio-v3-workflow/README.md)
+for adapter parity, history/export isolation, actual-app fake-browser flow and
+package quality. Real browser download/audible acceptance of these new controls
+remains distinct from the earlier microphone feedback and runner-v2 soak.
 
 ## Real microphone and device checks
 
@@ -146,6 +186,8 @@ the microphone/device lifecycle matrix remain separate acceptance requirements.
 | `program-worklet.mjs` | Four active mono buffers, at most one pending replacement each; equal-power pan; audio-frame activation and acknowledgements; sample-peak/clamp counts |
 | `capture-worklet.mjs` | Fixed-capacity private buffer, always-zero output, bounded-rate meters and one buffer transfer at stop |
 | `prepare-worker.mjs` | Bounded take preparation and SHA-256 of the resulting f32 samples; no audio callback work |
+| `levels.mjs` | Browser adapter for audio 0.3 measurement/plan semantics; independent Float32 output checks |
+| `take-workflow.mjs` | Bounded committed history/restore slots, sample-view hashing and strict PCM16 WAV encoding |
 | `app.mjs` | Serial bounded command queue, lifecycle and UI; transfers committed buffers to the program worklet |
 
 The reference host is fixed at 120 BPM, four bars in 4/4, 8-second phrases. The
@@ -224,8 +266,9 @@ GOOS=js GOARCH=wasm go build \
 
 The local server serves only `static/`, the fixed planner source, three optional
 runtime files and declared metadata APIs; it denies directory listings and repository
-traversal. JSON commands reject sample/upload fields. Raw takes are not logged,
-saved, exported, uploaded, or sent to the planner. Static original demo WAVs are
+traversal. JSON commands reject sample/upload fields. Raw/uncommitted takes are not
+logged, saved, exported, uploaded, or sent to the planner. Only an explicit active
+committed WAV download writes a recording outside session memory. Static original demo WAVs are
 ordinary served assets. API access is limited by exact Host/Origin and a custom
 same-origin JSON header. This is a single-session development server, not a
 multi-user production service.
@@ -246,6 +289,6 @@ other supported environments as needed. Then use the measured render/worker/tran
 prioritize `sunholo/audio` 0.3.0 block processing and the minimum `music_patterns`
 time/revision API. Notes extraction, controllers and AI remain later milestones.
 
-The next [musical feature roadmap](../../design_docs/planned/live-loop-musical-roadmap.md)
-prioritizes auto-levels/recovery, local hum-to-bass note capture, instrument choices
-and stateful effects. These are planned features, not capabilities of this version.
+The [musical feature roadmap](../../design_docs/planned/live-loop-musical-roadmap.md)
+now has the first level/recovery/WAV candidate implemented. Project persistence,
+local hum-to-bass note capture, instrument choices and stateful effects are next.

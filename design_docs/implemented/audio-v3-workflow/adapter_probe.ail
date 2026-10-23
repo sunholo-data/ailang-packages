@@ -1,0 +1,36 @@
+module audio_workflow/adapter_probe
+import std/list (map, range)
+import std/array (fromList)
+import std/result (Ok, Err)
+import std/json (encode, jo, kv, jnum, js)
+import pkg/sunholo/audio/clip (Mono, Stereo, create, defaultClipLimits)
+import pkg/sunholo/audio/clip_pcm (Reject, toWav16)
+import pkg/sunholo/audio/levels (defaultConfig, LevelsOff, PeakSafe, MatchRms, plan)
+import std/bytes (toInts)
+
+export pure func probe(index: int) -> string {
+  let fixture = index % 6;
+  let channels = if fixture == 4 then 2 else 1;
+  let planes = map(\ch. fromList(map(\i.
+    if fixture == 0 then 0.0
+    else if fixture == 1 then 0.01
+    else if fixture == 2 then (if i % 2 == 0 then 0.25 else -0.25)
+    else if fixture == 3 then (if i == 10 then 1.0 else 0.01)
+    else if fixture == 4 then (if ch == 0 then 0.1 else -0.1)
+    else (if i >= 1024 && i < 2048 then 0.0001 else 0.1), range(0, 2051))), range(0, channels));
+  let policy = if index < 6 then LevelsOff else if index < 12 then PeakSafe(0.501187)
+    else MatchRms({targetRms: 0.125, peakCeiling: 0.501187, maxBoost: 4.0, minActiveFrames: 1024});
+  match create(8000, if channels == 1 then Mono else Stereo, planes, defaultClipLimits()) {
+    Err(e) => "ERR ${show(e)}",
+    Ok(c) => match plan(c, defaultConfig(), policy, defaultClipLimits()) {
+      Err(e) => "ERR ${show(e)}",
+      Ok(p) => encode(jo([kv("peak", jnum(p.report.peak)),kv("rms", jnum(p.report.rms)),kv("activeRms",jnum(p.report.activeRms)),
+        kv("activeFrames",jnum(intToFloat(p.report.activeFrames))),kv("gain",jnum(p.gain)),kv("requestedGain",jnum(p.requestedGain)),kv("reason",js(show(p.reason)))]))
+    }
+  }
+}
+
+export pure func wavProbe(n: int) -> [int] =
+  match create(44100, Mono, [fromList([-1.0, -0.5, 0.0, 0.5, 1.0])], defaultClipLimits()) {
+    Err(_) => [], Ok(c) => match toWav16(c, Reject, defaultClipLimits()) { Err(_) => [], Ok(bytes) => toInts(bytes) }
+  }

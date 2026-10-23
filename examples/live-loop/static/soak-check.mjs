@@ -12,7 +12,7 @@ $('run').onclick=async()=> {
   if(running)return;
   const controller=new AbortController();running=controller;const {signal}=controller;
   const long=$('profile').value==='soak',target=long?100:8,seconds=long?1800:0;
-  const report={kind:'synthetic planner/worker/Web Audio repeated handoff check',runnerVersion:2,profile:long?'100 handoffs and 30-minute soak':'8 handoffs only',userAgent:navigator.userAgent,startedAt:new Date().toISOString(),physicalDeviceLatencyMeasured:false,targetHandoffs:target,targetAudioSeconds:seconds,handoffs:[],workerMs:[],workerRoundTripMs:[],bridgeMs:[],passed:false,completed:false};
+  const report={kind:'synthetic planner/worker/Web Audio repeated handoff check',runnerVersion:3,profile:long?'100 handoffs and 30-minute soak':'8 handoffs only',userAgent:navigator.userAgent,startedAt:new Date().toISOString(),physicalDeviceLatencyMeasured:false,targetHandoffs:target,targetAudioSeconds:seconds,handoffs:[],workerMs:[],workerRoundTripMs:[],bridgeMs:[],passed:false,completed:false};
   let state,ownedEpoch=null,configureId=null,configureFromEpoch=null,ctx,program,capture,osc,worker,sink,lastMeter=null,privatePeak=0,programPeakBefore=0,sequence=0;
   const audioEvents=new EventWaiters(signal),workerEvents=new EventWaiters(signal);
   const frame=()=>Math.ceil(ctx.currentTime*ctx.sampleRate);

@@ -7,11 +7,12 @@ import {tmpdir} from 'node:os';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {spawnSync} from 'node:child_process';
-import {prepareTake} from '../static/engine.mjs';
+import {prepareJob} from '../static/prepare-worker.mjs';
 const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
 class Element {
   constructor(){this.value=0;this.textContent='';this.style={};this.children=[];this.classList={toggle(){}};}
   append(...items){this.children.push(...items);}setAttribute(){}setPointerCapture(){}
+  click(){this.clicked=true;}remove(){}
   getContext(){return {clearRect(){},beginPath(){},moveTo(){},lineTo(){},stroke(){},fillRect(){}};}
 }
 const stream=()=>({track:{readyState:'live',onended:null,stop(){this.readyState='ended';}},getTracks(){return [this.track];}});
@@ -25,11 +26,13 @@ test('instrument permission → private capture → real-planner activation → 
     assert.equal(p.status,0,p.stderr);return JSON.parse(p.stdout);
   };
   let backend=invoke({schema:1,op:'init'}).state;
-  const nodes={},elements={},documentEvents={},windowEvents={},mediaEvents={},streams=[];
-  let pendingPermission=null,context;
+  const nodes={},elements={},documentEvents={},windowEvents={},mediaEvents={},streams=[],workers=[];
+  let pendingPermission=null,context,holdWorkerReply=false,deferredWorkerReply=null;
   for(const match of readFileSync(path.join(root,'static/index.html'),'utf8').matchAll(/id="([^"]+)"/g))elements[match[1]]=new Element();
-  elements.input.value='synthetic';elements.wave.width=600;elements.wave.height=110;
-  globalThis.document={hidden:false,getElementById:id=>{assert.ok(elements[id],id);return elements[id];},createElement:()=>new Element(),addEventListener:(type,fn)=>documentEvents[type]=fn};
+  elements.input.value='synthetic';elements['level-mode'].value='peak-safe';elements.wave.width=600;elements.wave.height=110;
+  globalThis.document={hidden:false,body:new Element(),getElementById:id=>{assert.ok(elements[id],id);return elements[id];},createElement:()=>new Element(),addEventListener:(type,fn)=>documentEvents[type]=fn};
+  const blobs=[],revoked=[],originalCreate=URL.createObjectURL,originalRevoke=URL.revokeObjectURL;
+  URL.createObjectURL=blob=>{blobs.push(blob);return `blob:test-${blobs.length}`;};URL.revokeObjectURL=url=>revoked.push(url);
   globalThis.window={addEventListener:(type,fn)=>windowEvents[type]=fn};globalThis.requestAnimationFrame=()=>0;
   Object.defineProperty(globalThis,'navigator',{configurable:true,value:{userAgent:'node-fake-browser',mediaDevices:{addEventListener:(type,fn)=>mediaEvents[type]=fn,getUserMedia:async()=>{
     if(pendingPermission)return pendingPermission.promise;const m=stream();streams.push(m);return m;
@@ -59,9 +62,11 @@ test('instrument permission → private capture → real-planner activation → 
     connect(node){return node;}disconnect(){}
   };
   globalThis.Worker=class {
+    constructor(){workers.push(this);}
     postMessage(m,transfer){const data=structuredClone(m,{transfer});queueMicrotask(async()=>{
-      const samples=prepareTake(data.samples,data.rate,data.frames),digest=await crypto.subtle.digest('SHA-256',samples.buffer);
-      this.onmessage?.({data:{id:data.id,samples,hash:Array.from(new Uint8Array(digest),x=>x.toString(16).padStart(2,'0')).join(''),prepareMs:1}});
+      const result=await prepareJob(data);
+      const resultData=structuredClone(result,{transfer:[result.samples.buffer,result.original.buffer]});
+      const deliver=()=>this.onmessage?.({data:resultData});if(holdWorkerReply)deferredWorkerReply=deliver;else deliver();
     });}
     terminate(){this.onmessage=null;}
   };
@@ -69,6 +74,11 @@ test('instrument permission → private capture → real-planner activation → 
   const pointer={pointerId:1,preventDefault(){}};
   try {
     await import('../static/app.mjs');await elements.start.onclick();
+    const controls=elements.tracks.children[0].children[2].children;
+    const undo=controls.find(e=>e.textContent==='Undo take'),download=controls.find(e=>e.textContent==='Download WAV');
+    assert.equal(undo.disabled,true);download.onclick();
+    const originalWav=new Uint8Array(await blobs.at(-1).arrayBuffer());
+    assert.equal(new DataView(originalWav.buffer).getInt16(44,true),3277);
     elements.input.value='microphone';elements.input.onchange();assert.equal(elements.capture.disabled,true);
     await elements['enable-mic'].onclick();assert.equal(streams[0].track.readyState,'ended');assert.equal(elements.capture.disabled,false);
     elements.capture.onpointerdown(pointer);await settle(()=>report().capture.phase==='recording');
@@ -76,18 +86,44 @@ test('instrument permission → private capture → real-planner activation → 
     for(let i=0;i<8;i++){globalThis.currentFrame=i*128;const output=[[new Float32Array(128)]];privateNode.processor.process([[new Float32Array(128).fill(.5)]],output);assert.ok(output[0][0].every(x=>x===0));nodes['loop-program'].processor.process([],[[new Float32Array(128),new Float32Array(128)]]);}
     await Promise.resolve();assert.equal(report().capture.ownedLiveTracks,1);assert.equal(report().lastCapture.privateInputPeak,.5);assert.equal(report().lastCapture.programPeakDuringCapture,0);assert.ok(report().lastCapture.programMeterSamples>0);
     elements.capture.onpointerup();await settle(()=>!elements.commit.disabled);assert.equal(streams[1].track.readyState,'ended');assert.equal(report().readyTrack,1);
+    elements['level-mode'].value='matched';elements['level-mode'].onchange();assert.equal(elements.commit.disabled,true);await settle(()=>!elements.commit.disabled);
+    assert.match(elements['level-report'].textContent,/Active RMS target matched/);assert.ok(report().workflow.readyLevels.gain<1);assert.equal(report().workflow.version,3);
+    const matchedReport=elements['level-report'].textContent;
+    elements['level-mode'].value='off';elements['level-mode'].onchange();await settle(()=>!elements.commit.disabled);assert.match(elements['level-report'].textContent,/Original level retained/);
+    elements['level-mode'].value='matched';elements['level-mode'].onchange();await settle(()=>!elements.commit.disabled);assert.equal(elements['level-report'].textContent,matchedReport);
+    download.onclick();assert.deepEqual(new Uint8Array(await blobs.at(-1).arrayBuffer()),originalWav,'private candidate cannot enter exports');
     await elements.commit.onclick();await settle(()=>backend.tracks[0].pending?.scheduled);
+    download.onclick();assert.deepEqual(new Uint8Array(await blobs.at(-1).arrayBuffer()),originalWav,'scheduled candidate cannot enter exports');assert.equal(undo.disabled,true);
     const at=backend.tracks[0].pending.at;context.currentTime=(at-67)/8000;globalThis.currentFrame=at;
     nodes['loop-program'].processor.process([],[[new Float32Array(128),new Float32Array(128)]]);
     await settle(()=>backend.tracks[0].revision===1);assert.equal(backend.running,true);assert.deepEqual(report().activationErrorsFrames,[0]);
+    await settle(()=>!undo.disabled);download.onclick();
+    const committedWav=new Uint8Array(await blobs.at(-1).arrayBuffer());assert.notDeepEqual(committedWav,originalWav);
+    assert.match(document.body.children.at(-1).download,/-r1-120bpm-4bars\.wav$/);
+    await undo.onclick();await settle(()=>backend.tracks[0].pending?.scheduled);
+    const undoAt=backend.tracks[0].pending.at;context.currentTime=undoAt/8000;globalThis.currentFrame=undoAt;nodes['loop-program'].processor.process([],[[new Float32Array(128),new Float32Array(128)]]);
+    await settle(()=>backend.tracks[0].revision===2&&!undo.disabled);assert.equal(undo.textContent,'Redo take');download.onclick();assert.deepEqual(new Uint8Array(await blobs.at(-1).arrayBuffer()),originalWav);
+    await undo.onclick();await settle(()=>backend.tracks[0].pending?.scheduled);
+    const redoAt=backend.tracks[0].pending.at;context.currentTime=redoAt/8000;globalThis.currentFrame=redoAt;nodes['loop-program'].processor.process([],[[new Float32Array(128),new Float32Array(128)]]);
+    await settle(()=>backend.tracks[0].revision===3&&!undo.disabled);download.onclick();assert.deepEqual(new Uint8Array(await blobs.at(-1).arrayBuffer()),committedWav);
+    holdWorkerReply=true;elements.capture.onpointerdown(pointer);await settle(()=>report().capture.phase==='recording');
+    for(let i=0;i<8;i++)privateNode.processor.process([[new Float32Array(128).fill(.75)]],[[new Float32Array(128)]]);
+    elements.capture.onpointerup();await settle(()=>deferredWorkerReply);assert.equal(elements.discard.disabled,false);
+    elements.discard.onclick();deferredWorkerReply();await Promise.resolve();assert.equal(elements.commit.disabled,true);assert.equal(report().readyTrack,null);holdWorkerReply=false;
+    download.onclick();assert.deepEqual(new Uint8Array(await blobs.at(-1).arrayBuffer()),committedWav,'discarded late worker output cannot enter exports');
     let resolve;pendingPermission={promise:new Promise(r=>resolve=r)};
     elements.capture.onpointerdown(pointer);await settle(()=>report().capture.phase==='opening');
     document.hidden=true;documentEvents.visibilitychange();const late=stream();resolve(late);await settle(()=>late.track.readyState==='ended');pendingPermission=null;
-    assert.equal(report().capture.ownedLiveTracks,0);assert.equal(report().readyTrack,null);assert.equal(backend.tracks[0].revision,1);
+    assert.equal(report().capture.ownedLiveTracks,0);assert.equal(report().readyTrack,null);assert.equal(backend.tracks[0].revision,3);
     assert.ok(report().events.some(e=>e.type==='late-input-released'));assert.equal(report().rawAudioIncluded,false);
     document.hidden=false;
     elements.capture.onpointerdown(pointer);await settle(()=>report().capture.phase==='recording');const unplugged=streams.at(-1);mediaEvents.devicechange();assert.equal(unplugged.track.readyState,'ended');assert.equal(report().capture.phase,'idle');
     await elements['enable-mic'].onclick();elements.capture.onpointerdown(pointer);await settle(()=>report().capture.phase==='recording');const focusInput=streams.at(-1);elements.capture.onblur();assert.equal(focusInput.track.readyState,'ended');assert.equal(report().capture.phase,'idle');
+    elements.capture.onpointerdown(pointer);await settle(()=>report().capture.phase==='recording');const failedInput=streams.at(-1);workers[0].onerror();assert.equal(failedInput.track.readyState,'ended');assert.equal(elements.capture.disabled,true);
+    await undo.onclick();await settle(()=>backend.tracks[0].pending?.scheduled);const stale={...backend.tracks[0].pending,epoch:backend.epoch};
     await elements.stop.onclick();assert.equal(backend.running,false);assert.equal(context.state,'closed');assert.equal(report().capture.disposed,true);
-  } finally {rmSync(temp,{recursive:true,force:true});}
+    nodes['loop-program'].port.onmessage({data:{type:'activated',epoch:stale.epoch,id:stale.id,track:1,at:stale.at,applied:stale.at}});await Promise.resolve();assert.equal(backend.running,false);assert.equal(report().readyTrack,null);
+    assert.equal(undo.disabled,true);assert.equal(download.disabled,true);assert.equal(revoked.length,blobs.length);assert.equal(report().workflow.retainedCommittedSamples,0);
+    const stoppedNotice=elements.notice.textContent;workers[0].onerror();assert.equal(elements.notice.textContent,stoppedNotice,'obsolete worker errors cannot mutate a later lifecycle');
+  } finally {URL.createObjectURL=originalCreate;URL.revokeObjectURL=originalRevoke;rmSync(temp,{recursive:true,force:true});}
 });

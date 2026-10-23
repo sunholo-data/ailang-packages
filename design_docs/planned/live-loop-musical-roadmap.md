@@ -6,6 +6,13 @@ instruments/sounds, and effects. Version numbers are candidates, not release pro
 Related: [instrument design](live-loop-instrument.md), [audio roadmap](first-class-audio-roadmap.md),
 [capture ownership](live-loop-capture-lifecycle.md).
 
+Implementation checkpoint: the audio 0.3 candidate now has checked level plans;
+the local host 0.2 candidate adds private mode/gain reports, boundary-staged undo/redo
+and active committed WAV downloads for a manual Live handoff. See
+[workflow evidence](../implemented/audio-v3-workflow/README.md). These changes are
+unreleased and need browser/user acceptance. Project save/load, detected MIDI,
+instruments, effects and plugin adapters remain subsequent feature groups.
+
 ## Starting point and order
 
 Audio 0.2.0 is published; upstream v0.54.18 WAV/PCM/verifier fixes are validated.
@@ -30,8 +37,8 @@ registry package releases.
 
 ## 1. Auto-levels and recoverable takes
 
-The current preparation only limits peaks downward to about -6 dBFS. It does not
-raise a quiet take or match the apparent level of different instruments. Add an
+The original preparation only limited peaks downward to about -6 dBFS. The candidate
+now adds bounded RMS matching; it is not perceptual loudness matching. The policy is an
 explicit Off / Peak-safe / Matched policy, with a previewed gain decision and a
 reversible original. Match presets to track/patch needs rather than treating kick,
 sustained bass and texture as identical signals.

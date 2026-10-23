@@ -19,16 +19,19 @@ export function gains(level, pan, muted) {
   return [Math.cos(angle)*amplitude, Math.sin(angle)*amplitude];
 }
 export function prepareTake(input, rate, frames) {
+  const output=shapeTake(input,rate,frames);
+  let peak=0;for(const x of output)peak=Math.max(peak,Math.abs(x));
+  const scale=peak>0.501187?0.501187/peak:1;
+  for(let i=0;i<output.length;i++)output[i]*=scale;
+  return output;
+}
+export function shapeTake(input, rate, frames) {
   if (!validSamples(input,rate) || !Number.isSafeInteger(frames) || frames < 1 || frames > rate*MAX_SECONDS) throw new Error('invalid take or frame budget');
   const output = new Float32Array(frames), used = Math.min(frames,input.length), edge = Math.min(Math.round(rate*.01),Math.floor(used/2));
-  let peak=0;
   for(let i=0;i<used;i++) {
     const fade=edge>1?Math.min(1,i/(edge-1),(used-1-i)/(edge-1)):1;
-    output[i]=input[i]*fade; peak=Math.max(peak,Math.abs(output[i]));
+    output[i]=input[i]*fade;
   }
-  // Limit to -6 dBFS, never boost a quiet take or divide by a silent peak.
-  const scale=peak>0.501187?0.501187/peak:1;
-  for(let i=0;i<used;i++) output[i]*=scale;
   return output;
 }
 export function cycleFrame(rate,bpm,origin,cycle) { return origin+Math.floor(cycle*rate*960/bpm); }

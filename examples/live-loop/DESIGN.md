@@ -31,3 +31,9 @@ an unrelated illustration or marketing layout. Remove the initial extra part col
 tracked capitals and small type. Orange identifies action/selection/capture, while
 text, button states and direct part labels also convey meaning. Keep technical IDs
 in inspection. Reduced-motion users see the bar counter without a sweeping playhead.
+
+The audio 0.3 workflow keeps that surface: level policy and before/after decisions
+sit beside the private waveform; undo/redo and WAV download belong to their part's
+existing control strip. Controls wrap on narrow lanes and retain 44 px targets.
+The download explanation states which committed signal is saved and the four-bar
+Live handoff. It adds no cue/monitor path and no new palette, font or network asset.

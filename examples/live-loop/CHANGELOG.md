@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.2.0
+
+Feature: audio 0.3 consumer workflow, still a local application (never published).
+
+- Private Off / Peak-safe / Matched take preparation with input/output sample peaks,
+  active-window RMS, bounded boost and a reason for the gain. Re-preparation starts
+  from an unlevelled shaped original rather than compounding gain or fades.
+- One-step undo/redo per part uses the existing prepare/stage/activate protocol;
+  history changes only after exact-frame renderer and planner acknowledgement.
+- Download the active committed part as an eight-second mono PCM16 WAV for Live.
+  Downloads exclude private/pending takes and precede track level/pan. Stop/reset
+  clears in-memory history; saving a WAV is an explicit user action.
+- Reference tests compare the browser level adapter against the AILANG API and
+  pin browser WAV bytes to the package codec. Runner v3 identifies the changed
+  preparation worker; the earlier v2 soak remains historical baseline evidence.
+
 ## 0.1.0
 
 Feature: local L0 host feasibility lab with four generated parts, private bounded capture,

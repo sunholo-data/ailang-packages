@@ -1,7 +1,10 @@
 import {activationNow} from './engine.mjs';
 import {CaptureLifecycle,MicrophoneAccess,inputError} from './private-capture.mjs';
+import {TakeHistory,hashSamples,wav16Mono} from './take-workflow.mjs';
 const $=id=>document.getElementById(id), names=['Drums','Bass','Harmony','Texture'];
 let state=null,ctx=null,program=null,captureNode=null,captureLifecycle=null,sink=null,worker=null,ready=null;
+const history=new TakeHistory();
+let committing=false,downloadUrl=null;
 const microphone=new MicrophoneAccess(constraints=> {
   if(!navigator.mediaDevices?.getUserMedia)throw {name:'SecurityError'};
   return navigator.mediaDevices.getUserMedia(constraints);
@@ -23,7 +26,8 @@ Prepared audio stays in browser memory
 API accepts command metadata only`;
 }
 function captureReport() {
-  return {kind:'Loop Lab capture lifecycle metadata',schema:1,startedAt:captureReportStartedAt,reportedAt:new Date().toISOString(),userAgent:navigator.userAgent,physicalDeviceLatencyMeasured:false,sampleRate:ctx?.sampleRate??captureObservation?.rate??null,transportRunning:!!ctx&&ctx.state==='running',epoch:state?.epoch??null,tracks:state?.tracks.map(t=>({id:t.id,revision:t.revision,muted:t.muted,pending:t.pending?{revision:t.pending.revision,scheduled:t.pending.scheduled,at:t.pending.at}:null}))??[],capture:{...(captureLifecycle?.snapshot()||lastCaptureSnapshot||{phase:'idle',ownedLiveTracks:0}),pendingPermission:microphone.pending},lastCapture:captureObservation?{...captureObservation}:null,readyTrack:ready?.track??null,preparing,programPeak:lastMeter.peak,activationErrorsFrames:[...activationErrors],events:captureEvents.map(e=>({...e})),eventsDropped:captureEventsDropped,rawAudioIncluded:false};
+  const workflow={version:3,retainedCommittedSamples:history.retainedSamples(),committing,readyLevels:ready?.levelPlan?{mode:ready.levelMode,gain:ready.levelPlan.gain,reason:ready.levelPlan.reason,peakBefore:ready.levelPlan.report.peak,peakAfter:ready.after.peak}:null};
+  return {kind:'Loop Lab capture lifecycle metadata',schema:1,workflow,startedAt:captureReportStartedAt,reportedAt:new Date().toISOString(),userAgent:navigator.userAgent,physicalDeviceLatencyMeasured:false,sampleRate:ctx?.sampleRate??captureObservation?.rate??null,transportRunning:!!ctx&&ctx.state==='running',epoch:state?.epoch??null,tracks:state?.tracks.map(t=>({id:t.id,revision:t.revision,muted:t.muted,pending:t.pending?{revision:t.pending.revision,scheduled:t.pending.scheduled,at:t.pending.at}:null}))??[],capture:{...(captureLifecycle?.snapshot()||lastCaptureSnapshot||{phase:'idle',ownedLiveTracks:0}),pendingPermission:microphone.pending},lastCapture:captureObservation?{...captureObservation}:null,readyTrack:ready?.track??null,preparing,programPeak:lastMeter.peak,activationErrorsFrames:[...activationErrors],events:captureEvents.map(e=>({...e})),eventsDropped:captureEventsDropped,rawAudioIncluded:false};
 }
 let selected=1,token=0,held=false,capturing=false,preparing=false,takeTrack=1,queue=Promise.resolve(),queued=0,sequence=0;
 let bridgeTimes=[],events=[],lastMeter={frame:0,peak:0,clipped:0,blocks:0},preparationMs=0,activationErrors=[],workerJob=0,stopping=false;
@@ -63,21 +67,36 @@ function render() {
     r.mute.textContent=t.muted?'Unmute':'Mute'; r.mute.classList.toggle('muted-on',t.muted);
     r.revision.textContent=t.pending?(t.pending.scheduled?'Scheduled for next loop':'Prepared · staging'):`${t.revision?'Take':'Original'} · active r${t.revision}`;
     for(const control of [r.level,r.pan,r.mute]) control.disabled=!ctx || !state.running || stopping;
+    const h=history.tracks.length?history.status(t.id):null;
+    r.undo.textContent=h?.restoreLabel||'Undo take';
+    r.undo.disabled=!h?.canRestore||!!t.pending||!ctx||ctx.state!=='running'||held||capturing||preparing||!!ready||committing||stopping;
+    r.download.disabled=!h||!ctx||!state.running||stopping||h.revision!==t.revision;
   }
   const captureTarget=ready?.track??captureLifecycle?.active?.track??(preparing?takeTrack:selected);
   $('capture-title').textContent=`A new part for ${names[captureTarget-1]}`;
   $('start').disabled=!!ctx || stopping || state.running || authorizing;
   $('stop').disabled=(!ctx&&!state.running&&!authorizing) || stopping;
-  $('capture').disabled=!ctx || !state.running || ctx.state!=='running' || !!ready || preparing || authorizing || captureLifecycle?.disposed || ($('input').value==='microphone'&&!microphoneReady) || stopping || !!state.tracks[selected-1].pending;
-  $('commit').disabled=!ready || stopping || !ctx || ctx.state!=='running' || !!state.tracks[ready?.track-1]?.pending;
-  $('discard').disabled=!ready;
-  $('input').disabled=capturing || held || preparing || authorizing;
+  $('capture').disabled=!ctx || !worker || !state.running || ctx.state!=='running' || !!ready || preparing || committing || authorizing || captureLifecycle?.disposed || ($('input').value==='microphone'&&!microphoneReady) || stopping || !!state.tracks[selected-1].pending;
+  $('commit').disabled=!ready || preparing || committing || stopping || !ctx || ctx.state!=='running' || !!state.tracks[ready?.track-1]?.pending;
+  $('discard').disabled=(!ready&&!preparing)||committing;
+  $('input').disabled=capturing || held || preparing || committing || authorizing;
+  $('level-mode').disabled=(!!ctx&&!worker)||capturing||held||preparing||committing||stopping;
+  renderLevels();
   $('enable-mic').hidden=$('input').value!=='microphone';
   $('enable-mic').disabled=authorizing || microphone.pending || held || capturing || preparing || !!ready || stopping;
   $('enable-mic').textContent=authorizing?'Opening microphone permission…':microphoneReady?'Check microphone permission':'Enable microphone';
   $('capture').classList.toggle('recording',capturing);
   $('transport-state').textContent=ctx?(ctx.state==='running'?'Playing':'Audio suspended'):state.running?'Reset required':'Stopped';
   $('bridge').textContent=`Strict bytecode CLI · no fallback\n${stats(bridgeTimes)}\nPreparation worker: ${preparationMs.toFixed(1)} ms\nQueued controls: ${queued}`;
+}
+const db=x=>x>0?`${(20*Math.log10(x)).toFixed(1)} dBFS`:'Silent';
+function renderLevels() {
+  if(preparing){$('level-report').textContent='Measuring the private take…';return;}
+  if(!ready?.levelPlan){$('level-report').textContent=preparing?'Measuring the private take…':'Choose how to prepare the next take.';return;}
+  const p=ready.levelPlan,r=p.report,a=ready.after;
+  const reasons={Bypassed:'Original level retained',BelowActivityFloor:'Below the activity floor · no boost',InsufficientActivity:'Not enough active windows · no boost',AlreadyAtLevel:'Level retained',TargetMatched:'Active RMS target matched',BoostLimited:'Boost limited to +12 dB',PeakLimited:'Peak headroom takes priority'};
+  const gain=p.gain>0?`${(20*Math.log10(p.gain)).toFixed(1)} dB gain`:'Zero gain';
+  $('level-report').textContent=`${reasons[p.reason]||p.reason}\n${gain} · peak ${db(r.peak)} → ${db(a.peak)}\nActive-window RMS ${db(r.activeRms)} → ${db(a.activeRms)}`;
 }
 function buildTracks() {
   names.forEach((name,i)=> {
@@ -96,16 +115,18 @@ function buildTracks() {
     };
     const level=makeSlider('Level',0,100,'level'),pan=makeSlider('Pan',-100,100,'pan');
     const mute=document.createElement('button');mute.setAttribute('aria-label',`${name} mute`);controls.append(mute);
+    const undo=document.createElement('button');undo.textContent='Undo take';undo.setAttribute('aria-label',`${name} undo or redo take`);undo.onclick=()=>restoreTrack(i+1);controls.append(undo);
+    const download=document.createElement('button');download.textContent='Download WAV';download.setAttribute('aria-label',`${name} download active loop as WAV`);download.onclick=()=>downloadTrack(i+1);controls.append(download);
     const revision=document.createElement('span');revision.className='revision';controls.append(revision);
     const update=()=> command('parameter',{track:i+1,level:Number(level.value),pan:Number(pan.value),muted:state.tracks[i].muted}).then(sendParams).catch(e=>notice(e.message));
     level.onchange=update;pan.onchange=update;
     mute.onclick=()=>command('parameter',{track:i+1,level:state.tracks[i].level,pan:state.tracks[i].pan,muted:!state.tracks[i].muted}).then(sendParams).catch(e=>notice(e.message));
-    row.append(select,phrase,controls);$('tracks').append(row); rows.push({row,select,level,pan,mute,revision});
+    row.append(select,phrase,controls);$('tracks').append(row); rows.push({row,select,level,pan,mute,undo,download,revision});
   });
 }
 function sendParams() { if(program) for(const t of state.tracks) program.port.postMessage({type:'parameter',epoch:state.epoch,track:t.id,level:t.level,pan:t.pan,muted:t.muted}); }
 async function start() {
-  const sessionToken=++token; ready=null; $('start').disabled=true; notice('Loading the four original phrases…');
+  const sessionToken=++token; ready=null;committing=false;history.clear(); $('start').disabled=true; notice('Loading the four original phrases…');
   try {
     ctx=new AudioContext({latencyHint:'interactive'}); await ctx.resume();
     ctx.onstatechange=()=> { if(ctx?.state!=='running') cancelCapture('Capture cancelled: audio suspended'); render(); };
@@ -115,9 +136,11 @@ async function start() {
       const response=await fetch(`/audio/demo-${i+1}.wav`),buffer=await audio.decodeAudioData(await response.arrayBuffer());
       return new Float32Array(buffer.getChannelData(0));
     }));
+    const hashes=await Promise.all(samples.map(hashSamples));
     if(sessionToken!==token) return;
     const now=currentFrame(),origin=now+audio.sampleRate;
     await command('configure',{rate:audio.sampleRate,bpm:120,origin,now});
+    history.seed(state.epoch,audio.sampleRate,samples.map((samples,i)=>({samples,hash:hashes[i]})));
     program=new AudioWorkletNode(audio,'loop-program',{numberOfInputs:0,outputChannelCount:[2]});program.connect(audio.destination);
     program.port.onmessage=e=>programMessage(e.data,sessionToken);
     program.port.postMessage({type:'init',epoch:state.epoch,origin,rate:audio.sampleRate,bpm:120,tracks:state.tracks.map((t,i)=>({...t,samples:samples[i]}))},samples.map(x=>x.buffer));
@@ -142,7 +165,7 @@ async function start() {
       onTake:m=>captureMessage(m,sessionToken)
     });captureLifecycle=owner;renderPrivacy();
     worker=new Worker('/prepare-worker.mjs',{type:'module'});worker.onmessage=e=>preparedMessage(e.data,sessionToken);
-    worker.onerror=()=>{ready=null;preparing=false;render();notice('Preparation worker failed; reset and retry');};
+    worker.onerror=()=>{if(sessionToken!==token)return;ready=null;cancelCapture('Preparation worker failed · private take discarded');worker?.terminate();worker=null;render();notice('Preparation worker failed; reset and retry');};
     render();notice('Four parts playing. Select a part, then hold to capture privately.');
     log(`Transport epoch ${state.epoch} · origin frame ${origin} · ${audio.sampleRate} Hz`);
   } catch(error) { notice(error.message); await stop(false); }
@@ -154,7 +177,11 @@ function programMessage(m,sessionToken) {
   const t=state.tracks[m.track-1];
   if(m.type==='rejected') {
     log(`Host rejected: ${m.reason}`);notice(`Current audio retained: ${m.reason}`);
-    if(t?.pending&&!t.pending.scheduled) command('cancel',{track:t.id,base:t.revision,pendingId:t.pending.id}).catch(e=>notice(e.message));
+    if(t?.pending&&m.id===t.pending.id) {
+      history.reject(state.epoch,t.id,m.id);
+      if(!t.pending.scheduled)command('cancel',{track:t.id,base:t.revision,pendingId:t.pending.id}).catch(e=>notice(e.message));
+      else stop(false);
+    }
     if(!t) stop(false);return;
   }
   if(m.epoch!==state.epoch || !t?.pending || m.id!==t.pending.id) {log('Ignored stale host acknowledgement');return;}
@@ -168,7 +195,7 @@ function programMessage(m,sessionToken) {
     activationErrors.push(m.applied-m.at); activationErrors=activationErrors.slice(-128);
     captureEvent({type:'take-activated',track:m.track,plannedFrame:m.at,appliedFrame:m.applied});
     log(`Part ${m.track} activated · planned ${m.at} / applied ${m.applied} / error ${m.applied-m.at} frames`);
-    command('activate',{track:m.track,base:t.revision,pendingId:m.id,at:m.at,applied:m.applied,now}).then(()=>{notice(`${names[m.track-1]}: committed take is now active.`);if(!held&&!capturing&&!preparing&&!ready)$('capture-status').textContent='Committed take active · hold to capture again';}).catch(error=>{notice(`Activation acknowledgement failed: ${error.message}. Reset required.`);stop(false);});
+    command('activate',{track:m.track,base:t.revision,pendingId:m.id,at:m.at,applied:m.applied,now}).then(()=>{history.activate(state.epoch,m.track,m.id,state.tracks[m.track-1].revision);render();notice(`${names[m.track-1]}: committed take is now active.`);if(!held&&!capturing&&!preparing&&!ready)$('capture-status').textContent='Committed take active · hold to capture again';}).catch(error=>{notice(`Activation acknowledgement failed: ${error.message}. Reset required.`);stop(false);});
   }
 }
 function cancelCapture(message='Capture discarded') {
@@ -189,7 +216,7 @@ async function authorizeMicrophone() {
   } finally {if(id===authorizationId)authorizing=false;render();renderPrivacy();}
 }
 function beginCapture() {
-  if(!ctx||ctx.state!=='running'||capturing||ready||held||preparing||authorizing||state.tracks[selected-1].pending)return;
+  if(!ctx||!worker||ctx.state!=='running'||capturing||ready||held||preparing||committing||authorizing||state.tracks[selected-1].pending)return;
   if($('input').value==='microphone'&&!microphoneReady){notice('Enable microphone access before holding to capture.');return;}
   captureLifecycle?.begin($('input').value,selected);
 }
@@ -199,30 +226,62 @@ function captureMessage(m,sessionToken) {
   held=false;capturing=false;takeTrack=m.track;
   if(m.used<ctx.sampleRate*.1){preparing=false;notice('Take too short. Hold for at least a tenth of a second.');render();return;}
   preparing=true;const input=m.samples.subarray(0,m.used);workerJob++;
-  worker.postMessage({id:workerJob,samples:input,rate:m.rate,frames:ctx.sampleRate*8},[input.buffer]);
+  worker.postMessage({id:workerJob,samples:input,rate:m.rate,frames:ctx.sampleRate*8,levelMode:$('level-mode').value||'peak-safe'},[input.buffer]);
   $('capture-status').textContent='Preparing privately…';render();
 }
 function preparedMessage(m,sessionToken) {
   if(sessionToken!==token || m.id!==workerJob)return;
   preparing=false;
-  if(m.error) {notice(m.error);render();return;}
-  ready={track:takeTrack,samples:m.samples,hash:m.hash};preparationMs=m.prepareMs;
+  if(m.error) {if(ready)$('level-mode').value=ready.levelMode;notice(m.error);render();return;}
+  ready={track:takeTrack,samples:m.samples,hash:m.hash,original:m.original,levelPlan:m.levelPlan,after:m.after,levelMode:m.levelMode};preparationMs=m.prepareMs;
   drawWave(m.samples);$('capture-status').textContent=`Ready for ${names[takeTrack-1]} · still private`;notice('Prepared in memory. Commit when you want this take to join the loop.');captureEvent({type:'take-prepared',track:takeTrack});render();
 }
-async function commit() {
-  if(!ready || !ctx) return;
-  const take=ready;ready=null;captureEvent({type:'commit-requested',track:take.track});render();$('capture-status').textContent='Planning the next loop…';
+function changeLevels() {
+  if(!ready||!worker||!ctx||preparing||committing)return;
+  takeTrack=ready.track;preparing=true;workerJob++;
+  $('capture-status').textContent='Updating the private take level…';
+  const samples=ready.original.slice();
+  worker.postMessage({id:workerJob,samples,rate:ctx.sampleRate,frames:ctx.sampleRate*8,shaped:true,levelMode:$('level-mode').value},[samples.buffer]);render();
+}
+async function commit() {if(ready&&!preparing&&!committing&&ctx)await stageTake(ready,'capture');}
+async function restoreTrack(track) {
+  if(!ctx||ctx.state!=='running'||held||capturing||preparing||ready||committing||stopping||state.tracks[track-1].pending)return;
+  try{const take=history.restore(track);await stageTake({...take,track},take.kind);}catch(error){notice(error.message);}
+}
+async function stageTake(take,kind) {
+  const sessionToken=token;if(kind==='capture')ready=null;committing=true;
+  let pending=null;
+  captureEvent({type:'commit-requested',track:take.track,kind});render();$('capture-status').textContent='Planning the next loop…';
   try {
     const t=state.tracks[take.track-1];
     await command('prepare',{track:t.id,base:t.revision,asset:`take-${crypto.randomUUID()}`,hash:take.hash,ready:currentFrame()});
     const p=state.tracks[t.id-1].pending;
+    pending=p;
+    history.stage(state.epoch,t.id,p.id,p.revision,take,kind);
     program.port.postMessage({type:'stage',epoch:state.epoch,track:t.id,base:t.revision,revision:p.revision,id:p.id,at:p.at,samples:take.samples},[take.samples.buffer]);
     $('capture-status').textContent='Committed · waiting for the loop';notice(`${names[t.id-1]} will change at the next planned loop boundary.`);drawWave(null);
-  } catch(error) {notice(`Current part retained: ${error.message}`);$('capture-status').textContent='Commit failed · capture again';}
-  render();
+  } catch(error) {
+    if(sessionToken!==token)return;
+    if(pending){history.reject(state.epoch,take.track,pending.id);await command('cancel',{track:take.track,base:state.tracks[take.track-1].revision,pendingId:pending.id}).catch(()=>stop(false));}
+    if(kind==='capture'&&take.samples.byteLength&&ctx&&!stopping)ready=take;
+    notice(`Current part retained: ${error.message}`);$('capture-status').textContent=ready?'Commit failed · private take retained':'Commit failed · current part retained';
+  } finally {if(sessionToken===token){committing=false;render();}}
+}
+function downloadTrack(track) {
+  try {
+    if(!ctx||!state.running||stopping)throw new Error('Play the parts before exporting an active loop');
+    const asset=history.current(track);
+    if(asset.revision!==state.tracks[track-1].revision)throw new Error('Wait for the activation acknowledgement');
+    const bytes=wav16Mono(asset.samples,ctx.sampleRate);
+    if(downloadUrl)URL.revokeObjectURL(downloadUrl);
+    downloadUrl=URL.createObjectURL(new Blob([bytes],{type:'audio/wav'}));
+    const a=document.createElement('a');a.href=downloadUrl;a.download=`loop-lab-${names[track-1].toLowerCase()}-r${asset.revision}-120bpm-4bars.wav`;document.body.append(a);a.click();a.remove();
+    captureEvent({type:'committed-wav-exported',track,revision:asset.revision,frames:asset.samples.length});
+    notice(`${names[track-1]} WAV downloaded: active eight-second loop, before track level/pan. Set Live to 120 BPM.`);
+  } catch(error){notice(error.message);}
 }
 async function stop(clearNotice=true) {
-  if(stopping)return;stopping=true;token++;workerJob++;ready=null;preparing=false;cancelCapture('Take discarded');
+  if(stopping)return;stopping=true;token++;workerJob++;ready=null;preparing=false;committing=false;history.clear();if(downloadUrl){URL.revokeObjectURL(downloadUrl);downloadUrl=null;}cancelCapture('Take discarded');
   authorizationId++;authorizing=false;
   captureLifecycle?.dispose();lastCaptureSnapshot=captureLifecycle?.snapshot()||lastCaptureSnapshot;captureLifecycle=null;
   worker?.terminate();worker=null;captureNode?.disconnect();captureNode=null;sink?.disconnect();sink=null;program?.disconnect();program=null;
@@ -248,9 +307,10 @@ function tick() {
 }
 $('enable-mic').onclick=authorizeMicrophone;
 $('input').onchange=()=>{authorizationId++;microphoneReady=false;render();};
+$('level-mode').onchange=changeLevels;
 $('capture-report-button').onclick=()=>{$('capture-report').textContent=JSON.stringify(captureReport(),null,2);};
 $('start').onclick=start;$('stop').onclick=()=>stop();$('commit').onclick=commit;
-$('discard').onclick=()=>{captureEvent({type:'take-discarded',track:ready?.track??null});ready=null;workerJob++;drawWave(null);$('capture-status').textContent='Take discarded';render();};
+$('discard').onclick=()=>{captureEvent({type:'take-discarded',track:ready?.track??null});captureLifecycle?.cancel('Take discarded');ready=null;workerJob++;preparing=false;drawWave(null);$('capture-status').textContent='Take discarded';render();};
 $('capture').onpointerdown=e=>{e.preventDefault();$('capture').setPointerCapture(e.pointerId);beginCapture();};
 $('capture').onblur=()=>{if(captureLifecycle?.active)cancelCapture('Capture control lost focus · take discarded');};
 $('capture').onpointerup=finishCapture;$('capture').onpointercancel=()=>cancelCapture();
@@ -259,7 +319,7 @@ $('capture').onkeyup=e=>{if(e.key===' '||e.key==='Enter'){e.preventDefault();fin
 window.addEventListener('blur',()=>{if(captureLifecycle?.active)cancelCapture('Focus lost · take discarded');});
 document.addEventListener('visibilitychange',()=>{if(document.hidden&&captureLifecycle?.active)cancelCapture('Page hidden · take discarded');});
 navigator.mediaDevices?.addEventListener('devicechange',()=>{if(captureLifecycle?.active?.kind==='microphone'){microphoneReady=false;cancelCapture('Audio devices changed · take discarded');}});
-window.addEventListener('pagehide',()=>{authorizationId++;captureLifecycle?.dispose();worker?.terminate();ctx?.close();});
+window.addEventListener('pagehide',()=>{authorizationId++;token++;workerJob++;ready=null;history.clear();if(downloadUrl)URL.revokeObjectURL(downloadUrl);captureLifecycle?.dispose();worker?.terminate();ctx?.close();});
 $('benchmark').onclick=async()=> {
   const button=$('benchmark');button.disabled=true;
   try {

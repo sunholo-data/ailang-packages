@@ -1,0 +1,89 @@
+{
+  "schema": "ailang.package-quality/v1",
+  "package": "sunholo/live_loop_lab",
+  "version": "0.2.0",
+  "stability": "experimental",
+  "mode": "publisher",
+  "compile": {
+    "source": "server",
+    "ok": true,
+    "files": 4
+  },
+  "contracts": {
+    "source": "server",
+    "evidence_schema": "ailang.verification-evidence/v1",
+    "numeric_model": {
+      "float_sort": "Real",
+      "int_sort": "Int",
+      "runtime_equivalence": "not_established"
+    },
+    "runtime_contracts": "not_measured",
+    "reason_counts": {
+      "uncontracted": 1,
+      "unsupported_encoding": 3
+    },
+    "verified": 3,
+    "total": 6,
+    "counterexample": 0,
+    "skipped": 3,
+    "errors": 0,
+    "uncontracted_exports": 1,
+    "wall_seconds": 0.090911459
+  },
+  "tests": {
+    "source": "attested",
+    "files": 1,
+    "passed": 10,
+    "failed": 0
+  },
+  "smoke": {
+    "source": "attested",
+    "present": true,
+    "passed": true,
+    "seconds": 0.234860375
+  },
+  "interface": {
+    "source": "server",
+    "hash_v1": "sha256:7ad9339ae0ed0fcb3070f89c776c6ee91fa2b786a97789110137d20abfb79479",
+    "hash_v2": "sha256:ifacev2:a777d55738158509c56b5a2df5f191fa7206179e48473ef35989f7962d6c56cd",
+    "signatures": 11
+  },
+  "effects": {
+    "source": "server",
+    "max": [
+      "FS",
+      "IO"
+    ],
+    "ceiling_declared": true,
+    "rank_max": "FS"
+  },
+  "release": {
+    "source": "server",
+    "kind": "feature",
+    "changelog_section": true,
+    "notes": "Feature: audio 0.3 consumer workflow, still a local application (never published).\n\n- Private Off / Peak-safe / Matched take preparation with input/output sample peaks,\n  active-window RMS, bounded boost and a reason for the gain. Re-preparation starts\n  from an unlevelled shaped original rather than compounding gain or fades.\n- One-step undo/redo per part uses the existing prepare/stage/activate protocol;\n  history changes only after exact-frame renderer and planner acknowledgement.\n- Download the active committed part as an eight-second mono PCM16 WAV for Live.\n  Downloads exclude private/pending takes and precede track level/pan. Stop/reset\n  clears in-memory history; saving a WAV is an explicit user action.\n- Reference tests compare the browser level adapter against the AILANG API and\n  pin browser WAV bytes to the package codec. Runner v3 identifies the changed\n  preparation worker; the earlier v2 soak remains historical baseline evidence."
+  },
+  "docs": {
+    "agent_md": true,
+    "ai_summary": true,
+    "agent_doc_exports_covered": 2
+  },
+  "style": {
+    "exported_funcs": 7,
+    "pure_exports": 6,
+    "pure_ratio": 0.8571428571428571
+  },
+  "gates": [],
+  "badges": [
+    {
+      "code": "PUB016",
+      "level": "info",
+      "msg": "3 contract(s) skipped by the verifier — not proved; `ailang verify --package .` lists the reason per function"
+    },
+    {
+      "code": "PUB011",
+      "level": "warn",
+      "msg": "1 exported function(s) carry no contract"
+    }
+  ]
+}
