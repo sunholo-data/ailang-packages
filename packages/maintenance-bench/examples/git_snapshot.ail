@@ -1,0 +1,10 @@
+module sunholo/maintenance_bench/examples/git_snapshot
+import pkg/sunholo/maintenance_bench/collect_git (collectGit)
+import pkg/sunholo/maintenance_bench/codec (encodeSnapshot)
+import std/env (getArgs)
+import std/io (println, exit)
+import std/result (Ok, Err)
+export func main() -> () ! {IO, Env, Process} = match getArgs() {
+ path :: _ => match collectGit(path,"local/source","ailang","HEAD",2000000000000,2) { Ok(s) => println(encodeSnapshot(s)), Err(e) => { println(e); exit(1) } },
+ _ => { println("usage: git_snapshot <repo>"); exit(2) }
+}
