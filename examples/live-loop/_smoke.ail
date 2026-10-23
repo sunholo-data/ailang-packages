@@ -1,0 +1,7 @@
+module sunholo/live_loop_lab/_smoke
+import ./planner (nextBoundary, boundaryFrame, handle)
+import std/string (contains)
+import std/io (println)
+export func main() -> () ! {IO @limit=1} {
+  if nextBoundary(48000,120,48000,48001)==432000 && boundaryFrame(44100,137,100,2)==618143 && contains(handle("{\"schema\":1,\"op\":\"init\"}"),"\"ok\":true") then println("OK: clock arithmetic and JSON planner") else println("FAIL: planner smoke")
+}

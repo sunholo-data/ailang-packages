@@ -1,0 +1,68 @@
+{
+  "schema": "ailang.package-verify/v1",
+  "package": "sunholo/live_loop_lab",
+  "version": "0.1.0",
+  "verified": 3,
+  "total": 6,
+  "counterexample": 0,
+  "skipped": 3,
+  "errors": 0,
+  "uncontracted": 1,
+  "wall_seconds": 0.049885958,
+  "modules": [
+    {
+      "module": "sunholo/live_loop_lab/assets",
+      "file": "assets.ail",
+      "verified": 0,
+      "counterexample": 0,
+      "skipped": 0,
+      "errors": 0,
+      "uncontracted": 1,
+      "results": [
+        {
+          "function": "generate",
+          "status": "uncontracted",
+          "reason": "no contract annotations (not a verification candidate)"
+        }
+      ]
+    },
+    {
+      "module": "sunholo/live_loop_lab/planner",
+      "file": "planner.ail",
+      "verified": 3,
+      "counterexample": 0,
+      "skipped": 3,
+      "errors": 0,
+      "uncontracted": 0,
+      "results": [
+        {
+          "function": "handle",
+          "status": "skipped",
+          "reason": "Function \"handle\" has deeply nested patterns; Function \"handle\" calls \"any\" whose signature uses an unencodable type \"*ast.FuncType\""
+        },
+        {
+          "function": "ceilDiv",
+          "status": "verified"
+        },
+        {
+          "function": "nextBoundary",
+          "status": "verified"
+        },
+        {
+          "function": "initial",
+          "status": "skipped",
+          "reason": "Function \"initial\" uses an unencodable builtin: std/list.range; Function \"initial\" calls \"map\" whose signature uses an unencodable type \"Option[b]\""
+        },
+        {
+          "function": "boundaryFrame",
+          "status": "verified"
+        },
+        {
+          "function": "apply",
+          "status": "skipped",
+          "reason": "Function \"apply\" calls \"any\" whose signature uses an unencodable type \"*ast.FuncType\""
+        }
+      ]
+    }
+  ]
+}

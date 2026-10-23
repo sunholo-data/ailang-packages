@@ -1,0 +1,26 @@
+// The worklet owns timing. Functions here are shared by the renderer and tests.
+export const TRACKS = 4;
+export const MAX_SECONDS = 16;
+export function validSamples(xs, rate) {
+  return xs instanceof Float32Array && Number.isInteger(rate) && rate >= 8000 && rate <= 192000
+    && xs.length > 0 && xs.length <= rate * MAX_SECONDS && xs.every(x => Number.isFinite(x) && Math.abs(x) <= 1);
+}
+export function gains(level, pan, muted) {
+  if (!Number.isInteger(level) || level < 0 || level > 100 || !Number.isInteger(pan) || Math.abs(pan) > 100 || typeof muted !== 'boolean') throw new Error('invalid parameters');
+  const angle = (pan / 100 + 1) * Math.PI / 4, amplitude = muted ? 0 : level / 100;
+  return [Math.cos(angle)*amplitude, Math.sin(angle)*amplitude];
+}
+export function prepareTake(input, rate, frames) {
+  if (!validSamples(input,rate) || !Number.isSafeInteger(frames) || frames < 1 || frames > rate*MAX_SECONDS) throw new Error('invalid take or frame budget');
+  const output = new Float32Array(frames), used = Math.min(frames,input.length), edge = Math.min(Math.round(rate*.01),Math.floor(used/2));
+  let peak=0;
+  for(let i=0;i<used;i++) {
+    const fade=edge>1?Math.min(1,i/(edge-1),(used-1-i)/(edge-1)):1;
+    output[i]=input[i]*fade; peak=Math.max(peak,Math.abs(output[i]));
+  }
+  // Limit to -6 dBFS, never boost a quiet take or divide by a silent peak.
+  const scale=peak>0.501187?0.501187/peak:1;
+  for(let i=0;i<used;i++) output[i]*=scale;
+  return output;
+}
+export function cycleFrame(rate,bpm,origin,cycle) { return origin+Math.floor(cycle*rate*960/bpm); }

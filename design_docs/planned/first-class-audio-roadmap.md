@@ -1,9 +1,24 @@
 # First class audio support in AILANG
 
-**Status:** Roadmap accepted in session, 2026-10-23. Hardening and mono/stereo clips/editing are implemented in the 0.2.0 feature group; see [hardening evidence](audio-hardening-0.1.1.md) and [clip milestone](audio-clips-0.2.0.md). Core updates are assigned to another agent. Later milestones remain planned.
+**Status:** Roadmap accepted in session, 2026-10-23. Hardening and mono/stereo clips/editing are implemented in the 0.2.0 feature group; see [hardening evidence](audio-hardening-0.1.1.md) and [clip milestone](audio-clips-0.2.0.md). The 0.2.0 group is merged and published. Core updates are assigned to another agent. A [live-loop L0 host prototype](live-loop-l0-feasibility.md) is now implemented for local review; browser/hardware acceptance is still open. Later milestones remain planned.
 **Scope:** `sunholo/audio`, `std/audio`, and the small runtime boundaries needed by their consumers. Stapledon's game port remains with that project.
 
 AILANG already supports deterministic sound generation, audio file output, offline measurements, and AI speech output. The next step should make these facilities safe to compose: validated formats, explicit channels and rates, bounded rendering, and evidence attached to the resulting bytes. Most sound processing should live in `sunholo/audio`; common file and sample conversions belong in `std/audio`. Runtime changes should serve a measured performance need or provide access to a host device.
+
+## Priority from the live-loop instrument
+
+The [long-term instrument plan](live-loop-instrument.md) makes host feasibility the
+next experiment: four-part playback, private capture, clock mapping and a minimal
+pure revision planner, before expanding the DSP API by guesswork. The local
+[Loop Lab example](../../examples/live-loop/README.md) supplies that prototype and
+[measured software evidence](../../examples/live-loop/evidence/2026-10-23/README.md).
+It does not establish device latency or finish L0 acceptance. After browser/loopback
+and lifecycle measurements, prioritize the 0.3.0 block-processing milestone and the
+minimum music/session timing model; then the L1 direct Audio capture workflow.
+
+The capabilities/audit tables below intentionally preserve the original 0.1.0
+baseline. For the shipped 0.2.0 checked clip/edit surface and current quality
+limitations, use the implementation links in the status line.
 
 ## Current capabilities
 
