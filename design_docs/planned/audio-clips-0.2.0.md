@@ -1,6 +1,6 @@
 # Audio clips and editing 0.2.0
 
-Status: second roadmap milestone implemented and validated, 2026-10-23. Publication is held until the feature group is validated and reviewed. This extends PR #155; the unpublished 0.1.1 hardening work will be included in 0.2.0.
+Status: second roadmap milestone implemented and validated, 2026-10-23. Merge and publication were authorized in session on 2026-10-23. PR #155 groups the unpublished 0.1.1 hardening work into 0.2.0; the known core verifier limitation remains explicitly recorded.
 
 Scope: validated planar mono/stereo clips backed by existing Array[float], explicit channel conversion/interleaving, checked editing/mixing, and channel-preserving PCM16/WAV adapters. Core updates remain with the other agent. Existing recipe records and mono render samples stay unchanged.
 
@@ -8,12 +8,12 @@ Policies: internal samples allow finite headroom; mono duplicates at unity; ster
 
 Clip records are public and can be forged, so every public operation validates its input. Limits bound input and output frames and total samples before allocation. Empty clips are valid. Temporary lists used by current array constructors/validation are bounded by the same dimensions; these are not exact host-memory or realtime guarantees.
 
-Acceptance: independent stereo byte fixtures retain both channels; interleave/deinterleave and bounded PCM round trips have native properties; edits have known expected samples; malformed clips, non-finite values, format mismatch and allocation overflow are rejected; all new exports have meaningful contracts; package quality, source tests, smoke, strict VM and runtime-contract probes are recorded separately. Publication remains deferred.
+Acceptance: independent stereo byte fixtures retain both channels; interleave/deinterleave and bounded PCM round trips have native properties; edits have known expected samples; malformed clips, non-finite values, format mismatch and allocation overflow are rejected; all new exports have meaningful contracts; package quality, source tests, smoke, strict VM and runtime-contract probes are recorded separately. Merge and publication are authorized in session.
 
 
 ## Delivered feature group
 
-The unpublished 0.2.0 candidate includes the hardening work from 0.1.1 and three new modules:
+The 0.2.0 release includes the hardening work from 0.1.1 and three new modules:
 
 - `clip`: planar Mono/Stereo Clip, ClipLimits, checked construction, channel selection, interleaving and explicit channel conversion.
 - `edit`: gain, end-exclusive trim, padding, reverse, append, endpoint-defined fades, complementary crossfades, bounded mixing/placement and equal-power mono panning.
@@ -21,7 +21,7 @@ The unpublished 0.2.0 candidate includes the hardening work from 0.1.1 and three
 
 All 24 new function exports carry contracts. Inputs and outputs are revalidated because Clip records are public. Internal finite headroom is retained; output limits are checked before constructing sample arrays. Operations use existing array and byte primitives; no core files, dependencies, device access or effect privileges were added.
 
-The working branch retains its earlier name `fix/audio-0.1.1`; PR #155 now describes the complete 0.2.0 group. The grouped version supersedes the unpublished hardening-only candidate. Publication remains deferred.
+The working branch retains its earlier name `fix/audio-0.1.1`; PR #155 now describes the complete 0.2.0 group. The grouped version supersedes the unpublished hardening-only candidate. Merge and publication are authorized in session.
 
 ## Quality and execution evidence
 
@@ -55,8 +55,13 @@ The raw [verifier report](../implemented/audio-clips-0.2.0/verify.json) preserve
 
 `checkSize` has a success contract for the validated sample count and bounds. Z3 verification fails because the generated declarations omit the imported `ResourceLimit(string)` constructor from `safety.AudioError`. A [minimal source](../implemented/audio-clips-0.2.0/verifier-repro.ail) and its [raw output](../implemented/audio-clips-0.2.0/verifier-repro.json) reproduce the failure on the installed binary. The contract remains in the code.
 
-Filed through canonical AILANG messages as `inbox_1792745981583_2823c9cc`, correlated with the earlier verification-scope request. Delivery and the unread shared-store entry were confirmed. The core agent owns this update. Re-run raw verification with the updated toolchain and reconcile this error before treating the release's verification evidence as complete; retain the known legacy skips and warnings explicitly.
+Filed through canonical AILANG messages as `inbox_1792745981583_2823c9cc`, correlated with the earlier verification-scope request. Delivery and the unread shared-store entry were confirmed. The core agent owns this update. Re-run raw verification when the core fix is available; retain the known verifier error, legacy skips and warnings explicitly. The user authorized release with the current evidence, without claiming complete verification.
 
 To reproduce the minimal failure from the repository root, copy the evidence probe into `packages/audio/_verify_probe.ail`, run `ailang verify --json packages/audio/_verify_probe.ail`, then remove the temporary copy before package quality/packaging. The evidence file is not package source.
 
 This is a cohesive offline feature group for the next release. Block processing, resampling, richer effects/analysis and devices remain later milestones; their absence does not imply any change to existing mono recipe output.
+
+
+## Authorized release check
+
+On 2026-10-23 the user instructed merging PR #155 and publishing 0.2.0 after the verifier limitation was explained. The [final release quality report](../implemented/audio-clips-0.2.0/release-quality.json) repeats the full checks after the release-note wording update: 22 files compile, 116 package checks pass, smoke passes, 9/49 contracts are verified, 39 are skipped, one verifier error remains and there are zero counterexamples. The 33 legacy uncontracted exports and mathematical proof scope remain explicit. No package code or contract was changed to bypass the core issue.

@@ -31,4 +31,4 @@ and export with `clip_pcm.toWav16` using an explicit clipping policy. Every chec
 `--verify-contracts` adds runtime assertions during validation; it is not needed for input rejection.
 See [AGENT.md](AGENT.md) for domains, resource limits, error variants and compatibility behavior.
 
-0.2.0 is an unpublished feature-group candidate that includes the 0.1.1 hardening work.
+0.2.0 groups the clip/editing features with the 0.1.1 hardening work.

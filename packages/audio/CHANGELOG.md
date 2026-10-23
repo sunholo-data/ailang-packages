@@ -3,8 +3,8 @@
 ## 0.2.0
 
 Feature: checked mono/stereo clips, channel-preserving PCM16/WAV adapters and editing.
-This release candidate groups the unpublished 0.1.1 hardening milestone with a useful
-set of offline audio features; publication is deferred until the group is reviewed.
+This release groups the unpublished 0.1.1 hardening milestone with the offline
+clip and editing features.
 
 - `clip`: planar `Array[float]` clips, explicit Mono/Stereo layouts, input/output frame
   and sample budgets, finite headroom, channel selection and interleaving. Unity
@@ -20,7 +20,7 @@ set of offline audio features; publication is deferred until the group is review
 - Keep all v1 recipe record shapes and existing mono render behavior. Internal
   headroom is finite but can exceed full scale; integer encoding is the explicit
   clipping boundary. No implicit resampling or normalization is added.
-- Add InvalidClip to the new, still-unpublished AudioError type. Keep DSP pure and
+- Add InvalidClip to the AudioError type introduced by the hardening milestone. Keep DSP pure and
   reuse existing std/array and std/bytes; core changes are developed separately.
 
 

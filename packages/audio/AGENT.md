@@ -324,5 +324,6 @@ ailang run --quiet --relax-modules --bytecode --strict-bytecode --verify-contrac
 Both print `true true true`: independent expected PCM bytes, stereo WAV reimport,
 and forged-clip rejection. Static verification currently has an upstream constructor
 declaration error on `checkSize`; retain that error separately from skipped proofs
-and passing native/runtime-contract checks. Publication is deferred for this grouped
-release candidate. See the roadmap's 0.2.0 report for actual proof/test counts.
+and passing native/runtime-contract checks. This toolchain limitation does not
+represent a successful proof or a counterexample. See the roadmap's 0.2.0 report
+for actual proof/test counts and the upstream message ID.
