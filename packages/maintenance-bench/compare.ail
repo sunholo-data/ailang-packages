@@ -1,0 +1,42 @@
+module sunholo/maintenance_bench/compare
+import ./types (Episode)
+import ./codec (collectResults)
+import ./metrics (rate)
+import std/option (Option, Some, None)
+import std/result (Result, Ok, Err, flatMap)
+import std/list (map, filter, length as size, flatMap as flatten)
+import std/map as M
+import std/json (encode, JArray, JString, JNumber)
+import std/math (intToFloat)
+export type PairComparison = {matched:int,knownPairs:int,unmatchedLeft:int,unmatchedRight:int,unmappedLeft:int,unmappedRight:int,bothPass:int,leftOnly:int,rightOnly:int,neither:int,unknownOutcomePairs:int,deltaPP:Option[float]}
+export pure func deltaPP(an: int, ad: int, bn: int, bd: int) -> Option[float] = match (rate(an,ad),rate(bn,bd)) { (Some(a),Some(b))=>Some(100.0*(a-b)),_=>None }
+func keyed(r: Episode) -> Result[{key:string,row:Episode},string] = match (r.pair,r.model,r.harness,r.trial) {
+ (Some(pair),Some(model),Some(harness),Some(trial))=>if pair=="" || model=="" || harness=="" || trial<1 then Err("empty/invalid pair configuration: ${r.id}") else Ok({key:encode(JArray([JString(pair),JString(model),JString(harness),JNumber(intToFloat(trial))])),row:r}),
+ _=>Err("semantic pair requires model, harness and trial identity: ${r.id}")
+}
+func hasPair(r: Episode) -> bool = match r.pair {Some(_)=>true,None=>false}
+func verdict(a: Episode,b: Episode) -> string = match (a.outcome,b.outcome) {
+ (Some(x),Some(y))=>if x && y then "both" else if x then "left" else if y then "right" else "neither", _=>"unknown"
+}
+export pure func compareLanguages(rows: [Episode], left: string, right: string) -> Result[PairComparison,string] {
+ if left==right then Err("comparison languages must differ") else {
+  let allLeft=filter(\r. r.language==left,rows);
+  let allRight=filter(\r. r.language==right,rows);
+  let leftRows=filter(\r. hasPair(r),allLeft);
+  let rightRows=filter(\r. hasPair(r),allRight);
+  flatMap(\a. flatMap(\b. {
+   let ai=M.fromList(map(\x. (x.key,x.row),a));
+   let bi=M.fromList(map(\x. (x.key,x.row),b));
+   if M.size(ai)!=size(a) || M.size(bi)!=size(b) then Err("duplicate semantic arm key") else {
+    let keys=filter(\key. M.member(bi,key),M.keys(ai));
+    let outcomes=flatten(\key. match (M.lookup(ai,key),M.lookup(bi,key)) { (Some(x),Some(y))=>[verdict(x,y)], _=>[] },keys);
+    let both=size(filter(\v. v=="both",outcomes));
+    let onlyA=size(filter(\v. v=="left",outcomes));
+    let onlyB=size(filter(\v. v=="right",outcomes));
+    let neither=size(filter(\v. v=="neither",outcomes));
+    let known=both+onlyA+onlyB+neither;
+    Ok({matched:size(keys),knownPairs:known,unmatchedLeft:size(a)-size(keys),unmatchedRight:size(b)-size(keys),unmappedLeft:size(allLeft)-size(a),unmappedRight:size(allRight)-size(b),bothPass:both,leftOnly:onlyA,rightOnly:onlyB,neither:neither,unknownOutcomePairs:size(keys)-known,deltaPP:deltaPP(both+onlyA,known,both+onlyB,known)})
+   }
+  },collectResults(map(\r. keyed(r),rightRows))),collectResults(map(\r. keyed(r),leftRows)))
+ }
+}

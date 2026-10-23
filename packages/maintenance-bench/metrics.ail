@@ -1,0 +1,51 @@
+module sunholo/maintenance_bench/metrics
+import ./types (Episode)
+import ./cohort (Cohort)
+import std/result (Result, Ok, Err)
+import std/option (Option, Some, None)
+import std/list (map, filter, foldl, length as size, sortBy, nth, flatMap as flatten)
+import std/map as M
+import std/math (intToFloat)
+import std/json (encode, JArray, JString)
+
+export type Summary = {repo:string,language:string,cluster:string,eligible:int,mature:int,censored:int,unlabelled:int,linkedRepairChanges:int,repairEpisodes:int,repairDefects:int,repairRounds:int,unattributedRepairs:int,interceptedRepairs:int,mechanicalChanges:int,compilerRepairs:int,canonicalFiles:int,knownTokenRows:int,totalTokens:Result[int,string],knownCostRows:int,totalCostMicros:Result[int,string],knownDurationRows:int,totalDurationMs:Result[int,string],successes:int,unknownOutcomes:int,medianDurationMs:Option[float],costPerSuccessMicros:Result[float,string]}
+export pure func rate(n: int, d: int) -> Option[float] = if n < 0 || d <= 0 || n > d then None else Some(intToFloat(n)/intToFloat(d))
+export pure func median(xs: [int]) -> Option[float] {
+ let sorted = sortBy(\a b. if a<b then -1 else if a>b then 1 else 0,xs);
+ let n=size(sorted);
+ if n==0 then None else match nth(sorted,n/2) { None => None, Some(upper) =>
+  if n%2==1 then Some(intToFloat(upper)) else match nth(sorted,n/2-1) { None => None, Some(lower) => Some(intToFloat(lower)/2.0+intToFloat(upper)/2.0) }
+ }
+}
+export pure func totalKnown(xs: [Option[int]]) -> Result[int,string] = foldl(\acc x. match acc { Err(e)=>Err(e), Ok(total)=>match x { None=>Ok(total), Some(n)=>if n<0 || n>9007199254740991-total then Err("exact count aggregation overflow") else Ok(total+n) } },Ok(0),xs)
+export pure func costPerSuccess(xs: [Option[int]], successes: int) -> Result[float,string] =
+ if successes<=0 then Err("no_verified_success") else if size(filter(\x. match x { None=>true, _=>false },xs))>0 then Err("unreported_cost") else match totalKnown(xs) { Err(e)=>Err(e), Ok(total)=>Ok(intToFloat(total)/intToFloat(successes)) }
+export pure func uniqueCount(xs: [string]) -> int = M.size(M.fromList(map(\s. (s,true),xs)))
+export pure func groupKey(r: Episode) -> string = encode(JArray([JString(r.repo),JString(r.language),JString(r.cluster)]))
+export pure func confirmedRepair(r: Episode) -> bool = r.purpose=="repair" && r.evidenceLevel=="confirmed"
+export pure func escapedApplicationRepair(r: Episode) -> bool = confirmedRepair(r) && r.canonical && (r.detectionStage=="production" || r.detectionStage=="post_acceptance") && (r.rootCause=="application" || r.rootCause=="type_interface" || r.rootCause=="effects_authority" || r.rootCause=="requirement")
+func texts(xs: [Option[string]]) -> [string] = flatten(\v. match v {Some(s)=>[s],None=>[]},xs)
+func ints(xs: [Option[int]]) -> [int] = flatten(\v. match v {Some(n)=>[n],None=>[]},xs)
+func known(xs: [Option[int]]) -> int = size(filter(\v. match v { Some(_)=>true, None=>false },xs))
+func summarize(c: Cohort, allRows: [Episode], example: Episode) -> Summary {
+ let key=groupKey(example);
+ let eligible=filter(\r. groupKey(r)==key,c.eligible);
+ let mature=filter(\r. groupKey(r)==key,c.mature);
+ let rows=filter(\r. groupKey(r)==key,allRows);
+ let index=M.fromList(map(\r. (r.id,r),mature));
+ let repairs=filter(\r. confirmedRepair(r),rows);
+ let escaped=filter(\r. escapedApplicationRepair(r),repairs);
+ let linked=filter(\r. match (r.repairs,r.detectedMs) {
+  (Some(target),Some(ms))=>match M.lookup(index,target) { Some(original)=>ms>=original.acceptedMs && ms-original.acceptedMs<=c.windowDays*86400000 && ms<=c.cutoffMs, None=>false }, _=>false
+ },escaped);
+ let tokens=map(\r. r.tokens,rows);
+ let costs=map(\r. r.costMicros,rows);
+ let durations=map(\r. r.durationMs,rows);
+ let successes=size(filter(\r. match r.outcome { Some(b)=>b, None=>false },rows));
+ let unknownOutcomes=size(filter(\r. match r.outcome { None=>true, _=>false },rows));
+ {repo:example.repo,language:example.language,cluster:example.cluster,eligible:size(eligible),mature:size(mature),censored:size(eligible)-size(mature),unlabelled:size(filter(\r. r.purpose=="uncertain" || r.evidenceLevel=="unknown",eligible)),linkedRepairChanges:uniqueCount(texts(map(\r. r.repairs,linked))),repairEpisodes:size(repairs),repairDefects:uniqueCount(texts(map(\r. r.defect,repairs))),repairRounds:uniqueCount(map(\r. encode(JArray([JString(show(r.defect)),JString(show(r.round))])),filter(\r. r.round>0,repairs))),unattributedRepairs:size(filter(\r. match r.repairs {None=>true,_=>false},repairs)),interceptedRepairs:size(filter(\r. r.detectionStage=="local_compiler" || r.detectionStage=="local_verifier" || r.detectionStage=="local_tests" || r.detectionStage=="ci" || r.detectionStage=="review",repairs)),mechanicalChanges:size(filter(\r. r.purpose=="mechanical",rows)),compilerRepairs:size(filter(\r. confirmedRepair(r) && r.rootCause=="compiler_runtime",rows)),canonicalFiles:uniqueCount(flatten(\r. r.files,filter(\r. r.canonical,rows))),knownTokenRows:known(tokens),totalTokens:totalKnown(tokens),knownCostRows:known(costs),totalCostMicros:totalKnown(costs),knownDurationRows:known(durations),totalDurationMs:totalKnown(durations),successes:successes,unknownOutcomes:unknownOutcomes,medianDurationMs:median(ints(durations)),costPerSuccessMicros:if unknownOutcomes>0 then Err("unknown_outcomes") else costPerSuccess(costs,successes)}
+}
+export pure func summaries(c: Cohort, allRows: [Episode]) -> [Summary] {
+ let groups=M.fromList(map(\r. (groupKey(r),r),c.eligible));
+ map(\r. summarize(c,allRows,r),M.values(groups))
+}

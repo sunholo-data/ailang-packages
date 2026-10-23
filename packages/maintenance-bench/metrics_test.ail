@@ -1,0 +1,20 @@
+module sunholo/maintenance_bench/metrics_test
+import ./metrics (rate, median, totalKnown, costPerSuccess)
+import std/option (Some, None)
+import std/result (Ok, Err)
+import ./metrics (summaries)
+import ./cohort (applyAnnotations, buildCohort)
+import ./reference (data, label, manifest)
+import std/list (length, head, reverse)
+test "zero denominator is unavailable" { match rate(0,0) { None => true, _ => false } }
+test "rate is a fraction" { match rate(1,4) { Some(x) => x==0.25, _ => false } }
+test "even median averages central pair" { match median([9,1,3,5]) { Some(x) => x==4.0, _ => false } }
+test "empty median is unavailable" { match median([]) { None => true, _ => false } }
+test "failed attempt cost remains in total" { match costPerSuccess([Some(100),Some(300)],1) { Ok(x) => x==400.0, _ => false } }
+test "unknown costs do not become zero" { match costPerSuccess([Some(100),None],1) { Err(_) => true, _ => false } }
+test "zero successes never zero cost" { match costPerSuccess([Some(100)],0) { Err(_) => true, _ => false } }
+test "count aggregation refuses overflow" { match totalKnown([Some(9007199254740991),Some(1)]) { Err(_) => true, _ => false } }
+test "confirmed escaped repair links original without counting files as defects" { match applyAnnotations(data(),[label("r1")]) { Ok(s)=>match buildCohort(s,manifest()) { Ok(c)=>match head(summaries(c,s.episodes)) { Some(row)=>row.linkedRepairChanges==1 && row.repairDefects==1 && row.repairRounds==1 && row.mature==3, _=>false }, _=>false }, _=>false } }
+test "compiler interception is separate from escaped defect" { let a={label("r1") | rootCause:"type_interface",detectionStage:"ci"}; match applyAnnotations(data(),[a]) { Ok(s)=>match buildCohort(s,manifest()) { Ok(c)=>match head(summaries(c,s.episodes)) { Some(row)=>row.linkedRepairChanges==0 && row.interceptedRepairs==1, _=>false }, _=>false }, _=>false } }
+test "inferred repair is not confirmed incidence" { let a={label("r1") | evidenceLevel:"inferred"}; match applyAnnotations(data(),[a]) { Ok(s)=>match buildCohort(s,manifest()) { Ok(c)=>match head(summaries(c,s.episodes)) { Some(row)=>row.linkedRepairChanges==0, _=>false }, _=>false }, _=>false } }
+property "rate bounded for count partitions" { forall(n: int) => if n>=0 && n<100000 then match rate(n,n+1) { Some(x)=>x>=0.0 && x<=1.0,_=>false } else true }
