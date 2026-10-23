@@ -2,6 +2,8 @@
 
 ## 0.2.0
 
+The staged adapter now has controller-only arbitrary candidate grading for both native task families, with explicit development-only unconfined controls, digest-bound inputs, immutable output, semantic/artifact/setup distinctions and source/oracle integrity checks. Unsafe source can be recorded as an invalid attempt with no fabricated candidate digest while preserving the last owned checkpoint. These controls do not themselves qualify containment or measure model outcomes.
+
 Add explicit sampled indices and scope/intent counts, rename-aware follow-up history, strict neutral usage receipts, exact money/cache/reasoning accounting, retained three-stage run ledgers, matched AILANG/comparator economics and reproduction roadmap-card drafts. Add offline maintenance-ledger command, independent instrument controls and native real-requirement taskpack qualification. Token headline includes generated output; unknown usage, invalid outcomes, overlap and overflow do not become wins. Frozen v0.1 consumers replay independently. Source release candidate only; no registry upload or model campaign.
 
 ## 0.1.0

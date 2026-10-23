@@ -2,7 +2,7 @@ AILANG_BIN ?= ailang
 # Native forall properties compile/test but trigger the pinned formatter nil-expression bug.
 # Explicit formatting waiver only for these four test modules; both remain compiled/tested.
 FMT_FILES = $(filter-out codec_test.ail cohort_test.ail lineage_test.ail metrics_test.ail,$(wildcard *.ail examples/*.ail))
-.PHONY: verify test fmt smoke examples integration ledger-integration qualify-taskpacks scale quality quality-strict package
+.PHONY: verify test fmt smoke examples integration ledger-integration qualify-taskpacks candidate-grading-test scale quality quality-strict package
 verify: fmt test smoke examples ledger-examples
 	$(AILANG_BIN) lock --check
 	$(AILANG_BIN) check --package .
@@ -17,7 +17,9 @@ integration:
 	AILANG_BIN=$(AILANG_BIN) sh tests/integration.sh
 ledger-integration:
 	AILANG_BIN=$(AILANG_BIN) sh tests/ledger_integration.sh
-qualify-taskpacks:
+candidate-grading-test:
+	PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s ../../research/real-world-maintenance/taskpacks/v1 -p candidate_grade_test.py -v
+qualify-taskpacks: candidate-grading-test
 	AILANG_BIN=$(AILANG_BIN) sh ../../research/real-world-maintenance/taskpacks/v1/qualify.sh
 scale:
 	@task_tmp=$$(mktemp -d); trap 'rm -rf "$$task_tmp"' EXIT; \
