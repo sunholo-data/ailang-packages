@@ -1,0 +1,300 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "packageSourceRevision",
+    "packageRoot",
+    "plan",
+    "settings",
+    "analysis",
+    "toolchains",
+    "trajectories",
+    "protectedRoots",
+    "limits",
+    "isolation"
+  ],
+  "properties": {
+    "schema": {
+      "const": "maintenance.execution/1"
+    },
+    "packageSourceRevision": {
+      "const": "a4163559a2e20dddc1a1bb0869a06e42372994a1"
+    },
+    "packageRoot": {
+      "type": "string",
+      "minLength": 1
+    },
+    "plan": {
+      "$ref": "#/$defs/ref"
+    },
+    "settings": {
+      "$ref": "#/$defs/ref"
+    },
+    "analysis": {
+      "$ref": "#/$defs/ref"
+    },
+    "toolchains": {
+      "type": "array",
+      "minItems": 2,
+      "items": {
+        "$ref": "#/$defs/toolchain"
+      }
+    },
+    "trajectories": {
+      "type": "array",
+      "minItems": 2,
+      "items": {
+        "$ref": "#/$defs/trajectory"
+      }
+    },
+    "protectedRoots": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "uniqueItems": true
+    },
+    "limits": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "maxTrajectories",
+        "maxStages",
+        "maxStageSeconds",
+        "maxCampaignSeconds",
+        "maxRequests",
+        "maxTokens"
+      ],
+      "properties": {
+        "maxTrajectories": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "maxStages": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "maxStageSeconds": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "maxCampaignSeconds": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "maxRequests": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "maxTokens": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    },
+    "isolation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "backend",
+        "status",
+        "policyDigest"
+      ],
+      "properties": {
+        "backend": {
+          "const": "pi"
+        },
+        "status": {
+          "enum": [
+            "unqualified",
+            "qualified"
+          ]
+        },
+        "policyDigest": {
+          "$ref": "#/$defs/sha"
+        }
+      }
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Maintenance execution bindings (controller only)",
+  "$defs": {
+    "sha": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "artifact": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))(?!.*[\\\\:\\u0000]).+$"
+    },
+    "ref": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "sha256"
+      ],
+      "properties": {
+        "path": {
+          "type": "string",
+          "minLength": 1
+        },
+        "sha256": {
+          "$ref": "#/$defs/sha"
+        }
+      }
+    },
+    "command": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "command",
+        "files"
+      ],
+      "properties": {
+        "command": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "files": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/ref"
+          }
+        }
+      }
+    },
+    "asset": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "destination",
+        "sha256",
+        "executable"
+      ],
+      "properties": {
+        "path": {
+          "type": "string",
+          "minLength": 1
+        },
+        "destination": {
+          "$ref": "#/$defs/artifact"
+        },
+        "sha256": {
+          "$ref": "#/$defs/sha"
+        },
+        "executable": {
+          "type": "boolean"
+        }
+      }
+    },
+    "stage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "request",
+        "publicCheck",
+        "oracle"
+      ],
+      "properties": {
+        "id": {
+          "enum": [
+            "S1",
+            "S2",
+            "S3"
+          ]
+        },
+        "request": {
+          "$ref": "#/$defs/ref"
+        },
+        "publicCheck": {
+          "$ref": "#/$defs/command"
+        },
+        "oracle": {
+          "$ref": "#/$defs/command"
+        }
+      }
+    },
+    "trajectory": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "starter",
+        "carryFiles",
+        "stages"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "starter": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/asset"
+          }
+        },
+        "carryFiles": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/artifact"
+          },
+          "uniqueItems": true
+        },
+        "stages": {
+          "type": "array",
+          "minItems": 3,
+          "items": {
+            "$ref": "#/$defs/stage"
+          },
+          "maxItems": 3
+        }
+      }
+    },
+    "toolchain": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "language",
+        "command",
+        "version",
+        "evidence"
+      ],
+      "properties": {
+        "language": {
+          "type": "string",
+          "minLength": 1
+        },
+        "command": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "version": {
+          "type": "string",
+          "minLength": 1
+        },
+        "evidence": {
+          "$ref": "#/$defs/ref"
+        }
+      }
+    }
+  }
+}
