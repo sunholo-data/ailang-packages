@@ -50,8 +50,13 @@ def build(ailang_evidence, python_evidence):
     tools = []
     for language, path in evidence.items():
         value = json.loads(path.read_text())
-        if not value.get("version") or not value.get("command"):
-            raise ValueError("toolchain evidence requires version and command")
+        if (value.get("schema") != "maintenance.toolchain/1" or not value.get("version") or
+            type(value.get("command")) is not list or len(value["command"]) != 1 or
+            type(value.get("versionCommand")) is not list or len(value["versionCommand"]) < 2 or
+            value["versionCommand"][0] != value["command"][0] or
+            type(value.get("binarySHA256")) is not str or len(value["binarySHA256"]) != 64 or
+            any(c not in "0123456789abcdef" for c in value["binarySHA256"])):
+            raise ValueError("maintenance.toolchain/1 requires native command, explicit version query and observed binary SHA")
         tools.append({"language": language, "command": value["command"],
                       "version": value["version"], "evidence": relative_ref(path)})
     settings = HERE / "development.settings.json"
@@ -72,6 +77,7 @@ def build(ailang_evidence, python_evidence):
                                 if family == "resource-ownership" else ["qualify.py", "taskpack.json", "stages/contract.md"])]
         trusted += sorted((source / "fixtures").glob("*.json"))
         oracle_files = [relative_ref(p) for p in trusted]
+        oracle_digest = sha(canonical([f["sha256"] for f in oracle_files]))
         for repeat in (1, 2):
             for language in ("ailang", "python"):
                 starter = source / "starter" / language
@@ -93,7 +99,7 @@ def build(ailang_evidence, python_evidence):
                     request = relative_ref(source / "stages" / request_name)
                     stage = f"S{number}"
                     stages.append({"id": stage, "requirementDigest": request["sha256"],
-                                   "oracleDigest": oracle_files[0]["sha256"]})
+                                   "oracleDigest": oracle_digest})
                     command = ["python3", str(grader.relative_to(REPOSITORY)), "--candidate", "{candidate}",
                                "--language", language, "--stage", str(number), "--output", "{output}",
                                "--expected-source-digest", "{candidateDigest}", "--command-prefix-json",

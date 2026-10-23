@@ -60,3 +60,7 @@ checks all bound source hashes, and verifies confinement qualification rather
 than trusting a user-supplied digest. No placeholder or oracle path is passed to
 the model. Development-only unconfined controls are labelled as such and cannot
 qualify protected execution.
+
+Before any model campaign, oracleDigest now binds SHA256 of compact JSON containing ALL ordered oracle-source/fixture file SHA256 values, not the wrapper alone. This identity is shared by native arms and is independent of checkout paths. Toolchain evidence uses maintenance.toolchain/1 with explicit native/version commands, full observed version and actual executable SHA256; loader validation is static, while native grading independently verifies version and binary before/after execution. These amendments occurred during no-model development and do not rescore frozen studies.
+
+Direct protected candidate checks demonstrate declared filesystem/network denials. POSIX process-group cleanup does not establish reaping of descendants that detach sessions or escape cwd; full live admission remains closed pending an owned process boundary and nested-tool execution fix.
