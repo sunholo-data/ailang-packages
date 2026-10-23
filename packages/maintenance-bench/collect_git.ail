@@ -38,7 +38,7 @@ func captureCommit(path: string, repo: string, language: string, sha: string) ->
      let paths = map(\r. r.path,rows);
      let canonical = filter(\p. canonicalPath(p),paths);
      let base = observed("${repo}@${sha}",repo,language,sec * 1000,if size(canonical)>0 then canonical else paths,"git:${sha}; raw-name-status:${raw}");
-     Ok({base | canonical:size(canonical)>0})
+     Ok({base | canonical:size(canonical)>0,artifactRole:if size(canonical)>0 then "canonical" else "derived"})
     } }
    }
   }, _ => Err("missing Git timestamp")

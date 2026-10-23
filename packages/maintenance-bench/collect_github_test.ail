@@ -1,0 +1,14 @@
+module sunholo/maintenance_bench/collect_github_test
+import ./collect_github (validRepo, decodePage, pageEnded, parsePull)
+import std/result (Ok, Err)
+import std/option (Some, None)
+import std/json (JObject, JString, JNull, JNumber, kv)
+import std/list (length)
+test "repo injection rejected" { not validRepo("owner/repo?state=all") && not validRepo("../repo") && not validRepo("owner/repo/extra") }
+test "normal repo accepted" { validRepo("qax-os/excelize") }
+test "API failure object is not an empty page" { match decodePage("{\"message\":\"rate limited\"}") { Err(_) => true, Ok(_) => false } }
+test "real empty page terminates" { match decodePage("[]") { Ok(xs) => length(xs)==0, Err(_) => false } }
+test "full capped page is not known complete" { not pageEnded(20,20) }
+test "unmerged PR is not accepted source" { match parsePull(JObject([kv("merged_at",JNull)]),"a/b","go",2000000000000,[]) { Ok(None) => true, _ => false } }
+test "missing merged field errors" { match parsePull(JObject([]),"a/b","go",2000000000000,[]) { Err(_) => true, _ => false } }
+test "merged PR keeps identity" { match parsePull(JObject([kv("merged_at",JString("2026-10-18T18:49:30Z")),kv("number",JNumber(749.0))]),"tafia/calamine","rust",2000000000000,[JObject([kv("filename",JString("src/xlsx.rs"))])]) { Ok(Some(row)) => row.id=="tafia/calamine#749" && row.authorship=="unknown" && row.canonical, _ => false } }

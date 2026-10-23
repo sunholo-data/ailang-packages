@@ -1,0 +1,84 @@
+module sunholo/maintenance_bench/collect_github
+import ./types (Episode, Snapshot, Evidence)
+import ./codec (requiredCount, requiredText, requiredTexts)
+import ./observation (observed, snapshot)
+import ./collect_git (canonicalPath)
+import ./process_read (readCommand)
+import std/result (Result, Ok, Err, flatMap)
+import std/option (Option, Some, None)
+import std/json (Json, JArray, JString, JNull, get, decode, encode)
+import std/list (map, filter, foldl, length as size)
+import std/string (split, chars, charCode, startsWith)
+import std/datetime (parseRFC3339)
+import std/crypto (sha256Hex)
+
+export type Fetched = {items:[Json],frames:[Evidence],complete:bool}
+func safePart(s: string) -> bool = s != "" && s != "." && s != ".." && not startsWith(s,"-") && foldl(\ok c. ok && ((charCode(c)>=48 && charCode(c)<=57) || (charCode(c)>=65 && charCode(c)<=90) || (charCode(c)>=97 && charCode(c)<=122) || c=="-" || c=="_" || c=="."),true,chars(s))
+export pure func validRepo(repo: string) -> bool = match split(repo,"/") { [owner,name] => safePart(owner) && safePart(name), _ => false }
+@allow_empty_ok("A successfully decoded empty API array is a legitimate pagination terminator")
+export pure func decodePage(raw: string) -> Result[[Json],string] = flatMap(\j. match j { JArray(xs) => Ok(xs), _ => Err("GitHub response is not an array") },decode(raw))
+export pure func pageEnded(count: int, pageSize: int) -> bool = count < pageSize
+func fetchPages(endpoint: string, page: int, maxPages: int, pageSize: int) -> Result[Fetched,string] ! {Process} {
+ let url = endpoint;
+ let query = "${url}${if hasQuery(endpoint) then "&" else "?"}per_page=${show(pageSize)}&page=${show(page)}";
+ match readCommand("gh",["api","--method","GET",query]) {
+  Err(e) => Err("${query}: ${e}"), Ok(raw) => match decodePage(raw) {
+   Err(e) => Err("${query}: ${e}"), Ok(items) => {
+    let frame = {endpoint:query,body:raw,digest:sha256Hex(raw)};
+    if pageEnded(size(items),pageSize) then Ok({items:items,frames:[frame],complete:true}) else
+    if page >= maxPages then Ok({items:items,frames:[frame],complete:false}) else
+    match fetchPages(endpoint,page+1,maxPages,pageSize) { Err(e) => Err(e), Ok(next) => Ok({items:items ++ next.items,frames:frame :: next.frames,complete:next.complete}) }
+   }
+  }
+ }
+}
+func hasQuery(s: string) -> bool = size(split(s,"?")) > 1
+export pure func parsePull(j: Json, repo: string, language: string, cutoffMs: int, files: [Json]) -> Result[Option[Episode],string] = match get(j,"merged_at") {
+ Some(JNull) => Ok(None),
+ Some(JString(date)) => match parseRFC3339(date) {
+  None => Err("invalid merged_at"), Some(ms) => if ms > cutoffMs then Ok(None) else
+  flatMap(\number. flatMap(\paths. {
+   let canonical = filter(\path. canonicalPath(path),paths);
+   let row = observed("${repo}#${show(number)}",repo,language,ms,if size(canonical)>0 then canonical else paths,"GitHub PR metadata: ${encode(j)}");
+   Ok(Some({row | canonical:size(canonical)>0,artifactRole:if size(canonical)>0 then "canonical" else "derived"}))
+  }, fileNames(files)), requiredCount(j,"number"))
+ }, _ => Err("missing merged_at (unmerged must be explicit null)")
+}
+@allow_empty_ok("A PR may legitimately contain no files, and recursion has an empty tail")
+func fileNames(files: [Json]) -> Result[[string],string] = match files {
+ [] => Ok([]), x :: rest => flatMap(\path. flatMap(\tail. Ok(path :: tail),fileNames(rest)),requiredText(x,"filename"))
+}
+func pullEvidence(j: Json, repo: string, maxPages: int) -> Result[{files:[Json],frames:[Evidence],complete:bool},string] ! {Process} = match requiredCount(j,"number") {
+ Err(e) => Err(e), Ok(n) => {
+  let base = "repos/${repo}/pulls/${show(n)}";
+  match fetchPages("${base}/files",1,maxPages,100) { Err(e) => Err(e), Ok(files) =>
+  match fetchPages("${base}/reviews",1,maxPages,100) { Err(e) => Err(e), Ok(reviews) =>
+  match fetchPages("${base}/comments",1,maxPages,100) { Err(e) => Err(e), Ok(inline) =>
+  match fetchPages("repos/${repo}/issues/${show(n)}/comments",1,maxPages,100) { Err(e) => Err(e), Ok(comments) =>
+   Ok({files:files.items,frames:files.frames ++ reviews.frames ++ inline.frames ++ comments.frames,complete:files.complete && reviews.complete && inline.complete && comments.complete})
+  } } } }
+ }
+}
+@allow_empty_ok("No remaining PRs is the recursion base, not a failed request")
+func acquirePulls(items: [Json], repo: string, language: string, cutoffMs: int, maxPages: int) -> Result[{rows:[Episode],frames:[Evidence],complete:bool},string] ! {Process} = match items {
+ [] => Ok({rows:[],frames:[],complete:true}), j :: rest => match pullEvidence(j,repo,maxPages) {
+  Err(e) => Err(e), Ok(data) => match parsePull(j,repo,language,cutoffMs,data.files) {
+   Err(e) => Err(e), Ok(row) => match acquirePulls(rest,repo,language,cutoffMs,maxPages) { Err(e) => Err(e), Ok(tail) =>
+    Ok({rows:match row { Some(r) => r :: tail.rows, None => tail.rows },frames:data.frames ++ tail.frames,complete:data.complete && tail.complete})
+   }
+  }
+ }
+}
+export func collectGithub(repo: string, language: string, cutoffMs: int, pageSize: int, maxPages: int) -> Result[Snapshot,string] ! {Process} {
+ if not validRepo(repo) || pageSize<1 || pageSize>20 || maxPages<1 || maxPages>5 || cutoffMs<0 then Err("invalid repo/cutoff/pageSize(1..20)/maxPages(1..5)") else
+ match fetchPages("repos/${repo}/pulls?state=closed&sort=created&direction=desc",1,maxPages,pageSize) {
+  Err(e) => Err(e), Ok(page) => match acquirePulls(page.items,repo,language,cutoffMs,maxPages) {
+   Err(e) => Err(e), Ok(data) => {
+    let frames = page.frames ++ data.frames;
+    let identity = sha256Hex(encode(JArray(map(\f. JString("${f.endpoint}:${f.digest}"),frames))));
+    let base = snapshot("github:${repo}",identity,cutoffMs,page.complete && data.complete,data.rows);
+    Ok({base | evidence:frames})
+   }
+  }
+ }
+}
