@@ -18,7 +18,7 @@ The [long-term instrument plan](live-loop-instrument.md) motivated the first hos
 experiment: four-part playback, private capture, clock mapping and a minimal
 pure revision planner. The local
 [Loop Lab example](../../examples/live-loop/README.md) supplies that prototype and
-[measured software evidence](../../examples/live-loop/evidence/2026-10-23/README.md).
+[measured software evidence](https://github.com/sunholo-data/ailang-packages/blob/93314fc581a7ee2fefdc82392a92228f8b01a2dd/examples/live-loop/evidence/2026-10-23/README.md).
 It does not establish device latency or finish L0 acceptance. After browser/loopback
 and lifecycle measurements, prioritize the 0.3.0 block-processing milestone and the
 minimum music/session timing model; then the L1 direct Audio capture workflow.

@@ -59,7 +59,7 @@ explicitly downloaded are external user-owned files.
 
 ## Validation
 
-Raw logs: [`examples/live-loop/evidence/audio-v3-workflow`](../../../examples/live-loop/evidence/audio-v3-workflow/README.md).
+Raw logs: [`examples/live-loop/evidence/audio-v3-workflow`](https://github.com/sunholo-data/ailang-packages/blob/93314fc581a7ee2fefdc82392a92228f8b01a2dd/examples/live-loop/evidence/audio-v3-workflow/README.md).
 
 | Check | Observed result |
 |---|---|
@@ -79,7 +79,7 @@ download, microphone lifecycle, audible listening or Ableton-import test.
 
 ### Local application's quality report, section by section
 
-[`quality.json`](../../../examples/live-loop/evidence/audio-v3-workflow/quality.json):
+[`quality.json`](https://github.com/sunholo-data/ailang-packages/blob/93314fc581a7ee2fefdc82392a92228f8b01a2dd/examples/live-loop/evidence/audio-v3-workflow/quality.json):
 
 | Section | Result |
 |---|---|
@@ -104,7 +104,7 @@ adapters; all skipped results remain unproved.
 
 ### Descriptive preparation costs
 
-[`node-worker-timing.json`](../../../examples/live-loop/evidence/audio-v3-workflow/node-worker-timing.json)
+[`node-worker-timing.json`](https://github.com/sunholo-data/ailang-packages/blob/93314fc581a7ee2fefdc82392a92228f8b01a2dd/examples/live-loop/evidence/audio-v3-workflow/node-worker-timing.json)
 records one warm-process preparation per mode/rate, including shaping, analysis,
 gain, output checks and SHA-256. Eight-second mono fixtures took 27.4–44.8 ms at
 44.1/48 kHz on this host. These are Node kernel measurements, excluding browser
@@ -136,7 +136,7 @@ python3 -m unittest discover -s test -p '*_test.py'
 ailang pkg quality --json .
 ```
 
-The consumer-owned [adapter_probe.ail](../../../examples/live-loop/test/fixtures/adapter_probe.ail)
+The consumer-owned [adapter_probe.ail](https://github.com/sunholo-data/ailang-packages/blob/93314fc581a7ee2fefdc82392a92228f8b01a2dd/examples/live-loop/test/fixtures/adapter_probe.ail)
 uses the application's `--package-dir` and declared dependency. The Node parity
 test supplies only bounded fixture IDs 0..17 and no longer reaches into this repo's
 package source or design-document directories. A later boundary/migration report

@@ -1,9 +1,10 @@
 # Loop Lab application and audio package boundary
 
-Status: proposed extraction plan, 2026-10-23. The user identifies Loop Lab as an
-application and a main consumer of the package. Proposed application repository:
-`sunholo-data/ailang-loop-lab`. No remote repository has been created and no source
-has been removed from this repository by this plan.
+Status: implemented 2026-10-23. Loop Lab now lives in its own private application
+repository, `sunholo-data/ailang-loop-lab`. Ten application commits were preserved;
+its fresh GitHub clone passes local compile/tests/quality with an exact Git-pinned
+audio candidate. The old source directory is a migration pointer. See the
+[implementation record](../implemented/loop-lab-repository-split/README.md).
 
 ## Ownership
 
@@ -50,7 +51,7 @@ adapter; do not turn the AILANG library into a four-part Web Audio application.
 
 ## Migration order and concrete acceptance
 
-1. Finish generic audio 0.3 scope, validate and release the package through its own
+1. Before an application release: finish generic audio 0.3 scope, validate and release the package through its own
    PR/registry workflow. The application's work does not itself publish that package.
 2. Create the application repository after its name/visibility are decided. Preserve
    the application directory's history and original commit/evidence provenance;
@@ -69,10 +70,9 @@ adapter; do not turn the AILANG library into a four-part Web Audio application.
    after standalone CI/reference checks pass. Avoid maintaining two source copies.
    Keep a small selection of generic headless package examples in this repository.
 
-The current isolated extraction check can establish path-independent compilation
-and behavior using an explicitly supplied local library. It cannot establish that
-unpublished audio 0.3 is installable from the registry or that a remote application
-repository exists. Those are separate migration gates.
+The standalone consumer has now resolved its dependency remotely by exact Git
+revision, without a producer checkout. This still does not establish that audio
+0.3 is registry-published; the registry switch remains an application-release gate.
 
 ## Release responsibilities after the split
 

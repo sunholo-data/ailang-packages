@@ -63,7 +63,7 @@ acceptance is not established by this filesystem/test isolation check.
 | Badges/gates | PUB016 / PUB011; no gates | PUB016 / PUB011; no gates |
 
 Audio report: [audio-quality.json](audio-quality.json). The original-tree app run
-is retained in [boundary-quality.json](../../../examples/live-loop/evidence/audio-v3-workflow/boundary-quality.json);
+is retained in [boundary-quality.json](https://github.com/sunholo-data/ailang-packages/blob/93314fc581a7ee2fefdc82392a92228f8b01a2dd/examples/live-loop/evidence/audio-v3-workflow/boundary-quality.json);
 the isolated app report agrees on compile/interface/effects/proof/test counts.
 The pure package source/ABI is unchanged; new processing features are proposed,
 not claimed implemented by these documentation changes. Earlier numeric reference,
