@@ -2,9 +2,9 @@
 
 **Design:** [Real-world language maintenance study — package addition](m-real-world-language-maintenance-study.md#repeatable-ailang-package--attended-scope-addition-2026-10-23)
 **Sprint ID:** M-MAINTENANCE-BENCH-PACKAGE
-**Status:** Implemented source candidate; execution authorised by Mark, 2026-10-23. Independent review and repository CI/publication are recorded in the completion evidence.
+**Status:** ✅ Completed package sprint, 2026-10-23. Source PR #156; independent evaluation passed and implementation CI is green. The parent research study remains planned.
 **Source target:** `sunholo-data/ailang-packages`, `packages/maintenance-bench/`, package `sunholo/maintenance_bench@0.1.0`.
-**Duration:** 4–6 focused days including fixture review, package validation and buffer. Separate from the larger survey's 6–10 research days and any model campaign.
+**Planned duration:** 4–6 focused days including fixture review, package validation and buffer. Separate from the larger survey's 6–10 research days and any model campaign.
 **Estimated total:** 2,160 LOC including meaningful tests; approximate planning quantity, not an empirical velocity forecast.
 **Risk:** Medium: evidence semantics, snapshot/API completeness, exact counts and unfamiliar data-analysis workloads.
 **AILANG prompt version loaded: v0.16.7** (`ailang prompt`, followed by `ailang prompt --version-active`).
@@ -15,7 +15,7 @@ Deliver an installable AILANG library/command that collects bounded public Git/G
 
 The source destination was explicitly confirmed in-session. Repository source publication is the requested release target. A registry release is a separate action; prepare and verify the tarball, but do not upload without that release being authorised. No scheduler, service, dashboard, LLM labeler or new generic runner in this sprint. The existing lifecycle proposal owns later model task execution.
 
-## Current Status and Capacity
+## Planning Baseline (before execution)
 
 - The research design exists; no package source, fixtures or pipeline implementation has been created.
 - The installed binary reports `v0.54.17-dirty` at `8f58117f265471584176e2aeb45996c2c9822577`. Pin a clean compiler for reproducible release evidence and record the prompt/compiler distinction.
@@ -29,13 +29,13 @@ Commands run on 2026-10-23: `ailang search statistics`, `stats`, `dataframe`, `c
 
 | Milestone | Decision | Package/capability and rationale |
 |---|---|---|
-| M1_SCHEMA | depend | Pin `sunholo/testing_utils@0.1.1` for assertion reuse; native tests/properties remain the evidence surface |
+| M1_SCHEMA | none (revised after reproduction) | Published testing_utils 0.1.1 failed on clean v0.54.17; native test expressions suffice; see execution amendments |
 | M2_GIT | none | No GitHub/benchmark package match; a narrow read-only Git acquisition adapter is study-specific |
 | M3_GITHUB | none | Use requested `gh` subprocess GET acquisition; no connector or new HTTP client package |
 | M4_COHORT | none | Study-specific annotations, lineage, censoring and accounting; stdlib supplies primitives |
 | M5_METRICS | none | No relevant statistics package found; bounded descriptive operations, not a new general dataframe library |
 | M6_REPORT | none | Stable JSON/Markdown reporting over study records; std/json and std/list |
-| M7_REPEATABILITY | depend | Reuse pinned testing_utils and native package/test tools; fixtures/oracles belong to this package |
+| M7_REPEATABILITY | none (revised after reproduction) | Native package/test tools; independent fixtures/oracles belong to this package |
 | M8_SOURCE_RELEASE | none | Existing package quality, [bin], Git/gh and CI mechanisms; no release utility package |
 
 The absence of a search match is dated registry evidence, not proof that no relevant future package can exist. If a suitable package appears before execution, inspect and revise the dependency decision rather than duplicate it.
@@ -44,7 +44,7 @@ The absence of a search match is dated registry evidence, not proof that no rele
 
 Each milestone should fit a 60–90 minute coding slice plus its validation/review; split further if it cannot. Every path below is relative to `packages/maintenance-bench/` in the target repository unless prefixed otherwise. Source LOC budgets include tests but exclude large acquired data. No file should approach the 800-line limit.
 
-### M1: Schema and strict codecs (~300 LOC)
+### ✅ M1: Schema and strict codecs (~300 LOC)
 
 **ID:** M1_SCHEMA. **Dependencies:** none. **Estimate:** 180 source + 120 tests.
 
@@ -55,7 +55,7 @@ Files: `ailang.toml`, `types.ail`, `manifest.ail`, `codec.ail`, `codec_test.ail`
 - [x] Missing, false, zero and empty are distinguishable; decoder never repairs malformed research input silently.
 - [x] Native valid/invalid/boundary tests and a codec round-trip property execute with recorded totals; no test_* naming substitute for native declarations.
 
-### M2: Bounded Git acquisition (~260 LOC)
+### ✅ M2: Bounded Git acquisition (~260 LOC)
 
 **ID:** M2_GIT. **Dependencies:** M1_SCHEMA. **Estimate:** 160 source + 100 tests.
 
@@ -66,7 +66,7 @@ Files: `collect_git.ail`, `snapshot_io.ail`, `collect_git_test.ail`; Git history
 - [x] Non-zero process exit, truncated output, missing executable and incomplete history are errors/incomplete observations even if exec returned Ok.
 - [x] Git output parsing handles spaces/unicode and record delimiters; a bounded test fixture verifies no mutation of the source repo.
 
-### M3: Bounded GitHub acquisition through gh (~300 LOC)
+### ✅ M3: Bounded GitHub acquisition through gh (~300 LOC)
 
 **ID:** M3_GITHUB. **Dependencies:** M1_SCHEMA, M2_GIT. **Estimate:** 180 source + 120 tests.
 
@@ -77,7 +77,7 @@ Files: `collect_github.ail`, `collect_github_test.ail`; captured small metadata 
 - [x] Offline replay of captured responses covers multi-page, missing-data, rejected/unmerged PR and non-zero exit cases without a network dependency.
 - [x] Acquisition outputs immutable snapshot identity; repeated collection never overwrites an earlier source snapshot in place.
 
-### M4: Reviewed annotations, lineage and cohorts (~320 LOC)
+### ✅ M4: Reviewed annotations, lineage and cohorts (~320 LOC)
 
 **ID:** M4_COHORT. **Dependencies:** M1_SCHEMA, M2_GIT, M3_GITHUB. **Estimate:** 180 source + 140 tests.
 
@@ -89,7 +89,7 @@ Files: `annotation.ail`, `lineage.ail`, `cohort.ail`, `cohort_test.ail`; example
 - [x] Unknown authorship is not human/AI; copied code and package consumers retain lineage/cluster identity.
 - [x] Partition-accounting and row-order-invariance properties plus adversarial duplicate/missing-link fixtures execute.
 
-### M5: Descriptive metrics and explicit deltas (~340 LOC)
+### ✅ M5: Descriptive metrics and explicit deltas (~340 LOC)
 
 **ID:** M5_METRICS. **Dependencies:** M4_COHORT. **Estimate:** 180 source + 160 tests.
 
@@ -101,7 +101,7 @@ Files: `metrics.ail`, `compare.ail`, `metrics_test.ail`, `compare_test.ail`; exa
 - [x] Per-project/domain/agent strata remain visible; tiny related cohorts cannot emit population-significance or unsupported confidence claims. Inferential results say not_computed with reason in v0.1.
 - [x] Independent fixtures cover equal rates, negative deltas, both-zero denominators, mixed known/unknown usage, costly failed attempts and zero successes.
 
-### M6: Stable reports and installable CLI (~280 LOC)
+### ✅ M6: Stable reports and installable CLI (~280 LOC)
 
 **ID:** M6_REPORT. **Dependencies:** M5_METRICS. **Estimate:** 180 source + 100 tests.
 
@@ -113,7 +113,7 @@ Files: `report.ail`, `cli.ail`, `report_test.ail`; finish examples `examples/off
 - [x] Non-zero CLI exit and typed diagnostics distinguish invalid schema, incomplete acquisition and unsupported analysis; a successful empty result never hides a failure.
 - [x] The installed [bin] command reproduces an example without requiring the original source checkout's working directory.
 
-### M7: Repeatability fixtures and data-science gap ledger (~240 LOC)
+### ✅ M7: Repeatability fixtures and data-science gap ledger (~240 LOC)
 
 **ID:** M7_REPEATABILITY. **Dependencies:** M6_REPORT. **Estimate:** 140 source + 100 tests.
 
@@ -125,7 +125,7 @@ Files: `benchmark.ail`, `_smoke.ail`, `benchmark_test.ail`, `DATA_SCIENCE_GAPS.m
 - [x] Gap entries include exact toolchain, reproducible operation/dataset size, observed behaviour, workaround and cost, proposed package/stdlib/compiler ownership, and follow-up status. No speculative language limitation or automatic core change.
 - [x] Smoke and normal tests remain offline and bounded; [bin] benchmark mode requests Clock explicitly. No paid/model runs or full study campaign.
 
-### M8: Package quality and repository source release (~120 LOC)
+### ✅ M8: Package quality and repository source release (~120 LOC)
 
 **ID:** M8_SOURCE_RELEASE. **Dependencies:** M7_REPEATABILITY. **Estimate:** 120 docs/config; full validation of existing tests rather than superficial new tests.
 
@@ -135,7 +135,7 @@ Files: `README.md`, `AGENT.md`, `CHANGELOG.md` with 0.1.0 entry, package metadat
 - [x] Record actual compile, named/inline test, property and SMT verified/unknown/skipped totals; run pkg quality --strict and publish --dry-run, reporting gates honestly.
 - [x] Repository metadata points to the package's actual GitHub tree path; changelog/release kind/docs/exports/effects are complete; no credentials or private transcripts in fixtures.
 - [x] Verify gh account before push, push only scoped changes to the requested repository, and create a reviewable PR using gh with exact validation evidence. Do not claim main-branch availability while only a PR exists.
-- [ ] Registry upload is not performed without separate release authorisation; dry-run is not registry acceptance. Independent sprint evaluation reviews design and evidence before completion. (Final review/publication evidence is pending.)
+- [x] Registry upload was not performed. Dry-run is not registry acceptance. Independent sprint evaluation passed; evidence is recorded below.
 
 ## Example Evidence Checklist (Syntax Gate)
 
@@ -171,7 +171,7 @@ Dependencies are sequential for v0.1; no delegation is requested. Statistical in
 
 ## Handoff and Progress State
 
-Progress JSON: `.ailang/state/sprints/sprint_M-MAINTENANCE-BENCH-PACKAGE.json`. Execution is authorised and progress is in review; completed milestone evidence is recorded in the JSON. The current active sprint is left unchanged. The standard JSON creator was inspected; it imports GitHub messages and can mark message reads, so the equivalent documented schema is written directly without unrelated inbox mutations. Validate using the existing sprint-executor validator.
+Progress JSON: `.ailang/state/sprints/sprint_M-MAINTENANCE-BENCH-PACKAGE.json`. Execution is complete; all eight milestone results and timestamps are recorded in the JSON. The current active sprint is left unchanged. The standard JSON creator was inspected; it imports GitHub messages and can mark message reads, so the equivalent documented schema is written directly without unrelated inbox mutations. Validate using the existing sprint-executor validator.
 
 **Execution gate satisfied:** Mark explicitly requested sprint planning and execution in the attended session. No autonomous dispatch or implementation starts merely because this plan/JSON exists. Repository source publication is within the requested destination after implementation checks; immutable registry upload is a separate release decision.
 
@@ -183,3 +183,9 @@ Progress JSON: `.ailang/state/sprints/sprint_M-MAINTENANCE-BENCH-PACKAGE.json`. 
 - Showcase main functions delegate to tested owner modules. Contracts: skip for orchestration wrappers; meaningful maturity contract lives in cohort. Inline tests/properties: skip in wrappers because they contain no new pure logic; codec/cohort/metrics/compare/report/lineage/benchmark owner modules supply native tests and generated properties. `make verify` executes the four offline examples; integration executes acquisition through disposable Git and replayed gh. These actual skips replace the earlier planned include rows, avoiding duplicate tests solely to satisfy a table.
 - Four valid native-test ASTs trigger pinned formatter nil-expression failures. Only codec_test.ail, cohort_test.ail, lineage_test.ail and metrics_test.ail receive a formatter waiver; all remain compiled and executed. Other source/examples must pass fmt. Deep binder/interpolation formatting was mitigated by decomposition and join/concat. Reproductions and actual quality/SMT coverage are recorded in package docs.
 - Git commit timestamps are explicitly proxy data; accepted-exposure analysis requires reviewed acceptance timestamps. Real AILANG sample merge times were verified through gh PR112/PR228. Artifact metrics now include structured rename/delete/copy history and touch/feature/confirmed-repair frequencies.
+
+## Package sprint completion
+
+All eight milestones passed. [Source PR #156](https://github.com/sunholo-data/ailang-packages/pull/156) contains the package, fixtures, documentation, CI and retrospective. [Implementation CI](https://github.com/sunholo-data/ailang-packages/actions/runs/39930266136) passed at d9699d5; the independent evaluation is in `.ailang/state/evaluations/eval_M-MAINTENANCE-BENCH-PACKAGE_round_1.json`. Later completion commits update documentation/state only; their CI status is visible on the PR.
+
+Actual source: 35 AILANG files / 1,544 physical lines, including 340 native-test lines. 84 native tests and 200 generated property cases passed. One SMT contract verified; 75 uncontracted exports keep strict PUB011 failing, explicitly documented. No registry upload, main-branch merge, broad survey or model campaign is claimed. Parent study and companion plan stay together in planned/ until its later research phases are complete.

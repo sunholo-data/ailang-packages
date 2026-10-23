@@ -1,6 +1,6 @@
 # M-REAL-WORLD-LANGUAGE-MAINTENANCE-STUDY: Real Project Repair and Lifetime Cost
 
-**Status:** Study direction approved by Mark in the attended 2026-10-23 session. Repeatable AILANG package implementation is in source review; the larger survey/campaign is not executed. No model campaign approved.
+**Status:** Study direction approved by Mark in the attended 2026-10-23 session. Repeatable AILANG package sprint is complete in source PR #156, independently reviewed with passing CI; the larger survey/campaign is not executed. No model campaign approved.
 **Created:** 2026-10-23, from Mark's attended research request.
 **Target:** Opt-in research, independent of release versions and the existing eval rotation.
 **Priority:** P1 candidate; prioritisation follows the feasibility pilot.
@@ -248,7 +248,7 @@ Rank by observed recurrence, independent consumers, severity and cumulative wast
 | 3: Controlled feasibility | Implement only necessary approved adapters/oracles, then the separately approved 24-change batch | Separate sprint after instrument inventory |
 | 4: Confirmation/prospective follow-up | Sample size from pilot variance; frozen real-task campaign and later 30/90-day outcomes | Separately budgeted; calendar follow-up explicit |
 
-Planned research artifacts: `research/real-world-maintenance/README.md`, versioned protocol/cohort manifest, evidence-linked episode/lineage tables, classification audit, availability report, semantic task mappings, immutable run manifests/results, analysis and roadmap evidence cards. This session creates the study/package design, sprint plan and non-started progress metadata only. Detailed implementation files/LOC belong to sprint planning after reuse inventory. No compiler, type-system or runtime semantics are changed by this proposal; a compiler conflict-surface analysis is therefore not applicable here.
+Planned research artifacts: `research/real-world-maintenance/README.md`, versioned protocol/cohort manifest, evidence-linked episode/lineage tables, classification audit, availability report, semantic task mappings, immutable run manifests/results, analysis and roadmap evidence cards. The approved package sprint now implements the repeatable instrument in source PR #156; research artifacts listed here belong to the later survey. Package implementation and validation do not complete that survey or a controlled campaign. No compiler, type-system or runtime semantics are changed by this proposal; a compiler conflict-surface analysis is therefore not applicable here.
 
 Acceptance criteria:
 
