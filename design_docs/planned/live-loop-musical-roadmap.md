@@ -146,6 +146,7 @@ work: the current Loop Lab does not host third-party plugins or export them.
 | Path | First useful deliverable | Execution boundary |
 |---|---|---|
 | Make our own | An effect starter with typed parameters, bounded state, block processing, presets, automation and a render/measurement harness | sunholo/audio reference + measured host runtime |
+| Use the user's Ableton Live | Export committed WAV loops, then detected-note MIDI, into a Live template with existing instruments/effects | Local Live instance; first desktop integration |
 | Use browser plugins | Insert one pinned WAM effect after a committed track; restore its state and bypass it | Browser Web Audio/AudioWorklet adapter |
 | Use installed plugins | Process a committed loop with one locally installed VST3 effect, then stage its rendered result | Native companion on the machine with the plugin installed |
 | Share our effects | Wrap one of our measured processors as a WAM; evaluate VST3/CLAP export separately | Build/runtime wrappers, not automatic package compatibility |
@@ -199,15 +200,52 @@ black-box reconstruction as measured approximation unless stronger evidence exis
 Choose a specific reference when we reach this work; no binary analysis is needed
 for the first musical features.
 
+### Ableton Live: use the existing local audio host
+
+The user has Ableton Live installed locally. The browser is a convenient prototype
+surface, not an architectural requirement: the package's pure plans/analysis can
+serve a browser, CLI, desktop companion or DAW integration. Use Live as the first
+desktop audio host rather than making our own native plugin host a prerequisite.
+Keep the standalone browser instrument useful alongside this path.
+
+1. **File handoff first:** export deliberately committed WAV loops with tempo,
+   bar length, start alignment and gain metadata; later export detected NoteClips
+   as Standard MIDI Files. Import them into a Live template with the user's chosen
+   instruments and effect racks. Live supports
+   [audio and MIDI file import](https://www.ableton.com/en/manual/managing-files-and-sets/).
+   Verify loop length, Live's warp/tempo interpretation, note timing, levels and
+   explicit export selection. A browser download is a deliberate handoff, not an
+   automatic write into a Live project or a continuous audio connection.
+2. **Live performance connection:** evaluate local virtual MIDI for notes/control
+   and an explicit local audio route where needed. Add a transport adapter only
+   after defining clock ownership and measuring latency/jitter on the user's
+   device. [Ableton Link](https://ableton.github.io/link/) can coordinate beat,
+   tempo, phase and optional start/stop; it does not carry our notes or audio.
+   The current Tailscale preview is not a Link/audio bridge. Browser MIDI support,
+   permissions and local endpoints must be checked rather than assumed.
+3. **Deeper Live integration:** if the user's edition/license includes
+   [Max for Live](https://www.ableton.com/en/live-manual/11/max-for-live/), evaluate
+   a small device for clip/parameter control and later custom effects. Max for
+   Live provides device-building and Live Set integration, but needs a specific
+   AILANG adapter; installing Live alone does not establish that adapter or license.
+
+Live's built-in devices remain hosted inside Live in this design; do not promise
+to extract them into Loop Lab as browser/VST modules. Distinguish those devices
+from independently installed third-party VST/AU instruments and effects. Record
+the user's Live version/edition, relevant plugins and preferred performance
+machine before choosing deeper APIs or building format-specific wrappers. This
+can follow file handoff planning without delaying level processing or note capture.
+
 An optional DSP authoring adapter can also evaluate
 [Faust's WebAssembly/WAM export](https://faustdoc.grame.fr/manual/deploying/).
 That offers another way to author DSP while AILANG owns checked plans, parameters
 and orchestration. It is not evidence that AILANG currently compiles to a plugin.
 
 Order: establish our processor contract with the first filter/delay; use one effect
-to prove the authoring harness and browser adapter; explore native offline hosting
-in parallel with later instruments/effects if the user's plugin collection makes
-it useful. Keep auto-levels and Hum → Bass moving without waiting for a full DAW.
+to prove the authoring harness and browser adapter. Prioritize committed WAV/MIDI
+handoff to the user's existing Live installation over building a native plugin
+host. Explore our own native offline hosting later if independent plugin hosting
+is useful. Keep auto-levels and Hum → Bass moving without waiting for a full DAW.
 Third-party plugin internals are outside our proofs: test their boundaries and
 observe output/latency, and retain post-effect metering/protection.
 
