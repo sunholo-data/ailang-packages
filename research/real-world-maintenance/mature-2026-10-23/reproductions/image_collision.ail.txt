@@ -1,0 +1,32 @@
+module probe
+import docparse/services/zip_extract (extractMediaToFiles, MediaFiles)
+import docparse/types/document (ImageBlock)
+import std/fs (readFileBytes)
+import std/env (getArgs)
+import std/io (println, eprintln, exit)
+import std/result (Ok, Err)
+import std/json (encode, jo, kv, jb)
+func path(m: MediaFiles) -> string = match m.blocks {
+  [ImageBlock(b)] => b.data,
+  _ => ""
+}
+func check(fixtures: string, temp: string) -> () ! {IO, FS} {
+  let a = match extractMediaToFiles("${fixtures}/first.zip", ["word/media/image1.png"], temp) {
+    Ok(m) => path(m), Err(e) => { eprintln(show(e)); exit(2); "" }
+  };
+  let b = match extractMediaToFiles("${fixtures}/second.zip", ["word/media/image1.png"], temp) {
+    Ok(m) => path(m), Err(e) => { eprintln(show(e)); exit(2); "" }
+  };
+  match (readFileBytes("${fixtures}/first.png"), readFileBytes(a)) {
+    (Ok(expected), Ok(actual)) => {
+      let ok = expected == actual;
+      println(encode(jo([kv("pathsEqual", jb(a == b)), kv("firstImageStillOwnedByFirstDocument", jb(ok))])));
+      if ok then () else exit(1)
+    },
+    _ => { eprintln("oracle input/output read failed"); exit(2) }
+  }
+}
+export func main() -> () ! {IO, FS, Env} = match getArgs() {
+  [fixtures, temp] => check(fixtures, temp),
+  _ => { eprintln("probe FIXTURE_DIRECTORY NEW_IMAGE_DIRECTORY"); exit(2) }
+}

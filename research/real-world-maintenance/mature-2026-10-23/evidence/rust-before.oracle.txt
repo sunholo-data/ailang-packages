@@ -1,0 +1,27 @@
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 13.88s
+     Running tests/maintenance_whitespace.rs (/private/tmp/mb-mature-cargo-before-isolated/debug/deps/maintenance_whitespace-8d4d713b8196a6d1)
+
+running 2 tests
+
+thread 'real_pr_673_internal_space_shared' (90100096) panicked at tests/maintenance_whitespace.rs:12:5:
+assertion `left == right` failed
+  left: Some(String("日期时间"))
+ right: Some(String("日期 时间"))
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+thread 'real_pr_673_internal_space_inline' (90100095) panicked at tests/maintenance_whitespace.rs:6:5:
+assertion `left == right` failed
+  left: Some(String("日期时间"))
+ right: Some(String("日期 时间"))
+test real_pr_673_internal_space_inline ... FAILED
+test real_pr_673_internal_space_shared ... FAILED
+
+failures:
+
+failures:
+    real_pr_673_internal_space_inline
+    real_pr_673_internal_space_shared
+
+test result: FAILED. 0 passed; 2 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+error: test failed, to rerun pass `--test maintenance_whitespace`
