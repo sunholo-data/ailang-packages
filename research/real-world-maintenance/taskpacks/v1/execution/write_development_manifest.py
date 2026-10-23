@@ -32,7 +32,11 @@ def relative_ref(path):
 
 
 def canonical(value):
-    return json.dumps(value, separators=(",", ":"), ensure_ascii=False).encode()
+    text = json.dumps(value, separators=(",", ":"), ensure_ascii=False)
+    for char, escaped in [("&", r"\u0026"), ("<", r"\u003c"), (">", r"\u003e"),
+                          ("\u2028", r"\u2028"), ("\u2029", r"\u2029")]:
+        text = text.replace(char, escaped)
+    return text.encode()
 
 
 def write_new(path, value):
