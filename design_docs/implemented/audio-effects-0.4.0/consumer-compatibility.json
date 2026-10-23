@@ -1,0 +1,101 @@
+{
+  "consumer": "sunholo-data/ailang-loop-lab",
+  "source": "37fc29276dc7f76dbe6d3b4e8c12671f6d6297e7",
+  "sourceRef": "release/0.2.0-registry",
+  "mode": "isolated local clone; temporary path dependency on candidate audio 0.4.0",
+  "committedConsumerDependencyRemains": "registry sunholo/audio@0.3.0",
+  "command": "ailang lock; make verify",
+  "nativePassed": 10,
+  "nodePassed": 45,
+  "pythonPassed": 6,
+  "quality": {
+    "schema": "ailang.package-quality/v1",
+    "package": "sunholo/live_loop_lab",
+    "version": "0.2.0",
+    "stability": "experimental",
+    "mode": "publisher",
+    "compile": {
+      "source": "server",
+      "ok": true,
+      "files": 5
+    },
+    "contracts": {
+      "source": "server",
+      "evidence_schema": "ailang.verification-evidence/v1",
+      "numeric_model": {
+        "float_sort": "Real",
+        "int_sort": "Int",
+        "runtime_equivalence": "not_established"
+      },
+      "runtime_contracts": "not_measured",
+      "reason_counts": {
+        "uncontracted": 1,
+        "unsupported_encoding": 3
+      },
+      "verified": 3,
+      "total": 6,
+      "counterexample": 0,
+      "skipped": 3,
+      "errors": 0,
+      "uncontracted_exports": 1,
+      "wall_seconds": 0.050391
+    },
+    "tests": {
+      "source": "attested",
+      "files": 1,
+      "passed": 10,
+      "failed": 0
+    },
+    "smoke": {
+      "source": "attested",
+      "present": true,
+      "passed": true,
+      "seconds": 0.2476205
+    },
+    "interface": {
+      "source": "server",
+      "hash_v1": "sha256:9894abe6d3fc780400957c60bde0c85f84e39953dc41130d954f0cafd50518a9",
+      "hash_v2": "sha256:ifacev2:9bab335ab4070639a5303dcef2a337045b6d91b389c4b9b70fe9710efa82ddce",
+      "signatures": 11
+    },
+    "effects": {
+      "source": "server",
+      "max": [
+        "FS",
+        "IO"
+      ],
+      "ceiling_declared": true,
+      "rank_max": "FS"
+    },
+    "release": {
+      "source": "server",
+      "kind": "feature",
+      "changelog_section": true,
+      "notes": "Feature: standalone audio 0.3 consumer application, released as source on GitHub.\n\nGitHub application source release: the default dependency is now the exact published\n`sunholo/audio@0.3.0` registry version. This application is not uploaded to the\nAILANG registry. Fresh-clone compatibility and original fixture generation are\nchecked before tagging the source release.\n\n- Private Off / Peak-safe / Matched take preparation with input/output sample peaks,\n  active-window RMS, bounded boost and a reason for the gain. Re-preparation starts\n  from an unlevelled shaped original rather than compounding gain or fades.\n- One-step undo/redo per part uses the existing prepare/stage/activate protocol;\n  history changes only after exact-frame renderer and planner acknowledgement.\n- Download the active committed part as an eight-second mono PCM16 WAV for Live.\n  Downloads exclude private/pending takes and precede track level/pan. Stop/reset\n  clears in-memory history; saving a WAV is an explicit user action.\n- Reference tests compare the browser level adapter against the AILANG API and\n  pin browser WAV bytes to the package codec. Runner v3 identifies the changed\n  preparation worker; the earlier v2 soak remains historical baseline evidence."
+    },
+    "docs": {
+      "agent_md": true,
+      "ai_summary": true,
+      "agent_doc_exports_covered": 2
+    },
+    "style": {
+      "exported_funcs": 7,
+      "pure_exports": 6,
+      "pure_ratio": 0.8571428571428571
+    },
+    "gates": [],
+    "badges": [
+      {
+        "code": "PUB016",
+        "level": "info",
+        "msg": "3 contract(s) skipped by the verifier \u2014 not proved; `ailang verify --package .` lists the reason per function"
+      },
+      {
+        "code": "PUB011",
+        "level": "warn",
+        "msg": "1 exported function(s) carry no contract"
+      }
+    ]
+  },
+  "livePreviewModified": false
+}

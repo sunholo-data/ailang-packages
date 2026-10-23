@@ -20,6 +20,8 @@ import ./edit (gain, panMono)
 import ./clip_pcm (Reject, toPcm16, toWav16, fromWav16)
 import ./levels (MatchRms, PeakSafe, BelowActivityFloor, prepare as prepareLevelClip, measure as measureLevels, plan as planLevels)
 import ./block (LowPass, defaultBlockLimits, startFilter, processFilter, resetFilter)
+import ./delay (defaultDelayLimits, startDelay, processDelay, resetDelay)
+import ./automation (startGain, setGain, processGain)
 import std/math (log)
 import std/list (map, range, foldl, take, zipWith)
 import std/result (Result, Ok, Err)
@@ -67,9 +69,9 @@ export func main() -> () ! {IO @limit=1} {
   let lv = level(sineWave(1000.0, 1.0, 48000), 0.0, 48000);
   let rmsOk = lv.rmsCdb == -283 && lv.peakCdb == 0;
   let whiteOk = absF(lag1(map(\i. white(i, 3), range(0, 20000)))) < 0.03;
-  if pinOk && wavOk && rmsOk && whiteOk && checkedProbe(0) == "true true true true" && clipProbe(0) == "true true true" && prepareLevelsProbe(0) == "true true true true" && blockProbe(0) == "true true true"
-  then println("OK: audio reference loop PCM sha256 28ee281f...7467 (render stability), WAV round trip 480 frames, gated RMS of a full-scale 1 kHz sine -2.83 dB (sqrt(24/46)), white noise lag-1 |r| < 0.03; checked boundaries, stereo clips, levels and block filters passed")
-  else println("FAIL: pin ${show(pinOk)} wav ${show(wavOk)} rms ${show(lv.rmsCdb)} peak ${show(lv.peakCdb)} white ${show(whiteOk)} checked ${checkedProbe(0)} clips ${clipProbe(0)} levels ${prepareLevelsProbe(0)} blocks ${blockProbe(0)}")
+  if pinOk && wavOk && rmsOk && whiteOk && checkedProbe(0) == "true true true true" && clipProbe(0) == "true true true" && prepareLevelsProbe(0) == "true true true true" && blockProbe(0) == "true true true" && effectsProbe(0) == "true true true"
+  then println("OK: audio reference loop PCM sha256 28ee281f...7467 (render stability), WAV round trip 480 frames, gated RMS of a full-scale 1 kHz sine -2.83 dB (sqrt(24/46)), white noise lag-1 |r| < 0.03; checked boundaries, stereo clips, levels, filters, delay and automation passed")
+  else println("FAIL: pin ${show(pinOk)} wav ${show(wavOk)} rms ${show(lv.rmsCdb)} peak ${show(lv.peakCdb)} white ${show(whiteOk)} checked ${checkedProbe(0)} clips ${clipProbe(0)} levels ${prepareLevelsProbe(0)} blocks ${blockProbe(0)} effects ${effectsProbe(0)}")
 }
 
 
@@ -151,6 +153,25 @@ export pure func blockProbe(n: int) -> string {
         let reset = match resetFilter(out.state, limits) { Ok(s) => s.history == [0.0] && s.processedFrames == 0, _ => false };
         let budget = match processFilter(out.state, c, limits) { Err(ResourceLimit(_)) => true, _ => false };
         "${show(expected)} ${show(reset)} ${show(budget)}"
+      }
+    }, _ => "false false false"
+  }
+}
+
+export pure func effectsProbe(n: int) -> string {
+  let l = defaultDelayLimits();let b = defaultBlockLimits();
+  match (fromMono(8000,[1.0,1.0,1.0,1.0],defaultClipLimits()),startGain(8000,Mono,0.0,b),
+    startDelay(8000,Mono,{delayFrames:1,feedback:0.5,dry:0.0,wet:1.0},l)) {
+    (Ok(c),Ok(g),Ok(d)) => match setGain(g,1.0,4,b) {
+      Err(_) => "false false false", Ok(ramp) => match processGain(ramp,c,b) {
+        Err(_) => "false false false", Ok(faded) => match processDelay(d,faded.clip,l) {
+          Err(_) => "false false false", Ok(out) => {
+            let fade = map(toList,faded.clip.planes) == [[0.25,0.5,0.75,1.0]];
+            let echo = map(toList,out.clip.planes) == [[0.0,0.25,0.625,1.0625]];
+            let reset = match resetDelay(out.state,l) { Ok(s) => s.processedFrames == 0 && map(toList,s.history) == [[0.0]], _ => false };
+            "${show(fade)} ${show(echo)} ${show(reset)}"
+          }
+        }
       }
     }, _ => "false false false"
   }

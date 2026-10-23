@@ -1,9 +1,10 @@
 # Loop Lab application and audio package boundary
 
-Status: implemented 2026-10-23. Loop Lab now lives in its own private application
+Status: implemented 2026-10-23. Loop Lab now lives in its own public application
 repository, `sunholo-data/ailang-loop-lab`. Ten application commits were preserved;
-its fresh GitHub clone passes local compile/tests/quality with an exact Git-pinned
-audio candidate. The old source directory is a migration pointer. See the
+its 0.2.0 source release consumes the published audio 0.3.0 registry package.
+Fresh-clone checks and [hosted CI](https://github.com/sunholo-data/ailang-loop-lab/actions/runs/40021421671)
+pass. The old source directory is a migration pointer. See the
 [implementation record](../implemented/loop-lab-repository-split/README.md).
 
 ## Ownership
@@ -70,9 +71,9 @@ adapter; do not turn the AILANG library into a four-part Web Audio application.
    after standalone CI/reference checks pass. Avoid maintaining two source copies.
    Keep a small selection of generic headless package examples in this repository.
 
-The standalone consumer has now resolved its dependency remotely by exact Git
-revision, without a producer checkout. This still does not establish that audio
-0.3 is registry-published; the registry switch remains an application-release gate.
+The extraction first used an exact Git revision. The released standalone consumer
+now resolves audio 0.3.0 from the registry, without a producer checkout; the
+registry switch and source release are complete.
 
 ## Release responsibilities after the split
 

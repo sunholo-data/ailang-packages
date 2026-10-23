@@ -1,0 +1,57 @@
+name: Verify audio package
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'packages/audio/**'
+      - '.github/workflows/audio.yml'
+      - 'design_docs/implemented/audio-effects-0.4.0/verify_examples.py'
+  pull_request:
+    paths:
+      - 'packages/audio/**'
+      - '.github/workflows/audio.yml'
+      - 'design_docs/implemented/audio-effects-0.4.0/verify_examples.py'
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Install pinned AILANG and solver
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y z3
+          mkdir -p "$RUNNER_TEMP/ailang"
+          gh release download v0.54.18 --repo sunholo-data/ailang -p linux.x64.ailang.tar.gz -p SHA256SUMS -D "$RUNNER_TEMP/ailang"
+          cd "$RUNNER_TEMP/ailang"
+          sha256sum --ignore-missing -c SHA256SUMS
+          tar xzf linux.x64.ailang.tar.gz
+          echo "$RUNNER_TEMP/ailang" >> "$GITHUB_PATH"
+      - name: Compile and test on strict bytecode
+        working-directory: packages/audio
+        run: |
+          ailang version
+          ailang lock --check
+          ailang check --package .
+          ailang test --strict-bytecode --package .
+          ailang test dsp.ail
+      - name: Compare delivered WAV with independent reference
+        run: python3 design_docs/implemented/audio-effects-0.4.0/verify_examples.py
+      - name: Run package quality including tests and smoke
+        working-directory: packages/audio
+        run: ailang pkg quality --json . > quality-ci.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: audio-quality
+          retention-days: 7
+          path: |
+            packages/audio/quality-ci.json
+            design_docs/implemented/audio-effects-0.4.0/headless-example.json

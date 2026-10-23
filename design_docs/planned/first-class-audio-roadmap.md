@@ -18,6 +18,12 @@ published. See the [release record](../implemented/audio-release-0.3.0/README.md
 [extracted](../implemented/loop-lab-repository-split/README.md). Delay, parameter
 smoothing, shared reports and broader conversions remain planned.
 
+**0.4.0 candidate:** bounded feedback delay and linked frame-defined gain ramps
+are implemented, with a headless PCM-to-effects-to-delivered-WAV fixture. See the
+[AI/DAW next steps](audio-0.4-ai-daw.md) and
+[effect evidence](../implemented/audio-effects-0.4.0/README.md). This increment is
+not yet merged or registry-published; Loop Lab's released dependency remains 0.3.0.
+
 AILANG already supports deterministic sound generation, audio file output, offline measurements, and AI speech output. The next step should make these facilities safe to compose: validated formats, explicit channels and rates, bounded rendering, and evidence attached to the resulting bytes. Most sound processing should live in `sunholo/audio`; common file and sample conversions belong in `std/audio`. Runtime changes should serve a measured performance need or provide access to a host device.
 
 ## Reference consumer: the live-loop instrument

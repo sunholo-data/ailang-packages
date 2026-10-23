@@ -1,0 +1,72 @@
+module sunholo/audio/automation
+-- Linked linear-gain automation. Absolute ramp positions make block partitioning
+-- irrelevant. Scheduling, tempo, clocks and UI belong to the consumer.
+import std/array (fromList, toList)
+import std/list (map, zipWith, range)
+import std/result (Result, Ok, Err)
+import ./clip (Clip, ChannelLayout, checkSize, validate, create)
+import ./block (BlockLimits)
+import ./safety (AudioError, InvalidClip, InvalidSamples, ResourceLimit, inRange)
+
+export type GainState = {rate: int, layout: ChannelLayout, startGain: float, targetGain: float, rampFrames: int, elapsedFrames: int, processedFrames: int}
+export type GainBlock = {clip: Clip, state: GainState}
+
+pure func stateValid(s: GainState, l: BlockLimits) -> Result[GainState, AudioError] =
+  if l.maxTotalFrames < 0 || l.maxTotalFrames > 2147483647 then Err(ResourceLimit("invalid automation cumulative limit"))
+  else match checkSize(s.rate, s.layout, 0, {maxFrames: l.maxFrames, maxSamples: l.maxSamples}) {
+    Err(e) => Err(e), Ok(_) =>
+      if not inRange(s.startGain, 0.0, 64.0) || not inRange(s.targetGain, 0.0, 64.0) then Err(InvalidSamples("automation gains must be finite 0..64"))
+      else if s.rampFrames < 0 || s.rampFrames > 2147483647 || s.elapsedFrames < 0 || s.elapsedFrames > s.rampFrames then Err(InvalidClip("invalid gain ramp position"))
+      else if s.processedFrames < 0 || s.elapsedFrames > s.processedFrames then Err(InvalidClip("invalid automation frame count"))
+      else if s.processedFrames > l.maxTotalFrames then Err(ResourceLimit("automation cumulative frame budget exceeded"))
+      else Ok(s)
+  }
+
+pure func gainAt(s: GainState, position: int) -> float =
+  if s.rampFrames == 0 || position >= s.rampFrames then s.targetGain
+  else {
+    let t = intToFloat(position) / intToFloat(s.rampFrames);
+    (1.0 - t) * s.startGain + t * s.targetGain
+  }
+
+pure func rampPosition(elapsed: int, count: int, total: int) -> int
+requires { elapsed >= 0 && elapsed <= total && total <= 2147483647 && count >= 0 && count <= 2147483647 }
+ensures { result >= elapsed && result <= total && (result == total || result == elapsed + count) }
+{
+  if count >= total - elapsed then total else elapsed + count
+}
+
+export func startGain(rate: int, layout: ChannelLayout, gain: float, limits: BlockLimits) -> Result[GainState, AudioError] ! {}
+ensures { match result { Ok(s) => s.rate == rate && s.layout == layout && s.startGain == gain && s.targetGain == gain && s.processedFrames == 0 && s.rampFrames == 0, Err(_) => true } }
+{
+  stateValid({rate: rate, layout: layout, startGain: gain, targetGain: gain, rampFrames: 0, elapsedFrames: 0, processedFrames: 0}, limits)
+}
+
+export func setGain(state: GainState, target: float, frames: int, limits: BlockLimits) -> Result[GainState, AudioError] ! {}
+ensures { match result { Ok(s) => s.processedFrames == state.processedFrames && s.targetGain == target && s.rampFrames == frames && s.elapsedFrames == 0, Err(_) => true } }
+{
+  match stateValid(state, limits) {
+    Err(e) => Err(e), Ok(s) => stateValid({s | startGain: if frames == 0 then target else gainAt(s, s.elapsedFrames), targetGain: target, rampFrames: frames, elapsedFrames: 0}, limits)
+  }
+}
+
+export func processGain(state: GainState, input: Clip, limits: BlockLimits) -> Result[GainBlock, AudioError] ! {}
+ensures { match result { Ok(v) => v.clip.rate == input.rate && v.clip.layout == input.layout && v.clip.frames == input.frames && v.state.processedFrames == state.processedFrames + input.frames && v.state.processedFrames <= limits.maxTotalFrames, Err(_) => true } }
+{
+  match stateValid(state, limits) {
+    Err(e) => Err(e), Ok(s) => match validate(input, {maxFrames: limits.maxFrames, maxSamples: limits.maxSamples}) {
+      Err(e) => Err(e), Ok(c) =>
+        if c.rate != s.rate || c.layout != s.layout then Err(InvalidClip("automation block rate/layout mismatch"))
+        else if c.frames > limits.maxTotalFrames - s.processedFrames then Err(ResourceLimit("automation cumulative frame budget exceeded"))
+        else {
+          let gains = map(\i. gainAt(s, s.elapsedFrames + i + 1), range(0, c.frames));
+          match create(c.rate, c.layout, map(\p. fromList(zipWith(\x g. x * g, toList(p), gains)), c.planes), {maxFrames: limits.maxFrames, maxSamples: limits.maxSamples}) {
+            Err(e) => Err(e), Ok(out) => {
+              let elapsed = rampPosition(s.elapsedFrames, c.frames, s.rampFrames);
+              Ok({clip: out, state: {s | elapsedFrames: elapsed, processedFrames: s.processedFrames + c.frames}})
+            }
+          }
+        }
+    }
+  }
+}

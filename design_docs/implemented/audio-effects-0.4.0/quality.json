@@ -1,0 +1,95 @@
+{
+  "schema": "ailang.package-quality/v1",
+  "package": "sunholo/audio",
+  "version": "0.4.0",
+  "stability": "experimental",
+  "mode": "publisher",
+  "compile": {
+    "source": "server",
+    "ok": true,
+    "files": 32
+  },
+  "contracts": {
+    "source": "server",
+    "evidence_schema": "ailang.verification-evidence/v1",
+    "numeric_model": {
+      "float_sort": "Real",
+      "int_sort": "Int",
+      "runtime_equivalence": "not_established"
+    },
+    "runtime_contracts": "not_measured",
+    "reason_counts": {
+      "missing_postcondition": 5,
+      "uncontracted": 33,
+      "unsupported_encoding": 50
+    },
+    "verified": 16,
+    "total": 71,
+    "counterexample": 0,
+    "skipped": 55,
+    "errors": 0,
+    "uncontracted_exports": 33,
+    "wall_seconds": 0.294731709
+  },
+  "tests": {
+    "source": "attested",
+    "files": 14,
+    "passed": 192,
+    "failed": 0
+  },
+  "smoke": {
+    "source": "attested",
+    "present": true,
+    "passed": true,
+    "seconds": 7.463593541
+  },
+  "interface": {
+    "source": "server",
+    "hash_v1": "sha256:887f483dd5d75ba03983e37e5a08cd7d421e5135cfbb86c65218dbb63cd5d205",
+    "hash_v2": "sha256:ifacev2:106fa417c34c705e7c7069c8872d9cc76c5f46e2fea170ad0762cd06a205acca",
+    "signatures": 154
+  },
+  "effects": {
+    "source": "server",
+    "max": [
+      "IO"
+    ],
+    "ceiling_declared": true,
+    "rank_max": "IO"
+  },
+  "release": {
+    "source": "server",
+    "kind": "feature",
+    "changelog_section": true,
+    "notes": "Feature candidate: bounded feedback delay and frame-defined gain automation. Not yet published.\n\n- `delay`: checked mono/stereo integer-frame delay with independent channel\n  histories, signed feedback (-0.99..0.99), dry/wet gains, explicit silence tails\n  and reset. Batch ring writes avoid a full history copy on every sample.\n- `automation`: linked 0..64 linear-gain ramps with exact target frames, immediate\n  changes and mid-ramp retargeting from the last delivered gain. Absolute ramp\n  positions preserve output across block partitions.\n- Both APIs validate public states, finite samples, rate/layout, block and\n  cumulative budgets; delay has a separate history allocation budget. Headroom\n  is preserved; arithmetic overflow returns typed errors. No callback guarantee,\n  delay-time interpolation, tempo policy or host scheduler is implied.\n- Add a headless speech/model PCM fixture → fade → echo → peak preparation → WAV\n  pipeline that reports delivered quantized audio measurements and byte identity.\n  No inference credentials, device or browser is required.\n- Preserve legacy synthesis/PCM pins. Requires the tested AILANG v0.54.18 toolchain."
+  },
+  "docs": {
+    "agent_md": true,
+    "ai_summary": true,
+    "agent_doc_exports_covered": 7,
+    "export_overlap_error": "failed to fetch registry index: Get \"https://storage.googleapis.com/ailang-registry/index.json?t=1792789491\": dial tcp: lookup storage.googleapis.com: no such host"
+  },
+  "style": {
+    "exported_funcs": 100,
+    "pure_exports": 100,
+    "pure_ratio": 1
+  },
+  "gates": [],
+  "badges": [
+    {
+      "code": "PUB016",
+      "level": "info",
+      "msg": "55 contract(s) skipped by the verifier — not proved; `ailang verify --package .` lists the reason per function"
+    },
+    {
+      "code": "PUB011",
+      "level": "warn",
+      "msg": "33 exported function(s) carry no contract"
+    },
+    {
+      "code": "PUB023",
+      "level": "info",
+      "msg": "registry export-overlap check did not run: failed to fetch registry index: Get \"https://storage.googleapis.com/ailang-registry/index.json?t=1792789491\": dial tcp: lookup storage.googleapis.com: no such host"
+    }
+  ]
+}
