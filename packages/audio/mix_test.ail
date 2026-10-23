@@ -8,3 +8,16 @@ test "a one-shot plays at each start" { tile([1.0, 2.0, 3.0], false, 1.0, 8, [0,
 test "a later start cuts an earlier one short" { tile([1.0, 2.0, 3.0], false, 1.0, 5, [0, 2]) == [1.0, 2.0, 1.0, 2.0, 3.0] }
 test "an empty sound tiles to silence" { tile([], true, 1.0, 3, []) == [0.0, 0.0, 0.0] }
 test "sum pads short parts with silence" { sum([[1.0, 2.0], [3.0, 4.0, 5.0]], 3) == [4.0, 6.0, 5.0] }
+
+test "one-shot starts are independent of input ordering and duplicates" {
+  let xs = [1.0, 2.0, 3.0, 4.0, 5.0, 6.0];
+  tile(xs, false, 1.0, 6, [4, 0, 4]) == [1.0, 2.0, 3.0, 4.0, 1.0, 2.0]
+}
+
+property "one-shot placement is invariant under a permutation of starts" {
+  forall(n: int) => {
+    let k = n % 6; let a = if k < 0 then 0 - k else k;
+    tile([0.25, -0.5, 0.75], false, 1.0, 10, [a, 0, 6])
+      == tile([0.25, -0.5, 0.75], false, 1.0, 10, [6, a, 0])
+  }
+}

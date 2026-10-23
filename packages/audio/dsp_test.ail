@@ -35,3 +35,11 @@ test "softSat keeps 0 and +-1 fixed and compresses between" { softSat(3.0, 1.0) 
 test "normalisePeak puts the peak at the dB asked; silence stays silence" {
   absF(peakAbs(normalisePeak(-6.0, [0.1, -0.4, 0.2])) - dbToGain(-6.0)) < 0.000000000000001 && normalisePeak(-6.0, [0.0, 0.0]) == [0.0, 0.0]
 }
+
+property "onePole coefficients are stable on explicitly generated positive domains" {
+  forall(n: int) => {
+    let k = n % 20000; let cut = intToFloat(if k < 0 then 1 - k else k + 1);
+    let a = onePole(cut, 48000.0);
+    a >= 0.0 && a <= 1.0
+  }
+}

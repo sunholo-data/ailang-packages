@@ -84,3 +84,29 @@ test "parse refuses an empty file, a bad loop, an unknown kind, no layers and no
   && bad(one("{\"id\":\"x\",\"seconds\":1,\"layers\":[]}")) && bad(one("{\"seconds\":1,\"layers\":[{\"kind\":\"white\"}]}"))
   && bad("not json")
 }
+
+test "silent layers remain finite silence when drive is enabled" {
+  let r = {shotRecipe() | seconds: 0.0001, drive: 1.0, layers: [sine(440.0, 0.0)]};
+  render(r) == [0.0, 0.0, 0.0, 0.0, 0.0]
+}
+
+test "parse refuses wrong optional types and fractional integers" {
+  let bad = \s. match parseRecipes(one(s)) { Err(_) => true, Ok(_) => false };
+  bad("{\"id\":\"x\",\"seconds\":0.1,\"rate\":\"oops\",\"layers\":[{}]}")
+  && bad("{\"id\":\"x\",\"seconds\":0.1,\"rate\":24000.5,\"layers\":[{}]}")
+  && bad("{\"id\":\"x\",\"seconds\":0.1,\"loop\":0,\"layers\":[{}]}")
+  && bad("{\"id\":\"x\",\"seconds\":0.1,\"layers\":[{\"seed\":1.5}]}")
+  && bad("{\"id\":\"x\",\"seconds\":0.1,\"layers\":[{\"env\":false}]}")
+}
+
+test "parse refuses invalid domains and a zero-frequency glide" {
+  let bad = \s. match parseRecipes(one(s)) { Err(_) => true, Ok(_) => false };
+  bad("{\"id\":\"x\",\"seconds\":0.1,\"swell\":{\"depth\":2},\"layers\":[{}]}")
+  && bad("{\"id\":\"x\",\"seconds\":0.1,\"layers\":[{\"beat_depth\":-0.1}]}")
+  && bad("{\"id\":\"x\",\"seconds\":0.1,\"layers\":[{\"freq\":0,\"glide_to\":440,\"glide_until_s\":0.1}]}")
+}
+
+test "loop modulation and filter restrictions are reported independently" {
+  let l = {sine(440.0, 1.0) | vibCents: 10.0, vibRate: 0.3, amDepth: 0.5, amRate: 0.3, lowpass: 200.0, lowpassTo: 400.0};
+  size(loopErrors({loopRecipe() | layers: [l]})) == 3
+}

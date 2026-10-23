@@ -5,6 +5,7 @@ module sunholo/audio/mix
 import std/list (map, range, foldl, length as size)
 import std/array (fromList, toList, get, add, make)
 
+-- Starts may be unsorted or repeated: the greatest nonnegative active start wins.
 -- xs placed over n samples at gain g. starts: sample indices for a one-shot (empty = [0]).
 export func tile(xs: [float], loop: bool, g: float, n: int, starts: [int]) -> [float] ! {}
 requires { n >= 0 }
@@ -14,7 +15,7 @@ requires { n >= 0 }
   let st = if size(starts) == 0 then [0] else starts;
   if m == 0 then map(\i. 0.0, range(0, n))
   else map(\i. if loop then g * get(arr, i % m) else {
-      let k = foldl(\best s. if s <= i && i - s < m then s else best, 0 - 1, st);
+      let k = foldl(\best s. if s >= 0 && s > best && s <= i && i - s < m then s else best, 0 - 1, st);
       if k < 0 then 0.0 else g * get(arr, i - k)
     }, range(0, n))
 }

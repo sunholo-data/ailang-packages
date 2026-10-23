@@ -1,0 +1,135 @@
+module sunholo/audio/safety_test
+import std/result (Ok, Err)
+import std/bytes (fromInts, toInts, length as byteLength)
+import std/list (length, map, range)
+import std/crypto (sha256Bytes)
+import ./safety (AudioError, InvalidRecipe, InvalidWav, UnsupportedFormat, ResourceLimit, InvalidSamples, defaultLimits, fitsWork, pcm16ByteCount, inRange, samplesInRange)
+import ./recipe (Recipe, renderChecked, validateRecipe, parseRecipesChecked, parseRecipesAsChecked, render)
+import ./reference (shotRecipe, loopRecipe, sine, loopPcmSha)
+import ./dsp (absF)
+import ./pcm (pcm16, pcm16Checked, wav16Checked, wavInfo, pcm16FloatsChecked, pcm16Floats)
+
+pure func tiny() -> Recipe = {shotRecipe() | seconds: 0.001, layers: [sine(440.0, 1.0)]}
+
+test "checked render preserves the pinned reference PCM" {
+  match renderChecked(loopRecipe(), defaultLimits()) { Ok(xs) => sha256Bytes(pcm16(xs)) == loopPcmSha(), Err(_) => false }
+}
+
+test "checked render has the expected frame count at the exact budget" {
+  let l = {defaultLimits() | maxFrames: 48, maxLayerFrames: 48, maxLayers: 1};
+  match renderChecked(tiny(), l) { Ok(xs) => length(xs) == 48, Err(_) => false }
+}
+
+test "checked render rejects each allocation budget before rendering" {
+  let r = tiny(); let l = defaultLimits();
+  (match renderChecked({r | seconds: 99999.0, rate: 384000}, l) { Err(ResourceLimit(_)) => true, _ => false })
+  && (match renderChecked(r, {l | maxFrames: 47}) { Err(ResourceLimit(_)) => true, _ => false })
+  && (match renderChecked({r | layers: [sine(1.0, 1.0), sine(2.0, 1.0)]}, {l | maxLayers: 1}) { Err(ResourceLimit(_)) => true, _ => false })
+  && (match renderChecked(r, {l | maxLayerFrames: 47}) { Err(ResourceLimit(_)) => true, _ => false })
+  && (match renderChecked(r, {l | maxFrames: 0}) { Err(ResourceLimit(_)) => true, _ => false })
+}
+
+test "noise loops charge both filter warm-up periods" {
+  let r = {tiny() | loop: true, layers: [{sine(0.0, 1.0) | kind: "white"}]};
+  (match renderChecked(r, {defaultLimits() | maxLayerFrames: 95}) { Err(ResourceLimit(_)) => true, _ => false })
+  && (match renderChecked(r, {defaultLimits() | maxLayerFrames: 96}) { Ok(xs) => length(xs) == 48, _ => false })
+}
+
+test "nonfinite parameters and zero-frame durations return typed errors" {
+  (match validateRecipe({tiny() | seconds: 0.0 / 0.0}) { Err(InvalidRecipe(_)) => true, _ => false })
+  && (match validateRecipe({tiny() | drive: 1.0 / 0.0}) { Err(InvalidRecipe(_)) => true, _ => false })
+  && (match validateRecipe({tiny() | seconds: 0.00000001}) { Err(InvalidRecipe(_)) => true, _ => false })
+  && (match validateRecipe({tiny() | layers: [{sine(440.0, 1.0) | seed: -1}]}) { Err(InvalidRecipe(_)) => true, _ => false })
+}
+
+test "checked silent drive renders silence" {
+  match renderChecked({tiny() | drive: 1.0, layers: [sine(440.0, 0.0)]}, defaultLimits()) {
+    Ok(xs) => length(xs) == 48 && xs == map(\i. 0.0, range(0, 48)), Err(_) => false
+  }
+}
+
+pure func recipeText() -> string = "{\"schema\":\"sunholo.audio.recipes/1\",\"recipes\":[{\"id\":\"x\",\"seconds\":0.001,\"layers\":[{\"freq\":440,\"amp\":1}]}]}"
+
+test "checked parse guards UTF-8 bytes before JSON decode and supports host schema" {
+  let text = recipeText();
+  (match parseRecipesChecked(text, defaultLimits()) { Ok([_]) => true, _ => false })
+  && (match parseRecipesChecked("💥", {defaultLimits() | maxInputBytes: 3}) { Err(ResourceLimit(_)) => true, _ => false })
+  && (match parseRecipesAsChecked("other.schema", text, defaultLimits()) { Err(InvalidRecipe(_)) => true, _ => false })
+  && (match parseRecipesChecked(text, {defaultLimits() | maxFrames: 47}) { Err(ResourceLimit(_)) => true, _ => false })
+}
+
+test "checked PCM encoder preserves bytes and refuses clipping or nonfinite values" {
+  let xs = [0.0, -1.0, 1.0];
+  (match pcm16Checked(xs, 3) { Ok(b) => toInts(b) == [0, 0, 1, 128, 255, 127], _ => false })
+  && (match pcm16Checked([1.001], 1) { Err(InvalidSamples(_)) => true, _ => false })
+  && (match pcm16Checked([0.0 / 0.0], 1) { Err(InvalidSamples(_)) => true, _ => false })
+  && (match pcm16Checked([1.0 / 0.0], 1) { Err(InvalidSamples(_)) => true, _ => false })
+  && (match pcm16Checked(xs, 2) { Err(ResourceLimit(_)) => true, _ => false })
+}
+
+test "checked WAV rejects unrepresentable rates and supports empty PCM" {
+  (match wav16Checked([], 8000, 0) { Ok(b) => byteLength(b) == 44, _ => false })
+  && (match wav16Checked([], 0, 0) { Err(InvalidWav(_)) => true, _ => false })
+  && (match wav16Checked([], 2147483648, 0) { Err(InvalidWav(_)) => true, _ => false })
+}
+
+test "checked decode refuses forged metadata and enforces output size" {
+  match wav16Checked([0.0, 1.0], 48000, 2) {
+    Err(_) => false,
+    Ok(b) => match wavInfo(b) {
+      Err(_) => false,
+      Ok(i) => (match pcm16FloatsChecked(b, i, 1) { Err(ResourceLimit(_)) => true, _ => false })
+        && (match pcm16FloatsChecked(b, {i | dataOffset: -1}, 2) { Err(InvalidWav(_)) => true, _ => false })
+        && (match pcm16FloatsChecked(b, {i | frames: 1000000000}, 2) { Err(InvalidWav(_)) => true, _ => false })
+        && pcm16Floats(b, {i | channels: 0}) == []
+        && (match pcm16FloatsChecked(b, i, 2) { Ok(xs) => xs == [0.0, 32767.0 / 32768.0], _ => false })
+    }
+  }
+}
+
+property "checked PCM retains exact sample count for bounded arbitrary int-derived values" {
+  forall(n: int) => {
+    let k = n % 64; let count = if k < 0 then 0 - k else k;
+    let xs = map(\i. intToFloat(i) / 64.0, range(0, count));
+    match pcm16Checked(xs, 64) { Ok(b) => byteLength(b) == 2 * count, _ => false }
+  }
+}
+
+property "work guard and byte count hold at bounded integer boundaries" {
+  forall(n: int) => {
+    let k = n % 10000; let count = if k < 0 then 0 - k else k;
+    fitsWork(count, 2, count * 2) && not fitsWork(count + 1, 2, count * 2)
+      && pcm16ByteCount(count) == count * 2
+  }
+}
+
+test "PCM8 metadata is readable but checked PCM16 decode explicitly refuses it" {
+  -- Change data size to 1 while keeping the last byte as the required RIFF pad.
+  let body = fromInts([82,73,70,70,38,0,0,0,87,65,86,69,102,109,116,32,16,0,0,0,1,0,1,0,64,31,0,0,64,31,0,0,1,0,8,0,100,97,116,97,1,0,0,0,128,0]);
+  match wavInfo(body) {
+    Ok(i) => i.bits == 8 && i.frames == 1 && (match pcm16FloatsChecked(body, i, 1) { Err(UnsupportedFormat(_)) => true, _ => false }),
+    _ => false
+  }
+}
+
+property "checked WAV round trips bounded signed samples within quantization error" {
+  forall(n: int) => {
+    let x = intToFloat(n % 1025) / 1024.0;
+    match wav16Checked([x, 0.0 - x], 8000, 2) {
+      Err(_) => false,
+      Ok(b) => match wavInfo(b) {
+        Err(_) => false,
+        Ok(i) => match pcm16FloatsChecked(b, i, 2) {
+          Ok([a, c]) => absF(a - x) <= 1.0 / 32767.0 + 1.0 / 32768.0 && absF(c + x) <= 1.0 / 32767.0 + 1.0 / 32768.0,
+          _ => false
+        }
+      }
+    }
+  }
+}
+
+test "bounded guards reject unordered and infinite samples" {
+  not inRange(0.0, -1.0, 1.0 / 0.0) && not inRange(0.0 / 0.0, -1.0, 1.0) && not inRange(1.0 / 0.0, -1.0, 1.0)
+  && not inRange(0.0 - (1.0 / 0.0), -1.0, 1.0)
+  && samplesInRange([-1.0, 0.0, 1.0], -1.0, 1.0)
+}

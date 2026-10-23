@@ -1,0 +1,36 @@
+module sunholo/audio/_audit_probe
+import std/io (println)
+import std/string (concat)
+import std/list (map, range, zipWith)
+import std/bytes (fromInts, toInts, length, byteAt)
+import std/audio (wavFromPcm, wavHeader)
+import std/result (Ok, Err)
+import ./pcm (wav16, wavInfo)
+import ./recipe (parseRecipes, render)
+import ./mix (tile)
+import ./reference (shotRecipe, sine)
+
+pure func accepted(body: string) -> bool =
+  match parseRecipes(concat(["{\"schema\":\"sunholo.audio.recipes/1\",\"recipes\":[", body, "]}"])) { Ok(_) => true, Err(_) => false }
+
+export func main() -> () ! {IO} {
+  let w = toInts(wav16([0.0, 0.5], 48000));
+  let zeroRate = fromInts(zipWith(\i v. if i >= 24 && i <= 27 then 0 else v, range(0, length(wav16([0.0, 0.5], 48000))), w));
+  let badAlign = fromInts(zipWith(\i v. if i == 32 then 1 else v, range(0, length(wav16([0.0, 0.5], 48000))), w));
+  let badRiff = fromInts(zipWith(\i v. if i >= 4 && i <= 7 then 0 else v, range(0, length(wav16([0.0, 0.5], 48000))), w));
+  println(concat(["wav_zero_rate=", show(wavInfo(zeroRate))]));
+  println(concat(["wav_bad_blockalign=", show(wavInfo(badAlign))]));
+  println(concat(["wav_zero_riff_size=", show(wavInfo(badRiff))]));
+  println(concat(["recipe_depth_2_accepted=", show(accepted("{\"id\":\"x\",\"seconds\":0.01,\"swell\":{\"rate\":1,\"depth\":2},\"layers\":[{\"kind\":\"sine\",\"freq\":440,\"amp\":1}]}"))]));
+  println(concat(["recipe_wrong_rate_type_accepted=", show(accepted("{\"id\":\"x\",\"seconds\":0.01,\"rate\":\"oops\",\"layers\":[{\"kind\":\"sine\",\"freq\":440,\"amp\":1}]}"))]));
+  println(concat(["recipe_zero_freq_glide_accepted=", show(accepted("{\"id\":\"x\",\"seconds\":0.01,\"layers\":[{\"kind\":\"sine\",\"freq\":0,\"glide_to\":440,\"glide_until_s\":0.01,\"amp\":1}]}"))]));
+  println(concat(["tile_sorted=", show(tile([1.0,2.0,3.0,4.0,5.0,6.0], false, 1.0, 6, [0,4]))]));
+  println(concat(["tile_unsorted=", show(tile([1.0,2.0,3.0,4.0,5.0,6.0], false, 1.0, 6, [4,0]))]));
+  let odd = wavFromPcm(fromInts([128]), 8000, 1, 8);
+  println(concat(["std_wav_odd_bytes=", show(length(odd))]));
+  println(concat(["std_wav_odd_riff_size_low=", show(byteAt(odd, 4))]));
+  let wide = wavHeader(0, 8000, 65536, 8);
+  println("std_wav_65536_channels_field=${show(byteAt(wide, 22))},${show(byteAt(wide, 23))}");
+  println("std_wav_partial_frame_bytes=${show(length(wavFromPcm(fromInts([0]), 8000, 1, 16)))}");
+  println(concat(["render_zero_gain_drive=", show(render({shotRecipe() | seconds: 0.0001, drive: 1.0, layers: [sine(440.0, 0.0)]}))]))
+}

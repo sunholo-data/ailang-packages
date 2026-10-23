@@ -7,7 +7,7 @@ every time:
 - Rendering tonal sounds and textures from a small JSON recipe: sines that glide, waver and beat,
   noise through filters, envelopes, a slow swell, a soft saturation, normalised to a peak
   (`recipe`).
-- Seamless loops: `loopErrors` refuses a loop that would click before you render it.
+- Loop authoring: `loopErrors` checks structural rules; measure the rendered join with `analysis.seam`.
 - Writing 16-bit WAVs (`pcm.wav16`) and reading them back (`pcm.wavInfo`, `pcm.pcm16Floats`).
 - Mixing renders into a bed or a preview: loops tiled, one-shots placed at start times (`mix`).
 - Measuring loudness offline, headless, with no audio device: peak, gated RMS, how much a
@@ -15,7 +15,7 @@ every time:
   loop's seam (`analysis`).
 
 Everything is pure: no effects, no clocks, no randomness except the two seeded index generators,
-and the same bits on the bytecode VM (`--strict-bytecode`) and the interpreter. It depends on no
+and matching output on the tested bytecode VM (`--strict-bytecode`) and interpreter. Cross-architecture equality needs separate evidence. It depends on no
 other package; WAV headers and Ogg Opus encoding are `std/audio` (call `std/audio.encode` on
 `pcm16(...)` for Opus).
 
@@ -67,7 +67,7 @@ Keep file IO in your own shell module; every function here is pure.
 A file is `{"schema": "sunholo.audio.recipes/1", "recipes": [recipe, ...]}`; a host that already
 has files under its own id parses them with `parseRecipesAs("<its id>", text)`. An empty list,
 a recipe without an `id`, `seconds <= 0`, no layers, an unknown layer kind, or a loop that breaks
-the loop rules is refused with the first error. Every default is a no-op.
+the loop rules is refused with the first error. Every missing optional field has a default. Provided fields of the wrong type are refused; unknown keys remain permitted for schema compatibility.
 
 | Recipe field | Default | Meaning |
 |---|---|---|
@@ -97,7 +97,7 @@ the loop rules is refused with the first error. Every default is a no-op.
 Loop rules (`loopErrors`): in a loop every sine is fixed-pitch, envelope-free and completes a
 whole number of cycles over `seconds`; vibrato, beat and swell complete whole cycles too; no
 filter sweep. Noise in a loop is periodic: sample i reads the generator at i mod n and its filters
-run over two periods, keeping the second, so the join is seamless.
+run over two periods, keeping the second, to reduce filter startup transients. Two periods are not an exact periodic-state proof; check `analysis.seam` for the rendered loop.
 
 ## Render stability
 
@@ -134,15 +134,16 @@ Do not "tidy" operation order in `dsp` or `recipe`: floating-point results depen
 sweepLowpass, softSat, peakAbs, normalisePeak.
 `noise`: rampNoise, white.
 `recipe`: Env, Layer, Recipe, defaultRate, frames, envAt, phaseAt, layerSamples, render,
-loopErrors, recipeSchema, parseRecipes, parseRecipesAs.
-`pcm`: pcm16, wav16, WavInfo, wavInfo, pcm16Floats.
+loopErrors, recipeSchema, parseRecipes, parseRecipesAs, validateRecipe, renderChecked, parseRecipesChecked, parseRecipesAsChecked.
+`pcm`: pcm16, wav16, WavInfo, wavInfo, pcm16Floats, pcm16Checked, wav16Checked, pcm16FloatsChecked.
 `mix`: tile, sum.
 `analysis`: levelGain, peak, rmsGated, Level, level, highpassKeepDb, lowbandDb, Seam, seam.
 `reference`: noEnv, sine, hiss, loopRecipe, shotRecipe, sineWave, loopPcmSha.
+`safety`: AudioError, RenderLimits, defaultLimits, inRange, samplesInRange, fitsWork, pcm16ByteCount, limitsValid.
 
 ## Validation
 
-`ailang test --package .` runs 51 checks against closed forms and two byte pins; `_smoke.ail`
+`ailang test --package .` runs 79 checks against closed forms and two byte pins; `_smoke.ail`
 prints `OK:` and its three probes give the same bytes on `--strict-bytecode` and the interpreter.
 The first consumer, stapledons-godot, regenerates its 19 shipped WAVs byte for byte from this
 package (`make sound-synth-check`) and compares `analysis` with its GDScript loudness checks on
@@ -153,6 +154,87 @@ every cue (`make sound-levels-parity`: 0 differences in centi-dB).
 - Rendering is list-based: a 30 s sound is 1.44 M floats. Fine on the bytecode VM (seconds); the
   tree-walking interpreter is about 10x slower, so compare engines on short probes.
 - `render` normalises to `peak_db`: a layer's `amp` sets balance, not absolute level.
-- `wavInfo` accepts integer PCM only (format tag 1); `pcm16Floats` returns [] unless bits == 16.
+- `wavInfo` accepts integer PCM8/16/24/32 only (format tag 1), with fmt before data and at most 4096 chunks. `pcm16Floats` returns [] for malformed/unsupported input; use the checked decoder for typed errors.
 - Known std gaps (reported upstream as sunholo-data/ailang#1930): `std/audio` has no WAV reader
   (hence `wavInfo` here) and `std/string` has no fixed-precision float formatter (hence centi-dB).
+
+
+## Checked APIs and trust boundaries in 0.1.1
+
+Use the checked path for untrusted JSON or direct record construction:
+
+```ailang
+import pkg/sunholo/audio/safety (defaultLimits)
+import pkg/sunholo/audio/recipe (parseRecipesChecked, renderChecked)
+import pkg/sunholo/audio/pcm (wav16Checked)
+-- Parse with limits; match Ok/Err at each stage.
+-- parseRecipesChecked(text, limits) -> Result[[Recipe], AudioError]
+-- renderChecked(recipe, limits) -> Result[[float], AudioError]
+-- wav16Checked(samples, recipe.rate, limits.maxFrames) -> Result[bytes, AudioError]
+```
+
+`AudioError` variants: `InvalidRecipe(string)`, `InvalidWav(string)`,
+`UnsupportedFormat(string)`, `ResourceLimit(string)`, `InvalidSamples(string)`.
+Failures are ordinary Result values in both engines; no contract flag is required.
+`validateRecipe` checks programmatic records too. The raw `render`, `pcm16` and `wav16`
+remain compatibility primitives whose callers own input validity and resource use.
+Legacy `parseRecipes`/`parseRecipesAs` gain strict types/domains but do not impose
+input-byte or render-work limits; use the Checked variants for those limits.
+
+`defaultLimits()` returns:
+
+| Field | Default | Meaning |
+|---|---|---|
+| maxInputBytes | 1048576 | UTF-8 bytes of recipe JSON before JSON decoding |
+| maxFrames | 1440000 | Frames per recipe, 30 seconds at 48 kHz |
+| maxLayers | 32 | Layers per recipe |
+| maxLayerFrames | 11520000 | Frames times total layer passes; loop noise costs two passes |
+
+Limits may be replaced using record update. Valid maxInputBytes is 1..16777216;
+maxFrames/maxLayerFrames are 1..2147483647; maxLayers is 1..1024.
+These bound sample-list sizes and layer processing; they are not an exact heap-byte,
+wall-time or host-memory guarantee. A caller can still choose limits too large for its machine.
+JSON UTF-8 encoding can allocate a bounded temporary copy after a character-count precheck.
+All recipes returned by checked parsing meet the per-recipe budget, not a cumulative batch budget.
+The 32-second historical cue needs an explicit larger maxFrames than the default.
+DSP is pure; `@limit` does not count sample operations. Smoke has `IO @limit=1`.
+
+Validation domains are finite: rate 1..384000; seconds >0 and <100000 with at least
+one rounded frame; peakDb -120..0; fadeMs 0..1e8; drive 0..1e6; swellDepth/beatDepth
+0..1; frequencies/filter cutoffs/modulation rates 0..1e6; amplitude -1e6..1e6;
+vibrato cents 0..12000; seed 0..2147483647; envelope/glide times 0..100000 with
+glide1 >= glide0. An active exponential glide needs positive endpoints; a filter sweep
+needs a positive starting cutoff. Negative seeds and empty IDs/layers are refused.
+Frequency limits ensure arithmetic domains, not anti-aliasing. V1 filter fields act on
+noise layers; existing sine processing is preserved. Loop validation is structural;
+noise filter warm-up is approximate.
+
+`renderChecked` validates before allocating samples and scans its result for finite
+full-scale output with a 1e-12 tolerance for normalization rounding. `pcm16Checked`
+strictly rejects samples outside [-1,1], non-finite values and excessive frames;
+it never silently clips, so a rounding overshoot must be handled explicitly by the caller.
+The legacy encoder still saturates. `wav16Checked` additionally checks that sample
+rate and byte counts fit classic mono PCM16 WAV fields. maxFrames can be zero for
+empty PCM; it must be <=2147483629 for checked encoding.
+
+`wavInfo` validates every chunk within the declared RIFF extent, rejecting short fmt,
+truncated headers/payloads/padding, invalid rate/alignment/byte rate, partial frames,
+and duplicate fmt/data. Bytes after RIFF are ignored. Float, extensible, compressed,
+and RIFX/RF64 WAV are unsupported. Zero-frame integer PCM WAV is valid.
+`pcm16FloatsChecked(bytes, info, maxFrames)` re-parses metadata, rejects forged
+fields, enforces the output-frame limit, and explicitly refuses non-PCM16 input.
+It returns the first channel only, using s16/32768. No resampling or downmix is implied.
+Callers bound acquisition/input bytes separately; this API avoids copying the whole file
+into an integer list. Very fragmented WAVs over the chunk ceiling return an error.
+
+The existing sample arithmetic and quantization order are retained. One-shot starts can
+be unsorted or repeated; the greatest active nonnegative start wins. Negative starts are
+ignored. This fixes order dependence while preserving sorted-start behavior.
+
+Static verification, runtime checks, tests and byte identity are distinct evidence.
+Use `--verify-contracts` explicitly to execute requires/ensures while validating;
+ordinary checked APIs enforce their guards without that flag. Z3 uses mathematical
+Real/Int models and bounded recursion: its proofs are not IEEE-754, NaN, overflow,
+or cross-architecture byte-equality guarantees. The report records unsupported/missing
+postcondition skips separately from counterexamples and errors. Do not claim fully
+verified audio from a passing package quality badge.

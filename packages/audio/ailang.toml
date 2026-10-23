@@ -1,13 +1,13 @@
 [package]
 name = "sunholo/audio"
-version = "0.1.0"
+version = "0.1.1"
 edition = "1"
 ailang = ">=0.54.14"
 description = "Deterministic, pure sound synthesis and measurement: envelopes, gliding sines with vibrato and beats, one-pole and swept filters, soft saturation, two seeded noise generators (white, and a legacy ramp kept for byte-stable sounds), JSON recipes rendered to floats, 16-bit PCM and WAV in and out, mixing, and offline loudness measures (peak, gated RMS, high-pass keep, low-band level, loop seams) that match a GDScript reference to 0.01 dB"
 license = "Apache-2.0"
 
 [exports]
-modules = ["sunholo/audio/dsp", "sunholo/audio/noise", "sunholo/audio/recipe", "sunholo/audio/pcm", "sunholo/audio/mix", "sunholo/audio/analysis", "sunholo/audio/reference"]
+modules = ["sunholo/audio/dsp", "sunholo/audio/noise", "sunholo/audio/recipe", "sunholo/audio/pcm", "sunholo/audio/mix", "sunholo/audio/analysis", "sunholo/audio/reference", "sunholo/audio/safety"]
 
 [effects]
 max = ["IO"]  # every export is pure; IO is used only by _smoke.ail to print its verdict
@@ -23,4 +23,4 @@ license_url = "https://github.com/sunholo-data/ailang-packages/blob/main/LICENSE
 level = "experimental"
 
 [release]
-kind = "feature"   # security | fix | feature | breaking — what THIS version changes
+kind = "fix"   # security | fix | feature | breaking — what THIS version changes

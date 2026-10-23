@@ -2,7 +2,7 @@
 -- std/audio, a WAV with a LIST chunk before fmt and data, refusals, and the round trip bound
 -- 1/32767 + 1/32768. Pin 2: the reference loop's WAV sha256 (the 44-byte header + pin 1's PCM).
 module sunholo/audio/pcm_test
-import std/list (map, range, zipWith, foldl, length as size)
+import std/list (map, range, zipWith, foldl, length as size, take, drop, flatMap)
 import std/bytes (fromInts, toInts, concat)
 import std/result (Result, Ok, Err)
 import std/crypto (sha256Bytes)
@@ -49,4 +49,54 @@ test "pcm16 then pcm16Floats is within 1/32767 + 1/32768" {
 test "the reference loop's WAV is its header plus pin 1's PCM" {
   let pcm = pcm16(render(loopRecipe()));
   sha256Bytes(wav16(render(loopRecipe()), 48000)) == sha256Bytes(concat(wavHeader(24000, 48000, 1, 16), pcm))
+}
+
+pure func replaceByte(b: bytes, idx: int, v: int) -> bytes {
+  let xs = toInts(b);
+  fromInts(zipWith(\i x. if i == idx then v else x, range(0, size(xs)), xs))
+}
+
+test "wavInfo rejects zero sample rate and inconsistent alignment or byte rate" {
+  let b = wav16([0.0, 0.5], 48000);
+  let zeroRate = foldl(\w i. replaceByte(w, i, 0), b, [24, 25, 26, 27]);
+  (match wavInfo(zeroRate) { Err(_) => true, _ => false })
+  && (match wavInfo(replaceByte(b, 32, 1)) { Err(_) => true, _ => false })
+  && (match wavInfo(replaceByte(b, 28, 1)) { Err(_) => true, _ => false })
+}
+
+test "wavInfo honors RIFF extent and refuses partial frames" {
+  let b = wav16([0.0, 0.5], 48000);
+  let zeroRiff = foldl(\w i. replaceByte(w, i, 0), b, [4, 5, 6, 7]);
+  (match wavInfo(zeroRiff) { Err(_) => true, _ => false })
+  && (match wavInfo(replaceByte(b, 40, 3)) { Err(_) => true, _ => false })
+}
+
+pure func riffBody(xs: [int]) -> bytes = fromInts([82, 73, 70, 70] ++ le32(size(xs)) ++ xs)
+
+test "WAV rejects short fmt, duplicate fmt/data and truncated chunks after data" {
+  let header = toInts(wavHeader(0, 8000, 1, 16));
+  let body = drop(8, header);
+  let fmt = take(24, drop(12, header));
+  let data = [100, 97, 116, 97] ++ le32(0);
+  (match wavInfo(replaceByte(fromInts(header), 16, 14)) { Err(_) => true, _ => false })
+  && (match wavInfo(riffBody(body ++ fmt)) { Err(_) => true, _ => false })
+  && (match wavInfo(riffBody(body ++ data)) { Err(_) => true, _ => false })
+  && (match wavInfo(riffBody(body ++ [74, 85, 78, 75] ++ le32(2))) { Err(_) => true, _ => false })
+  && (match wavInfo(riffBody(body ++ [1])) { Err(_) => true, _ => false })
+}
+
+test "WAV enforces its chunk ceiling without recursion failure" {
+  let junk = flatMap(\i. [74, 85, 78, 75, 0, 0, 0, 0], range(0, 4096));
+  let body = [87, 65, 86, 69] ++ junk ++ drop(12, toInts(wavHeader(0, 8000, 1, 16)));
+  match wavInfo(riffBody(body)) { Err(_) => true, _ => false }
+}
+
+test "WAV permits trailing bytes outside RIFF but validates chunks inside it" {
+  let b = wav16([0.25], 8000);
+  match wavInfo(concat(b, fromInts([1, 2, 3]))) { Ok(i) => i.frames == 1 && i.dataOffset == 44, _ => false }
+}
+
+test "PCM16 decode retains the first channel of independent stereo bytes" {
+  let b = concat(wavHeader(8, 8000, 2, 16), fromInts([0, 128, 255, 127, 0, 64, 0, 0]));
+  match wavInfo(b) { Ok(i) => i.channels == 2 && i.frames == 2 && pcm16Floats(b, i) == [-1.0, 0.5], _ => false }
 }

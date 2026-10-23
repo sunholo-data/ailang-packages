@@ -15,12 +15,13 @@ import std/io (println)
 import std/crypto (sha256Bytes)
 import std/list (map, range, foldl, take, zipWith)
 import std/result (Result, Ok, Err)
-import ./recipe (render, frames)
-import ./pcm (pcm16, wav16, wavInfo, pcm16Floats)
+import ./recipe (render, frames, renderChecked, validateRecipe)
+import ./pcm (pcm16, wav16, wavInfo, pcm16Floats, wav16Checked, pcm16FloatsChecked)
 import ./analysis (level, highpassKeepDb, lowbandDb, seam)
 import ./noise (white, rampNoise)
 import ./mix (tile, sum)
 import ./reference (loopRecipe, shotRecipe, sineWave, loopPcmSha)
+import ./safety (defaultLimits, ResourceLimit, InvalidRecipe, InvalidWav)
 
 -- The reference loop and one-shot as PCM hashes, and the first n samples of the one-shot as int16.
 export pure func renderProbe(n: int) -> string {
@@ -50,7 +51,7 @@ pure func lag1(xs: [float]) -> float =
   match foldl(\acc x. {prev: x, num: acc.num + x * acc.prev, den: acc.den + x * x}, {prev: 0.0, num: 0.0, den: 0.0}, xs) { r => r.num / r.den }
 pure func absF(x: float) -> float = if x < 0.0 then 0.0 - x else x
 
-export func main() -> () ! {IO} {
+export func main() -> () ! {IO @limit=1} {
   let pinOk = sha256Bytes(pcm16(render(loopRecipe()))) == loopPcmSha();
   let xs = sineWave(997.0, 0.9, 480);
   let b = wav16(xs, 48000);
@@ -58,7 +59,24 @@ export func main() -> () ! {IO} {
   let lv = level(sineWave(1000.0, 1.0, 48000), 0.0, 48000);
   let rmsOk = lv.rmsCdb == -283 && lv.peakCdb == 0;
   let whiteOk = absF(lag1(map(\i. white(i, 3), range(0, 20000)))) < 0.03;
-  if pinOk && wavOk && rmsOk && whiteOk
-  then println("OK: audio reference loop PCM sha256 28ee281f...7467 (render stability), WAV round trip 480 frames, gated RMS of a full-scale 1 kHz sine -2.83 dB (sqrt(24/46)), white noise lag-1 |r| < 0.03")
-  else println("FAIL: pin ${show(pinOk)} wav ${show(wavOk)} rms ${show(lv.rmsCdb)} peak ${show(lv.peakCdb)} white ${show(whiteOk)}")
+  if pinOk && wavOk && rmsOk && whiteOk && checkedProbe(0) == "true true true true"
+  then println("OK: audio reference loop PCM sha256 28ee281f...7467 (render stability), WAV round trip 480 frames, gated RMS of a full-scale 1 kHz sine -2.83 dB (sqrt(24/46)), white noise lag-1 |r| < 0.03; checked boundaries passed")
+  else println("FAIL: pin ${show(pinOk)} wav ${show(wavOk)} rms ${show(lv.rmsCdb)} peak ${show(lv.peakCdb)} white ${show(whiteOk)} checked ${checkedProbe(0)}")
+}
+
+
+-- Checked API parity and contract probe: pin, resource failure, nonfinite input,
+-- and metadata rejection. Run with --verify-contracts on both engines too.
+export pure func checkedProbe(n: int) -> string {
+  let pin = match renderChecked(loopRecipe(), defaultLimits()) { Ok(xs) => sha256Bytes(pcm16(xs)) == loopPcmSha(), Err(_) => false };
+  let budget = match renderChecked(shotRecipe(), {defaultLimits() | maxFrames: 1}) { Err(ResourceLimit(_)) => true, _ => false };
+  let invalid = match validateRecipe({shotRecipe() | drive: 1.0 / 0.0}) { Err(InvalidRecipe(_)) => true, _ => false };
+  let metadata = match wav16Checked([0.0, 0.5], 48000, 2) {
+    Err(_) => false,
+    Ok(b) => match wavInfo(b) {
+      Err(_) => false,
+      Ok(i) => match pcm16FloatsChecked(b, {i | dataOffset: n - 1}, 2) { Err(InvalidWav(_)) => true, _ => false }
+    }
+  };
+  "${show(pin)} ${show(budget)} ${show(invalid)} ${show(metadata)}"
 }
