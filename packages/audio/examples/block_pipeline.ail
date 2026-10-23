@@ -1,0 +1,53 @@
+module sunholo/audio/examples/block_pipeline
+-- Headless consumer examples. Fixtures stand in for provider-produced data;
+-- no model call, audio device, file IO or application session is required.
+import std/result (Result, Ok, Err)
+import std/bytes (fromInts, length as byteLength)
+import std/crypto (sha256Bytes)
+import std/json (encode, jo, kv, js, jnum)
+import pkg/sunholo/audio/clip (Clip, Mono, fromMono, defaultClipLimits)
+import pkg/sunholo/audio/clip_pcm (Reject, fromPcm16, toWav16)
+import pkg/sunholo/audio/levels (measure, prepare, MatchRms, defaultConfig)
+import pkg/sunholo/audio/block (LowPass, defaultBlockLimits, startFilter, processFilter)
+import pkg/sunholo/audio/recipe (parseRecipesChecked, renderChecked)
+import pkg/sunholo/audio/safety (defaultLimits)
+
+pure func pipeline(c: Clip, source: string) -> string {
+  let limits = defaultClipLimits();
+  match startFilter(c.rate, c.layout, LowPass, 1200.0, defaultBlockLimits()) {
+    Err(e) => "ERR ${show(e)}", Ok(state) => match processFilter(state, c, defaultBlockLimits()) {
+      Err(e) => "ERR ${show(e)}", Ok(filtered) => match prepare(filtered.clip, defaultConfig(),
+        MatchRms({targetRms: 0.125, peakCeiling: 0.5, maxBoost: 2.0, minActiveFrames: 1}), limits) {
+        Err(e) => "ERR ${show(e)}", Ok(out) => match (toWav16(out.clip, Reject, limits), measure(out.clip, defaultConfig(), limits)) {
+          (Ok(wav), Ok(report)) => encode(jo([kv("source",js(source)),kv("rate",jnum(intToFloat(report.rate))),kv("frames",jnum(intToFloat(report.frames))),
+            kv("peak",jnum(report.peak)),kv("rms",jnum(report.rms)),kv("gain",jnum(out.plan.gain)),kv("wavBytes",jnum(intToFloat(byteLength(wav)))),kv("wavSha256",js(sha256Bytes(wav)))])),
+          _ => "ERR output validation"
+        }
+      }
+    }
+  }
+}
+
+export pure func pcmDemo(n: int) -> string {
+  -- Eight s16le samples as a speech/model adapter could return. Analytic fixture,
+  -- not recorded/generated human speech; decode preserves its declared rate.
+  let pcm = fromInts([0,0,0,16,0,32,0,16,0,0,0,240,0,224,0,240]);
+  match fromPcm16(pcm, 24000, Mono, defaultClipLimits()) {
+    Err(e) => "ERR ${show(e)}", Ok(c) => pipeline(c, "speech/model PCM fixture")
+  }
+}
+
+export pure func recipeDemo(n: int) -> string {
+  -- A provider may propose this schema as data. The checked parser/render path
+  -- applies limits and guards; this example does not execute model-written code.
+  let text = "{\"schema\":\"sunholo.audio.recipes/1\",\"recipes\":[{\"id\":\"proposed-tone\",\"rate\":24000,\"seconds\":0.01,\"peak_db\":-12,\"layers\":[{\"kind\":\"sine\",\"freq\":440,\"amp\":1}]}]}";
+  match parseRecipesChecked(text, defaultLimits()) {
+    Err(e) => "ERR ${show(e)}", Ok(recipes) => match recipes {
+      r :: [] => match renderChecked(r, defaultLimits()) {
+        Err(e) => "ERR ${show(e)}", Ok(xs) => match fromMono(r.rate, xs, defaultClipLimits()) {
+          Err(e) => "ERR ${show(e)}", Ok(c) => pipeline(c, "model-proposed recipe fixture")
+        }
+      }, _ => "ERR recipe count"
+    }
+  }
+}

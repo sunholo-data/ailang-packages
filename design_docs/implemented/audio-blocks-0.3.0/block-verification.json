@@ -1,0 +1,88 @@
+{
+  "evidence_schema": "ailang.verification-evidence/v1",
+  "numeric_model": {
+    "float_sort": "Real",
+    "int_sort": "Int",
+    "runtime_equivalence": "not_established"
+  },
+  "runtime_contracts": "not_measured",
+  "file": "packages/audio/block.ail",
+  "verified": 2,
+  "counterexample": 0,
+  "skipped": 3,
+  "errors": 0,
+  "uncontracted": 0,
+  "total_exported": 5,
+  "results": [
+    {
+      "reason_code": "unsupported_encoding",
+      "function": "processFilter",
+      "status": "skipped",
+      "reason": "Function \"processFilter\" uses higher-order functions; Function \"processFilter\" uses an unencodable builtin: std/list.zipWith; Function \"processFilter\" calls \"any\" whose signature uses an unencodable type \"*ast.FuncType\"",
+      "rejections": [
+        {
+          "Code": "HIGHER_ORDER",
+          "Message": "Function \"processFilter\" uses higher-order functions",
+          "Location": "",
+          "Hint": "Inline function arguments or extract to named functions"
+        },
+        {
+          "Code": "UNENCODABLE_TYPE",
+          "Message": "Function \"processFilter\" uses an unencodable builtin: std/list.zipWith",
+          "Location": "",
+          "Hint": "Z3 has no SMT-LIB encoding for std/list.zipWith. Either remove its use, refactor to use a supported builtin, or narrow the function's contracts."
+        },
+        {
+          "Code": "UNENCODABLE_TYPE",
+          "Message": "Function \"processFilter\" calls \"any\" whose signature uses an unencodable type \"*ast.FuncType\"",
+          "Location": "",
+          "Hint": "Cross-function verification cannot encode parametric ADTs (Option/Result) or type variables in a callee signature. Callees returning records/enum ADTs are also not yet inlinable and will skip. Rewrite the callee to return a primitive, or inline its logic into the caller."
+        }
+      ]
+    },
+    {
+      "reason_code": "unsupported_encoding",
+      "function": "startFilter",
+      "status": "skipped",
+      "reason": "Function \"startFilter\" uses an unencodable builtin: std/list.range; Function \"startFilter\" calls \"any\" whose signature uses an unencodable type \"*ast.FuncType\"",
+      "rejections": [
+        {
+          "Code": "UNENCODABLE_TYPE",
+          "Message": "Function \"startFilter\" uses an unencodable builtin: std/list.range",
+          "Location": "",
+          "Hint": "Z3 has no SMT-LIB encoding for std/list.range. Either remove its use, refactor to use a supported builtin, or narrow the function's contracts."
+        },
+        {
+          "Code": "UNENCODABLE_TYPE",
+          "Message": "Function \"startFilter\" calls \"any\" whose signature uses an unencodable type \"*ast.FuncType\"",
+          "Location": "",
+          "Hint": "Cross-function verification cannot encode parametric ADTs (Option/Result) or type variables in a callee signature. Callees returning records/enum ADTs are also not yet inlinable and will skip. Rewrite the callee to return a primitive, or inline its logic into the caller."
+        }
+      ]
+    },
+    {
+      "reason_code": "unsupported_encoding",
+      "function": "resetFilter",
+      "status": "skipped",
+      "reason": "Function \"resetFilter\" calls \"any\" whose signature uses an unencodable type \"*ast.FuncType\"",
+      "rejections": [
+        {
+          "Code": "UNENCODABLE_TYPE",
+          "Message": "Function \"resetFilter\" calls \"any\" whose signature uses an unencodable type \"*ast.FuncType\"",
+          "Location": "",
+          "Hint": "Cross-function verification cannot encode parametric ADTs (Option/Result) or type variables in a callee signature. Callees returning records/enum ADTs are also not yet inlinable and will skip. Rewrite the callee to return a primitive, or inline its logic into the caller."
+        }
+      ]
+    },
+    {
+      "function": "canAdvance",
+      "status": "verified",
+      "duration": 7326084
+    },
+    {
+      "function": "defaultBlockLimits",
+      "status": "verified",
+      "duration": 5194750
+    }
+  ]
+}

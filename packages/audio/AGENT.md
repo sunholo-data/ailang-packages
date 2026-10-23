@@ -20,6 +20,8 @@ Provider inference and device/session handling belong to consumers or adapters.
   loop's seam (`analysis`).
 - Checked offline take preparation: whole-signal and active-window RMS, cumulative
   block measurements, peak protection and bounded RMS-matching gain plans (`levels`).
+- Stateful checked mono/stereo low-pass/high-pass processing of bounded blocks,
+  with independent channel histories, exact bypass and reset (`block`).
 
 Everything is pure: no effects, no clocks, no randomness except the two seeded index generators,
 and matching output on the tested bytecode VM (`--strict-bytecode`) and interpreter. Cross-architecture equality needs separate evidence. It depends on no
@@ -28,7 +30,7 @@ other package; WAV headers and Ogg Opus encoding are `std/audio` (call `std/audi
 
 Do NOT use it for:
 - Realtime device I/O or a general streaming synthesis engine. Block-based level
-  measurement is available; synthesis/clip edits are offline. Host clocks and device
+  measurement and stateful filters are available; synthesis/clip edits are offline. Host clocks and device
   callbacks are separate from these pure APIs.
 - Multichannel layouts beyond Mono/Stereo, resampling, or compressed input formats.
   The recipe renderer remains mono; convert/pan its output through the clip API.
@@ -158,10 +160,12 @@ loopErrors, recipeSchema, parseRecipes, parseRecipesAs, validateRecipe, renderCh
 `levels`: LevelConfig, LevelEnergy, LevelState, LevelReport, LevelTarget, LevelPolicy,
 GainReason, LevelPlan, PreparedLevels, defaultConfig, start, accumulate, finish,
 measure, plan, prepare.
+`block`: FilterKind (FilterBypass/LowPass/HighPass), BlockLimits, FilterState,
+FilterBlock, defaultBlockLimits, startFilter, processFilter, resetFilter.
 
 ## Validation
 
-`ailang test --package .` runs 145 checks against closed forms and two byte pins; `_smoke.ail`
+`ailang test --package .` runs 164 checks against closed forms and two byte pins; `_smoke.ail`
 prints `OK:` and its three probes give the same bytes on `--strict-bytecode` and the interpreter.
 The first consumer, stapledons-godot, regenerates its 19 shipped WAVs byte for byte from this
 package (`make sound-synth-check`) and compares `analysis` with its GDScript loudness checks on
@@ -415,3 +419,65 @@ probes, independent Decimal reference checks and descriptive CLI timings. Z3 use
 Real/Int models: its two proofs in levels cover defaultConfig and boundedGain,
 while the six public processing APIs are skipped for unsupported encodings.
 This is not proof of IEEE arithmetic, audible quality or third-party DSP.
+
+## Generic stateful filters in 0.3.0
+
+`block` owns no application/device/model state. A caller supplies a validated
+mono/stereo Clip block and keeps the returned state for the next block:
+
+```ailang
+import pkg/sunholo/audio/block (LowPass, defaultBlockLimits, startFilter, processFilter)
+-- startFilter(24000, Mono, LowPass, 1200.0, defaultBlockLimits())
+-- processFilter(state, inputClip, defaultBlockLimits()) -> Ok({clip, state})
+-- Retain result.state; do not restart the filter at every chunk boundary.
+```
+
+| API | Meaning |
+|---|---|
+| `defaultBlockLimits()` | `{maxFrames:4096, maxSamples:8192, maxTotalFrames:2147483647}` |
+| `startFilter(rate, layout, kind, cutoffHz, limits)` | New logical stream with zero per-channel histories and processedFrames=0 |
+| `processFilter(state, input, limits)` | Checked block → output Clip + next FilterState; rate/layout/frame count preserved |
+| `resetFilter(state, limits)` | Validate then flush history/restart its frame counter, keeping configuration |
+
+Kinds: FilterBypass is byte-preserving identity, including finite headroom/negative
+zero; its low-pass history stays unchanged but its processed-frame counter advances.
+LowPass uses `a=1-exp(-2*pi*cutoff/rate)` and `low=(1-a)*previous+a*x`.
+HighPass returns `x-low` from that same recurrence. These are first-order filters,
+not biquads or a claim of an exact digital -3 dB point at every cutoff. Scaling
+before adding avoids the opposite-extreme subtraction overflow in a naive update.
+Legacy `dsp.lowpass` and its render order remain unchanged.
+
+Rates: 1..384000 Hz, with no implicit resampling. Low/high cutoffs: 1e-6..rate/2 Hz;
+bypass accepts a finite 0..rate/2 cutoff but ignores it. State history has one
+finite value per channel, and block rate/layout must match. Public records are
+structurally checked, not authenticated observations of an earlier stream.
+Create/reset a state explicitly for a new logical stream; parameter changes are
+not automatically smoothed. No clock, device or background worker is implied.
+
+Block limits are integers 0..2147483647. maxFrames/maxSamples bound each input and
+output block; maxTotalFrames bounds processedFrames since start/reset. Budgets are
+caller-selected work/dimension limits, not global CPU or heap limits. An empty block
+preserves history/cursor. Input/output headroom may exceed full scale; nonfinite
+input, state or arithmetic output returns a typed error. Integer export remains an
+explicit Reject/Saturate boundary. High-pass output can overflow with extreme finite
+headroom; that returns InvalidSamples rather than releasing infinity.
+
+Filter tails are state, not extra output frames. Process explicit silence within
+the budget to render a decay; reset discards the remaining tail. IIR decay can be
+very long, so callers decide tail truncation. History is fixed-size, with O(block
+samples) processing; validation, toList/mapAccumL/fromList use bounded temporary
+allocations. mapAccumL builds output in one pass rather than growing an immutable
+list or copying an array for each sample. No callback deadline is guaranteed.
+
+Two headless fixture-backed consumer entries exercise synthesis/model-output paths:
+
+```sh
+ailang run --package-dir . --strict-bytecode --verify-contracts --entry pcmDemo --args-json 0 examples/block_pipeline.ail
+ailang run --package-dir . --strict-bytecode --verify-contracts --entry recipeDemo --args-json 0 examples/block_pipeline.ail
+```
+
+`pcmDemo` imports s16le as a speech/model adapter could supply. `recipeDemo` checks
+JSON data as a model could propose, then renders it under limits. Both filter,
+prepare levels and return measured WAV identity metadata without IO/model calls.
+These analytic fixtures are not generated human speech or an inference accuracy
+test. `std/ai`/provider adapters remain separate effectful consumers.

@@ -1,8 +1,10 @@
 # Audio 0.3: generic package scope
 
-Status: revised release recommendation, 2026-10-23. The checked level API is
-implemented in the candidate; additions below are recommendations, not completed
-features. Loop Lab is a reference application, with its own planned repository
+Status: revised release recommendation, 2026-10-23. Checked levels, the stateful
+filter block foundation and headless fixture examples are implemented in the
+candidate; delay, smoothing and the shared report schema remain recommendations.
+See [block evidence](../implemented/audio-blocks-0.3.0/README.md).
+Loop Lab is a reference application, with its own standalone repository
 and release lifecycle: [application split](loop-lab-repository-split.md).
 
 ## The common boundary
@@ -26,13 +28,19 @@ DSP and model inference are not supplied by the current package. A supported PCM
 output can be consumed now; unsupported provider formats need an explicit adapter.
 Coordinate the existing resampling work rather than assuming v0.54.18 shipped it.
 
-## Recommended additions before cutting 0.3
+## Generic feature group and remaining additions
 
 | Priority | Generic deliverable | Multiple consumers served |
 |---|---|---|
 | 1 | Checked stateful block-processing contract and first filter/delay processors, plus bounded parameter smoothing | Game effects, generated sounds, speech shaping, offline media processing and Loop Lab |
 | 2 | Shared machine-readable processing/report metadata: format/rate/layout, frames, input/output identity, applied gain/processor settings, peak/RMS and limit decisions | Batch AI pipelines, reproducible asset builds, headless validation and application inspection |
 | 3 | Small headless consumer examples: checked procedural/AI-proposed recipe and fixture-backed TTS/model PCM → clip → processing → measured WAV | Demonstrates generic generation/processing without a DAW or browser |
+
+Current checkpoint: `block` has low/high-pass/bypass, reset and bounded per-channel
+state; both headless example paths run on the interpreter and strict VM with
+runtime contracts. Processing reports in those examples are metadata, not yet the
+shared typed AudioReport API. Delay and parameter smoothing are the next processor
+work, independently of Loop Lab's UI/persistence schedule.
 
 For processors, define state + input block + parameters → output + next state,
 with explicit layout/rate, reset/flush/tail behavior and caller resource budgets.

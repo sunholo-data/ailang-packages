@@ -2,7 +2,7 @@
 
 ## 0.3.0
 
-Feature candidate: checked offline level preparation. Not yet published.
+Feature candidate: checked offline level preparation and stateful block filters. Not yet published.
 
 - `levels`: whole-clip RMS and active-window RMS with sample peaks, frame/sample
   counts and full-scale/over-range counts. Scaled energy supports finite headroom
@@ -15,6 +15,13 @@ Feature candidate: checked offline level preparation. Not yet published.
   immutable clips remain available for caller-owned preview/undo/explicit commit.
   No microphone control, perceptual loudness, plugin hosting or UI is implied.
 - Preserve every existing recipe, legacy gated-RMS and PCM quantization behavior.
+- `block`: checked mono/stereo low-pass, high-pass and exact bypass, persistent
+  per-channel histories, reset, per-block frame/sample limits and cumulative stream
+  frame budgets. No device/clock/AI effects; generic for games, speech/model audio
+  and offline processing. Legacy filter operation order remains untouched.
+- Add headless fixture-backed pipelines for a model-proposed recipe and speech/model
+  PCM: checked import/render → block filter → levels → measured PCM16 WAV identity.
+  Fixtures require no provider account and are not neural inference demonstrations.
 
 ## 0.2.0
 

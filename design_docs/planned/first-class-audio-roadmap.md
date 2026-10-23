@@ -10,6 +10,13 @@ requirements or public types of the generic audio package. General release scope
 must also serve headless generation, AI/TTS output processing and other consumers.
 See the [generic 0.3 scope](audio-0.3-generic-scope.md).
 
+**0.3 candidate checkpoint:** checked levels, mono/stereo stateful block filters,
+reset/budgets and headless recipe/speech-PCM fixture consumers are now implemented.
+[Block evidence](../implemented/audio-blocks-0.3.0/README.md): 164 package checks,
+14/62 contracts proved, 48 skipped, 0 refuted/errors. Loop Lab has been
+[extracted](../implemented/loop-lab-repository-split/README.md). Delay, parameter
+smoothing, shared reports and broader conversions remain planned.
+
 AILANG already supports deterministic sound generation, audio file output, offline measurements, and AI speech output. The next step should make these facilities safe to compose: validated formats, explicit channels and rates, bounded rendering, and evidence attached to the resulting bytes. Most sound processing should live in `sunholo/audio`; common file and sample conversions belong in `std/audio`. Runtime changes should serve a measured performance need or provide access to a host device.
 
 ## Reference consumer: the live-loop instrument
