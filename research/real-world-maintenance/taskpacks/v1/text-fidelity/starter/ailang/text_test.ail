@@ -1,0 +1,14 @@
+module benchmark/text_fidelity/text_test
+import ./text (logicalIdentity)
+
+test "baseline keeps internal spaces" {
+  logicalIdentity("日期 时间") == "日期 时间"
+}
+
+test "baseline keeps edge whitespace" {
+  logicalIdentity(" \tA  B\r\n") == " \tA  B\r\n"
+}
+
+test "baseline keeps non-ASCII whitespace" {
+  logicalIdentity("\u{A0}x\u{A0}") == "\u{A0}x\u{A0}"
+}

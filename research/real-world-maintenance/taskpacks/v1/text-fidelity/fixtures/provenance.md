@@ -1,0 +1,2 @@
+Expected outputs hand-specified from frozen contract before native implementations. Input/output fixture role: public development qualification, not model-generated results or sealed confirmation.
+S2 mechanically replays all frozen S1 cases through a one-text-event producer (E1–E8). S3 mechanically replays every frozen S2 case with the required added consumer fields (R-prefixed IDs). Expected text is copied from independent earlier expectations; no native implementation output is used. These are retained obligations, not new language-scoring tasks.

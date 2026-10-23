@@ -1,0 +1,34 @@
+module benchmark/text_fidelity/text_test
+import ./text (trimAscii, asciiEdge, render)
+import std/result (Ok, Err)
+import std/json (decode, encode)
+
+test "trim only outer ASCII whitespace" {
+  trimAscii(" \tA  B\r\n") == "A  B"
+}
+
+test "non-ASCII whitespace survives" {
+  trimAscii(" \u{A0}x\u{A0} ") == "\u{A0}x\u{A0}"
+}
+
+test "internal tab survives" {
+  trimAscii(" A\t B ") == "A\t B"
+}
+
+test "all ASCII whitespace becomes empty" {
+  trimAscii("\t\r\n \u{B}\u{C}") == ""
+}
+
+test "classification excludes NBSP" {
+  not asciiEdge("\u{A0}") && asciiEdge("\t")
+}
+
+test "empty is valid distinct from error" {
+  match decode("{\"schema\":\"cell.text/1\",\"cell\":\"A1\",\"preserve\":false,\"invalid\":false,\"text\":\"\"}") {
+    Ok(j) => match render(j, 1, "") {
+      Ok(v) => encode(v) == "{\"cell\":\"A1\",\"ok\":true,\"text\":\"\",\"error\":null}",
+      _ => false
+    },
+    _ => false
+  }
+}
