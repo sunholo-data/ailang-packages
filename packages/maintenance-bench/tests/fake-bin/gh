@@ -1,0 +1,12 @@
+#!/bin/sh
+set -eu
+[ "$1" = api ] && [ "$2" = --method ] && [ "$3" = GET ] || exit 51
+[ -z "${MB_GH_LOG:-}" ] || printf '%s\n' "$4" >> "$MB_GH_LOG"
+if [ "${MB_GH_FAIL:-0}" = 1 ]; then printf '%s\n' 'mock API rate/auth failure' >&2; exit 22; fi
+case "$4" in
+ 'repos/acme/demo/pulls?state=closed&sort=created&direction=desc&per_page=2&page=1')
+  printf '%s\n' '[{"number":1,"merged_at":"2026-01-01T00:00:00Z"},{"number":2,"merged_at":null}]' ;;
+ 'repos/acme/demo/pulls/1/files?per_page=100&page=1')
+  printf '%s\n' '[{"filename":"src/new name.ail","previous_filename":"src/old name.ail","status":"renamed"}]' ;;
+ *) printf '%s\n' '[]' ;;
+esac

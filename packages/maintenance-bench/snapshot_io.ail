@@ -1,0 +1,20 @@
+module sunholo/maintenance_bench/snapshot_io
+import std/fs (readFileResult, writeFileResult, fileExists)
+import std/result (Result, Ok, Err)
+
+export type Inputs = { snapshot: string, annotations: string, manifest: string }
+
+export func loadInputs(snapshotPath: string, annotationPath: string, manifestPath: string) -> Result[Inputs, string] ! {FS} =
+  match readFileResult(snapshotPath) {
+    Err(e) => Err("snapshot: ${e}"),
+    Ok(s) => match readFileResult(annotationPath) {
+      Err(e) => Err("annotations: ${e}"),
+      Ok(a) => match readFileResult(manifestPath) {
+        Err(e) => Err("manifest: ${e}"),
+        Ok(m) => Ok({ snapshot: s, annotations: a, manifest: m })
+      }
+    }
+  }
+
+export func writeNew(path: string, content: string) -> Result[(), string] ! {FS} =
+  if fileExists(path) then Err("refusing to overwrite evidence: ${path}") else writeFileResult(path, content)

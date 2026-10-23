@@ -1,0 +1,79 @@
+module sunholo/maintenance_bench/report_test
+import ./report (analyse)
+import ./verify_snapshot (verifySnapshot)
+import ./codec (encodeSnapshot, encodeAnnotations, encodeManifest)
+import ./reference (data, label, manifest)
+import std/result (Result, Ok, Err)
+import std/option (None)
+import std/json (decode, getString)
+import std/string (replace)
+
+func result() -> Result[{ json: string, markdown: string }, string] =
+  analyse(encodeSnapshot(data()), encodeAnnotations([label("r1")]), encodeManifest(manifest()), "", "")
+
+func expected() -> string =
+  "{\"schema\":\"maintenance.expectation/1\",\"eligible\":3,\"mature\":3,\"censored\":0,\"excluded\":0,\"groups\":[{\"repo\":\"project/a\",\"language\":\"ailang\",\"cluster\":\"project/a\",\"mature\":3,\"linkedRepairChanges\":1,\"knownRepairDefects\":1,\"knownRepairRounds\":1,\"interceptedRepairs\":0}]}"
+
+test "hand calculated expectations pass" {
+  match result() {
+    Ok(r) => match verifySnapshot(r.json, expected()) {
+      Ok(_) => true,
+      _ => false
+    },
+    _ => false
+  }
+}
+
+test "identical inputs have identical report bytes" {
+  match (result(), result()) {
+    (Ok(a), Ok(b)) => a.json == b.json && a.markdown == b.markdown,
+    _ => false
+  }
+}
+
+test "annotation revision changes identity" {
+  match (result(), analyse(encodeSnapshot(data()), encodeAnnotations([{ label("r1") | provenance: "revised evidence" }]), encodeManifest(manifest()), "", "")) {
+    (Ok(a), Ok(b)) => a.json != b.json,
+    _ => false
+  }
+}
+
+test "dropped row count cannot pass oracle" {
+  match result() {
+    Ok(r) => match verifySnapshot(replace(r.json, "\"eligible\":3", "\"eligible\":2"), expected()) {
+      Err(_) => true,
+      _ => false
+    },
+    _ => false
+  }
+}
+
+test "weakened repair classification cannot pass oracle" {
+  match analyse(encodeSnapshot(data()), encodeAnnotations([{ label("r1") | purpose: "feature", repairs: None, defect: None, detectedMs: None, round: 0 }]), encodeManifest(manifest()), "", "") {
+    Ok(r) => match verifySnapshot(r.json, expected()) {
+      Err(_) => true,
+      _ => false
+    },
+    _ => false
+  }
+}
+
+test "comparison direction is part of report identity" {
+  match (analyse(encodeSnapshot(data()), encodeAnnotations([]), encodeManifest(manifest()), "ailang", "python"), analyse(encodeSnapshot(data()), encodeAnnotations([]), encodeManifest(manifest()), "python", "ailang")) {
+    (Ok(a), Ok(b)) => match (decode(a.json), decode(b.json)) {
+      (Ok(x), Ok(y)) => getString(x, "reportId") != getString(y, "reportId"),
+      _ => false
+    },
+    _ => false
+  }
+}
+
+test "duplicate expectation group cannot replace a missing project" {
+  match result() {
+    Ok(r) => match verifySnapshot(r.json, replace(expected(), "\"groups\":[", "\"groups\":[{\"repo\":\"project/a\",\"language\":\"ailang\",\"cluster\":\"project/a\",\"mature\":3,\"linkedRepairChanges\":1,\"knownRepairDefects\":1,\"knownRepairRounds\":1,\"interceptedRepairs\":0},")) {
+      Err(_) => true,
+      _ => false
+    },
+    _ => false
+  }
+}

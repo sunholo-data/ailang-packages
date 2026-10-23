@@ -1,0 +1,64 @@
+module sunholo/maintenance_bench/benchmark
+import ./types (Snapshot)
+import ./reference (original, manifest)
+import ./observation (snapshot)
+import ./codec (encodeSnapshot, encodeManifest, encodeAnnotations, requiredCount)
+import ./report (analyse)
+import ./snapshot_io (writeNew)
+import std/list (map, range)
+import std/json (decode, encode, JObject, kv, JString, jint)
+import std/result (Result, Ok, Err)
+import std/option (Some, None)
+import std/clock (now)
+import std/env (getArgs)
+import std/string (stringToInt)
+import std/io (println, eprintln, exit)
+
+export pure func scaleSnapshot(n: int) -> Snapshot =
+  snapshot("synthetic scaling input; NOT language-quality evidence", "scale-generator-v1", 10000000000, true, map(\i. { original("scale-${show(i)}", "scale/project${show(i % 4)}", if i % 2 == 0 then "ailang" else "python") | provenance: "synthetic scale fixture, no language inference" }, range(0, n)))
+
+export pure func measuredReport(n: int) -> Result[string, string] =
+  if n < 1 || n > 10000 then Err("scale bound is 1..10000") else match analyse(encodeSnapshot(scaleSnapshot(n)), encodeAnnotations([]), encodeManifest(manifest()), "", "") {
+    Err(e) => Err(e),
+    Ok(report) => match decode(report.json) {
+      Err(e) => Err(e),
+      Ok(j) => match (requiredCount(j, "eligible"), requiredCount(j, "mature"), requiredCount(j, "censored")) {
+        (Ok(a), Ok(b), Ok(c)) => if a == n && b == n && c == 0 then Ok(report.json) else Err("scale semantic accounting failed"),
+        _ => Err("scale report fields missing")
+      }
+    }
+  }
+
+export func main() -> () ! {IO, FS, Env, Clock} = match getArgs() {
+  [count, out] => match stringToInt(count) {
+    None => {
+      eprintln("invalid row count")
+      exit(2)
+    },
+    Some(n) => {
+      let start = now()
+      let result = measuredReport(n)
+      let elapsed = now() - start
+      match result {
+        Err(e) => {
+          eprintln(e)
+          exit(1)
+        },
+        Ok(report) => {
+          let timing = encode(JObject([kv("schema", JString("maintenance.timing/1")), kv("rows", jint(n)), kv("elapsedMs", jint(elapsed)), kv("scope", JString("construction, strict ingestion, cohort, aggregation, JSON/Markdown report")), kv("semanticReport", JString(report))]))
+          match writeNew(out, timing) {
+            Err(e) => {
+              eprintln(e)
+              exit(1)
+            },
+            Ok(_) => println("verified ${show(n)} rows in ${show(elapsed)} ms; wrote ${out}")
+          }
+        }
+      }
+    }
+  },
+  _ => {
+    eprintln("usage: maintenance-scale ROWS(1..10000) NEW_TIMING_JSON")
+    exit(2)
+  }
+}

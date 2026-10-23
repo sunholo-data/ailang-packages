@@ -1,0 +1,20 @@
+module sunholo/maintenance_bench/cohort_test
+import ./cohort (buildCohort, applyAnnotations)
+import ./reference (manifest, original, label, data)
+import ./observation (snapshot)
+import std/result (Ok, Err)
+import std/option (Some, None)
+import std/list (length, reverse)
+test "all eligible observations accounted for" { match buildCohort(data(),manifest()) { Ok(c) => length(c.mature)==3 && length(c.censored)==0 && c.excluded==0, Err(_) => false } }
+test "exact 30 day boundary matures" { let m=manifest(); let r={original("x","project/a","ailang") | acceptedMs:m.cutoffMs-2592000000}; match buildCohort(snapshot("test","fixed",m.cutoffMs,true,[r]),m) { Ok(c) => length(c.mature)==1, Err(_) => false } }
+test "one millisecond short remains censored" { let m=manifest(); let r={original("x","project/a","ailang") | acceptedMs:m.cutoffMs-2592000000+1}; match buildCohort(snapshot("test","fixed",m.cutoffMs,true,[r]),m) { Ok(c) => length(c.censored)==1, Err(_) => false } }
+test "incomplete source refused when required" { match buildCohort({data() | complete:false},manifest()) { Err(_) => true, _ => false } }
+test "unknown annotation target refused" { match applyAnnotations(data(),[label("missing")]) { Err(_) => true, _ => false } }
+test "reviewed repair attaches to existing change" { match applyAnnotations(data(),[label("r1")]) { Ok(s) => match buildCohort(s,manifest()) { Ok(c) => length(c.eligible)==3, _ => false }, _ => false } }
+test "unknown repair introduction refused" { let a={label("r1") | repairs:Some("missing")}; match applyAnnotations(data(),[a]) { Err(_) => true, _ => false } }
+test "duplicate annotation is not silently overwritten" { match applyAnnotations(data(),[label("r1"),label("r1")]) { Err(_) => true, _ => false } }
+test "future episode is invalid rather than mature" { let s=data(); match buildCohort({s | episodes:[{original("future","project/a","ailang") | acceptedMs:s.cutoffMs+1}]},manifest()) { Err(_) => true, _ => false } }
+test "unknown authorship is excluded from agent stratum" { let s=data(); let m={manifest() | authorship:"agent"}; match buildCohort({s | episodes:[{original("unknown","project/a","ailang") | authorship:"unknown"}]},m) { Ok(c) => length(c.eligible)==0 && c.excluded==1, _ => false } }
+test "row order cannot change cohort sizes" { let s=data(); match (buildCohort(s,manifest()),buildCohort({s | episodes:reverse(s.episodes)},manifest())) { (Ok(a),Ok(b)) => length(a.mature)==length(b.mature) && length(a.censored)==length(b.censored), _ => false } }
+test "commit time cannot become acceptance exposure" { match applyAnnotations({data() | timeBasis:"commit"},[]) {Err(_)=>true,_=>false} }
+test "reviewed acceptance date corrects old commit age" { let s=snapshot("git:test","fixed",10000000000,true,[original("x","project/a","ailang")]); let raw={s | timeBasis:"commit"}; let a={label("x") | acceptedMs:Some(10000000000-86400000),purpose:"feature",repairs:None,defect:None,detectedMs:None,round:0}; match applyAnnotations(raw,[a]) {Ok(reviewed)=>match buildCohort(reviewed,manifest()) {Ok(c)=>length(c.mature)==0 && length(c.censored)==1,_=>false},_=>false} }

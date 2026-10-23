@@ -1,0 +1,5 @@
+module sunholo/maintenance_bench/examples/scale_bench
+import pkg/sunholo/maintenance_bench/benchmark (main as benchmarkMain)
+
+-- Delegates to the tested timing entry point; no duplicated domain calculations.
+export func main() -> () ! {IO, FS, Env, Clock} = benchmarkMain()

@@ -1,0 +1,39 @@
+module sunholo/maintenance_bench/collect_git_test
+import ./collect_git (parseChanges, canonicalPath, canonicalForLanguage, roleFor)
+import std/result (Ok, Err)
+import std/list (length)
+import std/bytes (fromInts, toString)
+
+test "rename is one changed artifact" {
+  match parseChanges("R100${toString(fromInts([0]))}old name.ail${toString(fromInts([0]))}new name.ail${toString(fromInts([0]))}") {
+    Ok(xs) => length(xs) == 1,
+    Err(_) => false
+  }
+}
+
+test "malformed status fails rather than drops" {
+  match parseChanges("M${toString(fromInts([0]))}") {
+    Err(_) => true,
+    Ok(_) => false
+  }
+}
+
+test "mirror is not canonical source" {
+  not canonicalPath("docs/ailang/parser.ail")
+}
+
+test "source path is canonical" {
+  canonicalPath("src/解析 name.ail")
+}
+
+test "other-language bridge is not AILANG source" {
+  not canonicalForLanguage("src/bridge.py", "ailang") && roleFor(["src/bridge.py"], "ailang") == "unknown"
+}
+
+test "ordinary documentation is not called a generated mirror" {
+  roleFor(["README.md"], "ailang") == "unknown"
+}
+
+test "explicit browser mirror remains derived" {
+  roleFor(["docs/ailang/parser.ail"], "ailang") == "derived"
+}

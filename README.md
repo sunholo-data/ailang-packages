@@ -168,3 +168,7 @@ export type Customer = { name: string, email: string }
 ```
 
 Before publishing, run the relevant runtime/integration and contract verification checks. `ailang publish --dry-run` creates and validates packaging locally; it does not run the remote validator or replace those checks. Publish dependencies before dependents when releasing new versions.
+
+## Maintenance evidence benchmark
+
+[`sunholo/maintenance_bench`](packages/maintenance-bench/README.md) is an experimental AILANG data-science instrument for real project histories: explicit Git/gh collection, reviewed repair/feature annotations, censored cohorts, artifact touch frequencies, descriptive language comparisons, frozen expected results and repeatable scale checks. It makes no general language-quality claim. Source/quality documentation and the data-science gap ledger live with the package; registry publication is a separate release step.

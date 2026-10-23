@@ -1,0 +1,54 @@
+module sunholo/maintenance_bench/lineage
+import ./types (Episode, FileChange)
+import std/result (unwrap, Err)
+import std/map as M
+import std/list (map, foldl, filter, sortBy, contains)
+import std/option (Some, None)
+import std/string (compare)
+import std/json (encode, JArray, JString)
+
+export type Artifact = { id: string, repo: string, language: string, cluster: string, paths: [string], touches: int, repairTouches: int, featureTouches: int, otherTouches: int }
+
+type History = { aliases: Map[string, string], artifacts: Map[string, Artifact] }
+
+func pathKey(r: Episode, path: string) -> string =
+  encode(JArray(map(\s. JString(s), [r.repo, r.language, r.cluster, path])))
+
+func visit(h: History, before: Map[string, string], r: Episode, path: string, change: FileChange) -> History {
+  let key = pathKey(r, path)
+  let oldKey = pathKey(r, change.oldPath)
+  let origin = if change.status == "R" then M.lookup(before, oldKey) else if change.status == "A" || change.status == "C" then None else M.lookup(before, key)
+  let id = match origin {
+    Some(existing) => existing,
+    None => encode(JArray(map(\s. JString(s), [r.repo, r.language, r.cluster, "first-observed", r.id, if change.status == "R" then change.oldPath else path])))
+  }
+  let prior = match M.lookup(h.artifacts, id) {
+    Some(a) => a,
+    None => { id: id, repo: r.repo, language: r.language, cluster: r.cluster, paths: if change.status == "R" && change.oldPath != path then [change.oldPath] else [], touches: 0, repairTouches: 0, featureTouches: 0, otherTouches: 0 }
+  }
+  let paths = if contains(prior.paths, path) then prior.paths else prior.paths ++ [path]
+  let repaired = r.purpose == "repair" && r.evidenceLevel == "confirmed"
+  let feature = r.purpose == "feature" && (r.evidenceLevel == "confirmed" || r.evidenceLevel == "supported")
+  let next = { prior | paths: paths, touches: prior.touches + 1, repairTouches: prior.repairTouches + (if repaired then 1 else 0), featureTouches: prior.featureTouches + (if feature then 1 else 0), otherTouches: prior.otherTouches + (if not repaired && not feature then 1 else 0) };
+  { aliases: if change.status == "D" then h.aliases else M.insert(h.aliases, key, id), artifacts: M.insert(h.artifacts, id, next) }
+}
+
+func visitRow(h: History, r: Episode) -> History {
+  let changes = M.fromList(map(\c. (c.path, c), r.changes))
+  let removed = filter(\c. contains(r.files, c.path) && (c.status == "R" || c.status == "D"), r.changes)
+  let aliases = foldl(\a c. M.remove(a, pathKey(r, if c.status == "R" then c.oldPath else c.path)), h.aliases, removed)
+  let initial = { h | aliases: aliases }
+  foldl(\state path. match M.lookup(changes, path) {
+    Some(c) => visit(state, h.aliases, r, path, c),
+    None => unwrap(Err("lineage requires validated structured file changes"))
+  }, initial, r.files)
+}
+
+-- Observed within-snapshot lineage, not a claim to complete file creation history.
+-- Ties use episode id deterministically; capture finer acceptance ordering if needed.
+export pure func artifacts(rows: [Episode]) -> [Artifact] {
+  let ordered = sortBy(\a b. if a.acceptedMs < b.acceptedMs then -1 else if a.acceptedMs > b.acceptedMs then 1 else compare(a.id, b.id), filter(\r. r.canonical, rows))
+  let initial: History = { aliases: M.empty(), artifacts: M.empty() }
+  let final = foldl(\state r. visitRow(state, r), initial, ordered)
+  M.values(final.artifacts)
+}

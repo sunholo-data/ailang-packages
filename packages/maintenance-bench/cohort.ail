@@ -1,0 +1,75 @@
+module sunholo/maintenance_bench/cohort
+import ./types (Episode, Snapshot, Manifest, Annotation)
+import std/result (Result, Ok, Err)
+import std/option (Some, None)
+import std/list (map, filter, foldl, length as size, contains)
+import std/map as M
+import std/json (encode, JArray, JString, JNumber)
+import std/math (intToFloat)
+
+export type Cohort = { mature: [Episode], censored: [Episode], eligible: [Episode], excluded: int, unlabelled: int, complete: bool, cutoffMs: int, windowDays: int }
+
+export pure func matureAt(acceptedMs: int, cutoffMs: int, days: int) -> bool
+requires { acceptedMs >= 0, cutoffMs >= 0, days >= 0, days <= 90 }
+ensures { not result || acceptedMs <= cutoffMs } {
+  acceptedMs <= cutoffMs && cutoffMs - acceptedMs >= days * 86400000
+}
+
+export pure func validateLinks(s: Snapshot) -> Result[(), string] {
+  let index = M.fromList(map(\r. (r.id, r), s.episodes))
+  let linked = filter(\r. match r.repairs {
+    Some(_) => true,
+    None => false
+  }, s.episodes)
+  let roundKeys = map(\r. encode(JArray([JString(r.repo), JString(show(r.defect)), JNumber(intToFloat(r.round))])), linked)
+  if M.size(index) != size(s.episodes) then Err("duplicate episode id") else if M.size(M.fromList(map(\k. (k, true), roundKeys))) != size(roundKeys) then Err("duplicate defect repair round (mirrors must not duplicate a repair)") else foldl(\state r. match state {
+    Err(e) => Err(e),
+    Ok(_) => if M.size(M.fromList(map(\path. (path, true), r.files))) != size(r.files) then Err("duplicate file path: ${r.id}") else if size(M.keys(M.fromList(map(\c. (c.path, true), r.changes)))) != size(r.changes) || size(filter(\path. not M.member(M.fromList(map(\c. (c.path, true), r.changes)), path), r.files)) > 0 then Err("missing/duplicate structured file change: ${r.id}") else if r.acceptedMs > s.cutoffMs then Err("episode after snapshot cutoff: ${r.id}") else if r.canonical != (r.artifactRole == "canonical") then Err("inconsistent artifact role: ${r.id}") else match r.repairs {
+      None => Ok(),
+      Some(target) => match M.lookup(index, target) {
+        None => Err("unknown repair introduction: ${target}"),
+        Some(original) => if original.id == r.id || original.repo != r.repo || original.language != r.language then Err("repair lineage requires same-project earlier source: ${r.id}") else if r.purpose != "repair" || r.round < 1 then Err("repair link requires repair intent and positive round: ${r.id}") else match (r.defect, r.detectedMs) {
+          (Some(_), Some(ms)) => if ms < original.acceptedMs || ms > r.acceptedMs then Err("inconsistent repair chronology: ${r.id}") else Ok(),
+          _ => Err("repair link requires defect and detection time: ${r.id}")
+        }
+      }
+    }
+  }, Ok(), s.episodes)
+}
+
+export pure func applyAnnotations(s: Snapshot, labels: [Annotation]) -> Result[Snapshot, string] {
+  let index = M.fromList(map(\a. (a.id, a), labels))
+  let rowIds = M.fromList(map(\r. (r.id, true), s.episodes))
+  if s.timeBasis != "acceptance" && (s.timeBasis != "commit" || size(filter(\r. match M.lookup(index, r.id) {
+    Some(a) => match a.acceptedMs {
+      Some(_) => false,
+      None => true
+    },
+    None => true
+  }, s.episodes)) > 0) then Err("Git commit time is not acceptance: provide reviewed acceptedMs for every row before cohort analysis") else if M.size(index) != size(labels) then Err("duplicate annotation id") else if size(filter(\a. not M.member(rowIds, a.id), labels)) > 0 then Err("annotation refers to unknown episode") else {
+    let rows = map(\r. match M.lookup(index, r.id) {
+      None => r,
+      Some(a) => { r | acceptedMs: match a.acceptedMs {
+        Some(ms) => ms,
+        None => r.acceptedMs
+      }, purpose: a.purpose, authorship: a.authorship, rootCause: a.rootCause, detectionStage: a.detectionStage, evidenceLevel: a.evidenceLevel, artifactRole: a.artifactRole, canonical: a.artifactRole == "canonical", defect: a.defect, repairs: a.repairs, detectedMs: a.detectedMs, round: a.round, provenance: "${r.provenance}\nreviewed:${a.provenance}" }
+    }, s.episodes)
+    let reviewed = { s | episodes: rows, timeBasis: "acceptance" }
+    match validateLinks(reviewed) {
+      Err(e) => Err(e),
+      Ok(_) => Ok(reviewed)
+    }
+  }
+}
+
+export pure func buildCohort(s: Snapshot, m: Manifest) -> Result[Cohort, string] {
+  if s.timeBasis != "acceptance" then Err("accepted-change exposure requires acceptance timestamps; commit age is a proxy") else if s.schema != "maintenance.snapshot/1" || m.schema != "maintenance.cohort/1" || m.metricVersion != "maintenance.metrics/1" || m.authorship != "all" && m.authorship != "agent" || m.windowDays != 30 && m.windowDays != 90 || m.cutoffMs != s.cutoffMs then Err("manifest/snapshot definition or cutoff mismatch") else if m.requireComplete && not s.complete then Err("incomplete acquisition cannot support the requested cohort") else match validateLinks(s) {
+    Err(e) => Err(e),
+    Ok(_) => {
+      let eligible = filter(\r. (size(m.repositories) == 0 || contains(m.repositories, r.repo)) && (m.authorship == "all" || m.authorship == "agent" && r.authorship == "agent") && (not m.canonicalOnly || r.canonical), s.episodes)
+      let mature = filter(\r. matureAt(r.acceptedMs, s.cutoffMs, m.windowDays), eligible)
+      let censored = filter(\r. not matureAt(r.acceptedMs, s.cutoffMs, m.windowDays), eligible)
+      Ok({ mature: mature, censored: censored, eligible: eligible, excluded: size(s.episodes) - size(eligible), unlabelled: size(filter(\r. r.purpose == "uncertain" || r.evidenceLevel == "unknown", eligible)), complete: s.complete, cutoffMs: s.cutoffMs, windowDays: m.windowDays })
+    }
+  }
+}

@@ -1,0 +1,16 @@
+module sunholo/maintenance_bench/examples/offline_report
+import pkg/sunholo/maintenance_bench/report (analyse)
+import pkg/sunholo/maintenance_bench/codec (encodeSnapshot, encodeAnnotations, encodeManifest)
+import pkg/sunholo/maintenance_bench/reference (data, label, manifest)
+import std/result (Ok, Err)
+import std/io (println, exit)
+
+-- No new pure logic: contracts and native tests belong to the imported modules.
+export func main() -> () ! {IO} =
+  match analyse(encodeSnapshot(data()), encodeAnnotations([label("r1")]), encodeManifest(manifest()), "", "") {
+    Ok(report) => println(report.markdown),
+    Err(e) => {
+      println(e)
+      exit(1)
+    }
+  }

@@ -1,0 +1,28 @@
+[package]
+name = "sunholo/maintenance_bench"
+version = "0.1.0"
+edition = "1"
+ailang = ">=0.54.17"
+description = "Repeatable real-project maintenance evidence: strict snapshots, reviewed annotations, cohorts and descriptive language comparisons"
+license = "Apache-2.0"
+[exports]
+modules = ["sunholo/maintenance_bench/types", "sunholo/maintenance_bench/codec", "sunholo/maintenance_bench/observation", "sunholo/maintenance_bench/collect_git", "sunholo/maintenance_bench/process_read", "sunholo/maintenance_bench/collect_github", "sunholo/maintenance_bench/cohort", "sunholo/maintenance_bench/reference", "sunholo/maintenance_bench/metrics", "sunholo/maintenance_bench/compare", "sunholo/maintenance_bench/report_json", "sunholo/maintenance_bench/report", "sunholo/maintenance_bench/snapshot_io", "sunholo/maintenance_bench/verify_snapshot", "sunholo/maintenance_bench/cli", "sunholo/maintenance_bench/collect_cli", "sunholo/maintenance_bench/benchmark", "sunholo/maintenance_bench/strict_json", "sunholo/maintenance_bench/lineage"]
+[effects]
+max = ["FS", "IO", "Env", "Process", "Clock"]
+[release]
+kind = "feature"
+[stability]
+level = "experimental"
+[metadata]
+repository = "https://github.com/sunholo-data/ailang-packages/tree/main/packages/maintenance-bench"
+license_url = "https://github.com/sunholo-data/ailang-packages/blob/main/packages/maintenance-bench/LICENSE"
+tags = ["research", "benchmarks", "data-science", "maintenance"]
+ai_summary = "Offline deterministic maintenance cohorts and descriptive cross-language deltas; explicit gh/Git collection and reviewed labels. No LLM dependency."
+
+[bin]
+maintenance-bench = { module = "cli", caps = "IO,FS,Env" }
+maintenance-collect = { module = "collect_cli", caps = "IO,FS,Env,Process" }
+maintenance-scale = { module = "benchmark", caps = "IO,FS,Env,Clock" }
+
+[assets]
+files = ["fixtures/README.md", "fixtures/analytical.annotations.json", "fixtures/analytical.expected.json", "fixtures/analytical.manifest.json", "fixtures/analytical.snapshot.json", "fixtures/real_cases.annotations.json", "fixtures/real_cases.manifest.json", "fixtures/real_cases.snapshot.json", "gap_repros/deep_codec.ail.txt", "gap_repros/nul_named_test.ail.txt", "gap_repros/property_fmt.ail.txt"]

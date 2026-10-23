@@ -1,0 +1,51 @@
+module sunholo/maintenance_bench/compare_test
+import ./compare (compareLanguages, deltaPP)
+import ./types (Episode)
+import ./reference (original)
+import std/result (Ok, Err)
+import std/option (Some, None)
+
+func paired(id: string, language: string, pass: bool) -> Episode =
+  { original(id, "project/a", language) | pair: Some("ticket-1"), model: Some("frozen-model"), harness: Some("frozen-harness"), trial: Some(1), outcome: Some(pass) }
+
+test "delta direction is A minus comparator" {
+  match deltaPP(1, 4, 1, 2) {
+    Some(x) => x == -25.0,
+    _ => false
+  }
+}
+
+test "missing denominator gives no delta" {
+  match deltaPP(0, 0, 1, 2) {
+    None => true,
+    _ => false
+  }
+}
+
+test "languages match through explicit semantic key" {
+  match compareLanguages([paired("a", "ailang", true), paired("b", "python", false)], "ailang", "python") {
+    Ok(c) => c.matched == 1 && c.leftOnly == 1,
+    _ => false
+  }
+}
+
+test "duplicate arm refuses" {
+  match compareLanguages([paired("a", "ailang", true), paired("b", "ailang", false)], "ailang", "python") {
+    Err(_) => true,
+    _ => false
+  }
+}
+
+test "different harness remains unmatched" {
+  match compareLanguages([paired("a", "ailang", true), { paired("b", "python", true) | harness: Some("different") }], "ailang", "python") {
+    Ok(c) => c.matched == 0 && c.unmatchedLeft == 1 && c.unmatchedRight == 1,
+    _ => false
+  }
+}
+
+test "unknown outcome is not a failure" {
+  match compareLanguages([paired("a", "ailang", true), { paired("b", "python", false) | outcome: None }], "ailang", "python") {
+    Ok(c) => c.knownPairs == 0 && c.unknownOutcomePairs == 1 && c.leftOnly == 0,
+    _ => false
+  }
+}

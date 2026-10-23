@@ -1,0 +1,21 @@
+module sunholo/maintenance_bench/examples/build_cohort
+import pkg/sunholo/maintenance_bench/cohort (applyAnnotations, buildCohort)
+import pkg/sunholo/maintenance_bench/reference (data, label, manifest)
+import std/list (length)
+import std/result (Ok, Err)
+import std/io (println, exit)
+
+-- The owner module proves maturity's chronological bound and tests exact boundaries.
+export func main() -> () ! {IO} = match applyAnnotations(data(), [label("r1")]) {
+  Err(e) => {
+    println(e)
+    exit(1)
+  },
+  Ok(s) => match buildCohort(s, manifest()) {
+    Err(e) => {
+      println(e)
+      exit(1)
+    },
+    Ok(c) => println("mature=${show(length(c.mature))}; censored=${show(length(c.censored))}")
+  }
+}

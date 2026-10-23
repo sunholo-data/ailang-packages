@@ -1,0 +1,11 @@
+module sunholo/maintenance_bench/process_read
+import std/process (exec)
+import std/bytes (toString)
+import std/result (Result, Ok, Err)
+
+-- Only callers with Process authority can acquire external data.
+export func readCommand(command: string, args: [string]) -> Result[string, string] ! {Process} =
+  match exec(command, args) {
+    Err(e) => Err("spawn failure: ${show(e)}"),
+    Ok(out) => if out.truncated then Err("truncated command output") else if out.exitCode != 0 then Err("command exit ${show(out.exitCode)}: ${toString(out.stderr)}") else Ok(toString(out.stdout))
+  }

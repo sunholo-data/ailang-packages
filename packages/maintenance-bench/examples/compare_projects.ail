@@ -1,0 +1,13 @@
+module sunholo/maintenance_bench/examples/compare_projects
+import pkg/sunholo/maintenance_bench/compare (deltaPP)
+import std/option (Some, None)
+import std/io (println, exit)
+
+-- Synthetic arithmetic only; not a measured cross-language advantage.
+export func main() -> () ! {IO} = match deltaPP(1, 4, 1, 2) {
+  Some(delta) => println("${show(delta)} pp; independent arithmetic example"),
+  None => {
+    println("unavailable")
+    exit(1)
+  }
+}
