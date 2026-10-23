@@ -3,7 +3,8 @@
 Implemented 2026-10-23 on AILANG v0.54.18. Loop Lab has moved to
 [its application repository](https://github.com/sunholo-data/ailang-loop-lab);
 this increment adds generic audio processing independently of that UI.
-Audio 0.3 remains unpublished.
+This implementation snapshot predates publication. Audio 0.3.0 was subsequently
+merged and published; see the [release record](../audio-release-0.3.0/README.md).
 
 ## Public behavior
 

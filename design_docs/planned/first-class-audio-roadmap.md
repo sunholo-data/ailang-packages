@@ -4,14 +4,15 @@
 **Scope:** `sunholo/audio`, `std/audio`, and the small runtime boundaries needed by their consumers. Stapledon's game port remains with that project.
 
 **Application boundary:** Loop Lab is an application and reference consumer, with
-a [proposed standalone-repository split](loop-lab-repository-split.md). Its session
+a [completed standalone-repository split](loop-lab-repository-split.md). Its session
 save/load, UI, device lifecycle and Live workflow are application features, not
 requirements or public types of the generic audio package. General release scope
 must also serve headless generation, AI/TTS output processing and other consumers.
 See the [generic 0.3 scope](audio-0.3-generic-scope.md).
 
-**0.3 candidate checkpoint:** checked levels, mono/stereo stateful block filters,
-reset/budgets and headless recipe/speech-PCM fixture consumers are now implemented.
+**0.3.0 released:** checked levels, mono/stereo stateful block filters,
+reset/budgets and headless recipe/speech-PCM fixture consumers are merged and
+published. See the [release record](../implemented/audio-release-0.3.0/README.md).
 [Block evidence](../implemented/audio-blocks-0.3.0/README.md): 164 package checks,
 14/62 contracts proved, 48 skipped, 0 refuted/errors. Loop Lab has been
 [extracted](../implemented/loop-lab-repository-split/README.md). Delay, parameter
@@ -24,7 +25,7 @@ AILANG already supports deterministic sound generation, audio file output, offli
 The [long-term instrument plan](live-loop-instrument.md) motivated the first host
 experiment: four-part playback, private capture, clock mapping and a minimal
 pure revision planner. The local
-[Loop Lab example](../../examples/live-loop/README.md) supplies that prototype and
+[Loop Lab application](https://github.com/sunholo-data/ailang-loop-lab) supplies that prototype and
 [measured software evidence](https://github.com/sunholo-data/ailang-packages/blob/93314fc581a7ee2fefdc82392a92228f8b01a2dd/examples/live-loop/evidence/2026-10-23/README.md).
 It does not establish device latency or finish L0 acceptance. After browser/loopback
 and lifecycle measurements, prioritize the 0.3.0 block-processing milestone and the

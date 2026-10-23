@@ -1,8 +1,9 @@
 # Audio 0.3: generic package scope
 
-Status: revised release recommendation, 2026-10-23. Checked levels, the stateful
-filter block foundation and headless fixture examples are implemented in the
-candidate; delay, smoothing and the shared report schema remain recommendations.
+Status: audio 0.3.0 released, 2026-10-23. Checked levels, the stateful
+filter block foundation and headless fixture examples are published.
+See the [release record](../implemented/audio-release-0.3.0/README.md);
+delay, smoothing and the shared report schema remain recommendations.
 See [block evidence](../implemented/audio-blocks-0.3.0/README.md).
 Loop Lab is a reference application, with its own standalone repository
 and release lifecycle: [application split](loop-lab-repository-split.md).
