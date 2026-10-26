@@ -79,5 +79,18 @@ whisper, diff, align, words, retry, gemini, dsp):
 
 ## Validation
 
-`ailang test --package .` (26), `ailang test words.ail` (23) and `take.ail` (5) inline,
-`ailang verify` on `cut`, `level`, `align`, `take` (8 contracts proved), `_smoke.ail`.
+`ailang test --package .` (26); inline, `ailang test --allow-skips <module>.ail` for each of
+the six modules (property tests skip where there is no generator: Array, Map, records);
+`_smoke.ail`.
+
+Contracts: `ailang verify --package .` proves 18. Fifteen more are skipped by the verifier
+(Array or Map parameters, `join`, `toLower`, JSON) and so are runtime checks only. They run
+under `ailang run --verify-contracts` on the **evaluator**: the bytecode VM ignores the flag
+(sunholo-data/ailang#1956). `shortHash`, `voiceId` and `takeFile` carry none: `sha256Hex`
+makes the verifier error (sunholo-data/ailang#1950). On the world_intro take (7.4 M samples,
+44 lines), `cutTake` under the evaluator with `--verify-contracts` broke no contract and gave
+the same 44 clips, byte for byte, as the bytecode VM (5 min 36 s against 8 s).
+
+When writing contracts here: compare records field by field, not with `==` (#1954), and
+prefer `contains` or a recursive predicate to `forall`, which Z3 proves but the runtime cannot
+evaluate (#1955). String `<=`/`>=` do not encode (#1953); `find` does.

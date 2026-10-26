@@ -9,7 +9,7 @@
 module sunholo/explainer/take
 
 import std/crypto (sha256Hex)
-import std/list (reverse)
+import std/list (length, reverse)
 import std/string (join, substring, startsWith)
 
 pure func seen(xs: [string], x: string) -> bool =
@@ -23,12 +23,14 @@ pure func keepFirst(xs: [string], kept: [string]) -> [string] =
 
 -- Each line once, in the order first spoken: a repeated line is one clip, as in the kit.
 export pure func uniqueLines(lines: [string]) -> [string]
+  ensures { length(result) <= length(lines) && (length(result) == 0) == (length(lines) == 0) }
   tests [(["a", "b", "a", "c", "b"], ["a", "b", "c"]), ([], [])] {
   keepFirst(lines, [])
 }
 
 -- The text sent to the model: the lines as paragraphs, so the model pauses between them.
 export pure func takeText(lines: [string]) -> string
+  ensures { match lines { [] => result == "", line :: _ => startsWith(result, line) } }
   tests [(["One.", "Two."], "One.\n\nTwo."), (["Only."], "Only.")] {
   join("\n\n", lines)
 }

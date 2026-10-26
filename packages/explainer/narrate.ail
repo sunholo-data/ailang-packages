@@ -11,6 +11,7 @@ import std/ai (callSpeech, AIError)
 import std/audio (pcm16ToFloats)
 import std/bytes (length)
 import std/json (encode, jo, kv, js)
+import std/string (startsWith, endsWith)
 import std/list (length as count, reverse)
 import std/option (Option, Some, None)
 import std/result (Result, Ok, Err)
@@ -19,16 +20,25 @@ import ./cut (bounds)
 import ./level (levelClip)
 
 -- Attempts per take: an error the provider marks retryable is tried again.
-export pure func attempts() -> int = 3
+export pure func attempts() -> int
+  ensures { result >= 1 }
+{
+  3
+}
 
 -- The options callSpeech takes: the TTS model and the language the voice speaks. Name the
 -- model: gemini-2.5-pro-tts and gemini-2.5-flash-tts work on Vertex; AILANG's default
 -- (gemini-2.5-flash-preview-tts) answered "Internal error" there on 2026-10-26.
-export pure func speechOptions(model: string, language: string) -> string =
+export pure func speechOptions(model: string, language: string) -> string
+  ensures { startsWith(result, "{") && endsWith(result, "}") }
+{
   encode(jo([kv("model", js(model)), kv("language_code", js(language))]))
+}
 
 -- Voice a text, trying again while the provider says the error is retryable.
-export func speak(text: string, voice: string, style: string, options: string, tries: int) -> Result[bytes, AIError] ! {AI} =
+export func speak(text: string, voice: string, style: string, options: string, tries: int) -> Result[bytes, AIError] ! {AI}
+  requires { tries >= 1 }
+=
   match callSpeech(text, voice, style, options) {
     Ok(pcm) => Ok(pcm),
     Err(e) => if e.retryable && tries > 1 then speak(text, voice, style, options, tries - 1) else Err(e)
@@ -45,13 +55,16 @@ pure func clipsFrom(take: bytes, cuts: [int], acc: [bytes], k: int) -> Result[[b
 
 -- A take cut into one levelled WAV clip per line, in order. Err names what could not be
 -- placed: a line none of whose words were heard, windows that overlap, or a silent line.
-export pure func cutTake(take: bytes, heard: [Heard], lines: [string]) -> Result[[bytes], string] =
-  match lineSpans(lines, heard) {
+export pure func cutTake(take: bytes, heard: [Heard], lines: [string]) -> Result[[bytes], string]
+  ensures { match result { Ok(clips) => count(clips) == count(lines), Err(m) => m != "" } }
+=
+  if count(lines) == 0 then Err("no lines to cut")
+  else match lineSpans(lines, heard) {
     None => Err("some line has no word that was heard; listen to the take"),
     Some(spans) => match pcm16ToFloats(take, 0, length(take) / 2, 1) {
       Err(msg) => Err("take: ${msg}"),
       Ok(xs) => match bounds(xs, spans) {
-        None => Err("two lines' cut windows overlap"),
+        None => Err("no cut leaves every line non-empty: two lines' windows overlap, or the last cut reaches the end of the take"),
         Some(cuts) => clipsFrom(take, cuts, [], 0)
       }
     }

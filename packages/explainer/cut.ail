@@ -11,13 +11,18 @@
 module sunholo/explainer/cut
 
 import std/array as A
-import std/list (reverse)
+import std/list (length, reverse)
 import std/math (sqrt, floatToInt)
 import std/option (Option, Some, None)
 import ./align (Span)
 
--- Samples per frame: 10 ms at 24 kHz, the rate of Gemini's and Kokoro's speech.
-export pure func hop() -> int = 240
+-- Samples per frame: 10 ms at 24 kHz, the rate of Gemini's and Kokoro's speech. 100 frames a
+-- second is what turns a word's time into a frame below (seconds * 100).
+export pure func hop() -> int
+  ensures { result * 100 == 24000 }
+{
+  240
+}
 
 -- The longest quiet run seen so far in a window: its length in frames and the frame after it.
 export type Run = { size: int, end: int } deriving (Eq)
@@ -33,7 +38,8 @@ export pure func extend(run: int, quiet: bool) -> int
 -- Python's max((size, end), (run, end')): the longer run, and of equal ones the later.
 export pure func longer(best: Run, run: int, end: int) -> Run
   requires { run >= 0 && best.size >= 0 }
-  ensures { result.size >= best.size && (result == best || (result.size == run && result.end == end)) }
+  ensures { result.size >= best.size
+    && ((result.size == best.size && result.end == best.end) || (result.size == run && result.end == end)) }
 {
   if run > best.size || (run == best.size && end > best.end) then { size: run, end: end } else best
 }
@@ -65,7 +71,9 @@ pure func energyIn(xs: Array[float], i: int, end: int, acc: float) -> float =
   if i >= end then acc else { let x = A.get(xs, i); energyIn(xs, i + 1, end, acc + x * x) }
 
 -- Frame k's level, as above.
-export pure func frameLevel(xs: Array[float], k: int) -> float {
+export pure func frameLevel(xs: Array[float], k: int) -> float
+  ensures { result >= 0.0 }
+{
   let n = A.length(xs);
   let h = hop();
   sqrt(energyIn(xs, clip(k * h - h / 2, n), clip(k * h + h / 2, n), 0.0) / intToFloat(h))
@@ -75,8 +83,11 @@ pure func levelsFrom(xs: Array[float], k: int, acc: [float]) -> [float] =
   if k < 0 then acc else levelsFrom(xs, k - 1, frameLevel(xs, k) :: acc)
 
 -- Every frame's level: ceil(samples / hop) frames.
-export pure func frameLevels(xs: Array[float]) -> Array[float] =
+export pure func frameLevels(xs: Array[float]) -> Array[float]
+  ensures { A.length(result) == (A.length(xs) + hop() - 1) / hop() }
+{
   A.fromList(levelsFrom(xs, (A.length(xs) + hop() - 1) / hop() - 1, []))
+}
 
 pure func quietest(levels: Array[float], i: int, hi: int, best: int) -> int =
   if i >= hi then best
@@ -89,8 +100,12 @@ pure func longestQuiet(levels: Array[float], floor: float, i: int, hi: int, run:
     longestQuiet(levels, floor, i + 1, hi, r, longer(best, r, i + 1))
   }
 
--- The frame to cut at within [lo, hi).
-export pure func cutFrame(levels: Array[float], floor: float, lo: int, hi: int) -> int {
+-- The frame to cut at, from lo to hi inclusive: the middle of a one-frame run that ends at hi
+-- is hi itself.
+export pure func cutFrame(levels: Array[float], floor: float, lo: int, hi: int) -> int
+  requires { lo >= 0 && lo <= hi && hi <= A.length(levels) }
+  ensures { result >= lo && result <= hi }
+{
   let best = longestQuiet(levels, floor, lo, hi, 0, { size: 0, end: lo });
   if best.size >= 1 then middle(best) else quietest(levels, lo + 1, hi, lo)
 }
@@ -113,15 +128,27 @@ pure func cutsFrom(levels: Array[float], floor: float, spans: [Span], previous: 
     _ => Some(reverse(acc))
   }
 
+-- Whether each number is smaller than the next.
+pure func increasing(xs: [int]) -> bool =
+  match xs { a :: b :: rest => a < b && increasing(b :: rest), _ => true }
+
 -- Where each line starts and the take ends, in samples: [0, cut 1, ..., cut n-1, length].
--- None if two lines' windows overlap, so a cut would leave a line empty.
-export pure func bounds(xs: Array[float], spans: [Span]) -> Option[[int]] =
-  if A.length(xs) == 0 then None else boundsOf(xs, frameLevels(xs), spans)
+-- None if some cut would leave a line empty: two lines' windows overlap, or the last cut
+-- reaches the end of the take. None for no lines or an empty take.
+export pure func bounds(xs: Array[float], spans: [Span]) -> Option[[int]]
+  ensures { match result {
+    Some(cs) => length(cs) == length(spans) + 1 && increasing(cs)
+      && _list_head(cs) == 0 && _list_nth(cs, length(cs) - 1) == A.length(xs),
+    None => true
+  } }
+{
+  if A.length(xs) == 0 || length(spans) == 0 then None else boundsOf(xs, frameLevels(xs), spans)
+}
 
 pure func boundsOf(xs: Array[float], levels: Array[float], spans: [Span]) -> Option[[int]] {
   let floor = 0.05 * A.get(levels, A.argmax(levels));
   match cutsFrom(levels, floor, spans, 0, []) {
-    Some(cuts) => Some(0 :: cuts ++ [A.length(xs)]),
+    Some(cuts) => { let cs = 0 :: cuts ++ [A.length(xs)]; if increasing(cs) then Some(cs) else None },
     None => None
   }
 }
