@@ -2,7 +2,7 @@
 
 ## 0.1.1
 
-Contracts on 30 of the 33 exports: 18 proved by Z3, 12 checked at runtime
+Contracts on 33 of the 36 exports: 18 proved by Z3, 15 checked at runtime
 (`--verify-contracts`, evaluator) and by the property tests, where the verifier cannot encode
 the function (Array or Map parameters, `join`, `toLower`, JSON). The three left (`shortHash`,
 `voiceId`, `takeFile`) call `sha256Hex`, which `ailang verify` cannot yet encode

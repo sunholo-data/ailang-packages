@@ -83,7 +83,7 @@ whisper, diff, align, words, retry, gemini, dsp):
 the six modules (property tests skip where there is no generator: Array, Map, records);
 `_smoke.ail`.
 
-Contracts: `ailang verify --package .` proves 18. Twelve more are skipped by the verifier
+Contracts: `ailang verify --package .` proves 18. Fifteen more are skipped by the verifier
 (Array or Map parameters, `join`, `toLower`, JSON) and so are runtime checks only. They run
 under `ailang run --verify-contracts` on the **evaluator**: the bytecode VM ignores the flag
 (sunholo-data/ailang#1956). `shortHash`, `voiceId` and `takeFile` carry none: `sha256Hex`
