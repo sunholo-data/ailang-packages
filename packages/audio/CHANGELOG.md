@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.5.0
+
+Breaking (record shape only; no sample changes): per-layer low-pass poles, and closed layer keys.
+Requested by stapledons-godot (ledger D-124), whose footsteps need a truly dark low-pass.
+
+- `recipe.Layer` gains `lpPoles: int` and recipes gain the layer field `lowpass_poles` (JSON
+  integer 1..4, default 1): the layer's low-pass (fixed or swept) applied that many times in
+  series. At 1 every render is unchanged: the reference loop's PCM pin holds, and the first
+  consumer's 28 shipped sounds regenerate byte for byte. Breaking only because code that builds
+  `Layer` records directly must now set `lpPoles` (1 keeps the old sound).
+- A layer's keys and its `env` keys are now a closed vocabulary: an unknown or misspelt key is
+  refused (`layer: unknown key lowpas_hz`), so a field a version does not implement can never be
+  silently ignored and render a brighter sound. Layers may carry an `about` note; recipe-level
+  keys stay open for host annotations.
+- `validateRecipe` refuses `lpPoles` outside 1..4.
+- Tests: two poles equal the one-pole low-pass applied twice, exactly; one pole equals the 0.4.0
+  path; three poles are darker; JSON parsing, defaults and refusals of 0, 5, 1.5 and unknown keys.
+
 ## 0.4.0
 
 Feature: bounded feedback delay and frame-defined gain automation.
