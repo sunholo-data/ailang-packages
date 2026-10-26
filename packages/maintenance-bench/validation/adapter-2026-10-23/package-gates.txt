@@ -1,0 +1,608 @@
+ailang fmt --check _smoke.ail benchmark.ail benchmark_test.ail cli.ail codec.ail cohort.ail collect_cli.ail collect_git.ail collect_git_test.ail collect_github.ail collect_github_test.ail compare.ail compare_test.ail evidence_card.ail evidence_card_test.ail index_codec.ail index_reference.ail index_test.ail index_types.ail ledger_cli.ail ledger_report.ail ledger_report_test.ail lineage.ail metrics.ail observation.ail process_read.ail reference.ail report.ail report_json.ail report_test.ail run_checkpoint_test.ail run_codec.ail run_compare.ail run_compare_test.ail run_metrics.ail run_test.ail run_types.ail run_validate.ail scoped_metrics.ail snapshot_io.ail strict_json.ail types.ail usage_aggregate.ail usage_codec.ail usage_codec_test.ail usage_normalize.ail usage_test.ail usage_types.ail verify_snapshot.ail examples/build_cohort.ail examples/compare_projects.ail examples/git_snapshot.ail examples/github_snapshot.ail examples/maintenance_trajectory.ail examples/offline_report.ail examples/roadmap_card.ail examples/scale_bench.ail examples/scoped_index.ail examples/usage_accounting.ail
+ailang test --package . --no-color
+→ Package sunholo/maintenance_bench
+  46 source modules, 17 test files
+
+
+Test Results
+Module: sunholo/maintenance_bench
+
+Tests:
+  ✓ scale preserves scheduled population (488.083µs)
+      at benchmark_test.ail:6:1
+  ✓ small scale pipeline validates accounting (26.196167ms)
+      at benchmark_test.ail:10:1
+  ✓ unbounded scale is refused (267.542µs)
+      at benchmark_test.ail:17:1
+  ✓ zero rows not reported as success (175.416µs)
+      at benchmark_test.ail:24:1
+  ✓ fractional count refused (446.625µs)
+      at codec_test.ail:11:1
+  ✓ negative count refused (406.541µs)
+      at codec_test.ail:12:1
+  ✓ whole count preserved (481.916µs)
+      at codec_test.ail:13:1
+  ✓ missing text never defaults (1.392417ms)
+      at codec_test.ail:14:1
+  ✓ large identifiers remain text (483.709µs)
+      at codec_test.ail:15:1
+  ✓ snapshot codec round trip (1.448667ms)
+      at codec_test.ail:17:1
+  ✓ duplicate episode identity refused (1.743791ms)
+      at codec_test.ail:18:1
+  ✓ schema is mandatory (618.459µs)
+      at codec_test.ail:22:1
+  ✓ unknown snapshot schema refused (1.018708ms)
+      at codec_test.ail:23:1
+  ✓ count out of exact range refused (410.916µs)
+      at codec_test.ail:24:1
+  ✓ missing nullable count refused (384.25µs)
+      at codec_test.ail:25:1
+  ✓ explicit unknown preserved (309.958µs)
+      at codec_test.ail:26:1
+  ✓ false is present not unknown (290.417µs)
+      at codec_test.ail:27:1
+  ✓ unknown annotation schema refused (316.417µs)
+      at codec_test.ail:28:1
+  ✓ unbounded manifest window refused (443.542µs)
+      at codec_test.ail:29:1
+  ✓ evidence body cannot change without hash (435.292µs)
+      at codec_test.ail:31:1
+  ✓ rounded fractional raw lexeme is rejected before JSON float conversion (354.292µs)
+      at codec_test.ail:32:1
+  ✓ fraction too small for float precision is still rejected (766.167µs)
+      at codec_test.ail:33:1
+  ✓ ambiguous duplicate completeness is rejected (742.5µs)
+      at codec_test.ail:34:1
+  ✓ numeric punctuation in quoted evidence is not a count (379.916µs)
+      at codec_test.ail:35:1
+  ✓ all eligible observations accounted for (537.083µs)
+      at cohort_test.ail:8:1
+  ✓ exact 30 day boundary matures (339.167µs)
+      at cohort_test.ail:9:1
+  ✓ one millisecond short remains censored (322.625µs)
+      at cohort_test.ail:10:1
+  ✓ incomplete source refused when required (607.5µs)
+      at cohort_test.ail:11:1
+  ✓ unknown annotation target refused (657.291µs)
+      at cohort_test.ail:12:1
+  ✓ reviewed repair attaches to existing change (621.583µs)
+      at cohort_test.ail:13:1
+  ✓ unknown repair introduction refused (378.875µs)
+      at cohort_test.ail:14:1
+  ✓ duplicate annotation is not silently overwritten (275.125µs)
+      at cohort_test.ail:15:1
+  ✓ future episode is invalid rather than mature (300.959µs)
+      at cohort_test.ail:16:1
+  ✓ unknown authorship is excluded from agent stratum (311.083µs)
+      at cohort_test.ail:17:1
+  ✓ row order cannot change cohort sizes (552.167µs)
+      at cohort_test.ail:18:1
+  ✓ commit time cannot become acceptance exposure (257.334µs)
+      at cohort_test.ail:19:1
+  ✓ reviewed acceptance date corrects old commit age (361.792µs)
+      at cohort_test.ail:20:1
+  ✓ rename is one changed artifact (236.292µs)
+      at collect_git_test.ail:7:1
+  ✓ malformed status fails rather than drops (164.166µs)
+      at collect_git_test.ail:14:1
+  ✓ mirror is not canonical source (142.291µs)
+      at collect_git_test.ail:21:1
+  ✓ source path is canonical (146µs)
+      at collect_git_test.ail:25:1
+  ✓ other-language bridge is not AILANG source (181.916µs)
+      at collect_git_test.ail:29:1
+  ✓ ordinary documentation is not called a generated mirror (172.291µs)
+      at collect_git_test.ail:33:1
+  ✓ explicit browser mirror remains derived (144µs)
+      at collect_git_test.ail:37:1
+  ✓ repo injection rejected (470.25µs)
+      at collect_github_test.ail:8:1
+  ✓ normal repo accepted (408.167µs)
+      at collect_github_test.ail:12:1
+  ✓ API failure object is not an empty page (233.958µs)
+      at collect_github_test.ail:16:1
+  ✓ real empty page terminates (228.375µs)
+      at collect_github_test.ail:23:1
+  ✓ full capped page is not known complete (225.458µs)
+      at collect_github_test.ail:30:1
+  ✓ unmerged PR is not accepted source (230.458µs)
+      at collect_github_test.ail:34:1
+  ✓ missing merged field errors (196µs)
+      at collect_github_test.ail:41:1
+  ✓ merged PR keeps identity (379µs)
+      at collect_github_test.ail:48:1
+  ✓ delta direction is A minus comparator (377.958µs)
+      at compare_test.ail:11:1
+  ✓ missing denominator gives no delta (275.333µs)
+      at compare_test.ail:18:1
+  ✓ languages match through explicit semantic key (378.792µs)
+      at compare_test.ail:25:1
+  ✓ duplicate arm refuses (297.75µs)
+      at compare_test.ail:32:1
+  ✓ different harness remains unmatched (360.667µs)
+      at compare_test.ail:39:1
+  ✓ unknown outcome is not a failure (329.541µs)
+      at compare_test.ail:46:1
+  ✓ empty evidence cannot become design ready (723.459µs)
+      at evidence_card_test.ail:8:1
+  ✓ historical controls support reproduced cards with unknown economics (5.523167ms)
+      at evidence_card_test.ail:18:1
+  ✓ missing mutation and reuse audit block design ready (5.027167ms)
+      at evidence_card_test.ail:30:1
+  ✓ unknown costs block economic claim (4.910167ms)
+      at evidence_card_test.ail:39:1
+  ✓ small exposed evidence cannot declare language advantage (5.491375ms)
+      at evidence_card_test.ail:48:1
+  ✓ failed build is not semantic regression evidence (4.946791ms)
+      at evidence_card_test.ail:58:1
+  ✓ same candidate cannot fail before and pass after unchanged (5.75725ms)
+      at evidence_card_test.ail:68:1
+  ✓ unbound text is not a configuration digest (4.363958ms)
+      at evidence_card_test.ail:78:1
+  ✓ standalone known label cannot qualify an economic card (6.03625ms)
+      at evidence_card_test.ail:88:1
+  ✓ explicit severe-case exception can qualify a reproduction draft for review (7.897458ms)
+      at evidence_card_test.ail:103:1
+  ✓ selected index stays fixed when a followup is added (2.993292ms)
+      at index_test.ail:24:1
+  ✓ duplicate index selection refused (731.333µs)
+      at index_test.ail:35:1
+  ✓ missing selected episode refused (1.506542ms)
+      at index_test.ail:47:1
+  ✓ row order does not change index partitions (2.212625ms)
+      at index_test.ail:59:1
+  ✓ index unknowns do not include out of sample rows (1.338625ms)
+      at index_test.ail:70:1
+  ✓ unknown acceptance remains unresolved (1.234541ms)
+      at index_test.ail:82:1
+  ✓ invalid secondary intent is rejected (1.404292ms)
+      at index_test.ail:93:1
+  ✓ feature file touches remain candidates not confirmed defects (1.393542ms)
+      at index_test.ail:104:1
+  ✓ confirmed repair links one introduced change (1.538916ms)
+      at index_test.ail:118:1
+  ✓ same filename in another project is not a followup (1.452042ms)
+      at index_test.ail:130:1
+  ✓ late supported correction stays workload outside followup window (1.988708ms)
+      at index_test.ail:163:1
+  ✓ supported correction on exact day 30 remains in followup (1.311375ms)
+      at index_test.ail:167:1
+  ✓ renamed artifact and its later edits retain observed identity (1.2955ms)
+      at index_test.ail:181:1
+  ✓ reviewed index times do not turn commit followups into acceptance (812.25µs)
+      at index_test.ail:190:1
+  ✓ v2 reports replay identical inputs byte for byte (5.909458ms)
+      at ledger_report_test.ail:17:1
+  ✓ declared compiler identity changes report identity (6.530625ms)
+      at ledger_report_test.ail:29:1
+  ✓ input byte identity is bound even with same semantic counts (6.307917ms)
+      at ledger_report_test.ail:41:1
+  ✓ missing runtime identity is not silently invented (4.213625ms)
+      at ledger_report_test.ail:45:1
+  ✓ malformed cards cannot become an empty success (342.459µs)
+      at ledger_report_test.ail:52:1
+  ✓ new reports identify actual package and metric series (3.111458ms)
+      at ledger_report_test.ail:66:1
+  ✓ rename preserves one artifact and two touches (752.209µs)
+      at lineage_test.ail:9:1
+  ✓ input order does not change accepted chronology (696.875µs)
+      at lineage_test.ail:10:1
+  ✓ path reuse after deletion creates a new artifact (444.791µs)
+      at lineage_test.ail:11:1
+  ✓ copy creates separate artifact (395.708µs)
+      at lineage_test.ail:12:1
+  ✓ simultaneous rename swap uses pre-episode aliases (464.458µs)
+      at lineage_test.ail:13:1
+  ✓ touch categories partition total touches (365.375µs)
+      at lineage_test.ail:14:1
+  ✓ zero denominator is unavailable (309.625µs)
+      at metrics_test.ail:9:1
+  ✓ rate is a fraction (230.917µs)
+      at metrics_test.ail:10:1
+  ✓ even median averages central pair (413.042µs)
+      at metrics_test.ail:11:1
+  ✓ empty median is unavailable (452.584µs)
+      at metrics_test.ail:12:1
+  ✓ failed attempt cost remains in total (302.25µs)
+      at metrics_test.ail:13:1
+  ✓ unknown costs do not become zero (228.584µs)
+      at metrics_test.ail:14:1
+  ✓ zero successes never zero cost (200.875µs)
+      at metrics_test.ail:15:1
+  ✓ count aggregation refuses overflow (224.458µs)
+      at metrics_test.ail:16:1
+  ✓ confirmed escaped repair links original without counting files as defects (873µs)
+      at metrics_test.ail:17:1
+  ✓ compiler interception is separate from escaped defect (825.958µs)
+      at metrics_test.ail:18:1
+  ✓ inferred repair is not confirmed incidence (777.291µs)
+      at metrics_test.ail:19:1
+  ✓ hand calculated expectations pass (6.654541ms)
+      at report_test.ail:17:1
+  ✓ identical inputs have identical report bytes (9.348875ms)
+      at report_test.ail:27:1
+  ✓ annotation revision changes identity (9.16325ms)
+      at report_test.ail:34:1
+  ✓ dropped row count cannot pass oracle (6.068917ms)
+      at report_test.ail:41:1
+  ✓ weakened repair classification cannot pass oracle (6.526958ms)
+      at report_test.ail:51:1
+  ✓ comparison direction is part of report identity (12.259958ms)
+      at report_test.ail:61:1
+  ✓ duplicate expectation group cannot replace a missing project (6.210958ms)
+      at report_test.ail:71:1
+  ✓ unsafe invalid source retains previous actual checkpoint without fake artifact (1.290333ms)
+      at run_checkpoint_test.ail:23:1
+  ✓ missing artifact still requires actual attempt (992.541µs)
+      at run_checkpoint_test.ail:27:1
+  ✓ missing artifact still requires matching prior (1.094167ms)
+      at run_checkpoint_test.ail:31:1
+  ✓ missing artifact requires explicit infrastructure classification (713.75µs)
+      at run_checkpoint_test.ail:35:1
+  ✓ missing artifact cannot claim public success (689.5µs)
+      at run_checkpoint_test.ail:39:1
+  ✓ missing artifact cannot claim oracle failure (686.5µs)
+      at run_checkpoint_test.ail:43:1
+  ✓ missing artifact cannot carry oracle artifact evidence (1.158875ms)
+      at run_checkpoint_test.ail:47:1
+  ✓ completed source still requires a candidate artifact (726µs)
+      at run_checkpoint_test.ail:51:1
+  ✓ failed source still requires a candidate artifact (711.417µs)
+      at run_checkpoint_test.ail:55:1
+  ✓ budget-stopped source still requires a candidate artifact (718.083µs)
+      at run_checkpoint_test.ail:59:1
+  ✓ independent matched-cohort economic fixture keeps retry cost (150.6145ms)
+      at run_compare_test.ail:31:1
+  ✓ fresh delta preserves left-minus-right direction and cache accounting (137.681833ms)
+      at run_compare_test.ail:40:1
+  ✓ unreported cost cannot yield a cost-per-success saving (147.854208ms)
+      at run_compare_test.ail:55:1
+  ✓ missing observed model identity blocks economic attribution (141.349458ms)
+      at run_compare_test.ail:70:1
+  ✓ zero successful trajectories keep failed work charged but no ratio (141.8635ms)
+      at run_compare_test.ail:86:1
+  ✓ missing independent outcome blocks comparisons (153.529875ms)
+      at run_compare_test.ail:101:1
+  ✓ an observed attempt without a leaf receipt is incomplete (147.585542ms)
+      at run_compare_test.ail:118:1
+  ✓ unreferenced normal leaf spend is rejected (100.715417ms)
+      at run_compare_test.ail:136:1
+  ✓ receipt model drift is rejected rather than averaged (108.991042ms)
+      at run_compare_test.ail:151:1
+  ✓ unmatched work remains charged outside matched-cohort economics (137.123292ms)
+      at run_compare_test.ail:166:1
+  ✓ unallocated preparation overhead stays visible and globally charged (141.266583ms)
+      at run_compare_test.ail:184:1
+  ✓ matching labels cannot hide different stage requirements (115.344792ms)
+      at run_compare_test.ail:199:1
+  ✓ different provider treatments cannot produce a language delta (136.7495ms)
+      at run_compare_test.ail:215:1
+  ✓ unknown cache split blocks token delta while attested billed cost stays separate (135.036917ms)
+      at run_compare_test.ail:230:1
+  ✓ invalid continuation cannot become a known model failure (140.736375ms)
+      at run_compare_test.ail:245:1
+  ✓ equal aggregate provider sets do not hide per-pair provider drift (135.663125ms)
+      at run_compare_test.ail:261:1
+  ✓ missing generated tokens block total token KPI but preserve input diagnostic (129.850167ms)
+      at run_compare_test.ail:273:1
+  ✓ exact edit aggregation boundary remains lossless (103.72975ms)
+      at run_compare_test.ail:288:1
+  ✓ one edit above exact boundary is refused (90.442084ms)
+      at run_compare_test.ail:292:1
+  ✓ all 24 scripted stages remain accounted (38.507292ms)
+      at run_test.ail:15:1
+  ✓ missing oracle artifact evidence is rejected (19.512625ms)
+      at run_test.ail:28:1
+  ✓ wrong owned checkpoint is rejected (17.715709ms)
+      at run_test.ail:45:1
+  ✓ model identity drift is rejected (22.484333ms)
+      at run_test.ail:56:1
+  ✓ duplicate attempt identity is rejected (23.907667ms)
+      at run_test.ail:67:1
+  ✓ changed plan identities cannot reuse another ledger (23.834125ms)
+      at run_test.ail:78:1
+  ✓ unknown schema cannot load (1.347875ms)
+      at usage_codec_test.ail:20:1
+  ✓ duplicate object keys cannot change accounting (1.023458ms)
+      at usage_codec_test.ail:28:1
+  ✓ fractional raw count cannot round into integer (1.104917ms)
+      at usage_codec_test.ail:36:1
+  ✓ exponent counts are refused (1.153459ms)
+      at usage_codec_test.ail:44:1
+  ✓ missing optional field cannot become unknown silently (1.2655ms)
+      at usage_codec_test.ail:52:1
+  ✓ negative count refused (718.75µs)
+      at usage_codec_test.ail:60:1
+  ✓ unknown counter contract refused (1.615625ms)
+      at usage_codec_test.ail:68:1
+  ✓ invalid cost amount lexical form is refused (1.020791ms)
+      at usage_codec_test.ail:76:1
+  ✓ strict usage receipt preserves original counters and knownness (1.153125ms)
+      at usage_codec_test.ail:87:1
+  ✓ unsupported money precision remains explicit input (1.755292ms)
+      at usage_codec_test.ail:98:1
+  ✓ empty valid receipt frame stays empty (443.666µs)
+      at usage_codec_test.ail:109:1
+  ✓ duplicate receipt id is rejected (1.979625ms)
+      at usage_codec_test.ail:117:1
+  ✓ inclusive counters reconcile independent arithmetic (1.103416ms)
+      at usage_test.ail:18:1
+  ✓ exclusive and inclusive counters agree (2.009459ms)
+      at usage_test.ail:31:1
+  ✓ reasoning included in generated is not charged twice (1.165666ms)
+      at usage_test.ail:43:1
+  ✓ unreported zero reasoning stays unknown (1.44525ms)
+      at usage_test.ail:55:1
+  ✓ known combined output survives unknown split (1.026875ms)
+      at usage_test.ail:67:1
+  ✓ impossible cache split is rejected (1.317834ms)
+      at usage_test.ail:79:1
+  ✓ cache reporting requires both buckets (1.260625ms)
+      at usage_test.ail:91:1
+  ✓ reasoning cannot exceed combined generated (1.344084ms)
+      at usage_test.ail:103:1
+  ✓ legacy totals never acquire a fresh split (1.027792ms)
+      at usage_test.ail:115:1
+  ✓ USD money is exact without rounding (1.402708ms)
+      at usage_test.ail:123:1
+  ✓ unsupported precision is unavailable (913.542µs)
+      at usage_test.ail:134:1
+  ✓ negative exponent and leading-zero money are refused (1.07975ms)
+      at usage_test.ail:145:1
+  ✓ money exact bound and overflow (1.25225ms)
+      at usage_test.ail:156:1
+  ✓ non USD is retained but not converted (1.589542ms)
+      at usage_test.ail:168:1
+  ✓ leaf replay is idempotent (1.943208ms)
+      at usage_test.ail:179:1
+  ✓ conflicting request duplicate is refused (1.971541ms)
+      at usage_test.ail:191:1
+  ✓ failed attempts retain all their cost (1.969875ms)
+      at usage_test.ail:204:1
+  ✓ summary and children are not charged twice (2.755584ms)
+      at usage_test.ail:217:1
+  ✓ incorrect complete parent sum is refused (1.823042ms)
+      at usage_test.ail:230:1
+  ✓ unknown cross-source overlap prevents additive claim (2.684291ms)
+      at usage_test.ail:244:1
+  ✓ metered and list-price bases remain separate (2.036917ms)
+      at usage_test.ail:257:1
+  ✓ unknown cost is not a zero total (1.859625ms)
+      at usage_test.ail:269:1
+  ✓ preparation overhead remains separately visible (1.514792ms)
+      at usage_test.ail:281:1
+  ✓ empty input has no known expenditure (1.322375ms)
+      at usage_test.ail:292:1
+  ✓ provider-request replay alias cannot hide conflicting import (1.809167ms)
+      at usage_test.ail:306:1
+  ✓ invalid metadata cannot hide behind a duplicate (1.533916ms)
+      at usage_test.ail:319:1
+  ✓ mixed money is not added even into a subtotal (2.089084ms)
+      at usage_test.ail:332:1
+  ✓ unresolved overlap has no misleading known subtotal (2.616125ms)
+      at usage_test.ail:346:1
+  ✓ incomplete parent leaves remain charged but total is unavailable (1.981791ms)
+      at usage_test.ail:359:1
+  ✓ incomplete native flags cannot attest cache zero (1.486ms)
+      at usage_test.ail:371:1
+  ✓ parent counter mismatch cannot hide behind same grand total (1.895417ms)
+      at usage_test.ail:399:1
+
+Properties:
+  ✓ exact bounded count roundtrip (100 cases, 747.834µs)
+      at codec_test.ail:30:1
+  ✓ index partition is invariant to out of sample usage and row order (100 cases, 103.123833ms)
+      at index_test.ail:145:1
+  ✓ rate bounded for count partitions (100 cases, 1.371958ms)
+      at metrics_test.ail:20:1
+  ✓ receipt replay is idempotent across bounded counters (100 cases, 79.693083ms)
+      at usage_test.ail:386:1
+  ✓ receipt order preserves totals across bounded counters (100 cases, 131.184625ms)
+      at usage_test.ail:414:1
+
+──────────────────────────────────────────────────
+✓ All tests passed!
+
+195 tests: 195 passed, 0 failed, 0 skipped (3.246406415s)
+  ✓ Passed: 195
+  ✗ Failed: 0
+
+Seed:
+  mode: derived
+  master seed: 0
+  derivation: ailang-property-seed-v1
+  replay: ailang test --seed 0 --package .
+
+ailang run --caps IO --entry main _smoke.ail
+OK: independent v1 counts and v2 scoped index verified; offline smoke
+ailang run --caps IO --entry main examples/offline_report.ail > /dev/null
+ailang run --caps IO --entry main examples/build_cohort.ail
+mature=3; censored=0
+ailang run --caps IO --entry main examples/compare_projects.ail
+-25.0 pp; independent arithmetic example
+verified 24 rows in 25 ms; wrote /var/folders/kr/h0wr2sj94vd6ljtmsxv8jkt00000gn/T/tmp.1NFV8VDzIp/example.json
+ailang run --caps IO --entry main examples/scoped_index.ail
+selected=1; workload=3
+ailang run --caps IO --entry main examples/usage_accounting.ail
+instrument-control: fresh=Some(50) accounted=Some(160) fresh+generated=Some(60)
+leaf receipts=1 duplicate imports=1 USD micros=Some(10001)
+ailang run --caps IO,FS --entry main examples/maintenance_trajectory.ail > /dev/null
+ailang run --caps IO,FS --entry main examples/roadmap_card.ail > /dev/null
+ailang lock --check
+✓ ailang.lock is current
+ailang check --package .
+→ Checking package sunholo/maintenance_bench (35 exported modules)...
+
+  ✓ _smoke.ail
+  ✓ benchmark.ail
+  ✓ benchmark_test.ail
+  ✓ cli.ail
+  ✓ codec.ail
+  ✓ codec_test.ail
+  ✓ cohort.ail
+  ✓ cohort_test.ail
+  ✓ collect_cli.ail
+  ✓ collect_git.ail
+  ✓ collect_git_test.ail
+  ✓ collect_github.ail
+  ✓ collect_github_test.ail
+  ✓ compare.ail
+  ✓ compare_test.ail
+  ✓ evidence_card.ail
+  ✓ evidence_card_test.ail
+  ✓ examples/build_cohort.ail
+  ✓ examples/compare_projects.ail
+  ✓ examples/git_snapshot.ail
+  ✓ examples/github_snapshot.ail
+  ✓ examples/maintenance_trajectory.ail
+  ✓ examples/offline_report.ail
+  ✓ examples/roadmap_card.ail
+  ✓ examples/scale_bench.ail
+  ✓ examples/scoped_index.ail
+  ✓ examples/usage_accounting.ail
+  ✓ index_codec.ail
+  ✓ index_reference.ail
+  ✓ index_test.ail
+  ✓ index_types.ail
+  ✓ ledger_cli.ail
+  ✓ ledger_report.ail
+  ✓ ledger_report_test.ail
+  ✓ lineage.ail
+  ✓ lineage_test.ail
+  ✓ metrics.ail
+  ✓ metrics_test.ail
+  ✓ observation.ail
+  ✓ process_read.ail
+  ✓ reference.ail
+  ✓ report.ail
+  ✓ report_json.ail
+  ✓ report_test.ail
+  ✓ run_checkpoint_test.ail
+  ✓ run_codec.ail
+  ✓ run_compare.ail
+  ✓ run_compare_test.ail
+  ✓ run_metrics.ail
+  ✓ run_test.ail
+  ✓ run_types.ail
+  ✓ run_validate.ail
+  ✓ scoped_metrics.ail
+  ✓ snapshot_io.ail
+  ✓ strict_json.ail
+  ✓ types.ail
+  ✓ usage_aggregate.ail
+  ✓ usage_codec.ail
+  ✓ usage_codec_test.ail
+  ✓ usage_normalize.ail
+  ✓ usage_test.ail
+  ✓ usage_types.ail
+  ✓ verify_snapshot.ail
+
+  ! module "sunholo/maintenance_bench/_smoke" compiled but not listed in [exports].modules
+  ! module "sunholo/maintenance_bench/examples/roadmap_card" compiled but not listed in [exports].modules
+  ! module "sunholo/maintenance_bench/examples/scale_bench" compiled but not listed in [exports].modules
+  ! module "sunholo/maintenance_bench/cohort_test" compiled but not listed in [exports].modules
+  ! module "sunholo/maintenance_bench/examples/compare_projects" compiled but not listed in [exports].modules
+  ! module "sunholo/maintenance_bench/examples/scoped_index" compiled but not listed in [exports].modules
+  ! module "sunholo/maintenance_bench/lineage_test" compiled but not listed in [exports].modules
+  ! module "sunholo/maintenance_bench/collect_github_test" compiled but not listed in [exports].modules
+  ! module "sunholo/maintenance_bench/compare_test" compiled but not listed in [exports].modules
+  ! module "sunholo/maintenance_bench/examples/offline_report" compiled but not listed in [exports].modules
+  ! module "sunholo/maintenance_bench/run_test" compiled but not listed in [exports].modules
+  ! module "sunholo/maintenance_bench/examples/git_snapshot" compiled but not listed in [exports].modules
+  ! module "sunholo/maintenance_bench/usage_codec_test" compiled but not listed in [exports].modules
+  ! module "sunholo/maintenance_bench/codec_test" compiled but not listed in [exports].modules
+  ! module "sunholo/maintenance_bench/evidence_card_test" compiled but not listed in [exports].modules
+  ! module "sunholo/maintenance_bench/examples/build_cohort" compiled but not listed in [exports].modules
+  ! module "sunholo/maintenance_bench/examples/maintenance_trajectory" compiled but not listed in [exports].modules
+  ! module "sunholo/maintenance_bench/ledger_report_test" compiled but not listed in [exports].modules
+  ! module "sunholo/maintenance_bench/run_checkpoint_test" compiled but not listed in [exports].modules
+  ! module "sunholo/maintenance_bench/usage_test" compiled but not listed in [exports].modules
+  ! module "sunholo/maintenance_bench/benchmark_test" compiled but not listed in [exports].modules
+  ! module "sunholo/maintenance_bench/collect_git_test" compiled but not listed in [exports].modules
+  ! module "sunholo/maintenance_bench/index_test" compiled but not listed in [exports].modules
+  ! module "sunholo/maintenance_bench/examples/usage_accounting" compiled but not listed in [exports].modules
+  ! module "sunholo/maintenance_bench/report_test" compiled but not listed in [exports].modules
+  ! module "sunholo/maintenance_bench/run_compare_test" compiled but not listed in [exports].modules
+  ! module "sunholo/maintenance_bench/examples/github_snapshot" compiled but not listed in [exports].modules
+  ! module "sunholo/maintenance_bench/metrics_test" compiled but not listed in [exports].modules
+
+✓ 63 files checked, all passed!
+ailang run --caps IO,FS,Env --entry main cli.ail verify-snapshot assets/fixtures/analytical.snapshot.json assets/fixtures/analytical.annotations.json assets/fixtures/analytical.manifest.json assets/fixtures/analytical.expected.json
+independent expectations verified
+AILANG_BIN=ailang sh tests/integration.sh
+✓ Lock: /private/tmp/ailang-maintenance-adapter-plan/packages/maintenance-bench/ailang.lock (existing, 0 packages)
+✓ bin: maintenance-bench → /var/folders/kr/h0wr2sj94vd6ljtmsxv8jkt00000gn/T/tmp.XguTrd251I/bin/maintenance-bench  (sunholo/maintenance_bench@0.2.0, module cli, entry main, caps IO,FS,Env)
+✓ bin: maintenance-collect → /var/folders/kr/h0wr2sj94vd6ljtmsxv8jkt00000gn/T/tmp.XguTrd251I/bin/maintenance-collect  (sunholo/maintenance_bench@0.2.0, module collect_cli, entry main, caps IO,FS,Env,Process)
+✓ bin: maintenance-ledger → /var/folders/kr/h0wr2sj94vd6ljtmsxv8jkt00000gn/T/tmp.XguTrd251I/bin/maintenance-ledger  (sunholo/maintenance_bench@0.2.0, module ledger_cli, entry main, caps IO,FS,Env)
+✓ bin: maintenance-scale → /var/folders/kr/h0wr2sj94vd6ljtmsxv8jkt00000gn/T/tmp.XguTrd251I/bin/maintenance-scale  (sunholo/maintenance_bench@0.2.0, module benchmark, entry main, caps IO,FS,Env,Clock)
+⚠ /var/folders/kr/h0wr2sj94vd6ljtmsxv8jkt00000gn/T/tmp.XguTrd251I/bin is not on your PATH. Add:  export PATH="/var/folders/kr/h0wr2sj94vd6ljtmsxv8jkt00000gn/T/tmp.XguTrd251I/bin:$PATH"
+independent expectations verified
+wrote /var/folders/kr/h0wr2sj94vd6ljtmsxv8jkt00000gn/T/tmp.XguTrd251I/first.json
+wrote /var/folders/kr/h0wr2sj94vd6ljtmsxv8jkt00000gn/T/tmp.XguTrd251I/second.json
+refusing to overwrite evidence: /var/folders/kr/h0wr2sj94vd6ljtmsxv8jkt00000gn/T/tmp.XguTrd251I/first.json
+wrote /var/folders/kr/h0wr2sj94vd6ljtmsxv8jkt00000gn/T/tmp.XguTrd251I/ledger.json
+wrote /var/folders/kr/h0wr2sj94vd6ljtmsxv8jkt00000gn/T/tmp.XguTrd251I/cards.json
+wrote /var/folders/kr/h0wr2sj94vd6ljtmsxv8jkt00000gn/T/tmp.XguTrd251I/gh.json; complete=true
+valid snapshot, annotations and cohort
+wrote /var/folders/kr/h0wr2sj94vd6ljtmsxv8jkt00000gn/T/tmp.XguTrd251I/capped.json; complete=false
+incomplete acquisition cannot support the requested cohort
+repos/acme/demo/pulls?state=closed&sort=created&direction=desc&per_page=2&page=1: command exit 22: mock API rate/auth failure
+
+wrote /var/folders/kr/h0wr2sj94vd6ljtmsxv8jkt00000gn/T/tmp.XguTrd251I/git.json; complete=true
+Git commit time is not acceptance: provide reviewed acceptedMs for every row before cohort analysis
+OK: installed CLI, offline replay, immutable outputs, gh failure/caps/reviews, real Git rename and acceptance-time controls
+AILANG_BIN=ailang sh tests/ledger_integration.sh
+valid trajectory, usage and evidence associations
+wrote /var/folders/kr/h0wr2sj94vd6ljtmsxv8jkt00000gn/T/tmp.neNsYshgRV/runs.json
+wrote /var/folders/kr/h0wr2sj94vd6ljtmsxv8jkt00000gn/T/tmp.neNsYshgRV/replay.json
+wrote /var/folders/kr/h0wr2sj94vd6ljtmsxv8jkt00000gn/T/tmp.neNsYshgRV/economic.json
+wrote /var/folders/kr/h0wr2sj94vd6ljtmsxv8jkt00000gn/T/tmp.neNsYshgRV/index.json
+wrote /var/folders/kr/h0wr2sj94vd6ljtmsxv8jkt00000gn/T/tmp.neNsYshgRV/cards.md
+PASS: independent staged counts, replay bytes, exact economics, scoped index and roadmap cards
+PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s ../../research/real-world-maintenance/taskpacks/v1 -p candidate_grade_test.py -v
+test_actual_mutation_is_semantic_failure (candidate_grade_test.CandidateBridge.test_actual_mutation_is_semantic_failure) ... ok
+test_all_native_reference_stages (candidate_grade_test.CandidateBridge.test_all_native_reference_stages) ... ok
+test_canonical_matches_go_html_unicode_escaping (candidate_grade_test.CandidateBridge.test_canonical_matches_go_html_unicode_escaping) ... ok
+test_changed_source_identity_is_invalid_setup (candidate_grade_test.CandidateBridge.test_changed_source_identity_is_invalid_setup) ... ok
+test_cli_evidence_is_create_only (candidate_grade_test.CandidateBridge.test_cli_evidence_is_create_only) ... ok
+test_duplicate_output_keys_are_artifact_failure (candidate_grade_test.CandidateBridge.test_duplicate_output_keys_are_artifact_failure) ... ok
+test_missing_entry_is_artifact_failure (candidate_grade_test.CandidateBridge.test_missing_entry_is_artifact_failure) ... ok
+test_missing_runtime_is_invalid_setup (candidate_grade_test.CandidateBridge.test_missing_runtime_is_invalid_setup) ... ok
+test_missing_trusted_fixture_is_invalid_setup (candidate_grade_test.CandidateBridge.test_missing_trusted_fixture_is_invalid_setup) ... ok
+test_mutated_runtime_input_is_invalid_setup (candidate_grade_test.CandidateBridge.test_mutated_runtime_input_is_invalid_setup) ... ok
+test_native_reference_is_not_replaced (candidate_grade_test.CandidateBridge.test_native_reference_is_not_replaced) ... ok
+test_prefix_forwarding_requires_double_dash (candidate_grade_test.CandidateBridge.test_prefix_forwarding_requires_double_dash) ... ok
+test_protected_mode_requires_wrapper_and_qualification (candidate_grade_test.CandidateBridge.test_protected_mode_requires_wrapper_and_qualification) ... ok
+test_resource_stage_retains_all_current_obligations (candidate_grade_test.CandidateBridge.test_resource_stage_retains_all_current_obligations) ... ok
+test_skipped_assertions_are_invalid_setup (candidate_grade_test.CandidateBridge.test_skipped_assertions_are_invalid_setup) ... ok
+test_source_changes_during_grade_are_not_accepted (candidate_grade_test.CandidateBridge.test_source_changes_during_grade_are_not_accepted) ... ok
+test_source_digest_includes_executable_bit (candidate_grade_test.CandidateBridge.test_source_digest_includes_executable_bit) ... ok
+test_symlink_candidate_is_rejected (candidate_grade_test.CandidateBridge.test_symlink_candidate_is_rejected) ... ok
+test_syntax_failure_is_not_semantic_mutant (candidate_grade_test.CandidateBridge.test_syntax_failure_is_not_semantic_mutant) ... ok
+test_timeout_is_artifact_failure_not_semantic_failure (candidate_grade_test.CandidateBridge.test_timeout_is_artifact_failure_not_semantic_failure) ... ok
+test_trusted_oracle_overwrite_is_invalid_setup (candidate_grade_test.CandidateBridge.test_trusted_oracle_overwrite_is_invalid_setup) ... ok
+test_typed_malformed_output_is_artifact_failure (candidate_grade_test.CandidateBridge.test_typed_malformed_output_is_artifact_failure) ... ok
+test_weakened_oracle_is_invalid_setup (candidate_grade_test.CandidateBridge.test_weakened_oracle_is_invalid_setup) ... ok
+test_wrapper_initialization_failure_is_invalid_setup (candidate_grade_test.CandidateBridge.test_wrapper_initialization_failure_is_invalid_setup) ... ok
+
+----------------------------------------------------------------------
+Ran 24 tests in 5.268s
+
+OK
+AILANG_BIN=ailang sh ../../research/real-world-maintenance/taskpacks/v1/qualify.sh
+......
+----------------------------------------------------------------------
+Ran 6 tests in 4.939s
+
+OK
+......
+----------------------------------------------------------------------
+Ran 6 tests in 0.000s
+
+OK
+PASS: both native real-requirement families qualified; exposed development controls, no model campaign
+AILANG_BIN=ailang sh ../../examples/maintenance-ledger-source/check.sh
+✓ ailang.lock is current
+wrote /var/folders/kr/h0wr2sj94vd6ljtmsxv8jkt00000gn/T/tmp.tgMxw0CT7v/report.json
+PASS: source-path native consumer: 8/24 control; -22500 micros, -550 input, -540 input+generated
