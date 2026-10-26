@@ -1,0 +1,144 @@
+-- sunholo/explainer/align — where each line of a script was said in a take.
+--
+-- The script's words and the words speech-to-text heard (each with its time) are aligned with
+-- the matching blocks of Python's difflib.SequenceMatcher(a=script, b=heard, autojunk=False),
+-- re-implemented: the longest run of equal words, earliest in the script then in the
+-- transcript, then the same on each side of it. A line's span runs from its first matched
+-- word's start to its last matched word's end. Words neither side matched (a homophone, a word
+-- spelt differently) are simply not in any span.
+
+module sunholo/explainer/align
+
+import std/array as A
+import std/list (length, reverse, map)
+import std/map as M
+import std/option (Option, Some, None)
+import ./words (normalise)
+
+-- One word as heard: when it started and ended, in seconds, and what it was.
+export type Heard = { start: float, end: float, word: string } deriving (Eq)
+
+-- Where one line was said: its first matched word's start, its last matched word's end.
+export type Span = { first: float, last: float } deriving (Eq)
+
+-- One matching block: script position, transcript position, length in words.
+export type Block = { a: int, b: int, size: int } deriving (Eq)
+
+-- The block a search returns when it finds a longer run ending at (i, j): it starts k words back.
+export pure func runAt(i: int, j: int, k: int) -> Block
+  requires { k >= 1 && i >= k - 1 && j >= k - 1 }
+  ensures { result.size == k && result.a + k - 1 == i && result.b + k - 1 == j && result.a >= 0 && result.b >= 0 }
+{
+  { a: i - k + 1, b: j - k + 1, size: k }
+}
+
+-- Positions of each word in the transcript, ascending.
+pure func positionsFrom(b: Array[string], j: int, acc: Map[string, [int]]) -> Map[string, [int]] =
+  if j < 0 then acc
+  else {
+    let w = A.get(b, j);
+    let before = match M.lookup(acc, w) { Some(js) => js, None => [] };
+    positionsFrom(b, j - 1, M.insert(acc, w, j :: before))
+  }
+
+pure func runBefore(j2len: Map[int, int], j: int) -> int =
+  match M.lookup(j2len, j - 1) { Some(k) => k, None => 0 }
+
+-- One script word against its positions in [blo, bhi): run lengths ending there, and the best.
+pure func scanRow(js: [int], i: int, blo: int, bhi: int, j2len: Map[int, int], next: Map[int, int], best: Block) -> (Map[int, int], Block) =
+  match js {
+    [] => (next, best),
+    j :: rest =>
+      if j < blo then scanRow(rest, i, blo, bhi, j2len, next, best)
+      else if j >= bhi then (next, best)
+      else {
+        let k = runBefore(j2len, j) + 1;
+        let better = if k > best.size then runAt(i, j, k) else best;
+        scanRow(rest, i, blo, bhi, j2len, M.insert(next, j, k), better)
+      }
+  }
+
+pure func scanRows(a: Array[string], at: Map[string, [int]], i: int, ahi: int, blo: int, bhi: int, j2len: Map[int, int], best: Block) -> Block =
+  if i >= ahi then best
+  else {
+    let js = match M.lookup(at, A.get(a, i)) { Some(js) => js, None => [] };
+    match scanRow(js, i, blo, bhi, j2len, M.empty(), best) {
+      (next, better) => scanRows(a, at, i + 1, ahi, blo, bhi, next, better)
+    }
+  }
+
+-- difflib's find_longest_match with no junk: the longest equal run in a[alo:ahi], b[blo:bhi];
+-- of equal lengths, the one starting earliest in a, then in b. Size 0 when there is none.
+export pure func longestMatch(a: Array[string], at: Map[string, [int]], alo: int, ahi: int, blo: int, bhi: int) -> Block =
+  scanRows(a, at, alo, ahi, blo, bhi, M.empty(), { a: alo, b: blo, size: 0 })
+
+pure func blocksIn(a: Array[string], at: Map[string, [int]], alo: int, ahi: int, blo: int, bhi: int) -> [Block] {
+  let m = longestMatch(a, at, alo, ahi, blo, bhi);
+  if m.size == 0 then []
+  else {
+    let left = if alo < m.a && blo < m.b then blocksIn(a, at, alo, m.a, blo, m.b) else [];
+    let right = if m.a + m.size < ahi && m.b + m.size < bhi then blocksIn(a, at, m.a + m.size, ahi, m.b + m.size, bhi) else [];
+    left ++ [m] ++ right
+  }
+}
+
+-- difflib's get_matching_blocks (without the zero-size sentinel, and adjacent blocks not merged).
+export pure func matchingBlocks(a: [string], b: [string]) -> [Block] {
+  let bs = A.fromList(b);
+  blocksIn(A.fromList(a), positionsFrom(bs, A.length(bs) - 1, M.empty()), 0, length(a), 0, A.length(bs))
+}
+
+pure func fmin(x: float, y: float) -> float = if y < x then y else x
+pure func fmax(x: float, y: float) -> float = if y > x then y else x
+
+pure func tagLine(ws: [string], k: int, acc: [(string, int)]) -> [(string, int)] =
+  match ws { [] => acc, w :: rest => tagLine(rest, k, (w, k) :: acc) }
+
+-- Script words with the line each belongs to.
+pure func scriptWords(lines: [string], k: int, acc: [(string, int)]) -> [(string, int)] =
+  match lines {
+    [] => reverse(acc),
+    line :: rest => scriptWords(rest, k + 1, tagLine(normalise(line), k, acc))
+  }
+
+pure func timePieces(ws: [string], h: Heard, acc: [Heard]) -> [Heard] =
+  match ws { [] => acc, w :: rest => timePieces(rest, h, { start: h.start, end: h.end, word: w } :: acc) }
+
+-- Heard words split as the script's are; every piece keeps its word's times.
+pure func heardWords(heard: [Heard], acc: [Heard]) -> [Heard] =
+  match heard {
+    [] => reverse(acc),
+    h :: rest => heardWords(rest, timePieces(normalise(h.word), h, acc))
+  }
+
+pure func widen(spans: Map[int, Span], k: int, h: Heard) -> Map[int, Span] =
+  match M.lookup(spans, k) {
+    Some(s) => M.insert(spans, k, { first: fmin(s.first, h.start), last: fmax(s.last, h.end) }),
+    None => M.insert(spans, k, { first: h.start, last: h.end })
+  }
+
+pure func blockSpans(lineOf: Array[int], heard: Array[Heard], m: Block, n: int, spans: Map[int, Span]) -> Map[int, Span] =
+  if n >= m.size then spans
+  else blockSpans(lineOf, heard, m, n + 1, widen(spans, A.get(lineOf, m.a + n), A.get(heard, m.b + n)))
+
+pure func collect(lineOf: Array[int], heard: Array[Heard], ms: [Block], spans: Map[int, Span]) -> Map[int, Span] =
+  match ms {
+    [] => spans,
+    m :: rest => collect(lineOf, heard, rest, blockSpans(lineOf, heard, m, 0, spans))
+  }
+
+pure func inOrder(spans: Map[int, Span], k: int, n: int, acc: [Span]) -> Option[[Span]] =
+  if k < 0 then Some(acc)
+  else match M.lookup(spans, k) {
+    Some(s) => inOrder(spans, k - 1, n, s :: acc),
+    None => None
+  }
+
+-- Each line's span, in script order; None if some line has no word that was heard.
+export pure func lineSpans(lines: [string], heard: [Heard]) -> Option[[Span]] {
+  let script = scriptWords(lines, 0, []);
+  let said = heardWords(heard, []);
+  let ms = matchingBlocks(map(\p. match p { (w, _) => w }, script), map(\h. h.word, said));
+  let spans = collect(A.fromList(map(\p. match p { (_, k) => k }, script)), A.fromList(said), ms, M.empty());
+  inOrder(spans, length(lines) - 1, length(lines), [])
+}

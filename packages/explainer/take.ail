@@ -1,0 +1,55 @@
+-- sunholo/explainer/take — what one take of a film's narration is: its text, its voice id and
+-- the file it is kept in.
+--
+-- A film is voiced in ONE call: Gemini picks a slightly different voice on every call, so a call
+-- per line drifts (measured on world_intro: line-to-line pitch spread 52 Hz per line, 22-39 Hz
+-- in one take). The voice id carries a hash of the style and of the script, so any edit to
+-- either is a new take, and a clip cache keyed by the id never mixes takes.
+
+module sunholo/explainer/take
+
+import std/crypto (sha256Hex)
+import std/list (reverse)
+import std/string (join, substring, startsWith)
+
+pure func seen(xs: [string], x: string) -> bool =
+  match xs { [] => false, y :: rest => y == x || seen(rest, x) }
+
+pure func keepFirst(xs: [string], kept: [string]) -> [string] =
+  match xs {
+    [] => reverse(kept),
+    x :: rest => if seen(kept, x) then keepFirst(rest, kept) else keepFirst(rest, x :: kept)
+  }
+
+-- Each line once, in the order first spoken: a repeated line is one clip, as in the kit.
+export pure func uniqueLines(lines: [string]) -> [string]
+  tests [(["a", "b", "a", "c", "b"], ["a", "b", "c"]), ([], [])] {
+  keepFirst(lines, [])
+}
+
+-- The text sent to the model: the lines as paragraphs, so the model pauses between them.
+export pure func takeText(lines: [string]) -> string
+  tests [(["One.", "Two."], "One.\n\nTwo."), (["Only."], "Only.")] {
+  join("\n\n", lines)
+}
+
+-- The style for a whole take: the line style, plus a clear pause at each paragraph, which is
+-- where the take is cut.
+export pure func takeStyle(style: string) -> string
+  ensures { startsWith(result, style) }
+{
+  "${style}. Leave a clear pause between paragraphs"
+}
+
+-- The first n hex digits of a sha256: a short name, not a security property.
+export pure func shortHash(text: string, n: int) -> string = substring(sha256Hex(text), 0, n)
+
+-- The voice id: who speaks, how, and which script; it keys the clip cache.
+export pure func voiceId(voice: string, language: string, model: string, style: string, lines: [string]) -> string {
+  "gemini:${voice}:${language}:${model}:${shortHash(style, 8)}:film-${shortHash(join("\n", lines), 8)}"
+}
+
+-- The file a take is kept in, beside the clips, so cutting again costs no call.
+export pure func takeFile(id: string) -> string {
+  "take-${shortHash(id, 16)}.pcm"
+}

@@ -1,0 +1,53 @@
+-- Tests for sunholo/explainer/cut on a made-up take: 0.4 s of sound, 0.2 s of silence, 0.6 s
+-- of sound, at 24 kHz. Frames 41-59 are wholly silent (frame k spans samples 240k +- 120),
+-- so the cut is at the middle of that run, frame 60 - 19 / 2 = 51, sample 12240.
+
+module sunholo/explainer/cut_test
+
+import std/array as A
+import std/list (map)
+import std/option (Some, None)
+import ./align (Span)
+import ./cut (bounds, frameLevels, cutFrame, middle, longer, extend, Run)
+
+pure func silenceFrom(i: int, end: int, acc: [(int, float)]) -> [(int, float)] =
+  if i >= end then acc else silenceFrom(i + 1, end, (i, 0.0) :: acc)
+
+pure func take() -> Array[float] = A.updateMany(A.make(28800, 0.5), silenceFrom(9600, 14400, []))
+
+test "frames: ceil(samples / 240)" {
+  A.length(frameLevels(take())) == 120
+}
+
+test "frames: silent inside the gap, sounding either side" {
+  let lv = frameLevels(take());
+  A.get(lv, 41) == 0.0 && A.get(lv, 59) == 0.0 && A.get(lv, 40) > 0.0 && A.get(lv, 60) > 0.0 && A.get(lv, 0) > 0.0
+}
+
+test "bounds: the cut is in the middle of the pause" {
+  bounds(take(), [{ first: 0.0, last: 0.4 }, { first: 0.6, last: 1.2 }]) == Some([0, 12240, 28800])
+}
+
+test "bounds: one line is the whole take" {
+  bounds(take(), [{ first: 0.0, last: 1.2 }]) == Some([0, 28800])
+}
+
+test "bounds: a window that starts before the line before it is None" {
+  bounds(take(), [{ first: 0.0, last: 0.1 }, { first: 0.12, last: 1.2 }]) == None
+}
+
+test "bounds: an empty take is None" {
+  bounds(A.make(0, 0.0), [{ first: 0.0, last: 1.0 }]) == None
+}
+
+test "cutFrame: no quiet frame, so the quietest" {
+  cutFrame(A.updateMany(A.make(10, 1.0), [(6, 0.5), (8, 0.5)]), 0.01, 2, 9) == 6
+}
+
+test "longer: of equal runs the later wins" {
+  longer({ size: 3, end: 10 }, 3, 20) == { size: 3, end: 20 } && longer({ size: 4, end: 10 }, 3, 20) == { size: 4, end: 10 }
+}
+
+test "middle and extend" {
+  middle({ size: 19, end: 60 }) == 51 && middle({ size: 1, end: 5 }) == 5 && extend(4, true) == 5 && extend(4, false) == 0
+}

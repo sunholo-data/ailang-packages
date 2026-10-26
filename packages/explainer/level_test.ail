@@ -1,0 +1,46 @@
+-- Tests for sunholo/explainer/level: the window kept, and clips made from made-up PCM.
+
+module sunholo/explainer/level_test
+
+import std/array as A
+import std/audio (floatsToPcm16, wavInfo, pcm16ToFloats, ClipOutOfRange)
+import std/bytes (fromString)
+import std/option (Option, Some, None)
+import std/result (Ok, Err)
+import ./level (keep, levelClip, speechStart, clipped, Window)
+
+pure func pcm(xs: Array[float]) -> bytes =
+  match floatsToPcm16(xs, 1, ClipOutOfRange) { Ok(b) => b, Err(_) => fromString("") }
+
+
+test "keep: 20 ms before the speech, 50 ms after its last loud sample" {
+  keep(1000, 5000, 10000) == { from: 520, to: 6200 }
+}
+
+test "keep: clipped to the line" {
+  keep(100, 9500, 10000) == { from: 0, to: 10000 }
+}
+
+test "clipped: only past 98%" {
+  clipped(0.99) == Some(0.98) && clipped(-1.5) == Some(-0.98) && clipped(0.5) == None
+}
+
+test "speechStart: a breath below 5% of the loudest is not speech" {
+  let xs = A.updateMany(A.make(4000, 0.0), [(100, 0.01), (2000, 0.9), (2001, 0.9), (2002, 0.9)]);
+  speechStart(xs) > 1900 && speechStart(xs) <= 2002
+}
+
+test "levelClip: silence is None" {
+  match levelClip(pcm(A.make(4800, 0.0)), 0, 4800) { Some(_) => false, None => true }
+}
+
+test "levelClip: a steady line is kept whole, at RMS 0.07" {
+  match levelClip(pcm(A.make(4800, 0.5)), 0, 4800) {
+    Some(wav) => match wavInfo(wav) {
+      Ok(info) => info.rate == 24000 && info.channels == 1 && info.frames == 4800 &&
+        (match pcm16ToFloats(wav, info.dataOffset, 1, 1) { Ok(x) => A.get(x, 0) > 0.0699 && A.get(x, 0) < 0.0701, Err(_) => false }),
+      Err(_) => false
+    },
+    None => false
+  }
+}

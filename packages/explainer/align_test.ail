@@ -1,0 +1,41 @@
+-- Tests for sunholo/explainer/align: blocks are the ones Python's difflib gives
+-- (SequenceMatcher(a, b, autojunk=False).get_matching_blocks(), sentinel dropped), and spans
+-- cover each line's matched words.
+
+module sunholo/explainer/align_test
+
+import std/list (map)
+import std/option (Some, None)
+import ./align (matchingBlocks, lineSpans, Block, Heard, Span)
+
+pure func triples(ms: [Block]) -> [(int, int, int)] = map(\m. (m.a, m.b, m.size), ms)
+
+test "blocks: an insertion on each side" {
+  triples(matchingBlocks(["a", "b", "c", "d"], ["x", "a", "b", "y", "c", "d"])) == [(0, 1, 2), (2, 4, 2)]
+}
+
+test "blocks: the longest run wins, then each side of it" {
+  triples(matchingBlocks(["the", "cat", "the", "dog", "the", "end"], ["the", "dog", "the", "cat", "end", "the"])) == [(2, 0, 3), (5, 4, 1)]
+}
+
+test "blocks: a repeated word" {
+  triples(matchingBlocks(["a", "a", "b"], ["b", "a", "a"])) == [(0, 1, 2)]
+}
+
+test "blocks: nothing in common" {
+  matchingBlocks(["a"], ["b"]) == []
+}
+
+pure func heard() -> [Heard] = [
+  { start: 0.0, end: 0.3, word: " Fair" }, { start: 0.3, end: 0.8, word: " question." },
+  { start: 1.5, end: 1.9, word: " World" }, { start: 1.9, end: 2.2, word: " uses" },
+  { start: 2.2, end: 2.6, word: " work" }, { start: 2.6, end: 3.0, word: " tree." }
+]
+
+test "spans: each line from its first matched word to its last" {
+  lineSpans(["Fair question.", "World uses a worktree."], heard()) == Some([{ first: 0.0, last: 0.8 }, { first: 1.5, last: 2.2 }])
+}
+
+test "spans: a line nobody heard is None" {
+  lineSpans(["Fair question.", "Nothing here."], heard()) == None
+}

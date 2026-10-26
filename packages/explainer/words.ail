@@ -1,0 +1,58 @@
+-- sunholo/explainer/words — the words a script and a transcript are aligned on.
+--
+-- Lower case; split at whitespace and hyphens ("read-only" is two words, as speech-to-text
+-- hears it); everything but a-z and 0-9 dropped from each piece ("it's" is "its"); number
+-- words zero to ten as digits, as Whisper writes them. Empty pieces are not words.
+
+module sunholo/explainer/words
+
+import std/list (reverse)
+import std/string (charCode, foldChars, toLower)
+
+-- A number word as Whisper writes it, or the word unchanged.
+export pure func digits(w: string) -> string
+  tests [("ten", "10"), ("tenth", "10th"), ("zero", "0"), ("eleven", "eleven"), ("", "")] {
+  if w == "zero" then "0" else if w == "one" then "1" else if w == "two" then "2"
+  else if w == "three" then "3" else if w == "four" then "4" else if w == "five" then "5"
+  else if w == "six" then "6" else if w == "seven" then "7" else if w == "eight" then "8"
+  else if w == "nine" then "9" else if w == "ten" then "10" else if w == "tenth" then "10th"
+  else w
+}
+
+-- Whether a character ends a word: whitespace or a hyphen.
+export pure func separates(c: string) -> bool
+  tests [(" ", true), ("-", true), ("\n", true), ("a", false), (".", false)] {
+  c == " " || c == "-" || c == "\n" || c == "\t" || c == "\r" || c == "\u{000C}" || c == "\u{000B}"
+}
+
+-- Whether a character is kept in a word: a-z or 0-9 (after lower-casing).
+export pure func kept(c: string) -> bool
+  tests [("a", true), ("z", true), ("0", true), ("9", true), ("'", false), ("A", false), ("é", false)] {
+  let k = charCode(c) in (k >= 97 && k <= 122) || (k >= 48 && k <= 57)
+}
+
+pure func flush(done: [string], piece: string) -> [string] =
+  if piece == "" then done else digits(piece) :: done
+
+pure func step(st: ([string], string), c: string) -> ([string], string) =
+  match st {
+    (done, piece) =>
+      if separates(c) then (flush(done, piece), "")
+      else if kept(c) then (done, "${piece}${c}")
+      else (done, piece)
+  }
+
+-- The words of a line of script or a word of transcript, in order.
+export pure func normalise(text: string) -> [string]
+  tests [
+    ("AI-lang World gives each agent a worktree.", ["ai", "lang", "world", "gives", "each", "agent", "a", "worktree"]),
+    ("ten tools, no shell, .git read-only", ["10", "tools", "no", "shell", "git", "read", "only"]),
+    (" It's", ["its"]),
+    ("row one eighty-nine", ["row", "1", "eighty", "9"]),
+    ("--", []),
+    ("", [])
+  ] {
+  match foldChars(step, ([], ""), toLower(text)) {
+    (done, piece) => reverse(flush(done, piece))
+  }
+}

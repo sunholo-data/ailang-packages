@@ -1,0 +1,125 @@
+-- sunholo/explainer/level — one line of a take, made into a clip the way the explainer kit
+-- makes its own (explainer_kit/voice.py): trimmed, brought to one RMS level, mono PCM16 WAV.
+--
+-- The clip starts 20 ms before the speech does and ends 50 ms after its last sample above 1%
+-- of full scale. Where the speech starts is found on a 5 ms loudness envelope (a 120-sample
+-- window), not on a single sample: a speech model sometimes breathes before a line, and a
+-- breath kept at the head of a clip puts the words late against the picture. The trimmed clip
+-- is scaled to an RMS of 0.07 (the kit's LEVEL), clipped at 98% of full scale, and quantised
+-- at x * 32767 rounded to nearest (the kit truncates toward zero: at most 1 LSB apart).
+
+module sunholo/explainer/level
+
+import std/array as A
+import std/audio (pcm16ToFloats, floatsToPcm16, wavFromPcm, ClipOutOfRange)
+import std/math (sqrt)
+import std/option (Option, Some, None)
+import std/result (Ok, Err)
+
+-- The RMS every clip is brought to (the kit's voice.LEVEL).
+export pure func target() -> float = 0.07
+
+-- Samples per second of the clips (the kit's voice.RATE).
+export pure func rate() -> int = 24000
+
+-- Samples kept before the speech starts (20 ms) and after its last loud sample (50 ms).
+export pure func lead() -> int = 480
+export pure func tail() -> int = 1200
+
+-- A part of a line, in samples from its start: [from, to).
+export type Window = { from: int, to: int } deriving (Eq)
+
+-- The part of a line of n samples to keep, given where speech starts and its last loud sample.
+export pure func keep(start: int, lastLoud: int, n: int) -> Window
+  requires { start >= 0 && start < n && lastLoud >= 0 && lastLoud < n }
+  ensures { result.from >= 0 && result.to <= n && result.from <= start && result.to > lastLoud }
+{
+  { from: if start > lead() then start - lead() else 0,
+    to: if lastLoud + tail() < n then lastLoud + tail() else n }
+}
+
+pure func lastLoudFrom(xs: Array[float], i: int) -> int =
+  if i < 0 then -1
+  else { let x = A.get(xs, i); if x > 0.01 || x < -0.01 then i else lastLoudFrom(xs, i - 1) }
+
+pure func sq(xs: Array[float], i: int) -> float =
+  if i < 0 || i >= A.length(xs) then 0.0 else { let x = A.get(xs, i); x * x }
+
+-- Energy of the 120-sample window around sample n: samples [n - 60, n + 60).
+pure func windowAt(xs: Array[float], n: int) -> float =
+  windowFrom(xs, n - 60, n + 60, 0.0)
+
+pure func windowFrom(xs: Array[float], i: int, end: int, acc: float) -> float =
+  if i >= end then acc else windowFrom(xs, i + 1, end, acc + sq(xs, i))
+
+-- The loudest window, sliding one sample at a time with a running sum.
+pure func loudestFrom(xs: Array[float], n: int, e: float, best: float) -> float =
+  if n >= A.length(xs) then best
+  else {
+    let next = e + sq(xs, n + 60) - sq(xs, n - 60);
+    loudestFrom(xs, n + 1, next, if e > best then e else best)
+  }
+
+-- The first sample whose window is louder than the threshold.
+pure func startFrom(xs: Array[float], n: int, e: float, over: float) -> int =
+  if n >= A.length(xs) then -1
+  else if sqrt(e / 120.0) > over then n
+  else startFrom(xs, n + 1, e + sq(xs, n + 60) - sq(xs, n - 60), over)
+
+-- Where the speech in a line starts: the first sample whose 5 ms envelope passes 5% of its
+-- loudest. -1 for a silent line.
+export pure func speechStart(xs: Array[float]) -> int =
+  if A.length(xs) == 0 then -1
+  else {
+    let e0 = windowAt(xs, 0);
+    let loudest = loudestFrom(xs, 0, e0, 0.0);
+    startFrom(xs, 0, e0, 0.05 * sqrt(loudest / 120.0))
+  }
+
+-- The sample to write instead of one past the clip level, or None for one within it.
+export pure func clipped(y: float) -> Option[float] =
+  if y > 0.98 then Some(0.98) else if y < -0.98 then Some(-0.98) else None
+
+-- The samples past the clip level and what they become; few or none, since the level is far
+-- below full scale, so they are written in one copy (updateMany) rather than one at a time.
+pure func overFrom(ys: Array[float], i: int, acc: [(int, float)]) -> [(int, float)] =
+  if i < 0 then acc
+  else match clipped(A.get(ys, i)) {
+    Some(c) => overFrom(ys, i - 1, (i, c) :: acc),
+    None => overFrom(ys, i - 1, acc)
+  }
+
+-- Scaled, clipped and quantised with whole-array operations: a per-sample list of a line's
+-- 100k+ samples is quadratic to build in AILANG 0.54 (cons onto an accumulator copies).
+pure func pcmOf(ys: Array[float], gain: float) -> Option[bytes] {
+  let zs = A.scale(gain, ys);
+  match floatsToPcm16(A.scale(32767.0 / 32768.0, A.updateMany(zs, overFrom(zs, A.length(zs) - 1, []))), 1, ClipOutOfRange) {
+    Ok(pcm) => Some(pcm),
+    Err(_) => None
+  }
+}
+
+-- One line of a take (s16le mono at rate()) as a levelled WAV clip: `frames` samples from
+-- sample `from`. None for a line with nothing above 1% of full scale.
+export pure func levelClip(take: bytes, from: int, frames: int) -> Option[bytes] =
+  match pcm16ToFloats(take, from * 2, frames, 1) {
+    Err(_) => None,
+    Ok(xs) => {
+      let lastLoud = lastLoudFrom(xs, A.length(xs) - 1);
+      let start = speechStart(xs);
+      if lastLoud < 0 || start < 0 then None
+      else {
+        let w = keep(start, lastLoud, A.length(xs));
+        match pcm16ToFloats(take, (from + w.from) * 2, w.to - w.from, 1) {
+          Err(_) => None,
+          Ok(ys) => {
+            let gain = target() / sqrt(A.dot(ys, ys) / intToFloat(A.length(ys)));
+            match pcmOf(ys, gain) {
+              Some(pcm) => Some(wavFromPcm(pcm, rate(), 1, 16)),
+              None => None
+            }
+          }
+        }
+      }
+    }
+  }
