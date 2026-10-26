@@ -1,0 +1,152 @@
+module sunholo/audio/automation_test
+import std/array (fromList, toList, encodeF64LE)
+import std/bytes (toInts)
+import std/list (map, range)
+import std/result (Ok, Err)
+import ./clip (Clip, Mono, Stereo, create, fromMono, defaultClipLimits)
+import ./edit (trim)
+import ./block (BlockLimits, defaultBlockLimits)
+import ./automation (GainState, startGain, setGain, processGain)
+import ./safety (InvalidClip, InvalidSamples, ResourceLimit)
+
+pure func fixture(xs: [float]) -> Clip = match fromMono(8000,xs,defaultClipLimits()) {
+  Ok(c) => c, _ => {rate: 0,layout: Mono,frames: -1,planes: []}
+}
+pure func values(c: Clip) -> [[float]] = map(toList,c.planes)
+pure func same(a: GainState, b: GainState) -> bool =
+  a.rate == b.rate && a.layout == b.layout && a.startGain == b.startGain && a.targetGain == b.targetGain
+  && a.rampFrames == b.rampFrames && a.elapsedFrames == b.elapsedFrames && a.processedFrames == b.processedFrames
+pure func partition(c: Clip, expected: Clip, s: GainState, final: GainState, at: int, count: int, l: BlockLimits) -> bool =
+  if at >= c.frames then same(s,final)
+  else {
+    let end = if count > c.frames-at then c.frames else at+count;
+    match (trim(c,at,end,defaultClipLimits()),trim(expected,at,end,defaultClipLimits())) {
+      (Ok(input),Ok(want)) => match processGain(s,input,l) {
+        Ok(out) => values(out.clip) == values(want) && partition(c,expected,out.state,final,end,count,l), _ => false
+      }, _ => false
+    }
+  }
+
+test "linear ramp reaches its exact target on the requested frame then holds" {
+  let l = defaultBlockLimits();
+  match startGain(8000,Mono,0.0,l) {
+    Ok(s) => match setGain(s,1.0,4,l) {
+      Ok(r) => match processGain(r,fixture([1.0,1.0,1.0,1.0,1.0]),l) {
+        Ok(out) => values(out.clip) == [[0.25,0.5,0.75,1.0,1.0]] && out.state.elapsedFrames == 4 && out.state.processedFrames == 5, _ => false
+      }, _ => false
+    }, _ => false
+  }
+}
+test "zero-frame change takes effect on the next input and one-frame ramp is exact" {
+  let l = defaultBlockLimits();
+  match startGain(8000,Mono,1.0,l) {
+    Err(_) => false, Ok(s) => match (setGain(s,0.0,0,l),setGain(s,0.5,1,l)) {
+      (Ok(a),Ok(b)) => (match processGain(a,fixture([1.0,1.0]),l) { Ok(out) => values(out.clip) == [[0.0,0.0]], _ => false })
+        && (match processGain(b,fixture([1.0,1.0]),l) { Ok(out) => values(out.clip) == [[0.5,0.5]], _ => false }), _ => false
+    }
+  }
+}
+test "retargeting starts at the last delivered gain instead of jumping to the old target" {
+  let l = defaultBlockLimits();
+  match startGain(8000,Mono,0.0,l) {
+    Ok(s) => match setGain(s,1.0,4,l) {
+      Ok(r) => match processGain(r,fixture([1.0,1.0]),l) {
+        Ok(a) => match setGain(a.state,0.0,2,l) {
+          Ok(next) => next.startGain == 0.5 && next.processedFrames == 2 && (match processGain(next,fixture([1.0,1.0,1.0]),l) {
+            Ok(out) => values(out.clip) == [[0.25,0.0,0.0]], _ => false
+          }), _ => false
+        }, _ => false
+      }, _ => false
+    }, _ => false
+  }
+}
+test "automation applies one gain per frame across stereo without changing balance or polarity" {
+  let l = defaultBlockLimits();
+  match create(8000,Stereo,[fromList([1.0,1.0,1.0,1.0]),fromList([-0.5,-0.5,-0.5,-0.5])],defaultClipLimits()) {
+    Err(_) => false, Ok(c) => match startGain(8000,Stereo,0.0,l) {
+      Ok(s) => match setGain(s,1.0,4,l) { Ok(r) => match processGain(r,c,l) {
+        Ok(out) => values(out.clip) == [[0.25,0.5,0.75,1.0],[-0.125,-0.25,-0.375,-0.5]] && out.clip.rate == 8000 && out.clip.layout == Stereo, _ => false
+      }, _ => false }, _ => false
+    }
+  }
+}
+test "ramp partitions 1 7 127 128 and whole preserve exact output and state" {
+  let l = defaultBlockLimits();let c = fixture(map(\i. intToFloat(i%11-5)/8.0,range(0,259)));
+  match startGain(8000,Mono,0.25,l) {
+    Ok(s) => match setGain(s,1.75,193,l) { Ok(r) => match processGain(r,c,l) {
+      Ok(out) => partition(c,out.clip,r,out.state,0,1,l) && partition(c,out.clip,r,out.state,0,7,l)
+        && partition(c,out.clip,r,out.state,0,127,l) && partition(c,out.clip,r,out.state,0,128,l), _ => false
+    }, _ => false }, _ => false
+  }
+}
+test "empty input does not move the gain ramp or frame budget" {
+  let l = defaultBlockLimits();
+  match startGain(8000,Mono,0.0,l) {
+    Ok(s) => match setGain(s,1.0,4,l) { Ok(r) => match processGain(r,fixture([]),l) {
+      Ok(out) => same(out.state,r) && out.clip.frames == 0, _ => false
+    }, _ => false }, _ => false
+  }
+}
+test "unity gain preserves sample bytes including negative zero and finite headroom" {
+  let l = defaultBlockLimits();let c = fixture([-0.0,0.0,2.0,-2.0]);
+  match startGain(8000,Mono,1.0,l) {
+    Ok(s) => match processGain(s,c,l) { Ok(out) => match (c.planes,out.clip.planes) {
+      (a::[],b::[]) => toInts(encodeF64LE(a)) == toInts(encodeF64LE(b)), _ => false
+    }, _ => false }, _ => false
+  }
+}
+test "gain automation rejects invalid values, ramp length and forged public position" {
+  let l = defaultBlockLimits();
+  match startGain(8000,Mono,1.0,l) {
+    Err(_) => false, Ok(s) =>
+      (match setGain(s,-0.1,4,l) { Err(InvalidSamples(_)) => true, _ => false })
+      && (match setGain(s,64.1,4,l) { Err(InvalidSamples(_)) => true, _ => false })
+      && (match setGain(s,0.0/0.0,4,l) { Err(InvalidSamples(_)) => true, _ => false })
+      && (match startGain(8000,Mono,1.0/0.0,l) { Err(InvalidSamples(_)) => true, _ => false })
+      && (match setGain(s,0.5,-1,l) { Err(InvalidClip(_)) => true, _ => false })
+      && (match setGain(s,0.5,9223372036854775807,l) { Err(InvalidClip(_)) => true, _ => false })
+      && (match processGain({s | elapsedFrames: 1},fixture([0.0]),l) { Err(InvalidClip(_)) => true, _ => false })
+      && (match setGain({s | processedFrames: -1},0.5,4,l) { Err(InvalidClip(_)) => true, _ => false })
+      && (match processGain({s | rampFrames: 4,elapsedFrames: 3,processedFrames: 2},fixture([]),l) { Err(InvalidClip(_)) => true, _ => false })
+  }
+}
+test "automation enforces cumulative and per-channel block sample budgets" {
+  let l = {maxFrames: 2,maxSamples: 2,maxTotalFrames: 3};
+  match startGain(8000,Mono,1.0,l) {
+    Err(_) => false, Ok(s) => match processGain(s,fixture([0.1,0.2]),l) {
+      Err(_) => false, Ok(a) => (match processGain(a.state,fixture([0.1,0.2]),l) { Err(ResourceLimit(_)) => true, _ => false })
+        && (match processGain(s,fixture([0.1,0.2,0.3]),l) { Err(ResourceLimit(_)) => true, _ => false })
+        && (match setGain(s,0.5,4,{l | maxTotalFrames: -1}) { Err(ResourceLimit(_)) => true, _ => false })
+        && a.state.processedFrames == 2 && s.processedFrames == 0
+    }
+  }
+}
+test "automation rejects malformed samples and rate or channel-layout changes" {
+  let l = defaultBlockLimits();let c = fixture([1.0]);
+  match startGain(8000,Mono,1.0,l) {
+    Err(_) => false, Ok(s) =>
+      (match processGain(s,{c | rate: 44100},l) { Err(InvalidClip(_)) => true, _ => false })
+      && (match processGain(s,{c | layout: Stereo,planes: c.planes++c.planes},l) { Err(InvalidClip(_)) => true, _ => false })
+      && (match processGain(s,{c | frames: 2},l) { Err(InvalidClip(_)) => true, _ => false })
+      && (match processGain(s,{c | planes: [fromList([1.0/0.0])]},l) { Err(InvalidSamples(_)) => true, _ => false })
+      && (match startGain(0,Mono,1.0,l) { Err(InvalidClip(_)) => true, _ => false })
+  }
+}
+test "finite headroom amplification overflow returns InvalidSamples rather than infinity" {
+  let l = defaultBlockLimits();
+  match startGain(8000,Mono,2.0,l) {
+    Ok(s) => match processGain(s,fixture([1.7e308]),l) { Err(InvalidSamples(_)) => true, _ => false }, _ => false
+  }
+}
+
+property "arbitrary bounded ramp durations and signals agree across partitions" {
+  forall(n: int) => {
+    let a = n%29;let count = if a<0 then 0-a else a;
+    let c = fixture(map(\i. intToFloat(i%5-2)/4.0,range(0,count)));let l = defaultBlockLimits();
+    match startGain(8000,Mono,0.125,l) {
+      Ok(s) => match setGain(s,1.5,count/2,l) { Ok(r) => match processGain(r,c,l) {
+        Ok(out) => partition(c,out.clip,r,out.state,0,3,l), _ => false
+      }, _ => false }, _ => false
+    }
+  }
+}

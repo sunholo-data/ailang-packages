@@ -22,6 +22,8 @@ Provider inference and device/session handling belong to consumers or adapters.
   block measurements, peak protection and bounded RMS-matching gain plans (`levels`).
 - Stateful checked mono/stereo low-pass/high-pass processing of bounded blocks,
   with independent channel histories, exact bypass and reset (`block`).
+- Checked feedback echo/delay and linked linear-gain automation for provider PCM,
+  offline effects and host-owned DAW automation (`delay`, `automation`).
 
 Everything is pure: no effects, no clocks, no randomness except the two seeded index generators,
 and matching output on the tested bytecode VM (`--strict-bytecode`) and interpreter. Cross-architecture equality needs separate evidence. It depends on no
@@ -162,10 +164,13 @@ GainReason, LevelPlan, PreparedLevels, defaultConfig, start, accumulate, finish,
 measure, plan, prepare.
 `block`: FilterKind (FilterBypass/LowPass/HighPass), BlockLimits, FilterState,
 FilterBlock, defaultBlockLimits, startFilter, processFilter, resetFilter.
+`delay`: DelayConfig, DelayLimits, DelayState, DelayBlock, defaultDelayLimits,
+startDelay, processDelay, resetDelay.
+`automation`: GainState, GainBlock, startGain, setGain, processGain.
 
 ## Validation
 
-`ailang test --package .` runs 164 checks against closed forms and two byte pins; `_smoke.ail`
+`ailang test --package .` runs 192 checks against closed forms and two byte pins; `_smoke.ail`
 prints `OK:` and its three probes give the same bytes on `--strict-bytecode` and the interpreter.
 The first consumer, stapledons-godot, regenerates its 19 shipped WAVs byte for byte from this
 package (`make sound-synth-check`) and compares `analysis` with its GDScript loudness checks on
@@ -481,3 +486,91 @@ JSON data as a model could propose, then renders it under limits. Both filter,
 prepare levels and return measured WAV identity metadata without IO/model calls.
 These analytic fixtures are not generated human speech or an inference accuracy
 test. `std/ai`/provider adapters remain separate effectful consumers.
+
+## Delay and gain automation (0.4.0)
+
+These pure APIs compose with checked Clip, filters, levels and WAV encoding. They
+own no audio callback, musical tempo, scheduler, model/provider or application state.
+
+### Integer-frame feedback delay
+
+`startDelay(rate, layout, config, limits)` allocates zero history after validating
+all dimensions. Config is `{delayFrames, feedback, dry, wet}`. Delay is at least
+one integer frame; feedback is finite -0.99..0.99; dry and wet are each finite 0..1.
+At each sample, read the old history value `d`, output `dry*x + wet*d`, then store
+`x + feedback*d`. Stereo channels never share history. Delay duration in seconds
+is delayFrames/rate; tempo and seconds-to-frame rounding belong to callers.
+
+`processDelay(state, inputClip, limits)` returns `{clip, state}` with the same
+rate/layout/frame count. Retain state across chunks. Dry/wet are independent gains,
+not a normalized crossfade; their sum and feedback can produce above-full-scale
+output. Apply explicit levels/clipping policy before integer encoding. Even with
+wet=0, feedback history runs and its overflow is checked; this is not exact bypass.
+No automatic normalization, interpolation, modulation or cross-feedback is added.
+
+`defaultDelayLimits()` gives `{block: defaultBlockLimits(), maxDelayFrames:96000,
+maxDelaySamples:192000}`. At 48 kHz this permits two seconds per channel. Rate
+remains 1..384000; delay is a frame budget, not a fixed duration across rates.
+Both maxDelay bounds are integers 1..2147483647, and channel samples are checked
+before allocation. Existing BlockLimits apply to every block and cumulative frames
+since start/reset. Caller-selected caps are not total-heap or wall-time guarantees.
+
+State contains rate/layout/config, processedFrames, ring cursor and one finite
+Array history per channel. Every boundary checks dimensions, cursor position
+(processedFrames modulo delayFrames), counts and finite samples/history. Public
+states are structurally checked, not authenticated. To change delay configuration,
+start a new state; changing delay time is not smoothed by this API.
+
+Tail rendering is explicit: process bounded silence for the desired duration.
+An empty block advances nothing; resetDelay validates then drops all histories and
+restarts the logical frame budget with the same configuration. Reset may truncate
+an audible tail. No silence detector or automatic tail-completion claim is supplied.
+
+Implementation batches at most delayFrames writes between ring-buffer copies using
+std/array.updateMany, preserving read-before-write semantics even at delayFrames=1.
+For N nonempty input frames and D history frames, work is O(channels*(N+D)) per
+call, including full state validation; histories are O(channels*D), with bounded
+temporary arrays/lists and allocations. Repeated tiny blocks still rescan/copy
+history. This is an offline/reference implementation, not an allocation-free or
+hard-realtime delay host. Nonfinite input, arithmetic output or history returns
+InvalidSamples; failed calls leave the caller's immutable state intact.
+
+### Linked gain ramps
+
+`startGain(rate, layout, gain, blockLimits)` initializes a constant gain, finite
+0..64. `setGain(state, target, frames, limits)` retains the cumulative frame count
+and starts a ramp from the last delivered gain. Frames is an integer
+0..2147483647. Zero means the next input uses target immediately. For a positive
+N-frame ramp, sample k (1..N) uses `(1-k/N)*start + (k/N)*target`; sample N and all
+later samples use target exactly. The starting gain belongs to the preceding frame.
+Re-target at a caller-chosen boundary to replace a ramp without jumping to its old
+target. This is linear amplitude, not dB interpolation or a complete automation lane.
+
+`processGain(state, input, limits)` returns `{clip,state}` and applies one gain per
+frame to all channels. Gains derive from absolute ramp positions; chunking does not
+change their arithmetic or accumulated phase. Empty clips consume no ramp/frame
+budget. Rate/layout, finite gains/samples and public position records are checked.
+There is no input reset API: startGain explicitly begins a new logical stream.
+Processing is O(block samples), with an O(block frames) gain vector; normal Clip
+validation/allocation applies. Output overflow returns InvalidSamples. This gain
+ramp does not smooth filter cutoff, delay time or feedback automatically.
+
+### Headless AI-output/DAW processing example
+
+```sh
+ailang run --package-dir . --strict-bytecode --verify-contracts --entry demo --args-json 0 examples/effects_pipeline.ail
+```
+
+The synthetic s16le fixture stands in for provider output. It is decoded at its
+declared 24 kHz rate, extended by 720 silence frames for a deliberately truncated
+tail, faded over 8 frames, echoed at 120-frame intervals, peak-prepared, encoded and
+decoded again. Returned peak/RMS measurements refer explicitly to delivered
+quantized audio; the WAV SHA-256 identifies bytes, not perceptual/model correctness.
+No inference, credentials, input upload or device access occurs.
+
+Evidence and independent Python WAV reference:
+`design_docs/implemented/audio-effects-0.4.0` in the source repository. The core
+record-Eq/property-evaluator bug is reported upstream; explicit field comparisons
+keep these APIs/tests compatible with v0.54.18. Verification skips, mathematical
+proofs, runtime guards, fixture tests and descriptive CLI timings are reported
+separately. No new browser soak or physical device acceptance is implied.

@@ -3,7 +3,8 @@
 Status: audio 0.3.0 released, 2026-10-23. Checked levels, the stateful
 filter block foundation and headless fixture examples are published.
 See the [release record](../implemented/audio-release-0.3.0/README.md);
-delay, smoothing and the shared report schema remain recommendations.
+The next [0.4 candidate](audio-0.4-ai-daw.md) implements delay and gain ramps;
+broader parameter smoothing and the shared report schema remain recommendations.
 See [block evidence](../implemented/audio-blocks-0.3.0/README.md).
 Loop Lab is a reference application, with its own standalone repository
 and release lifecycle: [application split](loop-lab-repository-split.md).
@@ -40,8 +41,8 @@ Coordinate the existing resampling work rather than assuming v0.54.18 shipped it
 Current checkpoint: `block` has low/high-pass/bypass, reset and bounded per-channel
 state; both headless example paths run on the interpreter and strict VM with
 runtime contracts. Processing reports in those examples are metadata, not yet the
-shared typed AudioReport API. Delay and parameter smoothing are the next processor
-work, independently of Loop Lab's UI/persistence schedule.
+shared typed AudioReport API. The unpublished [0.4 effect group](audio-0.4-ai-daw.md)
+adds delay and gain ramps independently of Loop Lab's UI/persistence schedule.
 
 For processors, define state + input block + parameters → output + next state,
 with explicit layout/rate, reset/flush/tail behavior and caller resource budgets.

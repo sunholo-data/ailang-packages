@@ -1,0 +1,108 @@
+module sunholo/audio/delay
+-- Integer-frame feedback delay. Work is bounded by block and delay dimensions;
+-- batch ring writes avoid copying the entire delay buffer for every sample.
+import std/array (fromList, toList, get, length as arrayLength, make, updateMany)
+import std/list (map, mapAccumL, range, length as size, any, flatMap)
+import std/result (Result, Ok, Err)
+import ./clip (Clip, ChannelLayout, channelCount, checkSize, validate, create)
+import ./block (BlockLimits, defaultBlockLimits)
+import ./safety (AudioError, InvalidClip, InvalidSamples, ResourceLimit, inRange)
+
+export type DelayConfig = {delayFrames: int, feedback: float, dry: float, wet: float}
+export type DelayLimits = {block: BlockLimits, maxDelayFrames: int, maxDelaySamples: int}
+export type DelayState = {rate: int, layout: ChannelLayout, config: DelayConfig, processedFrames: int, cursor: int, history: [Array[float]]}
+export type DelayBlock = {clip: Clip, state: DelayState}
+
+export func defaultDelayLimits() -> DelayLimits ! {}
+ensures { result.maxDelayFrames == 96000 && result.maxDelaySamples == 192000 && result.block.maxFrames == 4096 }
+{
+  {block: defaultBlockLimits(), maxDelayFrames: 96000, maxDelaySamples: 192000}
+}
+
+pure func configuration(rate: int, layout: ChannelLayout, c: DelayConfig, l: DelayLimits) -> Result[int, AudioError] =
+  if l.maxDelayFrames < 1 || l.maxDelayFrames > 2147483647 || l.maxDelaySamples < 1 || l.maxDelaySamples > 2147483647
+    || l.block.maxTotalFrames < 0 || l.block.maxTotalFrames > 2147483647 then Err(ResourceLimit("invalid delay limits"))
+  else match checkSize(rate, layout, 0, {maxFrames: l.block.maxFrames, maxSamples: l.block.maxSamples}) {
+    Err(e) => Err(e), Ok(_) =>
+      if c.delayFrames < 1 then Err(InvalidClip("delay must be at least one frame"))
+      else if c.delayFrames > l.maxDelayFrames || c.delayFrames > l.maxDelaySamples / channelCount(layout) then Err(ResourceLimit("delay history budget exceeded"))
+      else if not inRange(c.feedback, -0.99, 0.99) || not inRange(c.dry, 0.0, 1.0) || not inRange(c.wet, 0.0, 1.0) then Err(InvalidSamples("delay feedback or mix outside supported domain"))
+      else Ok(c.delayFrames)
+  }
+
+pure func stateValid(s: DelayState, l: DelayLimits) -> Result[DelayState, AudioError] =
+  match configuration(s.rate, s.layout, s.config, l) {
+    Err(e) => Err(e), Ok(n) =>
+      if s.processedFrames < 0 then Err(InvalidClip("negative delay frame count"))
+      else if s.processedFrames > l.block.maxTotalFrames then Err(ResourceLimit("delay cumulative budget exceeded"))
+      else if s.cursor < 0 || s.cursor >= n || s.cursor != s.processedFrames % n then Err(InvalidClip("invalid delay cursor"))
+      else if size(s.history) != channelCount(s.layout) || any(\p. arrayLength(p) != n, s.history) then Err(InvalidClip("delay history dimensions mismatch"))
+      else if any(\p. any(\x. x - x != 0.0, toList(p)), s.history) then Err(InvalidSamples("delay history must be finite"))
+      else Ok(s)
+  }
+
+export func startDelay(rate: int, layout: ChannelLayout, config: DelayConfig, limits: DelayLimits) -> Result[DelayState, AudioError] ! {}
+ensures { match result { Ok(s) => s.rate == rate && s.layout == layout && s.processedFrames == 0 && s.cursor == 0 && size(s.history) == channelCount(layout), Err(_) => true } }
+{
+  match configuration(rate, layout, config, limits) {
+    Err(e) => Err(e), Ok(n) => Ok({rate: rate, layout: layout, config: config, processedFrames: 0, cursor: 0,
+      history: map(\i. make(n, 0.0), range(0, channelCount(layout)))})
+  }
+}
+
+type PlaneResult = {samples: Array[float], history: Array[float]}
+type Ring = {history: Array[float], cursor: int}
+
+pure func advanceCursor(cursor: int, count: int, delay: int) -> int
+requires { delay >= 1 && delay <= 2147483647 && cursor >= 0 && cursor < delay && count >= 0 && count <= 2147483647 }
+ensures { result >= 0 && result < delay && result == (cursor + count) % delay }
+{
+  (cursor + count) % delay
+}
+
+pure func delayPlane(input: Array[float], history: Array[float], cursor: int, config: DelayConfig) -> PlaneResult {
+  let n = arrayLength(input);let d = config.delayFrames;
+  -- Each batch has at most d samples: its reads precede every write to the same
+  -- slot. updateMany makes ONE buffer copy for that batch, including d=1.
+  let batches = n / d + (if n % d == 0 then 0 else 1);
+  match mapAccumL(\ring batch. {
+    let at = batch * d;let count = if n - at < d then n - at else d;
+    let computed = map(\i. {
+      let index = (ring.cursor + i) % d;
+      let old = get(ring.history, index);let x = get(input, at + i);
+      {sample: config.dry * x + config.wet * old, index: index, stored: x + config.feedback * old}
+    }, range(0, count));
+    (map(\v. v.sample, computed), {history: updateMany(ring.history, map(\v. (v.index, v.stored), computed)), cursor: advanceCursor(ring.cursor, count, d)})
+  }, {history: history, cursor: cursor}, range(0, batches)) {
+    (out, last) => {samples: fromList(flatMap(\xs. xs, out)), history: last.history}
+  }
+}
+
+export func processDelay(state: DelayState, input: Clip, limits: DelayLimits) -> Result[DelayBlock, AudioError] ! {}
+ensures { match result { Ok(v) => v.clip.rate == input.rate && v.clip.layout == input.layout && v.clip.frames == input.frames && v.state.processedFrames == state.processedFrames + input.frames && v.state.processedFrames <= limits.block.maxTotalFrames, Err(_) => true } }
+{
+  match stateValid(state, limits) {
+    Err(e) => Err(e), Ok(s) => match validate(input, {maxFrames: limits.block.maxFrames, maxSamples: limits.block.maxSamples}) {
+      Err(e) => Err(e), Ok(c) =>
+        if c.rate != s.rate || c.layout != s.layout then Err(InvalidClip("delay block rate/layout mismatch"))
+        else if c.frames > limits.block.maxTotalFrames - s.processedFrames then Err(ResourceLimit("delay cumulative frame budget exceeded"))
+        else {
+          let histories = fromList(s.history);
+          let planes = fromList(c.planes);
+          let processed = map(\ch. delayPlane(get(planes, ch), get(histories, ch), s.cursor, s.config), range(0, channelCount(s.layout)));
+          match create(c.rate, c.layout, map(\p. p.samples, processed), {maxFrames: limits.block.maxFrames, maxSamples: limits.block.maxSamples}) {
+            Err(e) => Err(e), Ok(out) => match stateValid({s | processedFrames: s.processedFrames + c.frames,
+              cursor: advanceCursor(s.cursor, c.frames, s.config.delayFrames), history: map(\p. p.history, processed)}, limits) {
+              Err(e) => Err(e), Ok(next) => Ok({clip: out, state: next})
+            }
+          }
+        }
+    }
+  }
+}
+
+export func resetDelay(state: DelayState, limits: DelayLimits) -> Result[DelayState, AudioError] ! {}
+ensures { match result { Ok(s) => s.processedFrames == 0 && s.cursor == 0 && s.rate == state.rate && s.layout == state.layout && s.config.delayFrames == state.config.delayFrames && s.config.feedback == state.config.feedback && s.config.dry == state.config.dry && s.config.wet == state.config.wet, Err(_) => true } }
+{
+  match stateValid(state, limits) { Err(e) => Err(e), Ok(s) => startDelay(s.rate, s.layout, s.config, limits) }
+}

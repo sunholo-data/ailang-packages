@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.4.0
+
+Feature: bounded feedback delay and frame-defined gain automation.
+
+- `delay`: checked mono/stereo integer-frame delay with independent channel
+  histories, signed feedback (-0.99..0.99), dry/wet gains, explicit silence tails
+  and reset. Batch ring writes avoid a full history copy on every sample.
+- `automation`: linked 0..64 linear-gain ramps with exact target frames, immediate
+  changes and mid-ramp retargeting from the last delivered gain. Absolute ramp
+  positions preserve output across block partitions.
+- Both APIs validate public states, finite samples, rate/layout, block and
+  cumulative budgets; delay has a separate history allocation budget. Headroom
+  is preserved; arithmetic overflow returns typed errors. No callback guarantee,
+  delay-time interpolation, tempo policy or host scheduler is implied.
+- Add a headless speech/model PCM fixture → fade → echo → peak preparation → WAV
+  pipeline that reports delivered quantized audio measurements and byte identity.
+  No inference credentials, device or browser is required.
+- Preserve legacy synthesis/PCM pins. Requires the tested AILANG v0.54.18 toolchain.
+
 ## 0.3.0
 
 Feature: checked offline level preparation and stateful block filters.
