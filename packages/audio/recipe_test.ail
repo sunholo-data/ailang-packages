@@ -6,9 +6,10 @@ import std/list (map, range, length as size, nth, take, drop, foldl)
 import std/option (Option, Some, None)
 import std/result (Result, Ok, Err)
 import std/crypto (sha256Bytes)
-import ./recipe (Recipe, Layer, render, frames, loopErrors, parseRecipes, parseRecipesAs, envAt, phaseAt)
+import ./recipe (Recipe, Layer, render, frames, loopErrors, parseRecipes, parseRecipesAs, envAt, phaseAt, layerSamples)
 import ./pcm (pcm16)
-import ./dsp (absF, clamp16, twoPi)
+import ./dsp (absF, clamp16, twoPi, lowpass, onePole)
+import ./noise (white)
 import ./reference (sine, hiss, noEnv, loopRecipe, shotRecipe, loopPcmSha)
 import std/math (round, floatToInt)
 
@@ -46,7 +47,7 @@ test "a whole-cycle loop beat is accepted" { size(loopErrors({badLoop() | layers
 test "a loop cannot glide, have an envelope or sweep its filter" {
   size(loopErrors({badLoop() | layers: [{sine(440.0, 0.5) | freqTo: 880.0}]})) == 1
   && size(loopErrors({badLoop() | layers: [{sine(440.0, 0.5) | env: {noEnv() | tau: 0.1}}]})) == 1
-  && size(loopErrors({badLoop() | layers: [{hiss(200.0) | lowpassTo: 800.0}]})) == 1
+  && size(loopErrors({badLoop() | layers: [{hiss(200.0) | lowpassTo: 800.0, lpPoles: 1}]})) == 1
 }
 test "a one-shot has no loop rules" { size(loopErrors({badLoop() | loop: false})) == 0 }
 
@@ -64,7 +65,7 @@ test "drive keeps the peak" { absF(maxAbs(render({shotRecipe() | drive: 2.0})) -
 
 test "a filter sweep from 200 Hz to 8 kHz brightens white noise" {
   let sw = render({id: "sw", seconds: 0.5, loop: false, peakDb: -3.0, fadeMs: 10.0, swellRate: 0.0, swellDepth: 0.0, drive: 0.0, rate: 48000,
-    layers: [{hiss(200.0) | kind: "white", lowpassTo: 8000.0}]});
+    layers: [{hiss(200.0) | kind: "white", lowpassTo: 8000.0, lpPoles: 1}]});
   roughness(take(4000, drop(18000, sw))) > 2.0 * roughness(take(4000, drop(2000, sw)))
 }
 
@@ -107,6 +108,34 @@ test "parse refuses invalid domains and a zero-frequency glide" {
 }
 
 test "loop modulation and filter restrictions are reported independently" {
-  let l = {sine(440.0, 1.0) | vibCents: 10.0, vibRate: 0.3, amDepth: 0.5, amRate: 0.3, lowpass: 200.0, lowpassTo: 400.0};
+  let l = {sine(440.0, 1.0) | vibCents: 10.0, vibRate: 0.3, amDepth: 0.5, amRate: 0.3, lowpass: 200.0, lowpassTo: 400.0, lpPoles: 1};
   size(loopErrors({loopRecipe() | layers: [l]})) == 3
 }
+
+-- 0.5.0: lowpass_poles, one-pole stages in series.
+pure func whiteLayer(lp: float, poles: int) -> Layer = {hiss(lp) | kind: "white", amp: 1.0, seed: 9, lpPoles: poles}
+test "two poles are exactly the one-pole low-pass applied twice to the noise" {
+  let a = onePole(400.0, 48000.0);
+  let raw = map(\i. white(i, 9), range(0, 2000));
+  layerSamples(whiteLayer(400.0, 2), 2000, false, 48000) == lowpass(a, lowpass(a, raw))
+}
+test "one pole (the default) is unchanged: explicit lpPoles 1 renders the same samples as before" {
+  layerSamples(whiteLayer(400.0, 1), 2000, false, 48000) == lowpass(onePole(400.0, 48000.0), map(\i. white(i, 9), range(0, 2000)))
+}
+test "more poles are darker (less high-frequency movement)" {
+  let r1 = roughness(layerSamples(whiteLayer(400.0, 1), 4800, false, 48000));
+  let r3 = roughness(layerSamples(whiteLayer(400.0, 3), 4800, false, 48000));
+  r3 < 0.5 * r1
+}
+pure func layerJson(extra: string) -> string = one("{\"id\":\"x\",\"seconds\":0.1,\"about\":\"a note\",\"layers\":[{\"kind\":\"white\",\"amp\":0.5,\"lowpass_hz\":300${extra}}]}")
+pure func parses(s: string) -> bool = match parseRecipes(s) { Ok(_) => true, Err(_) => false }
+test "lowpass_poles parses as 1..4 and defaults to 1" {
+  (match parseRecipes(layerJson(",\"lowpass_poles\":3")) { Ok([r]) => match r.layers { [l] => l.lpPoles == 3, _ => false }, _ => false })
+  && (match parseRecipes(layerJson("")) { Ok([r]) => match r.layers { [l] => l.lpPoles == 1, _ => false }, _ => false })
+}
+test "lowpass_poles 0, 5 and 1.5 are refused" { not parses(layerJson(",\"lowpass_poles\":0")) && not parses(layerJson(",\"lowpass_poles\":5")) && not parses(layerJson(",\"lowpass_poles\":1.5")) }
+test "an unknown or misspelt layer or env key is refused; notes are allowed" {
+  not parses(layerJson(",\"lowpas_hz\":200")) && not parses(layerJson(",\"env\":{\"atack\":0.01}"))
+  && parses(layerJson(",\"about\":\"the thud\"")) && parses(layerJson(",\"env\":{\"attack\":0.01}"))
+}
+

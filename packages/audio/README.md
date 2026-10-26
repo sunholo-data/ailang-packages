@@ -54,7 +54,7 @@ and `examples/block_pipeline.ail` for headless recipe and speech/model PCM fixtu
 Loop Lab has [its own application repository](https://github.com/sunholo-data/ailang-loop-lab)
 and consumes this package; its UI/session features are independently versioned.
 
-Version **0.4.0** adds delay and gain automation. Both work on
+Version **0.5.0** adds per-layer `lowpass_poles` (dark sounds) and refuses unknown layer keys. Version **0.4.0** adds delay and gain automation. Both work on
 source-independent clips: process provider-produced PCM, game assets or DAW tracks
 with the same guards. `examples/effects_pipeline.ail` demonstrates a synthetic
 speech/model PCM fixture → fade → echo → peak preparation → measured WAV. Its

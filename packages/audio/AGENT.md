@@ -83,7 +83,7 @@ Keep file IO in your own shell module; every function here is pure.
 A file is `{"schema": "sunholo.audio.recipes/1", "recipes": [recipe, ...]}`; a host that already
 has files under its own id parses them with `parseRecipesAs("<its id>", text)`. An empty list,
 a recipe without an `id`, `seconds <= 0`, no layers, an unknown layer kind, or a loop that breaks
-the loop rules is refused with the first error. Every missing optional field has a default. Provided fields of the wrong type are refused; unknown keys remain permitted for schema compatibility.
+the loop rules is refused with the first error. Every missing optional field has a default. Provided fields of the wrong type are refused. Since 0.5.0 a layer's keys and its `env` keys are a closed vocabulary: an unknown or misspelt key (say `lowpas_hz`) is refused, so a recipe can never silently render a different sound because a field was ignored; a layer may carry an `about` note. Recipe-level keys stay open for host annotations (`about`, etc.).
 
 | Recipe field | Default | Meaning |
 |---|---|---|
@@ -107,6 +107,7 @@ the loop rules is refused with the first error. Every missing optional field has
 | `vib_hz`, `vib_cents` | 0, 0 | Vibrato as a phase offset |
 | `beat_hz`, `beat_depth` | 0, 0 | Amplitude beat `1 - d + d (0.5 + 0.5 sin(2 pi r t))` |
 | `lowpass_hz`, `lowpass_to_hz` | 0, 0 | One-pole low-pass; with `lowpass_to_hz` it sweeps exponentially over the sound |
+| `lowpass_poles` | 1 | 0.5.0: that low-pass applied 1-4 times in series (6 dB/octave per pole), for truly dark sounds; a single pole on white noise keeps much of its energy above 2 kHz |
 | `highpass_hz` | 0 | One-pole high-pass (input minus its low-pass) |
 | `seed` | 1 | Noise seed |
 

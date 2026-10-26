@@ -17,7 +17,7 @@ import std/math (sin, cos, exp, log, round, floatToInt, pow, floor)
 import std/option (Option, Some, None)
 import std/result (Result, Ok, Err)
 import std/string (join, floatToStr, length as textLength)
-import std/json (Json, decode, getString, getNumber, getBool, getArray, getObject, getInt, get, JNull, JBool, JNumber, JString, JArray, JObject)
+import std/json (Json, decode, getString, getNumber, getBool, getArray, getObject, getInt, get, keys, JNull, JBool, JNumber, JString, JArray, JObject)
 import ./dsp (twoPi, absF, onePole, lowpass, sweepLowpass, softSat, normalisePeak)
 import ./noise (rampNoise, white)
 import ./safety (AudioError, InvalidRecipe, ResourceLimit, InvalidSamples, RenderLimits, limitsValid, inRange, samplesInRange, fitsWork)
@@ -32,10 +32,10 @@ export type Env = {delay: float, attack: float, tau: float, stop: float}
 
 -- A layer. kind "sine" (freq, gliding exponentially to freqTo between glide0 and glide1 s; vibrato
 -- vibRate Hz, vibCents; beat amRate Hz, amDepth 0..1), "noise" (the legacy rampNoise) or "white",
--- filtered by a low-pass (lowpass Hz, sweeping to lowpassTo Hz over the sound) and a high-pass.
--- 0 turns any filter or modulation off.
+-- filtered by a low-pass (lowpass Hz, sweeping to lowpassTo Hz over the sound; lpPoles one-pole
+-- stages in series, 1..4, 0.5.0) and a high-pass. 0 turns any filter or modulation off.
 export type Layer = {kind: string, freq: float, freqTo: float, glide0: float, glide1: float, amp: float, lowpass: float, highpass: float, seed: int, env: Env,
-  vibRate: float, vibCents: float, amRate: float, amDepth: float, lowpassTo: float}
+  vibRate: float, vibCents: float, amRate: float, amDepth: float, lowpassTo: float, lpPoles: int}
 
 -- A recipe: seconds long, looping or a one-shot, normalised to peakDb dBFS, a one-shot fading out
 -- over fadeMs; a swell (rate Hz, depth 0..1); drive k for soft saturation (0 = off); rate Hz.
@@ -72,17 +72,20 @@ export pure func phaseAt(l: Layer, t: float) -> float =
 
 pure func gen(l: Layer, i: int) -> float = if l.kind == "white" then white(i, l.seed) else rampNoise(i, l.seed)
 
+-- f applied k times in series (k <= 1: once). With lpPoles = 1 every earlier render is unchanged.
+pure func times(k: int, f: [float] -> [float], xs: [float]) -> [float] = if k <= 1 then f(xs) else times(k - 1, f, f(xs))
+
 pure func filtered(l: Layer, xs: [float], fr: float) -> [float] {
   let n = size(xs);
-  let lp = if l.lowpass > 0.0 && l.lowpassTo > 0.0 && l.lowpassTo != l.lowpass then sweepLowpass(l.lowpass, l.lowpassTo, n, fr, xs)
-    else if l.lowpass > 0.0 then lowpass(onePole(l.lowpass, fr), xs) else xs;
+  let lp = if l.lowpass > 0.0 && l.lowpassTo > 0.0 && l.lowpassTo != l.lowpass then times(l.lpPoles, \v. sweepLowpass(l.lowpass, l.lowpassTo, n, fr, v), xs)
+    else if l.lowpass > 0.0 then times(l.lpPoles, \v. lowpass(onePole(l.lowpass, fr), v), xs) else xs;
   if l.highpass > 0.0 then zipWith(\x y. x - y, lp, lowpass(onePole(l.highpass, fr), lp)) else lp
 }
 
 -- The sweep's period is the sound's length n, also when a loop's noise is filtered over two periods.
 pure func filteredN(l: Layer, xs: [float], n: int, fr: float) -> [float] =
   if l.lowpass > 0.0 && l.lowpassTo > 0.0 && l.lowpassTo != l.lowpass then {
-    let lp = sweepLowpass(l.lowpass, l.lowpassTo, n, fr, xs);
+    let lp = times(l.lpPoles, \v. sweepLowpass(l.lowpass, l.lowpassTo, n, fr, v), xs);
     if l.highpass > 0.0 then zipWith(\x y. x - y, lp, lowpass(onePole(l.highpass, fr), lp)) else lp
   } else filtered(l, xs, fr)
 
@@ -163,7 +166,7 @@ pure func layerOf(j: Json) -> Layer {
    lowpass: num(j, "lowpass_hz", 0.0), highpass: num(j, "highpass_hz", 0.0),
    seed: match getInt(j, "seed") { Some(s) => s, None => 1 }, env: envOf(j),
    vibRate: num(j, "vib_hz", 0.0), vibCents: num(j, "vib_cents", 0.0), amRate: num(j, "beat_hz", 0.0), amDepth: num(j, "beat_depth", 0.0),
-   lowpassTo: num(j, "lowpass_to_hz", 0.0)}
+   lowpassTo: num(j, "lowpass_to_hz", 0.0), lpPoles: match getInt(j, "lowpass_poles") { Some(k) => k, None => 1 }}
 }
 
 pure func kindErrors(id: string, ls: [Layer]) -> [string] =
@@ -231,8 +234,17 @@ pure func numberErrors(j: Json, keys: [string]) -> [string] = flatMap(\k. fieldE
 pure func envErrors(j: Json) -> [string] = match getObject(j, "env") {
   None => [], Some(e) => numberErrors(e, ["delay", "attack", "tau", "stop"])
 }
+-- A layer's and an envelope's keys are a closed vocabulary (0.5.0): an unknown or misspelt key is
+-- refused, so a field this version does not implement (e.g. lowpass_poles before 0.5.0) can never be
+-- silently ignored and render a different sound. "about" is allowed for notes. Recipe-level keys
+-- stay open, so hosts can annotate recipes.
+pure func layerKeys() -> [string] = ["kind", "freq", "glide_to", "glide_from_s", "glide_until_s", "amp", "lowpass_hz", "lowpass_poles", "lowpass_to_hz",
+  "highpass_hz", "seed", "env", "vib_hz", "vib_cents", "beat_hz", "beat_depth", "about"]
+pure func unknownKeys(j: Json, allowed: [string], what: string) -> [string] =
+  flatMap(\k. if foldl(\f a. f || a == k, false, allowed) then [] else ["${what}: unknown key ${k}"], keys(j))
 pure func layerShape(j: Json) -> [string] = match j {
-  JObject(_) => fieldErrors(j, "kind", "string") ++ fieldErrors(j, "seed", "integer") ++ fieldErrors(j, "env", "object") ++ envErrors(j)
+  JObject(_) => unknownKeys(j, layerKeys(), "layer") ++ (match getObject(j, "env") { Some(e) => unknownKeys(e, ["delay", "attack", "tau", "stop"], "env"), None => [] })
+    ++ fieldErrors(j, "kind", "string") ++ fieldErrors(j, "seed", "integer") ++ fieldErrors(j, "lowpass_poles", "integer") ++ fieldErrors(j, "env", "object") ++ envErrors(j)
     ++ numberErrors(j, ["freq", "glide_to", "glide_from_s", "glide_until_s", "amp", "lowpass_hz", "highpass_hz", "vib_hz", "vib_cents", "beat_hz", "beat_depth", "lowpass_to_hz"]),
   _ => ["layer must be an object"]
 }
@@ -257,6 +269,7 @@ pure func layerValid(l: Layer) -> bool =
   && inRange(l.env.tau, 0.0, 100000.0) && inRange(l.env.stop, 0.0, 100000.0)
   && inRange(l.vibRate, 0.0, 1000000.0) && inRange(l.vibCents, 0.0, 12000.0)
   && inRange(l.amRate, 0.0, 1000000.0) && inRange(l.amDepth, 0.0, 1.0)
+  && l.lpPoles >= 1 && l.lpPoles <= 4
 
 -- Validates direct record construction as well as JSON. This does not allocate samples.
 -- Frequencies are bounded for arithmetic, not anti-aliased; rates are not converted.
