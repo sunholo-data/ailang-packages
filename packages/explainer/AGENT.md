@@ -58,6 +58,25 @@ Run per-sample work on the bytecode VM: `ailang run --bytecode ...`. A 6-minute 
   through `std/array` whole-array operations (`scale`, `updateMany`) and
   `std/audio.floatsToPcm16`; keep it that way when changing `level`.
 
+## Related packages, and why they are not dependencies
+
+Checked against the registry on 2026-10-26 (`ailang pkg search` audio, wav, pcm, speech, tts,
+whisper, diff, align, words, retry, gemini, dsp):
+
+- `sunholo/audio` 0.5.0: its `levels` sets gain from active-window RMS (1024-frame windows)
+  and meets a peak ceiling by turning the whole clip down. The kit levels to the plain RMS of
+  the trimmed clip and clips the few samples past 0.98, and `level` must match the kit's own
+  clips. Its PCM16 convention (`round(x * 32767)`) is the one `level` uses; both call the same
+  `std/audio` builtins underneath. Onset trimming has no counterpart there.
+- `sunholo/gemini_live` 0.5.1 `tts`: builds raw Vertex `generateContent` TTS requests for a
+  Net caller. This package voices through `std/ai.callSpeech` (the AI effect, with its budget
+  and trace). A take cut short is caught here by alignment: every line must be heard.
+- `sunholo/external_backend` 0.2.0: for a caller that runs Whisper or the kit as a
+  subprocess; the films' orchestrator (`ailang-explainers/films/narrate`) uses its `runJson`.
+  This package itself has no Process effect.
+- Nothing on the registry aligns a transcript to a script, normalises spoken words, or picks
+  cut points; `align`, `words` and `cut` are new.
+
 ## Validation
 
 `ailang test --package .` (26), `ailang test words.ail` (23) and `take.ail` (5) inline,

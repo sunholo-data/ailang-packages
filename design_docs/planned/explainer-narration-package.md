@@ -35,6 +35,18 @@ pipeline that are ours, and the ones that can be checked:
 Speed: per-sample work runs on the bytecode VM (`--bytecode`); one pass over a 6-minute take
 (7.4 M samples) takes 1.1 s there, 56 s in the tree-walking evaluator.
 
+## Registry reuse
+
+| Part | Decision | Reason |
+|---|---|---|
+| Subprocess + JSON (adapter calls) | **depend** `sunholo/external_backend` 0.2.0, in the orchestrator | same job; better process-error messages than a hand-rolled `exec` |
+| Levelling, PCM16, WAV | **none** (`sunholo/audio` 0.5.0 checked) | its `levels` uses active-window RMS and peak-limited gain, not the kit's plain RMS + clip at 0.98; PCM16/WAV are the same `std/audio` builtins either way |
+| Voicing | **none** (`sunholo/gemini_live` 0.5.1 `tts` checked) | raw REST over Net; this package uses `std/ai.callSpeech` (AI effect, budgets, trace) |
+| Alignment, word normalisation, cut points | **none** | no registry package does these |
+
+(Recorded after the first draft: the registry was searched on review, and the orchestrator's
+hand-written `exec` adapter was replaced by `external_backend.runJson`.)
+
 ## Interfaces
 
 ```
