@@ -1,8 +1,9 @@
 # Bounded delay and gain automation, audio 0.4.0 candidate
 
 Implemented 2026-10-23 on AILANG v0.54.18 (`cd33d050b2276633c82624453309ebf7fcea9e2f`).
-Not yet merged or registry-published. Published audio 0.3.0 and Loop Lab's released
-registry dependency are unchanged. [Next AI/DAW steps](../../planned/audio-0.4-ai-daw.md).
+This is the implementation-time candidate snapshot. Audio 0.4.0 was subsequently
+merged and published on 2026-10-26; see the [release record](../audio-release-0.4.0/README.md).
+Loop Lab's released registry dependency remains 0.3.0. [Next AI/DAW steps](../../planned/audio-0.4-ai-daw.md).
 
 ## Behavior and boundaries
 
