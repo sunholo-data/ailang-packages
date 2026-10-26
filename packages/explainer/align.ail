@@ -69,8 +69,13 @@ pure func scanRows(a: Array[string], at: Map[string, [int]], i: int, ahi: int, b
 
 -- difflib's find_longest_match with no junk: the longest equal run in a[alo:ahi], b[blo:bhi];
 -- of equal lengths, the one starting earliest in a, then in b. Size 0 when there is none.
-export pure func longestMatch(a: Array[string], at: Map[string, [int]], alo: int, ahi: int, blo: int, bhi: int) -> Block =
+export pure func longestMatch(a: Array[string], at: Map[string, [int]], alo: int, ahi: int, blo: int, bhi: int) -> Block
+  requires { alo >= 0 && alo <= ahi && ahi <= A.length(a) && blo >= 0 && blo <= bhi }
+  ensures { result.size >= 0 && result.a >= alo && result.a + result.size <= ahi
+    && result.b >= blo && result.b + result.size <= bhi }
+{
   scanRows(a, at, alo, ahi, blo, bhi, M.empty(), { a: alo, b: blo, size: 0 })
+}
 
 pure func blocksIn(a: Array[string], at: Map[string, [int]], alo: int, ahi: int, blo: int, bhi: int) -> [Block] {
   let m = longestMatch(a, at, alo, ahi, blo, bhi);
@@ -83,10 +88,20 @@ pure func blocksIn(a: Array[string], at: Map[string, [int]], alo: int, ahi: int,
 }
 
 -- difflib's get_matching_blocks (without the zero-size sentinel, and adjacent blocks not merged).
-export pure func matchingBlocks(a: [string], b: [string]) -> [Block] {
+export pure func matchingBlocks(a: [string], b: [string]) -> [Block]
+  ensures { inside(result, length(a), length(b), 0, 0) }
+{
   let bs = A.fromList(b);
   blocksIn(A.fromList(a), positionsFrom(bs, A.length(bs) - 1, M.empty()), 0, length(a), 0, A.length(bs))
 }
+
+-- Whether blocks are non-empty, in order on both sides, apart, and within a and b.
+pure func inside(ms: [Block], na: int, nb: int, fromA: int, fromB: int) -> bool =
+  match ms {
+    [] => true,
+    m :: rest => m.size >= 1 && m.a >= fromA && m.b >= fromB && m.a + m.size <= na && m.b + m.size <= nb
+      && inside(rest, na, nb, m.a + m.size, m.b + m.size)
+  }
 
 pure func fmin(x: float, y: float) -> float = if y < x then y else x
 pure func fmax(x: float, y: float) -> float = if y > x then y else x
@@ -135,7 +150,9 @@ pure func inOrder(spans: Map[int, Span], k: int, n: int, acc: [Span]) -> Option[
   }
 
 -- Each line's span, in script order; None if some line has no word that was heard.
-export pure func lineSpans(lines: [string], heard: [Heard]) -> Option[[Span]] {
+export pure func lineSpans(lines: [string], heard: [Heard]) -> Option[[Span]]
+  ensures { match result { Some(ss) => length(ss) == length(lines), None => true } }
+{
   let script = scriptWords(lines, 0, []);
   let said = heardWords(heard, []);
   let ms = matchingBlocks(map(\p. match p { (w, _) => w }, script), map(\h. h.word, said));

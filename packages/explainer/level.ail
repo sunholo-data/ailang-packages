@@ -12,19 +12,39 @@ module sunholo/explainer/level
 
 import std/array as A
 import std/audio (pcm16ToFloats, floatsToPcm16, wavFromPcm, ClipOutOfRange)
+import std/bytes (length)
 import std/math (sqrt)
 import std/option (Option, Some, None)
 import std/result (Ok, Err)
 
--- The RMS every clip is brought to (the kit's voice.LEVEL).
-export pure func target() -> float = 0.07
+-- The RMS every clip is brought to (the kit's voice.LEVEL): well under the clip level, so
+-- clipping touches only a line's few loudest peaks.
+export pure func target() -> float
+  ensures { result > 0.0 && result * 10.0 < 0.98 }
+{
+  0.07
+}
 
--- Samples per second of the clips (the kit's voice.RATE).
-export pure func rate() -> int = 24000
+-- Samples per second of the clips (the kit's voice.RATE). The speech envelope's 120-sample
+-- window is 5 ms at this rate.
+export pure func rate() -> int
+  ensures { result * 5 == 120 * 1000 }
+{
+  24000
+}
 
 -- Samples kept before the speech starts (20 ms) and after its last loud sample (50 ms).
-export pure func lead() -> int = 480
-export pure func tail() -> int = 1200
+export pure func lead() -> int
+  ensures { result * 1000 == 20 * rate() }
+{
+  480
+}
+
+export pure func tail() -> int
+  ensures { result * 1000 == 50 * rate() }
+{
+  1200
+}
 
 -- A part of a line, in samples from its start: [from, to).
 export type Window = { from: int, to: int } deriving (Eq)
@@ -68,7 +88,9 @@ pure func startFrom(xs: Array[float], n: int, e: float, over: float) -> int =
 
 -- Where the speech in a line starts: the first sample whose 5 ms envelope passes 5% of its
 -- loudest. -1 for a silent line.
-export pure func speechStart(xs: Array[float]) -> int =
+export pure func speechStart(xs: Array[float]) -> int
+  ensures { result >= -1 && result < A.length(xs) }
+=
   if A.length(xs) == 0 then -1
   else {
     let e0 = windowAt(xs, 0);
@@ -77,8 +99,14 @@ export pure func speechStart(xs: Array[float]) -> int =
   }
 
 -- The sample to write instead of one past the clip level, or None for one within it.
-export pure func clipped(y: float) -> Option[float] =
+export pure func clipped(y: float) -> Option[float]
+  ensures { match result {
+    Some(c) => (c == 0.98 && y > 0.98) || (c == 0.0 - 0.98 && y < 0.0 - 0.98),
+    None => y <= 0.98 && y >= 0.0 - 0.98
+  } }
+{
   if y > 0.98 then Some(0.98) else if y < -0.98 then Some(-0.98) else None
+}
 
 -- The samples past the clip level and what they become; few or none, since the level is far
 -- below full scale, so they are written in one copy (updateMany) rather than one at a time.
@@ -101,7 +129,10 @@ pure func pcmOf(ys: Array[float], gain: float) -> Option[bytes] {
 
 -- One line of a take (s16le mono at rate()) as a levelled WAV clip: `frames` samples from
 -- sample `from`. None for a line with nothing above 1% of full scale.
-export pure func levelClip(take: bytes, from: int, frames: int) -> Option[bytes] =
+export pure func levelClip(take: bytes, from: int, frames: int) -> Option[bytes]
+  requires { from >= 0 && frames >= 0 }
+  ensures { match result { Some(wav) => length(wav) >= 46 && length(wav) <= 44 + 2 * frames, None => true } }
+=
   match pcm16ToFloats(take, from * 2, frames, 1) {
     Err(_) => None,
     Ok(xs) => {
