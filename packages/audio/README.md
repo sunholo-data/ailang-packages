@@ -21,9 +21,9 @@ ailang pkg-docs sunholo/audio   # AGENT.md: the recipe schema, conventions, pitf
   and explicit Off/PeakSafe/MatchRms preparation with bounded boost and peak ceilings.
 - `block` (0.3.0): checked stateful mono/stereo low-pass/high-pass/bypass,
   independent channel histories, reset and per-block/cumulative budgets.
-- `delay` (0.4.0 candidate): checked integer-frame feedback echo, independent
+- `delay` (0.4.0): checked integer-frame feedback echo, independent
   mono/stereo history, explicit tail rendering/reset and allocation budgets.
-- `automation` (0.4.0 candidate): linked linear-gain ramps, exact target frames,
+- `automation` (0.4.0): linked linear-gain ramps, exact target frames,
   immediate changes and mid-ramp retargeting, independent of block partitioning.
 - `recipe`: layers (sine with glide, vibrato, beat; white or legacy noise), envelopes, filters
   and sweeps, swell, drive, edge fades, peak normalisation; loop rules that refuse clicks.
@@ -54,7 +54,7 @@ and `examples/block_pipeline.ail` for headless recipe and speech/model PCM fixtu
 Loop Lab has [its own application repository](https://github.com/sunholo-data/ailang-loop-lab)
 and consumes this package; its UI/session features are independently versioned.
 
-The **unpublished 0.4.0 candidate** adds delay and gain automation. Both work on
+Version **0.4.0** adds delay and gain automation. Both work on
 source-independent clips: process provider-produced PCM, game assets or DAW tracks
 with the same guards. `examples/effects_pipeline.ail` demonstrates a synthetic
 speech/model PCM fixture → fade → echo → peak preparation → measured WAV. Its

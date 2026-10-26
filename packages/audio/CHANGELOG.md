@@ -2,7 +2,7 @@
 
 ## 0.4.0
 
-Feature candidate: bounded feedback delay and frame-defined gain automation. Not yet published.
+Feature: bounded feedback delay and frame-defined gain automation.
 
 - `delay`: checked mono/stereo integer-frame delay with independent channel
   histories, signed feedback (-0.99..0.99), dry/wet gains, explicit silence tails

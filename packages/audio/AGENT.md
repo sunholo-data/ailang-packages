@@ -487,7 +487,7 @@ prepare levels and return measured WAV identity metadata without IO/model calls.
 These analytic fixtures are not generated human speech or an inference accuracy
 test. `std/ai`/provider adapters remain separate effectful consumers.
 
-## Delay and gain automation (0.4.0 candidate, not yet published)
+## Delay and gain automation (0.4.0)
 
 These pure APIs compose with checked Clip, filters, levels and WAV encoding. They
 own no audio callback, musical tempo, scheduler, model/provider or application state.
