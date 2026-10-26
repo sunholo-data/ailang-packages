@@ -1,8 +1,10 @@
 # Audio 0.4: AI-output processing and DAW foundations
 
-Status: delay and gain automation implemented as an unpublished 0.4.0 feature
-candidate, 2026-10-23. [Evidence](../implemented/audio-effects-0.4.0/README.md).
-Published consumers still use audio 0.3.0 until a new registry release exists.
+Status: delay and gain automation released in audio 0.4.0, 2026-10-26.
+[Release record](../implemented/audio-release-0.4.0/README.md),
+[implementation evidence](../implemented/audio-effects-0.4.0/README.md).
+The [Audio Tools demo design](https://github.com/sunholo-data/ailang-demos/pull/3)
+consumes this version; existing consumers choose their own dependency upgrades.
 
 The package operates on samples independently of who produced them. The DAW
 application owns tracks, arrangement, devices, transport, permissions and projects.
