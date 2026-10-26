@@ -1,0 +1,28 @@
+-- Tests for sunholo/explainer/take: ids name the voice and change with the style and script.
+
+module sunholo/explainer/take_test
+
+import std/string (startsWith, endsWith, length)
+import ./take (voiceId, takeFile, takeStyle, shortHash)
+
+pure func id(style: string, lines: [string]) -> string = voiceId("Sulafat", "en-GB", "gemini-2.5-pro-tts", style, lines)
+
+test "voiceId: who speaks, then the style's and the script's hashes" {
+  startsWith(id("brisk", ["One."]), "gemini:Sulafat:en-GB:gemini-2.5-pro-tts:") && length(id("brisk", ["One."])) == 62
+}
+
+test "voiceId: an edit to the script or the style is a new id" {
+  id("brisk", ["One."]) != id("brisk", ["One!"]) && id("brisk", ["One."]) != id("calm", ["One."])
+}
+
+test "voiceId: a known value (the sixth cut's id is gemini:...:be22660c:film-0163348f)" {
+  shortHash("Narrate clearly and confidently, at a brisk, energetic pace, like a product launch video, in British English", 8) == "be22660c"
+}
+
+test "takeFile: take-<16 hex>.pcm" {
+  startsWith(takeFile("x"), "take-") && endsWith(takeFile("x"), ".pcm") && length(takeFile("x")) == 25
+}
+
+test "takeStyle asks for the pause the cut needs" {
+  takeStyle("brisk") == "brisk. Leave a clear pause between paragraphs"
+}

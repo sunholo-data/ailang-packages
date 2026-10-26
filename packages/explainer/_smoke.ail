@@ -1,0 +1,22 @@
+-- Boot probe: prints "OK: ..." iff a made-up take (sound, a 0.2 s pause, sound) is cut in the
+-- middle of its pause and both lines come back as levelled clips.
+module sunholo/explainer/_smoke
+
+import std/array as A
+import std/audio (floatsToPcm16, ClipOutOfRange)
+import std/io (println)
+import std/list (length)
+import std/result (Ok, Err)
+import ./narrate (cutTake)
+
+pure func silenceFrom(i: int, end: int, acc: [(int, float)]) -> [(int, float)] =
+  if i >= end then acc else silenceFrom(i + 1, end, (i, 0.0) :: acc)
+
+export func main() -> () ! {IO} =
+  match floatsToPcm16(A.updateMany(A.make(28800, 0.5), silenceFrom(9600, 14400, [])), 1, ClipOutOfRange) {
+    Err(m) => println("FAIL: ${m}"),
+    Ok(take) => match cutTake(take, [{ start: 0.0, end: 0.4, word: " Fair" }, { start: 0.6, end: 1.2, word: " question." }], ["Fair.", "Question."]) {
+      Ok(clips) => if length(clips) == 2 then println("OK: one take cut into 2 levelled clips") else println("FAIL: ${show(length(clips))} clips"),
+      Err(m) => println("FAIL: ${m}")
+    }
+  }

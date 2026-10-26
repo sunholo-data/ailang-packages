@@ -1,0 +1,37 @@
+[package]
+name = "sunholo/explainer"
+version = "0.1.0"
+edition = "1"
+ailang = ">=0.54.18"
+description = "Narrate an explainer film in one Gemini take: script to take text and voice id, Whisper words aligned to the script, the take cut into lines at the longest pause, each line trimmed and levelled to PCM16 WAV"
+license = "Apache-2.0"
+
+[release]
+kind = "feature"   # security | fix | feature | breaking
+
+[exports]
+modules = [
+  "sunholo/explainer/take",
+  "sunholo/explainer/words",
+  "sunholo/explainer/align",
+  "sunholo/explainer/cut",
+  "sunholo/explainer/level",
+  "sunholo/explainer/narrate"
+]
+
+# Everything is pure except narrate.speak, which calls the TTS model; IO is the smoke test's.
+[effects]
+max = ["AI", "IO"]
+
+[metadata]
+tags = ["audio", "tts", "gemini", "narration", "video", "explainer", "whisper"]
+ai_summary = "The narration half of an explainer-film pipeline (the picture stays in Manim): voice a whole script in ONE std/ai.callSpeech call so the voice does not drift between lines, align speech-to-text word timings to the script (difflib matching blocks, re-implemented), cut the take at the longest pause between lines, then trim and RMS-level each line into mono PCM16 WAV. Word timings come from the caller (e.g. faster-whisper); per-sample work is meant for the bytecode VM."
+repository = "https://github.com/sunholo-data/ailang-packages/tree/main/packages/explainer"
+homepage = "https://ailang.sunholo.com/docs/packages/sunholo/explainer"
+license_url = "https://github.com/sunholo-data/ailang-packages/blob/main/LICENSE"
+
+[cascade]
+max_cost_usd = 1.00
+
+[stability]
+level = "experimental"
