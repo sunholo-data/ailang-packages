@@ -1,0 +1,209 @@
+module sunholo/linkedin/videos
+
+-- LinkedIn Videos API client (0.6.0).
+--
+-- A multipart upload, then a post:
+--
+--   1. POST /rest/videos?action=initializeUpload {owner, fileSizeBytes}
+--      → { video: "urn:li:video:…", uploadToken, uploadInstructions: [{firstByte, lastByte, uploadUrl}, …] }
+--   2. PUT each part's bytes [firstByte..lastByte] to its uploadUrl (pre-signed, no auth header),
+--      in order, keeping the response's ETag header.
+--   3. POST /rest/videos?action=finalizeUpload {video, uploadToken, uploadedPartIds: [etags in order]}
+--   4. GET /rest/videos/{urn} until status is AVAILABLE (PROCESSING, WAITING_UPLOAD before it;
+--      PROCESSING_FAILED ends it) — the caller polls with linkedinVideoStatus, because how long to wait
+--      is the caller's policy.
+--   5. linkedinCreateVideoPost: a post whose content.media.id is the video URN.
+--
+-- Specification (learn.microsoft.com, LinkedIn Videos API, li-lms-2026-10, read 2026-10-27): the token
+-- needs w_organization_social with ADMIN on the page for an organization owner; MP4, 3 s to 30 min,
+-- 75 KB to 500 MB; parts are 4 MB (4,194,304 bytes), the last one shorter.
+
+import std/net (httpRequest, httpRequestBytes, urlEncode)
+import std/json (encode, decode, getString, getObject, getArray, getInt, jo, ja, kv, js, jint, jb)
+import std/string (length)
+import std/list (map, foldl, length as listLength)
+import std/bytes (slice, length as bytesLength)
+import std/option (Option, Some, None, getOrElse)
+import std/result (Result, Ok, Err)
+import pkg/sunholo/linkedin/posts (linkedinHeaders, linkedinEscapeLittleText, linkedinFindHeader, PostResult)
+
+export type VideoPart = { firstByte: int, lastByte: int, uploadUrl: string }
+export type VideoUpload = { videoUrn: string, uploadToken: string, parts: [VideoPart] }
+
+-- LinkedIn's part size.
+export pure func linkedinVideoPartBytes() -> int { 4194304 }
+
+-- Proven: how many parts a file of `size` bytes is cut into — enough to hold every byte, and not one more.
+export pure func linkedinVideoPartCount(size: int) -> int
+  requires { size > 0 }
+  ensures { result >= 1 && result * 4194304 >= size && (result - 1) * 4194304 < size }
+{ (size + 4194303) / 4194304 }
+
+-- Proven: LinkedIn's limits for a feed video's file (75 KB to 500 MB).
+export pure func linkedinVideoSizeOk(size: int) -> bool
+  ensures { result == (size >= 75000 && size <= 500000000) }
+{ size >= 75000 && size <= 500000000 }
+
+-- Step 1. The instructions cover the file in order; linkedinPartsCover checks that before any byte is sent.
+export func linkedinInitializeVideoUpload(token: string, orgUrn: string, fileSizeBytes: int)
+  -> Result[VideoUpload, string]
+  ! {Net @limit=1}
+{
+  let body = encode(jo([
+    kv("initializeUploadRequest", jo([
+      kv("owner", js(orgUrn)),
+      kv("fileSizeBytes", jint(fileSizeBytes)),
+      kv("uploadCaptions", jb(false)),
+      kv("uploadThumbnail", jb(false))
+    ]))
+  ]));
+  match httpRequest("POST", "https://api.linkedin.com/rest/videos?action=initializeUpload", linkedinHeaders(token), body) {
+    Ok(resp) => if resp.ok then linkedinParseVideoInit(resp.body)
+                else Err("video initializeUpload status ${show(resp.status)}: ${resp.body}"),
+    Err(_) => Err("Network error during video initializeUpload")
+  }
+}
+
+export func linkedinParseVideoInit(body: string) -> Result[VideoUpload, string] {
+  match decode(body) {
+    Err(e) => Err("Failed to parse video initializeUpload response: ${e}"),
+    Ok(json) => match getObject(json, "value") {
+      None => Err("No 'value' object in video initializeUpload response"),
+      Some(v) => {
+        let urn = getOrElse(getString(v, "video"), "");
+        let tok = getOrElse(getString(v, "uploadToken"), "");
+        let parts = match getArray(v, "uploadInstructions") {
+          Some(xs) => map(\p. {
+            firstByte: getOrElse(getInt(p, "firstByte"), -1),
+            lastByte: getOrElse(getInt(p, "lastByte"), -1),
+            uploadUrl: getOrElse(getString(p, "uploadUrl"), "")
+          }, xs),
+          None => []
+        };
+        if length(urn) == 0 then Err("No video URN in initializeUpload response")
+        else if listLength(parts) == 0 then Err("No uploadInstructions in initializeUpload response")
+        else {
+          let u: VideoUpload = { videoUrn: urn, uploadToken: tok, parts: parts };
+          Ok(u)
+        }
+      }
+    }
+  }
+}
+
+-- Tested: the parts start at byte 0, follow each other with no gap or overlap, end at size - 1, and each
+-- has an upload URL. An instruction list that does not cover the file is refused before anything is sent.
+export pure func linkedinPartsCover(size: int, parts: [VideoPart]) -> bool {
+  let r = foldl(\st. \p. {next: p.lastByte + 1, ok: st.ok && p.firstByte == st.next && p.lastByte >= p.firstByte && length(p.uploadUrl) > 0},
+                {next: 0, ok: true}, parts) in
+  r.ok && r.next == size && listLength(parts) > 0
+}
+
+-- Step 2, one part: PUT the bytes and return LinkedIn's ETag for it (the finalize step's part id).
+export func linkedinUploadVideoPart(uploadUrl: string, part: bytes) -> Result[string, string] ! {Net @limit=1} {
+  match httpRequestBytes("PUT", uploadUrl, [{ name: "Content-Type", value: "application/octet-stream" }], part) {
+    Ok(resp) => {
+      let etag = linkedinFindHeader(resp.headers, "etag");
+      if not resp.ok then Err("video part upload status ${show(resp.status)}")
+      else if length(etag) == 0 then Err("video part uploaded but LinkedIn returned no ETag")
+      else Ok(etag)
+    },
+    Err(_) => Err("Network error during video part upload")
+  }
+}
+
+-- Step 3.
+export func linkedinFinalizeVideoUpload(token: string, videoUrn: string, uploadToken: string, etags: [string])
+  -> Result[(), string]
+  ! {Net @limit=1}
+{
+  let body = encode(jo([
+    kv("finalizeUploadRequest", jo([
+      kv("video", js(videoUrn)),
+      kv("uploadToken", js(uploadToken)),
+      kv("uploadedPartIds", ja(map(\e. js(e), etags)))
+    ]))
+  ]));
+  match httpRequest("POST", "https://api.linkedin.com/rest/videos?action=finalizeUpload", linkedinHeaders(token), body) {
+    Ok(resp) => if resp.ok then Ok(()) else Err("video finalizeUpload status ${show(resp.status)}: ${resp.body}"),
+    Err(_) => Err("Network error during video finalizeUpload")
+  }
+}
+
+-- Step 4, one look: AVAILABLE, PROCESSING, WAITING_UPLOAD or PROCESSING_FAILED (with its reason).
+export func linkedinVideoStatus(token: string, videoUrn: string) -> Result[string, string] ! {Net @limit=1} {
+  match httpRequest("GET", "https://api.linkedin.com/rest/videos/${urlEncode(videoUrn)}", linkedinHeaders(token), "") {
+    Ok(resp) => if not resp.ok then Err("video status ${show(resp.status)}: ${resp.body}")
+                else (match decode(resp.body) {
+                  Ok(j) => {
+                    let st = getOrElse(getString(j, "status"), "");
+                    let why = getOrElse(getString(j, "processingFailureReason"), "");
+                    if length(st) == 0 then Err("video status response has no status")
+                    else if st == "PROCESSING_FAILED" then Ok("PROCESSING_FAILED ${why}")
+                    else Ok(st)
+                  },
+                  Err(e) => Err("Failed to parse video status: ${e}")
+                }),
+    Err(_) => Err("Network error during video status")
+  }
+}
+
+-- Steps 1–3 in one call: initialize, check the instructions cover the file, PUT every part in order
+-- (stopping at the first failure), finalize. Returns the video URN; poll linkedinVideoStatus until
+-- AVAILABLE before posting it.
+export func linkedinUploadVideo(token: string, orgUrn: string, video: bytes)
+  -> Result[string, string]
+  ! {Net @limit=200}
+{
+  let size = bytesLength(video);
+  if not linkedinVideoSizeOk(size) then Err("the video is ${show(size)} bytes; LinkedIn takes 75,000 to 500,000,000")
+  else match linkedinInitializeVideoUpload(token, orgUrn, size) {
+    Err(e) => Err(e),
+    Ok(init) =>
+      if not linkedinPartsCover(size, init.parts) then Err("LinkedIn's upload instructions do not cover the file")
+      else {
+        let sent = foldl(\st. \p.
+          if st.err != "" then st
+          else match slice(video, p.firstByte, p.lastByte + 1) {
+            None => {err: "could not cut bytes ${show(p.firstByte)}..${show(p.lastByte)}", etags: st.etags},
+            Some(b) => match linkedinUploadVideoPart(p.uploadUrl, b) {
+              Ok(etag) => {err: "", etags: st.etags ++ [etag]},
+              Err(e) => {err: e, etags: st.etags}
+            }
+          }, {err: "", etags: []}, init.parts);
+        if sent.err != "" then Err(sent.err)
+        else match linkedinFinalizeVideoUpload(token, init.videoUrn, init.uploadToken, sent.etags) {
+          Ok(_) => Ok(init.videoUrn),
+          Err(e) => Err(e)
+        }
+      }
+  }
+}
+
+-- Step 5: a post carrying the video. `title` is shown with the video (LinkedIn's content.media.title).
+export func linkedinCreateVideoPost(token: string, orgUrn: string, text: string, videoUrn: string, title: string)
+  -> Result[PostResult, string]
+  ! {Net @limit=1}
+requires { length(text) > 0 && length(text) <= 3000 }
+{
+  let body = encode(jo([
+    kv("author", js(orgUrn)),
+    kv("commentary", js(linkedinEscapeLittleText(text))),
+    kv("visibility", js("PUBLIC")),
+    kv("distribution", jo([ kv("feedDistribution", js("MAIN_FEED")) ])),
+    kv("content", jo([ kv("media", jo([ kv("id", js(videoUrn)), kv("title", js(title)) ])) ])),
+    kv("lifecycleState", js("PUBLISHED"))
+  ]));
+  match httpRequest("POST", "https://api.linkedin.com/rest/posts", linkedinHeaders(token), body) {
+    Ok(resp) => {
+      let urn = linkedinFindHeader(resp.headers, "x-restli-id");
+      if not resp.ok then Err("LinkedIn API error (status ${show(resp.status)}): ${resp.body}")
+      else if length(urn) == 0 then Err("LinkedIn accepted the video post but returned no x-restli-id")
+      else {
+        let r: PostResult = { postUrn: urn, slug: "", publishedAt: "" };
+        Ok(r)
+      }
+    },
+    Err(_) => Err("Network error creating LinkedIn video post")
+  }
+}
