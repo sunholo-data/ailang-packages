@@ -1,20 +1,21 @@
 [package]
 name = "sunholo/linkedin"
-version = "0.5.1"
+version = "0.6.0"
 edition = "1"
 ailang = ">=0.19.0"
-description = "LinkedIn API client for AILANG: OAuth2 auth, publish text + image posts on a company page, read threaded comments, derive GDPR-safe pseudonymous personas for public display."
+description = "LinkedIn API client for AILANG: OAuth2 auth, publish text, image and video posts on a company page, read threaded comments, derive GDPR-safe pseudonymous personas for public display."
 license = "Apache-2.0"
 
 [release]
-kind = "fix"
+kind = "feature"
 
 [exports]
 modules = [
   "sunholo/linkedin/auth",
   "sunholo/linkedin/posts",
   "sunholo/linkedin/comments",
-  "sunholo/linkedin/images"
+  "sunholo/linkedin/images",
+  "sunholo/linkedin/videos"
 ]
 
 [dependencies]
@@ -24,8 +25,8 @@ modules = [
 max = ["Net", "FS", "Env", "Declassify", "IO"]
 
 [metadata]
-tags = ["linkedin", "social", "oauth2", "marketing", "publishing", "comments", "gdpr", "ifc-labels"]
-ai_summary = "LinkedIn REST API client. Publish text + image posts on a company page (Net @limit=1, requires text length 1..3000). Read threaded comments (per-post @limit=1, sweep @limit=50). Derive stable pseudonymous personas from actor URNs via SHA-256 — initials + 6-hex avatar seed, IFC-Declassify-typed so the raw URN cannot leak. Credentials live in ~/.ailang/linkedin/credentials.json with automatic OAuth2 refresh."
+tags = ["linkedin", "social", "oauth2", "marketing", "publishing", "comments", "gdpr", "ifc-labels", "video"]
+ai_summary = "LinkedIn REST API client. Publish text, image and video posts on a company page (Net @limit=1, requires text length 1..3000); videos by the multipart Videos API (4 MB parts, ETags, finalize, poll to AVAILABLE). Read threaded comments (per-post @limit=1, sweep @limit=50). Derive stable pseudonymous personas from actor URNs via SHA-256 — initials + 6-hex avatar seed, IFC-Declassify-typed so the raw URN cannot leak. Credentials live in ~/.ailang/linkedin/credentials.json with automatic OAuth2 refresh."
 repository = "https://github.com/sunholo-data/ailang-packages/tree/main/packages/linkedin"
 homepage = "https://ailang.sunholo.com/docs/packages/sunholo/linkedin"
 documentation = "https://github.com/sunholo-data/ailang-packages/blob/main/packages/linkedin/README.md"

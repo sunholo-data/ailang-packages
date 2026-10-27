@@ -1,5 +1,16 @@
 # sunholo/linkedin — CHANGELOG
 
+## 0.6.0
+- New module `sunholo/linkedin/videos`: the Videos API's multipart upload for posts with a video.
+  `linkedinInitializeVideoUpload`, `linkedinUploadVideoPart` (returns the part's ETag),
+  `linkedinFinalizeVideoUpload`, `linkedinVideoStatus` (poll to `AVAILABLE`), the one-call
+  `linkedinUploadVideo`, and `linkedinCreateVideoPost` (`content.media.id` + `title`).
+- Proven: `linkedinVideoPartCount` (4 MB parts, enough and not one more) and `linkedinVideoSizeOk`
+  (75 KB to 500 MB). Tested: `linkedinPartsCover` refuses instructions with a gap, an overlap, a short
+  cover or a part with no URL, before a byte is sent.
+- First consumer: Daneel's LinkedIn calendar (sunholo-data/daneel, M-DANEEL-LINKEDIN-MEDIA).
+- No existing signature changed.
+
 ## 0.5.1
 - Fix STRICT_FALLBACK_001 in `comments.ail`: a comments/replies response that
   returns HTTP 200 but is missing the `elements` field is now reported as

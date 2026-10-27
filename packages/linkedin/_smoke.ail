@@ -22,6 +22,8 @@ import std/io (println)
 import std/string (length, intToStr)
 import sunholo/linkedin/posts (linkedinEscapeLittleText)
 import sunholo/linkedin/comments (linkedinDerivePersona)
+import sunholo/linkedin/videos (linkedinVideoPartCount, linkedinVideoSizeOk, linkedinPartsCover, linkedinParseVideoInit)
+import std/result (Ok, Err)
 
 func check(name: string, got: string, want: string) -> int ! {IO} {
   if got == want then {
@@ -79,8 +81,25 @@ export func main() -> () ! {IO} {
   let pp5 = checkInt("initials is 2 chars",   length(p1.initials),   2);
   let pp6 = checkInt("avatarSeed is 6 chars", length(p1.avatarSeed), 6);
 
-  let total = e1 + e2 + e3 + e4 + e5 + e6 + pp1 + pp2 + pp3 + pp4 + pp5 + pp6;
-  let expected = 12;
+  println("");
+  println("videos: multipart upload, offline");
+  let v1 = checkInt("one part for 1 byte",            linkedinVideoPartCount(1), 1);
+  let v2 = checkInt("one part for exactly 4 MB",      linkedinVideoPartCount(4194304), 1);
+  let v3 = checkInt("two parts for 4 MB + 1",         linkedinVideoPartCount(4194305), 2);
+  let v4 = check("74,999 bytes is too small",         show(linkedinVideoSizeOk(74999)), "false");
+  let v5 = check("10 MB is within the limits",        show(linkedinVideoSizeOk(10000000)), "true");
+  let two = [{firstByte: 0, lastByte: 4194303, uploadUrl: "u1"}, {firstByte: 4194304, lastByte: 5000000, uploadUrl: "u2"}];
+  let v6 = check("two parts cover 5,000,001 bytes",   show(linkedinPartsCover(5000001, two)), "true");
+  let v7 = check("a gap is refused",                  show(linkedinPartsCover(5000001, [{firstByte: 0, lastByte: 4194303, uploadUrl: "u1"}, {firstByte: 4194305, lastByte: 5000000, uploadUrl: "u2"}])), "false");
+  let v8 = check("a short cover is refused",          show(linkedinPartsCover(6000000, two)), "false");
+  let v9 = check("a part with no URL is refused",     show(linkedinPartsCover(5000001, [{firstByte: 0, lastByte: 4194303, uploadUrl: "u1"}, {firstByte: 4194304, lastByte: 5000000, uploadUrl: ""}])), "false");
+  let init = "{\"value\":{\"uploadUrlsExpireAt\":1633234498985,\"video\":\"urn:li:video:C5505AQH\",\"uploadInstructions\":[{\"uploadUrl\":\"https://www.linkedin.com/dms-uploads/x\",\"lastByte\":4194303,\"firstByte\":0}],\"uploadToken\":\"\"}}";
+  let v10 = check("init response parses",             match linkedinParseVideoInit(init) { Ok(u) => (match u.parts { [p] => "${u.videoUrn} ${show(p.firstByte)}-${show(p.lastByte)} ${p.uploadUrl}", _ => "parts" }), Err(e) => e },
+                  "urn:li:video:C5505AQH 0-4194303 https://www.linkedin.com/dms-uploads/x");
+  let v11 = check("init with no URN is an error",     match linkedinParseVideoInit("{\"value\":{}}") { Ok(_) => "ok", Err(_) => "err" }, "err");
+
+  let total = e1 + e2 + e3 + e4 + e5 + e6 + pp1 + pp2 + pp3 + pp4 + pp5 + pp6 + v1 + v2 + v3 + v4 + v5 + v6 + v7 + v8 + v9 + v10 + v11;
+  let expected = 23;
   println("");
   if total == expected then println("OK: ${intToStr(total)}/${intToStr(expected)} assertions passed")
   else println("FAIL: ${intToStr(total)}/${intToStr(expected)} assertions passed")
