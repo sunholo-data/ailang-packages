@@ -1,0 +1,147 @@
+-- Check values for sunholo/observe/lightcone: stapledons-design
+-- physics/relativity-spec.md RS-26..RS-37 (the "Light cone and Earth's link"
+-- row). Expected values are closed forms or the spec's printed digits, never
+-- this module's output:
+--   Earth rate astern e^-phi = sqrt((1 - beta) / (1 + beta)), ahead e^phi,
+--   written from 1 - beta so the top speed (1 - beta = 1e-6) is exact;
+--   catch-up delta / (1 - beta); excess |a| + |b| - |ab| by hand.
+-- The rates are checked to 1e-9 relative against the closed forms and to the
+-- spec's printed digits; RS-34 to its printed 1e-3.
+--
+-- Private names carry an `lc` prefix: the test runner mixes up same-named
+-- private functions across modules (ailang#1461).
+
+module sunholo/observe/lightcone_test
+
+import std/math (sqrt, exp)
+import pkg/sunholo/relativity/optics (Vec3)
+import pkg/sunholo/relativity/hyper (absf, atanh)
+import pkg/sunholo/relativity/kinematics (oneMinusBeta, rapidityOfOneMinusBeta)
+import ./lightcone (seenAt, catchUp, triangleExcess, onBeamLine, linkWindow, earthRate, atSolLy)
+
+pure func lcRel(got: float, want: float, tol: float) -> bool = absf(got - want) <= tol * absf(want)
+pure func lcAbs(got: float, want: float, tol: float) -> bool = absf(got - want) <= tol
+pure func lcV(x: float, y: float, z: float) -> Vec3 = { x: x, y: y, z: z }
+pure func lcO() -> Vec3 = lcV(0.0, 0.0, 0.0)
+pure func lcDay() -> float = 1.0 / 365.25
+pure func lcTol() -> float = 0.0000001
+
+-- A ship 40 ly out along +x, heading `h`, at the rapidity whose 1 - beta is omb.
+pure func lcRate(omb: float, h: Vec3) -> float = earthRate(lcV(40.0, 0.0, 0.0), h, rapidityOfOneMinusBeta(omb))
+pure func lcAstern(omb: float) -> float = sqrt(omb / (2.0 - omb))
+pure func lcAhead(omb: float) -> float = sqrt((2.0 - omb) / omb)
+pure func lcOut() -> Vec3 = lcV(1.0, 0.0, 0.0)
+pure func lcHome() -> Vec3 = lcV(-1.0, 0.0, 0.0)
+
+-- ---------- RS-26..RS-30: the Earth rate ----------
+
+pure func lcRs26() -> bool { let d = lcRate(0.01, lcOut()); lcRel(d, lcAstern(0.01), 0.000000001) && lcAbs(d, 0.070888, 0.0000005) }
+test "RS-26: Earth rate astern at 0.99c is e^-phi = 0.070888" { lcRs26() }
+
+pure func lcRs27() -> bool { let d = lcRate(0.001, lcOut()); lcRel(d, lcAstern(0.001), 0.000000001) && lcAbs(d, 0.022366, 0.0000005) }
+test "RS-27: Earth rate astern at 0.999c is 0.022366" { lcRs27() }
+
+pure func lcRs28() -> bool { let d = lcRate(0.000001, lcOut()); lcRel(d, lcAstern(0.000001), 0.000000001) && lcAbs(d, 0.00070711, 0.000000005) }
+test "RS-28: Earth rate astern at the top speed (beta 0.999999) is 7.0711e-4" { lcRs28() }
+
+pure func lcRs29() -> bool { let d = lcRate(0.01, lcHome()); lcRel(d, lcAhead(0.01), 0.000000001) && lcAbs(d, 14.107, 0.0005) }
+test "RS-29: Earth rate ahead (heading home) at 0.99c is e^phi = 14.107" { lcRs29() }
+
+pure func lcRs30() -> bool { let d = lcRate(0.000001, lcHome()); lcRel(d, lcAhead(0.000001), 0.000000001) && lcAbs(d, 1414.2, 0.05) }
+test "RS-30: Earth rate ahead at the top speed is 1414.2" { lcRs30() }
+
+-- A sideways heading reads gamma (cos theta = 0), and astern-ahead are reciprocal.
+pure func lcSideways() -> bool {
+  let phi = atanh(0.6);
+  lcRel(earthRate(lcV(40.0, 0.0, 0.0), lcV(0.0, 1.0, 0.0), phi), 1.25, 0.000000001) &&
+  lcRel(lcRate(0.01, lcOut()) * lcRate(0.01, lcHome()), 1.0, 0.000000001)
+}
+test "Earth rate sideways at 0.6c is gamma 1.25; astern times ahead is 1" { lcSideways() }
+
+-- At Sol: rate 1 at rest, e^-phi leaving (continuous with just outside).
+pure func lcAtSol() -> bool {
+  let phi = atanh(0.99);
+  earthRate(lcO(), lcO(), 0.0) == 1.0 &&
+  earthRate(lcO(), lcOut(), 0.0) == 1.0 &&
+  lcRel(earthRate(lcO(), lcOut(), phi), exp(0.0 - phi), 0.000000001) &&
+  lcRel(earthRate(lcV(0.000000000001, 0.0, 0.0), lcOut(), phi), exp(0.0 - phi), 0.000000001) &&
+  lcRel(earthRate(lcV(0.000001, 0.0, 0.0), lcOut(), phi), exp(0.0 - phi), 0.000000001) &&
+  atSolLy() == 0.000000000001
+}
+test "Earth rate at Sol: 1 at rest, e^-phi leaving, continuous across the 1e-12 ly guard" { lcAtSol() }
+
+-- ---------- RS-31, RS-32: catch-up ----------
+
+pure func lcRs31() -> bool { lcAbs(catchUp(lcDay(), oneMinusBeta(atanh(0.9))) / lcDay(), 10.0, 0.000000001) }
+test "RS-31: a signal sent one day after departure catches a 0.9c ship 10 days after departure" { lcRs31() }
+
+pure func lcRs32() -> bool {
+  let t = catchUp(lcDay(), oneMinusBeta(rapidityOfOneMinusBeta(0.000001)));
+  lcRel(t, 1000000.0 / 365.25, 0.000000001) && lcAbs(t, 2737.9, 0.05)
+}
+test "RS-32: the same signal at beta 0.999999 catches up after 1e6 days = 2,737.9 yr" { lcRs32() }
+
+-- ---------- RS-33..RS-36: triangle excess ----------
+
+pure func lcRs33() -> bool { lcAbs(triangleExcess(lcV(40.0, 0.0, 0.0), lcV(40.0, 30.0, 0.0)), 60.0, 0.000000001) }
+test "RS-33: from a port 40 ly out, a 30 ly right-angle turn: excess 60 ly" { lcRs33() }
+
+pure func lcRs34() -> bool {
+  let e = triangleExcess(lcV(40.0, 0.0, 0.0), lcV(0.0, 10.0, 0.0));
+  lcAbs(e, 50.0 - sqrt(1700.0), 0.000000001) && lcAbs(e, 8.769, 0.001)
+}
+test "RS-34: from a port 40 ly out to a star 10 ly from Sol at right angles: excess 8.769 ly" { lcRs34() }
+
+pure func lcRs35() -> bool { triangleExcess(lcV(40.0, 0.0, 0.0), lcV(-40.0, 0.0, 0.0)) == 0.0 && triangleExcess(lcV(0.0, 0.0, 4.37), lcV(0.3, -0.2, -11.9)) < 0.01 }
+test "RS-35: B on the far side of Sol from A: excess 0 (the formula's only zero)" { lcRs35() }
+
+pure func lcRs36() -> bool { lcAbs(triangleExcess(lcV(40.0, 0.0, 0.0), lcV(60.0, 0.0, 0.0)), 80.0, 0.000000001) && lcAbs(triangleExcess(lcV(40.0, 0.0, 0.0), lcV(20.0, 0.0, 0.0)), 40.0, 0.000000001) }
+test "RS-36: B beyond A on Sol's ray (A 40, B 60): excess 80 ly; between Sol and A (B 20): 40" { lcRs36() }
+
+-- ---------- onBeamLine (RS-36 geometry) ----------
+
+pure func lcBeamLine() -> bool {
+  let port = lcV(40.0, 0.0, 0.0);
+  onBeamLine(port, lcV(60.0, 0.0, 0.0), lcTol()) &&
+  onBeamLine(port, lcV(20.0, 0.0, 0.0), lcTol()) &&
+  onBeamLine(port, port, lcTol()) &&
+  !onBeamLine(port, lcV(-40.0, 0.0, 0.0), lcTol()) &&
+  !onBeamLine(port, lcO(), lcTol()) &&
+  !onBeamLine(lcO(), port, lcTol()) &&
+  !onBeamLine(port, lcV(40.0, 30.0, 0.0), lcTol()) &&
+  -- 1e-6 ly off a 40 ly ray is 2.5e-8 rad: on at 1e-7, off at 1e-8.
+  onBeamLine(port, lcV(40.0, 0.000001, 0.0), lcTol()) &&
+  !onBeamLine(port, lcV(40.0, 0.000001, 0.0), 0.00000001) &&
+  -- a 10,000 ly port: 1e-4 ly off is 1e-8 rad, resolved by the atan2 form
+  onBeamLine(lcV(10000.0, 0.0, 0.0), lcV(10000.0, 0.0001, 0.0), 0.00000002) &&
+  !onBeamLine(lcV(10000.0, 0.0, 0.0), lcV(10000.0, 0.0001, 0.0), 0.000000005)
+}
+test "onBeamLine: beyond and between are on the ray, the far side and Sol are not; atan2 resolves 1e-8 rad" { lcBeamLine() }
+
+-- ---------- RS-33, RS-37: the link window ----------
+
+pure func lcWindow() -> bool {
+  let a = lcV(40.0, 0.0, 0.0);
+  let b = lcV(40.0, 30.0, 0.0);
+  lcAbs(linkWindow(a, b, 30.0, false), 60.0, 0.000000001) &&
+  lcAbs(linkWindow(a, b, 30.0 / 0.9, false), 90.0 - 30.0 / 0.9, 0.000000001) &&
+  linkWindow(a, b, 30.0, true) == 0.0 &&
+  linkWindow(a, b, 200.0, false) == 0.0 &&
+  linkWindow(a, lcV(60.0, 0.0, 0.0), 20.0, onBeamLine(a, lcV(60.0, 0.0, 0.0), lcTol())) == 0.0 &&
+  linkWindow(a, lcV(20.0, 0.0, 0.0), 20.0, onBeamLine(a, lcV(20.0, 0.0, 0.0), lcTol())) == 0.0
+}
+test "RS-33/RS-37: wait 60 yr at a right-angle port at high gamma, less on a slow leg, 0 when covered" { lcWindow() }
+
+-- ---------- seenAt ----------
+
+-- The alpha Cen news epoch of M4.4 AC1 (stapledons-godot consequence_test):
+-- docked 4.37 ly out less the 1000 AU stand-off, at galaxy time
+-- 0.043984 + 4.3541875, the newest Earth light left Sol at 0.043984.
+pure func lcSeen() -> bool {
+  let d = 4.37 - 0.0158125;
+  let p = lcV(0.0, 0.0, 0.0 - d);
+  lcAbs(seenAt(0.043984 + d, p, lcO()), 0.043984, 0.000000001) &&
+  seenAt(10.0, lcV(3.0, 4.0, 0.0), lcO()) == 5.0 &&
+  seenAt(10.0, lcV(3.0, 4.0, 0.0), lcV(3.0, 4.0, 0.0)) == 10.0
+}
+test "seenAt: the alpha Cen news epoch 0.043984; a 5 ly source is seen 5 yr late" { lcSeen() }

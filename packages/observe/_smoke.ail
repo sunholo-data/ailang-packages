@@ -1,0 +1,49 @@
+-- Boot probe for publish: prints "OK: ..." iff independent checks hold in a
+-- clean workdir — the Earth rate astern at the top speed (RS-28), the
+-- catch-up of a one-day-late signal at 0.9c (RS-31), the right-angle excess
+-- (RS-33), and a covered port's zero wait (RS-37).
+--
+-- linkProbe is the VM-vs-interpreter probe: pure, and the strict bytecode VM
+-- must print the same bytes as the interpreter. From packages/observe:
+--   ailang run --quiet --relax-modules --bytecode --strict-bytecode --entry linkProbe --args-json 64 _smoke.ail
+--   ailang run --quiet --relax-modules --entry linkProbe --args-json 64 _smoke.ail
+--   ailang run --quiet --relax-modules --caps IO --entry main _smoke.ail
+module sunholo/observe/_smoke
+
+import std/io (println)
+import std/math (sqrt, sin, cos, intToFloat)
+import std/list (length)
+import pkg/sunholo/relativity/optics (Vec3)
+import pkg/sunholo/relativity/hyper (absf, atanh)
+import pkg/sunholo/relativity/kinematics (oneMinusBeta, rapidityOfOneMinusBeta)
+import ./lightcone (seenAt, catchUp, triangleExcess, onBeamLine, linkWindow, earthRate)
+
+pure func v(x: float, y: float, z: float) -> Vec3 = { x: x, y: y, z: z }
+
+-- every function over an n-step sweep of ports and headings, in order
+pure func row(k: int, n: int, acc: [float]) -> [float] =
+  if k > n then acc
+  else {
+    let u = intToFloat(k) / intToFloat(n);
+    let a = v(40.0 * cos(6.0 * u), 40.0 * sin(6.0 * u), 3.0 * u);
+    let b = v(10.0 + 20.0 * u, 0.0 - 5.0 * u, 12.0 * cos(2.0 * u));
+    let h = v(cos(5.0 * u), sin(5.0 * u), 0.0);
+    let phi = 0.1 + 14.0 * u;
+    let covered = if onBeamLine(a, b, 0.0000001) then 1.0 else 0.0;
+    row(k + 1, n, earthRate(a, h, phi) :: triangleExcess(a, b) :: linkWindow(a, b, 30.0 * u, false) :: seenAt(100.0 * u, a, b) ::
+      catchUp(u, oneMinusBeta(phi)) :: covered :: acc)
+  }
+
+export pure func linkProbe(n: int) -> [float] = row(0, n, [])
+
+export func main() -> () ! {IO} {
+  let rate = earthRate(v(40.0, 0.0, 0.0), v(1.0, 0.0, 0.0), rapidityOfOneMinusBeta(0.000001));
+  let catch = catchUp(1.0, oneMinusBeta(atanh(0.9)));
+  let excess = triangleExcess(v(40.0, 0.0, 0.0), v(40.0, 30.0, 0.0));
+  let a = v(40.0, 0.0, 0.0);
+  let covered = linkWindow(a, v(60.0, 0.0, 0.0), 20.0, onBeamLine(a, v(60.0, 0.0, 0.0), 0.0000001));
+  let ok = absf(rate - sqrt(0.000001 / 1.999999)) < 0.000000000001 && absf(catch - 10.0) < 0.000000001 &&
+    absf(excess - 60.0) < 0.000000001 && covered == 0.0 && length(linkProbe(8)) == 54;
+  if ok then println("OK: sunholo/observe rate ${show(rate)} catch-up ${show(catch)} excess ${show(excess)} covered ${show(covered)}")
+  else println("FAIL: sunholo/observe rate ${show(rate)} catch-up ${show(catch)} excess ${show(excess)} covered ${show(covered)}")
+}

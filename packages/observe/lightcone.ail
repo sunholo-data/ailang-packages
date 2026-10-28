@@ -1,0 +1,109 @@
+-- sunholo/observe/lightcone — what reaches an observer, and when, at c = 1.
+--
+-- Conventions (the same as sunholo/relativity):
+--   c = 1; positions in light-years, times in years, galaxy (rest) frame
+--   Sol (home, the transmitter) is the origin
+--   sources are static in the galaxy frame, so the light-travel time is the
+--   distance exactly (no retarded-time iteration; for moving Solar System
+--   bodies use sunholo/celestial's lighttime)
+--   heading  unit direction of the ship's velocity
+--   phi      ship rapidity (>= 0), beta = tanh phi
+-- Doppler stays in sunholo/relativity: earthRate composes its
+-- gammaOnePlusBetaCos, and catchUp takes 1 - beta from its
+-- kinematics.oneMinusBeta. Nothing here computes 1 - beta.
+
+module sunholo/observe/lightcone
+
+import std/math (atan2)
+import pkg/sunholo/relativity/optics (Vec3, dot, norm, gammaOnePlusBetaCos)
+
+export pure func sub(a: Vec3, b: Vec3) -> Vec3 = { x: a.x - b.x, y: a.y - b.y, z: a.z - b.z }
+
+export pure func cross(a: Vec3, b: Vec3) -> Vec3 =
+  { x: a.y * b.z - a.z * b.y, y: a.z * b.x - a.x * b.z, z: a.x * b.y - a.y * b.x }
+
+-- Below this distance (light-years, about 9.5 km) a position is Sol itself.
+export pure func atSolLy() -> float = 0.000000000001
+
+-- The emission time of the light from a static source at `src` that reaches
+-- an observer at `obs` at galaxy time t: t - |obs - src|.
+export pure func seenAt(t: float, obs: Vec3, src: Vec3) -> float
+  ensures { result <= t }
+{
+  t - norm(sub(obs, src))
+}
+
+-- A signal sent `delta` after a ship leaves on a straight outbound cruise at
+-- speed beta (the signal chasing it along its path) reaches the ship
+-- delta / (1 - beta) after departure, in galaxy time. The caller passes
+-- 1 - beta from kinematics.oneMinusBeta; it is never computed here.
+export pure func catchUp(delta: float, oneMinusBeta: float) -> float
+  requires { delta >= 0.0 && oneMinusBeta > 0.0 && oneMinusBeta <= 1.0 }
+  ensures { result >= delta }
+{
+  delta / oneMinusBeta
+}
+
+-- The triangle excess |a| + |b| - |b - a|, Sol at the origin: the extra light
+-- path Sol -> a -> b has over the straight line a -> b. It is >= 0 (the
+-- triangle inequality; a rounding residue below 0 is returned as 0), and 0
+-- only when b lies on the far side of Sol from a. It is pure geometry: it is
+-- not the wait at b when b is on a beam's ray (see linkWindow).
+export pure func triangleExcess(a: Vec3, b: Vec3) -> float
+  ensures { result >= 0.0 }
+{
+  let e = norm(a) + norm(b) - norm(sub(b, a));
+  if e < 0.0 then 0.0 else e
+}
+
+-- p lies on the ray from Sol through `port`: in front of Sol (p . port > 0;
+-- Sol itself and the far side are not on it) and within angTol radians of
+-- the ray. The angle is atan2(|p x port|, p . port), which keeps full
+-- precision at angTol ~ 1e-7 rad, where a cosine test (cos >= 1 - 5e-15)
+-- runs into float64 resolution.
+export pure func onBeamLine(port: Vec3, p: Vec3, angTol: float) -> bool
+  requires { angTol >= 0.0 }
+{
+  let d = dot(p, port);
+  d > 0.0 && atan2(norm(cross(p, port)), d) <= angTol
+}
+
+-- The wait at port b, after arriving, for Sol's light aimed at a plan sent
+-- from port a when the leg was committed: the plan reaches Sol |a| after the
+-- commit, and the light Sol then aims at b arrives |b| later, while the ship
+-- arrives legT (the leg's galaxy time) after the commit. So the wait is
+-- max(0, |a| + |b| - legT): the triangle excess when legT ~ |ab| (high
+-- gamma), less on a slow leg. `covered` (b on the ray of the beam Sol was
+-- already aiming when the plan was sent) makes it 0.
+export pure func linkWindow(a: Vec3, b: Vec3, legT: float, covered: bool) -> float
+  requires { legT >= 0.0 }
+  ensures { result >= 0.0 }
+{
+  if covered then 0.0
+  else {
+    let w = norm(a) + norm(b) - legT;
+    if w > 0.0 then w else 0.0
+  }
+}
+
+-- The Earth rate: Sol-seconds of history received per ship-second, the
+-- Doppler factor gamma (1 + beta cos theta) for Sol's rest-frame direction
+-- n = -pos / |pos| (relativity optics.doppler). Straight astern it is e^-phi,
+-- straight ahead e^phi, 1 at rest. At Sol (|pos| < atSolLy()) Sol's direction
+-- is taken as -heading, so leaving Sol reads e^-phi continuously and a ship
+-- at rest at Sol reads 1. The cosine is clamped to [-1, 1] before
+-- gammaOnePlusBetaCos (the function doppler applies), because two
+-- normalised vectors can dot to 1 + 1 ulp.
+export pure func earthRate(pos: Vec3, heading: Vec3, phi: float) -> float
+  requires { phi >= 0.0 && phi <= 700.0 }
+  ensures { result > 0.0 }
+{
+  let r = norm(pos);
+  -- At Sol, Sol is straight astern: cos theta = -1 for any (unit) heading;
+  -- with no heading the ship is at rest and phi = 0 makes D = 1 for any c.
+  let c = if r < atSolLy() then (if norm(heading) > 0.0 then -1.0 else 0.0)
+          else 0.0 - dot(pos, heading) / r;
+  gammaOnePlusBetaCos(phi, clampUnit(c))
+}
+
+pure func clampUnit(c: float) -> float = if c > 1.0 then 1.0 else if c < -1.0 then -1.0 else c
