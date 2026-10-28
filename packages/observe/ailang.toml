@@ -1,0 +1,29 @@
+[package]
+name = "sunholo/observe"
+version = "0.1.0"
+edition = "1"
+ailang = ">=0.54.18"
+description = "Pure observation geometry at c = 1: when light from a static source is seen (the light cone), how long a signal takes to catch a ship on a straight cruise, the triangle excess and link window of a plan relayed via home, whether a point lies on a beam's ray from home, and the home rate (the Doppler factor for home's direction, from sunholo/relativity)"
+license = "Apache-2.0"
+
+[exports]
+modules = ["sunholo/observe/lightcone"]
+
+[dependencies]
+"sunholo/relativity" = "0.12.0" # optics.gammaOnePlusBetaCos (the Doppler factor), Vec3; kinematics.oneMinusBeta is the caller's
+
+[effects]
+max = ["IO"]  # every export is pure; IO is used only by _smoke.ail to print its verdict
+
+[metadata]
+tags = ["physics", "relativity", "light-cone", "signals", "communication", "games", "simulation"]
+ai_summary = "Pure observation geometry in c = 1 units (light-years, years, galaxy frame, home at the origin). lightcone: seenAt(t, obs, src) = t - |obs - src| for a static source; catchUp(delta, oneMinusBeta) = delta / (1 - beta), when a signal sent delta after departure reaches a ship on a straight outbound cruise (pass 1 - beta from sunholo/relativity kinematics.oneMinusBeta); triangleExcess(a, b) = |a| + |b| - |b - a|, >= 0, zero only with b on the far side of home; onBeamLine(port, p, angTol), p on the ray from home through port by an atan2 angle that resolves 1e-8 rad (home and the far side excluded); linkWindow(a, b, legT, covered) = 0 if covered else max(0, |a| + |b| - legT), the wait at b for home's reply to a plan sent from a; earthRate(pos, heading, phi), home-seconds received per ship-second, gamma (1 + beta cos theta) for home's direction via relativity optics.gammaOnePlusBetaCos, -heading at home so leaving reads e^-phi. Check values are stapledons-design relativity-spec RS-26..RS-37. Static sources only: for moving Solar System bodies use sunholo/celestial lighttime."
+repository = "https://github.com/sunholo-data/ailang-packages/tree/main/packages/observe"
+homepage = "https://ailang.sunholo.com/docs/packages/sunholo/observe"
+license_url = "https://github.com/sunholo-data/ailang-packages/blob/main/packages/observe/LICENSE"
+
+[stability]
+level = "experimental"
+
+[release]
+kind = "feature"   # a new package. security | fix | feature | breaking — what THIS version changes
