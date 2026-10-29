@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.1
+
+Docs only. AGENT.md gains "Connecting to a real agreement": developer agreement,
+app and role, installation URL and grant token, 1Password CLI setup for
+`std/secret`, and which `/self` fields to check (plan level, granted role,
+modules) before trusting a connection. No code changes.
+
 ## 0.1.0
 
 First release. Read-only e-conomic REST client: agreement identity check,
