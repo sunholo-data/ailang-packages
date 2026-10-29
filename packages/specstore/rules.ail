@@ -1,0 +1,36 @@
+module sunholo/specstore/rules
+-- The rules that are proofs. Pure, with contracts: `ailang verify specstore/rules.ail`.
+-- Everything else a standard says is data (the standard's YAML); these are the rules whose
+-- logic does not change from one agency to the next.
+
+-- A version major.minor as one comparable number.
+export pure func versionKey(major: int, minor: int) -> int ! {}
+requires { major >= 0, minor >= 0, minor < 1000 }
+ensures { result >= 0 }
+{ major * 1000 + minor }
+
+-- Whole numbers go to the client and nothing else does; 0.x never does.
+export pure func statusFitsVersion(major: int, minor: int, sent: bool) -> bool ! {}
+requires { major >= 0, minor >= 0 }
+ensures { result == (if major == 0 then !sent else sent == (minor == 0)) }
+{ if major == 0 then !sent else sent == (minor == 0) }
+
+-- The history only moves forward.
+export pure func movesForward(prev: int, next: int) -> bool ! {}
+ensures { result == (next > prev) }
+{ next > prev }
+
+-- A QA round tests a version that exists, no later than the current one.
+export pure func roundTestsKnownVersion(tested: int, current: int, known: bool) -> bool ! {}
+ensures { result == (known && tested <= current) }
+{ known && tested <= current }
+
+-- A system may record a failure; only a person sets a pass.
+export pure func passAllowed(byPerson: bool, isPass: bool) -> bool ! {}
+ensures { result == (!isPass || byPerson) }
+{ !isPass || byPerson }
+
+-- A row needs retesting when it changed after the version it was last tested against.
+export pure func needsRetest(changed: int, lastTested: int, everTested: bool) -> bool ! {}
+ensures { result == (!everTested || changed > lastTested) }
+{ !everTested || changed > lastTested }

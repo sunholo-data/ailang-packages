@@ -1,0 +1,51 @@
+module sunholo/specstore/view
+-- The Sheet: Spec, Matrix (one column per dataLayer key), Dictionary, History, QA rounds.
+
+import std/option (Option, Some, None)
+import std/list (map, filter, length, foldl, concat, sortBy, dedup, flatMap)
+import std/string (join)
+import ./rules (needsRetest)
+import ./model (Field, Rule, Std, Dev, Param, Event, Dict, Hist, Res, Round, Spec, str, arr, strs, obj, loadYaml, toStd, toSpec, toRound, loadSpec, matches, varsIn, parseVersion, keyOf, present, fieldsOf, missingIn, dup)
+import ./xlsx (sheetXml)
+
+export type Latest = { round: int, version: string, state: string, comment: string }
+
+-- The latest result a person or a check recorded for an event; "not tested" never replaces a result.
+export func latestFor(id: string, rs: [Round]) -> Option[Latest] =
+  foldl(\acc. \r. match filter(\x. x.event == id && x.state != "not tested", r.results) {
+      [x, ..._] => Some({ round: r.n, version: r.version, state: x.state, comment: x.comment }),
+      [] => acc
+    }, None, rs)
+
+export func stateStyle(s: string) -> int = if s == "pass" then 2 else if s == "fail" then 3 else if s == "blocked" then 4 else 0
+
+export func view(sp: Spec) -> [(string, string)] {
+  let specRows = map(\e. {
+      let base = [(e.id, 0), (e.description, 0), (e.trigger, 0), (e.scope, 0), (e.eventName, 0),
+                  (join("\n", map(\p. "${p.key} = ${p.value}", e.params)), 0), (e.priority, 0), (e.since, 0), (e.changed, 0)];
+      match latestFor(e.id, sp.rounds) {
+        None => concat(base, [("—", 0), ("not tested", 4), ("", 0), ("yes", 4), (e.note, 0)]),
+        Some(l) => {
+          let re = needsRetest(keyOf(e.changed), keyOf(l.version), true);
+          concat(base, [("round ${show(l.round)} · v${l.version}", 0), (l.state, stateStyle(l.state)), (l.comment, 0),
+                        (if re then "yes" else "", if re then 4 else 0), (e.note, 0)])
+        }
+      }
+    }, sp.events);
+  -- the wide view the team knows: one column per dataLayer key
+  let keys = sortBy(\a. \b. if a < b then -1 else if a > b then 1 else 0, dedup(flatMap(\e. map(\p. p.key, e.params), sp.events)));
+  let matrixRows = map(\e. concat([(e.id, 0), (e.eventName, 0)],
+      map(\k. match filter(\p. p.key == k, e.params) { [p, ..._] => (p.value, 0), [] => ("", 0) }, keys)), sp.events);
+  [ ("Spec v${sp.version}", sheetXml(["ID", "Description", "Trigger", "Scope", "eventName", "Parameters", "Priority", "Since", "Last changed", "Last QA", "Result", "QA comment", "Retest", "Note"],
+                                      specRows, [6, 30, 30, 16, 18, 36, 9, 7, 12, 15, 10, 36, 8, 24])),
+    ("Matrix", sheetXml(concat(["ID", "eventName"], keys), matrixRows, concat([6, 18], map(\k. 18, keys)))),
+    ("Dictionary", sheetXml(["Name", "Definition", "Type", "Example", "Source", "Allowed"],
+        map(\d. [(d.name, 0), (d.definition, 0), (d.typ, 0), (d.example, 0), (d.source, 0), (join(", ", d.allowed), 0)], sp.dict), [18, 36, 10, 16, 16, 36])),
+    ("History", sheetXml(["Version", "Date", "Author", "What changed", "Second reader", "Status"],
+        map(\h. [(h.version, 0), (h.date, 0), (h.author, 0), (h.what, 0), (if h.reader == "" then "—" else h.reader, 0), (h.status, 0)], sp.hist), [9, 12, 12, 50, 14, 16])),
+    ("QA rounds", sheetXml(["Round", "Version", "Date", "Tester", "By", "Event", "Result", "Comment"],
+        flatMap(\r. map(\x. [(show(r.n), 0), ("v${r.version}", 0), (r.date, 0), (r.tester, 0), (r.by, 0), (x.event, 0), (x.state, stateStyle(x.state)), (x.comment, 0)], r.results), sp.rounds),
+        [7, 9, 12, 18, 10, 7, 13, 50])) ]
+}
+
+-- ── main ────────────────────────────────────────────────────────────────────

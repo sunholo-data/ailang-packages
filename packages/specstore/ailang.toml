@@ -1,0 +1,41 @@
+[package]
+name = "sunholo/specstore"
+version = "0.1.0"
+edition = "1"
+ailang = ">=0.54.0"
+description = "A tagging-specification standard as a tool: one YAML standard drives the checks, the readable guide and a spreadsheet view of versioned specs and their QA rounds"
+license = "Apache-2.0"
+
+[release]
+kind = "feature"
+
+[exports]
+modules = [
+  "sunholo/specstore/rules",
+  "sunholo/specstore/model",
+  "sunholo/specstore/check",
+  "sunholo/specstore/guide",
+  "sunholo/specstore/xlsx",
+  "sunholo/specstore/view",
+  "sunholo/specstore/audit",
+  "sunholo/specstore/main",
+]
+
+[effects]
+max = ["IO", "FS", "Env", "Declassify"]
+
+[assets]
+files = ["standard-template.yaml"]
+
+# `ailang install --path .` (or from the registry) puts `specstore` on PATH.
+[bin]
+specstore = { module = "sunholo/specstore/main", caps = "IO,FS,Env" }
+
+[metadata]
+tags = ["analytics", "tagging", "ga4", "gtm", "specifications", "qa", "versioning", "xlsx", "z3"]
+ai_summary = "Tagging specifications (events, parameters, a variable dictionary, a version history and QA rounds) kept as YAML files and checked against a standard that is itself YAML: each rule has a status (decided, proposed, open), a source, and optionally a check key that switches a built-in check on. Projects may record deviations approved by the standard's owner. Generates the readable standard (Markdown) and an .xlsx view (spec, wide matrix, dictionary, history, QA rounds) that opens in Google Sheets. Version, QA-round, pass-by-person and retest rules are Z3-proved"
+repository = "https://github.com/sunholo-data/ailang-packages/tree/main/packages/specstore"
+license_url = "https://github.com/sunholo-data/ailang-packages/blob/main/LICENSE"
+
+[stability]
+level = "experimental"

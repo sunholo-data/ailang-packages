@@ -1,0 +1,53 @@
+module sunholo/specstore/main
+-- specstore: a tagging-specification standard as a tool.
+--
+--   specstore check <standard.yaml> <spec-folder>
+--   specstore guide <standard.yaml> <STANDARD.md>
+--   specstore view  <standard.yaml> <spec-folder> <out.xlsx>
+--
+-- Without the shim: ailang run --quiet --caps IO,FS,Env specstore/main.ail -- <command> …
+
+import std/result (Result, Ok, Err)
+import std/option (Option, Some, None)
+import std/fs (writeFile, readFile)
+import std/env (getArgs)
+import std/io (println)
+import std/list (length, foldl)
+import std/zip (createArchive)
+import ./model (Field, Rule, Std, Dev, Param, Event, Dict, Hist, Res, Round, Spec, str, arr, strs, obj, loadYaml, toStd, toSpec, toRound, loadSpec, matches, varsIn, parseVersion, keyOf, present, fieldsOf, missingIn, dup)
+import ./check (runCheck)
+import ./guide (guide)
+import ./view (view)
+import ./xlsx (workbook)
+import ./audit (runAudit)
+import std/package (assetPath)
+
+export func main() -> () ! {IO, FS, Env, Declassify} {
+  match getArgs(()) {
+    ["check", stdPath, dir] => withStd(stdPath, \std. match loadSpec(dir) {
+        Err(es) => foldl(\u. \e. println("✗ ${e}"), (), es),
+        Ok(sp) => { let _ = runCheck(std, sp); () }
+      }),
+    ["guide", stdPath, out] => withStd(stdPath, \std. { writeFile(out, guide(std)); println("✓ wrote ${out}: ${show(length(std.rules))} rules") }),
+    ["view", stdPath, dir, out] => withStd(stdPath, \std. match loadSpec(dir) {
+        Err(es) => foldl(\u. \e. println("✗ ${e}"), (), es),
+        Ok(sp) => if runCheck(std, sp) then match createArchive(out, workbook(view(sp))) {
+            Ok(_) => println("✓ wrote ${out}"),
+            Err(e) => println("✗ could not write ${out}: ${e}")
+          } else println("Nothing written: the spec does not meet the standard.")
+      }),
+    ["template", out] => match assetPath("sunholo/specstore", "standard-template.yaml") {
+        Ok(src) => { writeFile(out, readFile(src)); println("✓ wrote ${out}: a starting standard; name its owner and decide its rules") },
+        Err(e) => println("✗ ${e}")
+      },
+    ["audit", manifest, names] => runAudit(manifest, names),
+    _ => println("usage: specstore template <out.yaml> | audit <manifest.tsv> <names.txt> | check <standard.yaml> <spec-folder> | guide <standard.yaml> <out.md> | view <standard.yaml> <spec-folder> <out.xlsx>")
+  }
+}
+
+export func withStd(path: string, k: Std -> () ! {IO, FS}) -> () ! {IO, FS} =
+  match loadYaml(path) {
+    Err(e) => println("✗ ${e}"),
+    Ok(j) => k(toStd(j))
+  }
+

@@ -1,0 +1,62 @@
+module sunholo/specstore/guide
+-- The readable standard, generated from the standard's YAML.
+
+import std/list (map, filter, concat)
+import std/string (join)
+import ./model (Field, Rule, Std, Dev, Param, Event, Dict, Hist, Res, Round, Spec, str, arr, strs, obj, loadYaml, toStd, toSpec, toRound, loadSpec, matches, varsIn, parseVersion, keyOf, present, fieldsOf, missingIn, dup)
+export func ruleLine(r: Rule) -> string =
+  "- **${r.text}** *(${r.source}${if r.check == "" then "" else "; checked"})*"
+
+export func fieldTable(std: Std, section: string) -> string =
+  join("\n", concat(["| Field | Required | Notes |", "|---|---|---|"],
+    map(\f. "| `${f.name}` | ${if f.required then "yes" else ""} | ${f.note} |", fieldsOf(std, section))))
+
+export func guide(std: Std) -> string {
+  let by = \s. filter(\r. r.status == s, std.rules);
+  join("\n", [
+    "# ${std.name}",
+    "",
+    "*Version ${std.version} · ${std.status} · owner: ${std.owner}. Generated from `spec-standard.yaml` by `specstore guide`; change that file, not this one.*",
+    "",
+    "Three kinds of rule. **Decided** rules are settled; each names where it was decided. **Proposed** rules are suggestions waiting for a decision: accept, change or drop. **Open** questions have no default. Rules marked *checked* are tested by `specstore check` on every spec.",
+    "",
+    "## Decided",
+    "",
+    join("\n", map(ruleLine, by("decided"))),
+    "",
+    "## Proposed",
+    "",
+    join("\n", map(ruleLine, by("proposed"))),
+    "",
+    "## Open",
+    "",
+    join("\n", map(ruleLine, by("open"))),
+    "",
+    "## Words",
+    "",
+    "- **QA results:** ${join(" · ", std.qaStates)}",
+    "- **Priority:** ${join(" · ", std.priorities)}",
+    "- **Dictionary types:** ${join(" · ", std.types)}",
+    "- **History status:** ${join(" · ", std.statuses)}",
+    "",
+    "## What a spec holds",
+    "",
+    "A spec is a folder: `spec.yaml` (the spec, its dictionary and its history) and `qa/round-01.yaml`, `round-02.yaml` … (one file per QA round, never edited once written). The Sheet, the guide and the overview are generated from it.",
+    "",
+    "### The spec", "", fieldTable(std, "spec"), "",
+    "### Each event", "", fieldTable(std, "event"), "",
+    "### Each dictionary entry", "", fieldTable(std, "dictionary"), "",
+    "### Each history row", "", fieldTable(std, "history"), "",
+    "### Each QA round", "", fieldTable(std, "qa_round"), "",
+    "## A worked example",
+    "",
+    "`example/demo-bank-web/` is a complete spec in this format, with invented data. Check it, and make its Sheet:",
+    "",
+    "```sh",
+    "specstore check spec-standard.yaml example/demo-bank-web",
+    "specstore view spec-standard.yaml example/demo-bank-web demo-bank-web.xlsx",
+    "```",
+    ""])
+}
+
+-- ── the Sheet ───────────────────────────────────────────────────────────────

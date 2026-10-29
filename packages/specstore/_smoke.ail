@@ -1,0 +1,25 @@
+-- Smoke: a one-event spec against a two-rule standard, both inline. One finding expected.
+module sunholo/specstore/_smoke
+
+import std/io (println)
+import std/yaml (decode as yamlDecode)
+import std/json (Json, JNull)
+import std/list (length)
+import ./model (toStd, toSpec)
+import ./check (findings)
+
+func y(s: string) -> Json = match yamlDecode(s) { Ok(j) => j, Err(_) => JNull }
+
+export func main() -> () ! {IO} {
+  let st = toStd(y("standard: {name: S, version: \"0.1\", status: draft, owner: O}
+rules:
+  - {id: event-name, status: decided, source: s, text: t, check: event-name}
+  - {id: casing, status: proposed, source: s, text: t, check: event-casing}
+vocab: {qa_states: [pass], priority: [high], types: [text], statuses: [Internal]}
+patterns: {id: \"^E[0-9]+$\", event_name: \"^[a-z]+(_[a-z]+)*$\", key: \".*\", variable: \"x^\", other_notation: \"x^\"}
+fields: {}"));
+  let sp = toSpec(y("spec: {client: C, project: P, owner: O, version: \"0.1\", standard: \"0.1\"}
+history: [{version: \"0.1\", date: d, author: O, what: w, status: Internal}]
+events: [{id: E1, description: d, trigger: t, scope: s, eventName: pageView, priority: high, since: \"0.1\"}]"), []);
+  println("specstore smoke: ${show(length(findings(st, sp)))} finding (expected 1: eventName casing)")
+}

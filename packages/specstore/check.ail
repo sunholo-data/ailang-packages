@@ -1,0 +1,122 @@
+module sunholo/specstore/check
+-- Check a spec against a standard. Each check has a key; it runs only when a rule in the
+-- standard names that key in `check`, and its problems are reported under that rule's id.
+-- A spec's deviations (rule id, what it does instead, who approved it) turn that rule's
+-- problems into notes, provided the standard's owner approved them.
+
+import std/json (Json)
+import std/option (Option, Some, None)
+import std/io (println)
+import std/list (map, filter, length, nth, foldl, range, any, zip, flatMap)
+import std/string (join, startsWith, trim)
+import ./rules (statusFitsVersion, movesForward, roundTestsKnownVersion, passAllowed)
+import ./model (Field, Rule, Std, Dev, Param, Event, Dict, Hist, Res, Round, Spec, str, arr, strs, obj, loadYaml, toStd, toSpec, toRound, loadSpec, matches, varsIn, parseVersion, keyOf, present, fieldsOf, missingIn, dup)
+export func all(xss: [[(string, string)]]) -> [(string, string)] = flatMap(\xs. xs, xss)
+
+export func when(ok: bool, rule: string, msg: string) -> [(string, string)] = if ok then [] else [(rule, msg)]
+
+export func paramChecks(std: Std, names: [string], e: Event, pr: Param) -> [(string, string)] =
+  all([
+    when(matches(std.pKey, pr.key), "key-casing", "${e.id}: key \"${pr.key}\" is not camelCase under an object"),
+    when(!matches(std.pOther, pr.value), "notation", "${e.id}: ${pr.key} is written \"${pr.value}\"; a run-time value is {{name}}"),
+    flatMap(\v. when(any(\n. n == v, names), "dictionary", "${e.id}: {{${v}}} is not in the dictionary"), varsIn(std.pVar, pr.value))
+  ])
+
+export func eventChecks(std: Std, names: [string], known: [string], e: Event, ej: Json) -> [(string, string)] =
+  all([
+    missingIn(std, "event", "required", e.id, ej),
+    when(e.eventName != "", "event-name", "${e.id}: no eventName"),
+    when(e.eventName == "" || matches(std.pEvent, e.eventName), "event-casing", "${e.id}: eventName \"${e.eventName}\" is not snake_case"),
+    when(matches(std.pId, e.id), "ids", "${e.id}: the ID is not a letter and two or three digits"),
+    when(any(\x. x == e.priority, std.priorities), "priority", "${e.id}: priority \"${e.priority}\" is not one of ${join(", ", std.priorities)}"),
+    when(any(\k. k == e.since, known), "versions", "${e.id}: since ${e.since}, which is not in the history"),
+    when(any(\k. k == e.changed, known), "versions", "${e.id}: changed in ${e.changed}, which is not in the history"),
+    flatMap(\pr. paramChecks(std, names, e, pr), e.params)
+  ])
+
+export func dictChecks(std: Std, d: Dict, dj: Json) -> [(string, string)] =
+  all([
+    missingIn(std, "dictionary", "dictionary-fields", "dictionary ${if d.name == "" then "(an entry with no name)" else d.name}", dj),
+    when(any(\t. t == d.typ, std.types), "dictionary-fields", "dictionary ${d.name}: type \"${d.typ}\" is not one of ${join(", ", std.types)}"),
+    when(length(d.allowed) == 0 || any(\x. x == d.example, d.allowed), "dictionary-fields", "dictionary ${d.name}: the example is not one of its allowed values")
+  ])
+
+export func histChecks(std: Std, h: Hist, hj: Json) -> [(string, string)] =
+  all([
+    missingIn(std, "history", "history-fields", "history ${h.version}", hj),
+    when(any(\x. x == h.status, std.statuses), "history-fields", "history ${h.version}: status \"${h.status}\" is not one of ${join(", ", std.statuses)}"),
+    match parseVersion(h.version) {
+      None => [("versions", "history: \"${h.version}\" is not a version like 1.2")],
+      Some((a, b)) => when(statusFitsVersion(a, b, h.status == "Sent to client"), "versions",
+        if h.status == "Sent to client" then "history ${h.version}: only whole numbers go to the client"
+        else "history ${h.version}: a whole number is a release, so its status is Sent to client")
+    }
+  ])
+
+export func roundChecks(std: Std, sp: Spec, ids: [string], known: [string], i: int, r: Round) -> [(string, string)] =
+  all([
+    missingIn(std, "qa_round", "qa-rounds", "QA round ${show(r.n)}", r.j),
+    when(r.n == i + 1, "qa-rounds", "QA rounds are not numbered 1, 2, 3 … (found ${show(r.n)} in place of ${show(i + 1)})"),
+    when(roundTestsKnownVersion(keyOf(r.version), keyOf(sp.version), any(\k. k == r.version, known)), "qa-rounds",
+         "QA round ${show(r.n)}: tests ${r.version}, which is not in the history up to ${sp.version}"),
+    when(r.by == "person" || r.by == "automated", "qa-rounds", "QA round ${show(r.n)}: by is \"${r.by}\"; it is person or automated"),
+    flatMap(\x. all([
+        when(any(\k. k == x.event, ids), "qa-rounds", "QA round ${show(r.n)}: ${x.event} is not in the spec"),
+        when(any(\s. s == x.state, std.qaStates), "qa-states", "QA round ${show(r.n)}, ${x.event}: \"${x.state}\" is not one of ${join(", ", std.qaStates)}"),
+        when(passAllowed(r.by == "person", x.state == "pass"), "pass-by-person", "QA round ${show(r.n)}, ${x.event}: an automated round recorded a pass; only a person sets a pass")
+      ]), r.results)
+  ])
+
+export func checks(std: Std, sp: Spec) -> [(string, string)] {
+  let names = map(\d. d.name, sp.dict);
+  let ids = map(\e. e.id, sp.events);
+  let known = map(\h. h.version, sp.hist);
+  let lastHist = match nth(sp.hist, length(sp.hist) - 1) { Some(h) => h.version, None => "" };
+  let pairs = zip(known, match known { [] => [], [_, ...rest] => rest });
+  all([
+    missingIn(std, "spec", "required", "spec", obj(sp.j, "spec")),
+    flatMap(\d. all([
+        when(any(\r. r.id == d.rule, std.rules), "deviations", "deviation on \"${d.rule}\": there is no such rule in the standard"),
+        when(d.approvedBy != "" && startsWith(std.owner, trim(d.approvedBy)), "deviations", "deviation on ${d.rule}: approved by \"${d.approvedBy}\"; the owner of the standard (${std.owner}) approves differences")
+      ]), sp.deviations),
+    flatMap(\p. match p { (e, ej) => eventChecks(std, names, known, e, ej) }, zip(sp.events, arr(sp.j, "events"))),
+    map(\i. ("ids", "${i}: the ID is used twice"), dup(ids)),
+    flatMap(\p. match p { (d, dj) => dictChecks(std, d, dj) }, zip(sp.dict, arr(sp.j, "dictionary"))),
+    when(sp.version == lastHist, "versions", "spec: version ${sp.version} is not the last row of the history (${lastHist})"),
+    flatMap(\p. match p { (h, hj) => histChecks(std, h, hj) }, zip(sp.hist, arr(sp.j, "history"))),
+    flatMap(\p. match p { (a, b) => when(movesForward(keyOf(a), keyOf(b)), "versions", "history: ${b} does not come after ${a}") }, pairs),
+    flatMap(\p. match p { (i, r) => roundChecks(std, sp, ids, known, i, r) }, zip(range(0, length(sp.rounds)), sp.rounds))
+  ])
+}
+
+-- The rule that switches a check on: the first rule in the standard naming that check key.
+export func ruleFor(std: Std, key: string) -> Option[Rule] =
+  match filter(\r. r.check == key, std.rules) { [r, ..._] => Some(r), [] => None }
+
+-- Problems keyed by check, resolved to (rule id, rule status, message); checks no rule names are dropped.
+export func resolve(std: Std, ps: [(string, string)]) -> [(string, string, string)] =
+  flatMap(\p. match p { (k, m) => match ruleFor(std, k) { Some(r) => [(r.id, r.status, m)], None => [] } }, ps)
+
+-- What `check` reports, without printing: (rule id, rule status, message), deviations removed.
+export func findings(std: Std, sp: Spec) -> [(string, string, string)] {
+  let devIds = map(\d. d.rule, sp.deviations);
+  filter(\p. match p { (r, _, _) => !any(\d. d == r, devIds) }, resolve(std, checks(std, sp)))
+}
+
+export func runCheck(std: Std, sp: Spec) -> bool ! {IO} {
+  let found = resolve(std, checks(std, sp));
+  let devIds = map(\d. d.rule, sp.deviations);
+  let waived = filter(\p. match p { (r, _, _) => any(\d. d == r, devIds) }, found);
+  let problems = filter(\p. match p { (r, _, _) => !any(\d. d == r, devIds) }, found);
+  let stdNote = if sp.standard == std.version then "" else " (written for standard ${sp.standard}, checked against ${std.version})";
+  foldl(\u. \d. println("  ~ deviation on ${d.rule}: ${d.instead} (approved by ${d.approvedBy})"), (), sp.deviations);
+  if length(waived) > 0 then println("  ~ ${show(length(waived))} finding(s) covered by those deviations") else ();
+  if length(problems) == 0 then {
+    println("✓ ${sp.client} · ${sp.project} · v${sp.version} meets the standard ${std.version}${stdNote}: ${show(length(sp.events))} events, ${show(length(sp.dict))} variables, ${show(length(sp.hist))} versions, ${show(length(sp.rounds))} QA rounds");
+    true
+  } else {
+    println("✗ ${sp.client} · ${sp.project} · v${sp.version}: ${show(length(problems))} problem(s) against the standard ${std.version}${stdNote}");
+    foldl(\u. \p. match p { (r, st, m) => println("  ✗ [${r}, ${st}] ${m}") }, (), problems);
+    false
+  }
+}

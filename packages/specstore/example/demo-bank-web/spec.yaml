@@ -1,0 +1,103 @@
+# A worked example. Invented data throughout.
+spec:
+  client: Demo Bank
+  project: Public website, GA4
+  owner: Ana
+  version: "2.1"
+  standard: "0.1"
+  deviations: []
+
+history:
+  - {version: "0.1", date: "2026-11-02", author: Ana, what: "First draft", second_reader: "", status: Internal}
+  - {version: "1.0", date: "2026-11-05", author: Ana, what: "First release to the client", second_reader: Chloé, status: Sent to client}
+  - {version: "1.1", date: "2026-11-10", author: Ana, what: "E03 form_submit: form_id added after developer feedback", second_reader: "", status: Internal}
+  - {version: "1.2", date: "2026-11-12", author: Ben, what: "Loan simulator split into E04–E06", second_reader: Chloé, status: Internal}
+  - {version: "2.0", date: "2026-11-13", author: Ana, what: "Release with 1.1 and 1.2", second_reader: "", status: Sent to client}
+  - {version: "2.1", date: "2026-11-18", author: Ana, what: "E02 cta_click: ctaPosition added", second_reader: "", status: Internal}
+
+events:
+  - id: E01
+    description: Any page is viewed
+    trigger: Page load, every page
+    scope: All pages
+    eventName: page_view
+    priority: high
+    since: "1.0"
+    parameters:
+      - {key: page.type, value: "{{pageType}}"}
+      - {key: page.language, value: "{{pageLanguage}}"}
+      - {key: user.loginStatus, value: "{{loginStatus}}"}
+  - id: E02
+    description: The visitor clicks a main button
+    trigger: Click on a primary call-to-action button
+    scope: All pages
+    eventName: cta_click
+    priority: high
+    since: "1.0"
+    changed: "2.1"
+    parameters:
+      - {key: cta.label, value: "{{ctaLabel}}"}
+      - {key: cta.type, value: "{{ctaType}}"}
+      - {key: cta.position, value: "{{ctaPosition}}"}
+  - id: E03
+    description: The visitor sends the contact form
+    trigger: Contact form sent and validated, not on click
+    scope: Contact page
+    eventName: form_submit
+    priority: high
+    since: "1.0"
+    changed: "1.1"
+    parameters:
+      - {key: form.name, value: contact}
+      - {key: form.id, value: "{{formId}}"}
+  - id: E04
+    description: The visitor starts the loan simulator
+    trigger: Simulator step 1 shown
+    scope: Loan simulator
+    eventName: simulator_start
+    priority: medium
+    since: "1.2"
+    parameters:
+      - {key: simulator.type, value: loan}
+  - id: E05
+    description: The visitor completes a simulator step
+    trigger: Each step completed
+    scope: Loan simulator
+    eventName: simulator_step
+    priority: medium
+    since: "1.2"
+    parameters:
+      - {key: simulator.type, value: loan}
+      - {key: simulator.step, value: "{{stepNumber}}"}
+    note: Steps are numbered from 1
+  - id: E06
+    description: The visitor sees the simulation result
+    trigger: Result page shown
+    scope: Loan simulator
+    eventName: simulator_result
+    priority: high
+    since: "1.2"
+    parameters:
+      - {key: simulator.type, value: loan}
+      - {key: simulator.amountBand, value: "{{loanAmountBand}}"}
+  - id: E07
+    description: The visitor downloads a PDF
+    trigger: Click on a link to a .pdf file
+    scope: All pages
+    eventName: file_download
+    priority: low
+    since: "1.0"
+    parameters:
+      - {key: file.name, value: "{{fileName}}"}
+
+dictionary:
+  - {name: pageType, definition: "The kind of page", type: text, example: product, source: "CMS template", allowed: [home, product, article, contact, simulator]}
+  - {name: pageLanguage, definition: "Language of the page", type: text, example: fr, source: "Page URL", allowed: [fr, nl, en]}
+  - {name: loginStatus, definition: "Whether the visitor is logged in", type: text, example: logged-out, source: "User session", allowed: [logged-in, logged-out]}
+  - {name: ctaLabel, definition: "The button's visible text", type: text, example: "Simulate my loan", source: "Page"}
+  - {name: ctaType, definition: "What the button does", type: text, example: simulator, source: "CMS component", allowed: [simulator, contact, product, download]}
+  - {name: ctaPosition, definition: "Where on the page the button sits", type: text, example: hero, source: "CMS component", allowed: [hero, body, footer]}
+  - {name: formId, definition: "The form's identifier in the CMS", type: text, example: "contact-01", source: "CMS"}
+  - {name: stepNumber, definition: "The simulator step just completed, from 1", type: number, example: "2", source: "Simulator"}
+  - {name: loanAmountBand, definition: "The simulated amount, in bands", type: text, example: "100k-200k", source: "Simulator", allowed: ["<100k", "100k-200k", "200k-400k", ">400k"]}
+  - {name: fileName, definition: "The file name of the PDF", type: text, example: "rates-2026.pdf", source: "Link"}

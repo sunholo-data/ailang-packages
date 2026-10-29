@@ -1,0 +1,91 @@
+-- Tests for sunholo/specstore: a small standard and spec as inline YAML, so nothing touches disk.
+module sunholo/specstore/check_test
+
+import std/yaml (decode as yamlDecode)
+import std/json (Json, JNull)
+import std/list (map, length, any)
+import ./rules (statusFitsVersion, passAllowed, needsRetest, versionKey)
+import ./model (Std, Spec, toStd, toSpec, toRound)
+import ./check (findings)
+
+func y(s: string) -> Json = match yamlDecode(s) { Ok(j) => j, Err(_) => JNull }
+
+func std(extra: string) -> Std = toStd(y("standard: {name: T, version: \"0.1\", status: draft, owner: Ana Owner}
+rules:
+  - {id: owner, status: decided, source: t, text: t, check: deviations}
+  - {id: casing, status: proposed, source: t, text: t, check: event-casing}
+  - {id: dict, status: decided, source: t, text: t, check: dictionary}
+  - {id: by-person, status: decided, source: t, text: t, check: pass-by-person}
+  - {id: versions, status: decided, source: t, text: t, check: versions}
+${extra}
+vocab: {qa_states: [pass, fail], priority: [high], types: [text], statuses: [Internal, Sent to client]}
+patterns:
+  id: \"^[A-Z][0-9]{2,3}$\"
+  event_name: \"^[a-z][a-z0-9]*(_[a-z0-9]+)*$\"
+  key: \"^[a-z][A-Za-z0-9]*(\\\\.[a-z][A-Za-z0-9]*)*$\"
+  variable: \"\\\\{\\\\{([A-Za-z][A-Za-z0-9]*)\\\\}\\\\}\"
+  other_notation: \"\\\\$[A-Za-z_][A-Za-z0-9_]*\"
+fields: {}"))
+
+func spec(eventName: string, value: string, status11: string, by: string, state: string, devs: string) -> Spec =
+  toSpec(y("spec: {client: C, project: P, owner: Ana, version: \"1.1\", standard: \"0.1\", deviations: [${devs}]}
+history:
+  - {version: \"1.0\", date: d, author: Ana, what: w, status: Sent to client}
+  - {version: \"1.1\", date: d, author: Ana, what: w, status: ${status11}}
+events:
+  - {id: E01, description: d, trigger: t, scope: s, eventName: ${eventName}, priority: high, since: \"1.0\",
+     parameters: [{key: page.type, value: \"${value}\"}]}
+dictionary:
+  - {name: pageType, definition: d, type: text, example: e, source: s}"),
+    [toRound(y("{round: 1, version: \"1.0\", date: d, tester: t, by: ${by}, results: [{event: E01, state: ${state}, comment: \"\"}]}"))])
+
+func ids(fs: [(string, string, string)]) -> [string] = map(\f. match f { (r, _, _) => r }, fs)
+
+func clean() -> Spec = spec("page_view", "{{pageType}}", "Internal", "person", "pass", "")
+
+test "whole numbers go to the client, minors do not, drafts never" {
+  statusFitsVersion(1, 0, true) && !statusFitsVersion(1, 1, true) && statusFitsVersion(1, 1, false) && !statusFitsVersion(0, 3, true)
+}
+
+test "only a person sets a pass" { passAllowed(true, true) && !passAllowed(false, true) && passAllowed(false, false) }
+
+test "a row changed after its last test needs a retest" {
+  needsRetest(versionKey(2, 1), versionKey(2, 0), true) && !needsRetest(versionKey(1, 0), versionKey(2, 0), true)
+}
+
+test "a clean spec has no findings" { length(findings(std(""), clean())) == 0 }
+
+test "camelCase eventName is reported under the rule that switches the check on" {
+  ids(findings(std(""), spec("pageView", "{{pageType}}", "Internal", "person", "pass", ""))) == ["casing"]
+}
+
+test "an undefined variable breaks the dictionary rule" {
+  ids(findings(std(""), spec("page_view", "{{nope}}", "Internal", "person", "pass", ""))) == ["dict"]
+}
+
+test "an automated pass is refused" {
+  ids(findings(std(""), spec("page_view", "{{pageType}}", "Internal", "automated", "pass", ""))) == ["by-person"]
+}
+
+test "a minor version marked sent breaks the version rule" {
+  ids(findings(std(""), spec("page_view", "{{pageType}}", "Sent to client", "person", "pass", ""))) == ["versions"]
+}
+
+test "a check no rule names does not run: $var passes when notation is not in the standard" {
+  length(findings(std(""), spec("page_view", "$pageType", "Internal", "person", "pass", ""))) == 0
+}
+
+test "the same check runs once a rule names it" {
+  ids(findings(std("  - {id: notation, status: proposed, source: t, text: t, check: notation}"),
+               spec("page_view", "$pageType", "Internal", "person", "pass", ""))) == ["notation"]
+}
+
+test "a deviation approved by the owner waives its rule" {
+  length(findings(std(""), spec("pageView", "{{pageType}}", "Internal", "person", "pass",
+                               "{rule: casing, instead: camel, approved_by: Ana}"))) == 0
+}
+
+test "a deviation approved by someone else is itself a finding" {
+  any(\r. r == "owner", ids(findings(std(""), spec("pageView", "{{pageType}}", "Internal", "person", "pass",
+                                                   "{rule: casing, instead: camel, approved_by: Ben}"))))
+}

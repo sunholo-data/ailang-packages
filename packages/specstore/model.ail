@@ -1,0 +1,132 @@
+module sunholo/specstore/model
+-- A spec folder and a standard, read from YAML. A spec folder is spec.yaml (the spec, its
+-- dictionary, its history) plus qa/round-NN.yaml, one file per QA round.
+
+import std/result (Result, Ok, Err)
+import std/option (Option, Some, None)
+import std/yaml (decode as yamlDecode)
+import std/json (Json, JString, JArray, JNull, get, getString, getArray, getInt, getObject)
+import std/fs (readFile, listDir, fileExists)
+import std/list (map, filter, length, nth, last, sortBy, flatMap, dedup)
+import std/string (split, replace, startsWith, endsWith, stringToInt, trim)
+import std/regex (compile, isMatch, findAll)
+import ./rules (versionKey)
+
+export type Field = { name: string, required: bool, note: string }
+export type Rule = { id: string, status: string, source: string, text: string, check: string }
+export type Std = { name: string, version: string, status: string, owner: string, rules: [Rule],
+             qaStates: [string], priorities: [string], types: [string], statuses: [string],
+             pId: string, pEvent: string, pKey: string, pVar: string, pOther: string, j: Json }
+
+export type Dev = { rule: string, instead: string, approvedBy: string }
+export type Param = { key: string, value: string }
+export type Event = { id: string, description: string, trigger: string, scope: string, eventName: string,
+               priority: string, since: string, changed: string, note: string, params: [Param] }
+export type Dict = { name: string, definition: string, typ: string, example: string, source: string, allowed: [string] }
+export type Hist = { version: string, date: string, author: string, what: string, reader: string, status: string }
+export type Res = { event: string, state: string, comment: string }
+export type Round = { n: int, version: string, date: string, tester: string, by: string, results: [Res], j: Json }
+export type Spec = { client: string, project: string, owner: string, version: string, standard: string,
+              deviations: [Dev], events: [Event], dict: [Dict], hist: [Hist], rounds: [Round], j: Json }
+
+export func str(j: Json, k: string) -> string =
+  match get(j, k) {
+    Some(JString(s)) => s,
+    Some(JNull) => "",
+    Some(v) => match v { JArray(_) => "", _ => trim(replace(replace(show(v), "JNumber(", ""), ")", "")) },
+    None => ""
+  }
+
+export func arr(j: Json, k: string) -> [Json] = match getArray(j, k) { Some(xs) => xs, None => [] }
+
+export func strs(j: Json, k: string) -> [string] = map(\x. match x { JString(s) => s, _ => "" }, arr(j, k))
+
+export func obj(j: Json, k: string) -> Json = match getObject(j, k) { Some(o) => o, None => JNull }
+
+export func loadYaml(path: string) -> Result[Json, string] ! {FS} =
+  if fileExists(path) then match yamlDecode(readFile(path)) { Ok(j) => Ok(j), Err(e) => Err("${path}: ${e}") }
+  else Err("${path}: not found")
+
+export func toStd(j: Json) -> Std {
+  let s = obj(j, "standard");
+  let v = obj(j, "vocab");
+  let p = obj(j, "patterns");
+  { name: str(s, "name"), version: str(s, "version"), status: str(s, "status"), owner: str(s, "owner"),
+    rules: map(\r. { id: str(r, "id"), status: str(r, "status"), source: str(r, "source"), text: str(r, "text"), check: str(r, "check") }, arr(j, "rules")),
+    qaStates: strs(v, "qa_states"), priorities: strs(v, "priority"), types: strs(v, "types"), statuses: strs(v, "statuses"),
+    pId: str(p, "id"), pEvent: str(p, "event_name"), pKey: str(p, "key"), pVar: str(p, "variable"), pOther: str(p, "other_notation"), j: j }
+}
+
+export func toSpec(j: Json, rounds: [Round]) -> Spec {
+  let s = obj(j, "spec");
+  { client: str(s, "client"), project: str(s, "project"), owner: str(s, "owner"), version: str(s, "version"), standard: str(s, "standard"),
+    deviations: map(\d. { rule: str(d, "rule"), instead: str(d, "instead"), approvedBy: str(d, "approved_by") }, arr(s, "deviations")),
+    events: map(\e. { id: str(e, "id"), description: str(e, "description"), trigger: str(e, "trigger"), scope: str(e, "scope"),
+                      eventName: str(e, "eventName"), priority: str(e, "priority"), since: str(e, "since"),
+                      changed: if str(e, "changed") == "" then str(e, "since") else str(e, "changed"), note: str(e, "note"),
+                      params: map(\p. { key: str(p, "key"), value: str(p, "value") }, arr(e, "parameters")) }, arr(j, "events")),
+    dict: map(\d. { name: str(d, "name"), definition: str(d, "definition"), typ: str(d, "type"), example: str(d, "example"),
+                    source: str(d, "source"), allowed: strs(d, "allowed") }, arr(j, "dictionary")),
+    hist: map(\h. { version: str(h, "version"), date: str(h, "date"), author: str(h, "author"), what: str(h, "what"),
+                    reader: str(h, "second_reader"), status: str(h, "status") }, arr(j, "history")),
+    rounds: rounds, j: j }
+}
+
+export func toRound(j: Json) -> Round =
+  { n: match getInt(j, "round") { Some(i) => i, None => 0 }, version: str(j, "version"), date: str(j, "date"),
+    tester: str(j, "tester"), by: str(j, "by"),
+    results: map(\r. { event: str(r, "event"), state: str(r, "state"), comment: str(r, "comment") }, arr(j, "results")), j: j }
+
+export func loadSpec(dir: string) -> Result[Spec, [string]] ! {FS} =
+  match loadYaml("${dir}/spec.yaml") {
+    Err(e) => Err([e]),
+    Ok(j) => {
+      let files = if fileExists("${dir}/qa") then
+          sortBy(\a. \b. if a < b then -1 else if a > b then 1 else 0,
+                 filter(\f. startsWith(f, "round-") && endsWith(f, ".yaml"), listDir("${dir}/qa")))
+        else [];
+      let loaded = map(\f. loadYaml("${dir}/qa/${f}"), files);
+      let errs = flatMap(\r. match r { Err(e) => [e], Ok(_) => [] }, loaded);
+      if length(errs) > 0 then Err(errs)
+      else Ok(toSpec(j, flatMap(\r. match r { Ok(x) => [toRound(x)], Err(_) => [] }, loaded)))
+    }
+  }
+
+-- ── helpers ─────────────────────────────────────────────────────────────────
+
+export func matches(p: string, s: string) -> bool =
+  match compile(p) { Ok(r) => isMatch(r, s), Err(_) => false }
+
+export func varsIn(p: string, s: string) -> [string] =
+  match compile(p) {
+    Ok(r) => flatMap(\m. match last(m.groups) { Some(g) => [g.text], None => [] }, findAll(r, s)),
+    Err(_) => []
+  }
+
+export func parseVersion(s: string) -> Option[(int, int)] =
+  match split(s, ".") {
+    [a, b] => match (stringToInt(a), stringToInt(b)) {
+      (Some(x), Some(y)) => if x >= 0 && y >= 0 && y < 1000 then Some((x, y)) else None,
+      _ => None
+    },
+    _ => None
+  }
+
+export func keyOf(s: string) -> int = match parseVersion(s) { Some((a, b)) => versionKey(a, b), None => -1 }
+
+export func present(j: Json, k: string) -> bool =
+  match get(j, k) {
+    Some(JString(s)) => trim(s) != "",
+    Some(JNull) => false,
+    Some(_) => true,
+    None => false
+  }
+
+export func fieldsOf(std: Std, section: string) -> [Field] =
+  map(\f. { name: str(f, "name"), required: match get(f, "required") { Some(v) => show(v) == "JBool(true)" || show(v) == "true", None => false },
+            note: str(f, "note") }, arr(obj(std.j, "fields"), section))
+
+export func missingIn(std: Std, section: string, rule: string, what: string, j: Json) -> [(string, string)] =
+  flatMap(\f. if f.required && !present(j, f.name) then [(rule, "${what}: ${f.name} is missing")] else [], fieldsOf(std, section))
+
+export func dup(xs: [string]) -> [string] = dedup(filter(\x. length(filter(\y. y == x, xs)) > 1, xs))

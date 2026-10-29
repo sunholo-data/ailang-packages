@@ -1,0 +1,57 @@
+module sunholo/specstore/xlsx
+-- A minimal .xlsx writer: inline strings, a bold header, three fills, a frozen header row and
+-- a filter. Enough for a sheet that opens in Excel and Google Sheets.
+
+import std/list (map, length, nth, zip, range, concat)
+import std/string (join, replace)
+
+export func esc(s: string) -> string =
+  replace(replace(replace(replace(s, "&", "&amp;"), "<", "&lt;"), ">", "&gt;"), "\"", "&quot;")
+
+export func colName(i: int) -> string {
+  let az = ["A","B","C","D","E","F","G","H","I","J","K","L","M","N","O","P","Q","R","S","T","U","V","W","X","Y","Z"];
+  let one = \k. match nth(az, k) { Some(c) => c, None => "Z" };
+  if i < 26 then one(i) else "${one(i / 26 - 1)}${one(i - (i / 26) * 26)}"
+}
+
+export func cell(r: int, c: int, v: string, style: int) -> string =
+  "<c r=\"${colName(c)}${show(r)}\" t=\"inlineStr\" s=\"${show(style)}\"><is><t xml:space=\"preserve\">${esc(v)}</t></is></c>"
+
+export func rowXml(r: int, vs: [(string, int)]) -> string =
+  "<row r=\"${show(r)}\">${join("", map(\p. match p { (i, (v, s)) => cell(r, i, v, s) }, zip(range(0, length(vs)), vs)))}</row>"
+
+export func sheetXml(header: [string], rows: [[(string, int)]], widths: [int]) -> string {
+  let cols = join("", map(\p. match p { (i, w) => "<col min=\"${show(i + 1)}\" max=\"${show(i + 1)}\" width=\"${show(w)}\" customWidth=\"1\"/>" }, zip(range(0, length(widths)), widths)));
+  join("", [
+    "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>",
+    "<worksheet xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\">",
+    "<sheetViews><sheetView workbookViewId=\"0\"><pane ySplit=\"1\" topLeftCell=\"A2\" activePane=\"bottomLeft\" state=\"frozen\"/></sheetView></sheetViews>",
+    if cols == "" then "" else "<cols>${cols}</cols>",
+    "<sheetData>", rowXml(1, map(\h. (h, 1), header)),
+    join("", map(\p. match p { (i, vs) => rowXml(i + 2, vs) }, zip(range(0, length(rows)), rows))),
+    "</sheetData><autoFilter ref=\"A1:${colName(length(header) - 1)}${show(length(rows) + 1)}\"/></worksheet>"])
+}
+
+export func stylesXml() -> string = join("", [
+  "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>",
+  "<styleSheet xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\">",
+  "<fonts count=\"2\"><font><sz val=\"11\"/><name val=\"Arial\"/></font><font><b/><sz val=\"11\"/><name val=\"Arial\"/></font></fonts>",
+  "<fills count=\"5\"><fill><patternFill patternType=\"none\"/></fill><fill><patternFill patternType=\"gray125\"/></fill>",
+  "<fill><patternFill patternType=\"solid\"><fgColor rgb=\"FFD9EAD3\"/></patternFill></fill>",
+  "<fill><patternFill patternType=\"solid\"><fgColor rgb=\"FFF4CCCC\"/></patternFill></fill>",
+  "<fill><patternFill patternType=\"solid\"><fgColor rgb=\"FFFFF2CC\"/></patternFill></fill></fills>",
+  "<borders count=\"1\"><border/></borders><cellStyleXfs count=\"1\"><xf/></cellStyleXfs>",
+  "<cellXfs count=\"5\"><xf/><xf fontId=\"1\" applyFont=\"1\"/><xf fillId=\"2\" applyFill=\"1\"/><xf fillId=\"3\" applyFill=\"1\"/><xf fillId=\"4\" applyFill=\"1\" applyAlignment=\"1\"><alignment wrapText=\"1\"/></xf></cellXfs>",
+  "</styleSheet>"])
+
+export func workbook(sheets: [(string, string)]) -> [{ name: string, content: string }] {
+  let idx = zip(range(1, length(sheets) + 1), sheets);
+  let n = length(sheets) + 1;
+  concat([
+    { name: "[Content_Types].xml", content: "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?><Types xmlns=\"http://schemas.openxmlformats.org/package/2006/content-types\"><Default Extension=\"rels\" ContentType=\"application/vnd.openxmlformats-package.relationships+xml\"/><Default Extension=\"xml\" ContentType=\"application/xml\"/><Override PartName=\"/xl/workbook.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml\"/><Override PartName=\"/xl/styles.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml\"/>${join("", map(\p. match p { (i, _) => "<Override PartName=\"/xl/worksheets/sheet${show(i)}.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml\"/>" }, idx))}</Types>" },
+    { name: "_rels/.rels", content: "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?><Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\"><Relationship Id=\"rId1\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument\" Target=\"xl/workbook.xml\"/></Relationships>" },
+    { name: "xl/workbook.xml", content: "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?><workbook xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\" xmlns:r=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships\"><sheets>${join("", map(\p. match p { (i, (nm, _)) => "<sheet name=\"${esc(nm)}\" sheetId=\"${show(i)}\" r:id=\"rId${show(i)}\"/>" }, idx))}</sheets></workbook>" },
+    { name: "xl/_rels/workbook.xml.rels", content: "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?><Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\">${join("", map(\p. match p { (i, _) => "<Relationship Id=\"rId${show(i)}\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet\" Target=\"worksheets/sheet${show(i)}.xml\"/>" }, idx))}<Relationship Id=\"rId${show(n)}\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles\" Target=\"styles.xml\"/></Relationships>" },
+    { name: "xl/styles.xml", content: stylesXml() }
+  ], map(\p. match p { (i, (_, x)) => { name: "xl/worksheets/sheet${show(i)}.xml", content: x } }, idx))
+}

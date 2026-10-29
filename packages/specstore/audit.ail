@@ -1,0 +1,239 @@
+module sunholo/specstore/audit
+-- Structure-only audit of tagging specifications, parsed locally by docparse.
+--
+--   specstore audit <manifest.tsv> <names.txt>
+--
+-- manifest.tsv: one line per file, tab-separated: code, author, kind, path to a docparse JSON
+-- parse (docparse <file> --output-dir <dir>). names.txt: one name per line to replace with ‹client›.
+--
+-- Every cell's text enters as string<client>. The only way out to the report is through a
+-- declassifier (! {Declassify}) that returns a shape, never the text: a notation class, a casing
+-- class, a header name with client names replaced. report() refuses anything still <client>,
+-- and the type checker enforces it: a cell value printed by mistake does not compile.
+
+import std/json (Json, JString, decode, getString, getArray, getObject, getInt)
+import std/fs (readFile)
+import std/io (println)
+import std/list (map, filter, length, nth, foldl, concat, take, drop, flatMap, any, sortBy, dedup, mapE, filterE, foldlE, range)
+import std/string (split, join, trim, contains, toLower, length as slen, substring, replace)
+import std/regex (compile, isMatch, replaceAll)
+
+-- ── the boundary ────────────────────────────────────────────────────────────
+
+func report(s: string{not client}) -> () ! {IO} = println(s)
+
+func cellText(j: Json) -> string<client> =
+  match getString(j, "text") { Some(s) => s, None => "" }
+
+func matches(p: string, s: string) -> bool =
+  match compile(p) { Ok(r) => isMatch(r, s), Err(_) => false }
+
+func subst(p: string, s: string, by: string) -> string =
+  match compile(p) { Ok(r) => replaceAll(r, s, by), Err(_) => s }
+
+-- How a variable is written: {{x}}, $x, or neither.
+func notationOf(raw: string) -> string
+{
+  if contains(raw, "{{") then "{{var}}"
+  else if matches("\\$[A-Za-z_]", raw) then "$var"
+  else if matches("\\[\\[[^\\]]+\\]\\]|<[a-z_ ]+>", raw) then "[[var]]/<var>"
+  else ""
+}
+
+-- The casing of a single identifier-like value.
+func casingOf(raw: string) -> string
+{
+  let s = trim(raw);
+  if s == "" then ""
+  else if contains(s, " ") then "phrase"
+  else if matches("^[a-z0-9]+(\\.[A-Za-z0-9_]+)+$", s) then "dotted"
+  else if matches("^[a-z0-9]+(_[a-z0-9]+)+$", s) then "snake_case"
+  else if matches("^[a-z0-9]+(-[a-z0-9]+)+$", s) then "kebab-case"
+  else if matches("^[a-z]+[A-Z][A-Za-z0-9]*$", s) then "camelCase"
+  else if matches("^[a-z0-9]+$", s) then "lowercase"
+  else if matches("^[A-Z][A-Za-z0-9]*$", s) then "Capitalised"
+  else "other"
+}
+
+-- The cell's fill colour: a formatting code, not content.
+pure func colourOf(c: Cell) -> string<structure> ! {Declassify}
+{ toLower(c.fill) }
+
+-- How many: a count says nothing about what was counted.
+pure func countOf(n: int<client>) -> int<structure> ! {Declassify}
+{ n }
+
+-- The header of column i, as headerOf gives it.
+pure func headerAt(h: [Cell], i: int, names: [string]) -> string<structure> ! {Declassify}
+{ match nth(h, i) { Some(c) => headerOf(c.text, names), None => "" } }
+
+-- A column's shape: the three commonest casing classes and notations, with counts.
+pure func casingsOf(vs: [Cell]) -> string<structure> ! {Declassify}
+{ tally(map(\x. casingOf(x.text), vs)) }
+
+pure func notationsOf(vs: [Cell]) -> string<structure> ! {Declassify}
+{ tally(map(\x. notationOf(x.text), vs)) }
+
+-- Up to 30 headings, each through headerOf, joined.
+pure func headingsLine(hs: [string<client>], names: [string]) -> string<structure> ! {Declassify}
+{ join(" | ", take(30, mapE(\x. headerOf(x, names), hs))) }
+
+pure func present(raw: string<client>) -> string<structure> ! {Declassify}
+{ if trim(raw) == "" then "" else "x" }
+
+pure func shortEnough(raw: string<client>) -> string<structure> ! {Declassify}
+{ if slen(trim(raw)) <= 45 then "x" else "" }
+
+-- A header or sheet name: client names replaced, numbers kept, cut to 45 characters.
+pure func headerOf(raw: string<client>, names: [string]) -> string<structure> ! {Declassify}
+{
+  if slen(trim(raw)) > 40 || contains(raw, "<") || contains(raw, "{") then "(long text)" else {
+  let s0 = foldl(\acc. \n. subst("(?i)(^|[^A-Za-z])${quoteMeta(n)}([^A-Za-z]|$)", acc, "$1‹client›$2"), trim(raw), names);
+  let s1 = subst("https?://\\S+|[a-z0-9.-]+\\.(be|com|eu|lu|nl|fr|de)\\S*", s0, "‹url›");
+  let s2 = subst("\\s+", s1, " ");
+  if slen(s2) > 45 then "${substring(s2, 0, 44)}…" else s2
+  }
+}
+
+func quoteMeta(s: string) -> string =
+  foldl(\acc. \c. replace(acc, c, "\\${c}"), s, [".", "+", "*", "?", "(", ")", "[", "]", "{", "}", "|", "^", "$"])
+
+-- ── reading the parse ───────────────────────────────────────────────────────
+
+type Cell = { text: string<client>, fill: string }
+type Table = { sheet: string<client>, header: [Cell], rows: [[Cell]] }
+
+func toCell(j: Json) -> Cell =
+  match j {
+    JString(t) => { text: plainText(t), fill: "" },
+    _ => { text: cellText(j), fill: match getString(j, "fill") { Some(f) => f, None => "" } }
+  }
+
+func plainText(t: string) -> string<client> = t
+
+func objs(j: Json, k: string) -> [Json] = match getArray(j, k) { Some(xs) => xs, None => [] }
+
+func tablesIn(sheet: string<client>, blocks: [Json]) -> [Table] =
+  flatMap(\b. match getString(b, "type") {
+      Some("table") => [{ sheet: sheet, header: map(toCell, objs(b, "headers")),
+                          rows: map(\r. match getArray(r, "cells") { Some(cs) => map(toCell, cs), None => map(toCell, asList(r)) }, objs(b, "rows")) }],
+      Some("section") => tablesIn(cellTextKey(b, "name"), objs(b, "blocks")),
+      _ => []
+    }, blocks)
+
+func asList(j: Json) -> [Json] = match j { JArray(xs) => xs, _ => [] }
+
+func cellTextKey(j: Json, k: string) -> string<client> =
+  match getString(j, k) { Some(s) => s, None => "" }
+
+func headingsIn(blocks: [Json]) -> [string<client>] =
+  flatMap(\b. match getString(b, "type") {
+      Some("heading") => match getInt(b, "level") {
+        Some(l) => if l <= 2 then [cellTextKey(b, "text")] else [],
+        None => []
+      },
+      Some("section") => headingsIn(objs(b, "blocks")),
+      _ => []
+    }, blocks)
+
+-- ── measuring ───────────────────────────────────────────────────────────────
+
+func filled(cs: [Cell]) -> int ! {Declassify} = length(filterE(\c. present(c.text) == "x", cs))
+
+-- The header is the first row with three or more short, non-empty cells.
+func pickHeader(t: Table) -> ([Cell], [[Cell]]) ! {Declassify} {
+  let all = concat([t.header], t.rows);
+  let cands = take(9, all);
+  let ok = \r. filled(r) >= 3 && length(filterE(\c. present(c.text) == "x" && shortEnough(c.text) == "", r)) == 0;
+  match filterE(\p. match p { (_, r) => ok(r) }, zipIdx(cands)) {
+    [(i, h), ..._] => match nth(cands, i + 1) {
+      Some(r2) => if filled(r2) > filled(h) && length(filterE(\c. present(c.text) == "x" && shortEnough(c.text) == "", r2)) == 0
+                  then (combine(h, r2), drop(i + 2, all)) else (h, drop(i + 1, all)),
+      None => (h, drop(i + 1, all))
+    },
+    [] => (t.header, t.rows)
+  }
+}
+
+-- A two-row header: the group name carried right across its merged cells, then the sub-key.
+func combine(top: [Cell], sub: [Cell]) -> [Cell] {
+  let carried = foldl(\acc. \c. match acc { (out, last) => if trim(c.text) == "" then (concat(out, [last]), last) else (concat(out, [c.text]), c.text) }, ([], ""), top);
+  match carried { (tops, _) =>
+    map(\p. match p { (t, c) => { text: if trim(c.text) == "" then t else if trim(t) == "" then c.text else "${trim(t)} ${trim(c.text)}", fill: c.fill } },
+        zipPad(tops, sub)) }
+}
+
+func zipPad(ts: [string<client>], cs: [Cell]) -> [(string<client>, Cell)] =
+  map(\i. (match nth(ts, i) { Some(t) => t, None => "" }, match nth(cs, i) { Some(c) => c, None => { text: "", fill: "" } }),
+      range(0, if length(ts) > length(cs) then length(ts) else length(cs)))
+
+func zipIdx(xs: [[Cell]]) -> [(int, [Cell])] =
+  foldl(\acc. \x. concat(acc, [(length(acc), x)]), [], xs)
+
+func drop1(i: int, xs: [[Cell]]) -> [[Cell]] =
+  match zipIdx(xs) { ps => map(\p. match p { (_, r) => r }, filter(\p. match p { (j, _) => j > i }, ps)) }
+
+func indexed(cs: [Cell]) -> [(int, Cell)] ! {Declassify} =
+  foldlE(\acc. \c. concat(acc, [(countOf(length(acc)), c)]), [], cs)
+
+func col(rows: [[Cell]], i: int) -> [Cell] =
+  flatMap(\r. match nth(r, i) { Some(c) => [c], None => [] }, rows)
+
+func tally(xs: [string]) -> string {
+  let ks = dedup(filter(\k. k != "", xs));
+  let counted = map(\k. (k, length(filter(\x. x == k, xs))), ks);
+  let sorted = sortBy(\a. \b. match (a, b) { ((_, x), (_, y)) => y - x }, counted);
+  join(", ", map(\p. match p { (k, n) => "${k} ${show(n)}" }, take(3, sorted)))
+}
+
+func isFill(f: string<structure>) -> bool =
+  f != "" && toLower(f) != "ffffff" && toLower(f) != "#ffffff" && toLower(f) != "ffffffff" && toLower(f) != "none"
+
+func describeTable(code: string, names: [string], t: Table) -> () ! {IO, Declassify} {
+  let hr = pickHeader(t);
+  match hr {
+    (h, body) => {
+      let rows = filterE(\r. filled(r) > 0, body);
+      let n = length(rows);
+      let allCells = flatMap(\r. r, rows);
+      let fills = filter(isFill, mapE(colourOf, allCells));
+      report("  [${code}] tab \"${headerOf(t.sheet, names)}\": ${show(countOf(n))} rows × ${show(countOf(length(h)))} cols; coloured cells ${show(countOf(length(fills)))} in ${show(countOf(length(dedup(fills))))} colours");
+      foldlE(\u. \i. {
+          let vs = col(rows, i);
+          let fillPct = if countOf(n) == 0 then 0 else (countOf(filled(vs)) * 100) / countOf(n);
+          let cas = casingsOf(vs);
+          let nots = notationsOf(vs);
+          let name = if countOf(length(h)) < 3 then "(cell)" else headerAt(h, i, names);
+          if name == "" && countOf(filled(vs)) == 0 then ()
+          else report("      ${if name == "" then "(no header)" else name} · ${show(fillPct)}% filled${if cas == "" then "" else " · ${cas}"}${if nots == "" then "" else " · notation ${nots}"}")
+        }, (), range(0, countOf(length(h))))
+    }
+  }
+}
+
+-- ── main ────────────────────────────────────────────────────────────────────
+
+export func runAudit(manifest: string, namesFile: string) -> () ! {IO, FS, Declassify} {
+  let names = filter(\n. n != "", map(trim, split(readFile(namesFile), "\n")));
+  foldlE(\u. \line. match split(line, "\t") {
+      [code, author, kind, path] => audit1(code, author, kind, path, names),
+      _ => ()
+    }, (), filter(\l. trim(l) != "", split(readFile(manifest), "\n")))
+}
+
+func audit1(code: string, author: string, kind: string, path: string, names: [string]) -> () ! {IO, FS, Declassify} {
+  match decode(readFile(path)) {
+    Err(e) => report("[${code}] could not read the parse"),
+    Ok(j) => {
+      let blocks = match getObject(j, "document") { Some(d) => objs(d, "blocks"), None => [] };
+      let ts = tablesIn("", blocks);
+      let hs = headingsIn(blocks);
+      report("");
+      report("[${code}] ${author} · ${kind} · ${show(countOf(length(ts)))} table(s), ${show(countOf(length(hs)))} heading(s)");
+      if countOf(length(hs)) > 0 then
+        report("  headings: ${headingsLine(hs, names)}")
+      else ();
+      foldlE(\u. \t. describeTable(code, names, t), (), ts)
+    }
+  }
+}
