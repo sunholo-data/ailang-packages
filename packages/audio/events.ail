@@ -1,0 +1,58 @@
+module sunholo/audio/events
+-- Events (0.6.0): short one-shot voices placed at fixed or seeded starts. In a loop the output is a
+-- circle of n samples: an event that starts near the end wraps its tail to the start, so the loop
+-- is exactly periodic whatever the event does. Starts, variation draws and seeds are integer
+-- arithmetic over white(k, seed) until the final scale; events are summed in event order.
+import std/list (map, range, take, foldl, zipWith, length as size)
+import std/array (make, toList, scatterAdd)
+import std/math (round, floor, floatToInt, pow)
+import ./noise (white)
+import ./dsp (dbToGain)
+
+-- u in [0, 1) from the integer generator.
+pure func unit(k: int, seed: int) -> float = (white(k, seed) + 1.0) / 2.0
+
+-- A jittered grid: slot k is [k n / count, (k + 1) n / count) (integer division); the start is the
+-- slot's beginning plus floor(u_k * spread * (slot length - minGap)). Consecutive starts are at least
+-- minGap apart, also across the loop point. In event order, in [0, n).
+export func scatterStarts(count: int, seed: int, spread: float, minGap: int, n: int) -> [int] ! {}
+requires { count >= 0 && n > 0 && minGap >= 0 && spread >= 0.0 && spread <= 1.0 }
+{
+  map(\k. {
+    let a = k * n / count;
+    let len = (k + 1) * n / count - a;
+    let room = if len - minGap > 0 then len - minGap else 0;
+    a + floatToInt(floor(unit(k, seed) * spread * intToFloat(room)))
+  }, range(0, count))
+}
+
+-- Seconds to frames, rounded.
+export pure func fixedStarts(times: [float], rate: int) -> [int] = map(\t. floatToInt(round(t * intToFloat(rate))), times)
+
+-- Event sample lists summed at their starts over n samples, in event order. wrap: sample j of an
+-- event lands at (start + j) mod n (an event must be at most n long); otherwise samples past n are cut.
+export pure func place(evs: [[float]], starts: [int], n: int, wrap: bool) -> [float] {
+  let acc = foldl(\a e. match e { (xs, s) => {
+    let m = size(xs);
+    if wrap then scatterAdd(a, map(\j. (s + j) % n, range(0, m)), xs)
+    else {
+      let keep = if s >= n then 0 else if s + m > n then n - s else m;
+      scatterAdd(a, map(\j. s + j, range(0, keep)), take(keep, xs))
+    }
+  } }, make(n, 0.0), zipWith(\x s. (x, s), evs, starts));
+  toList(acc)
+}
+
+-- Per-event variation: a gain uniform in +-ampDb dB, a pitch ratio uniform in +-cents, and the voice
+-- (seeded, or in turn when cycle). Draws: white(k, seed + 7), white(k, seed + 11), white(k, seed + 13).
+export type Variation = {gain: float, ratio: float, voice: int}
+
+export pure func variation(seed: int, k: int, ampDb: float, cents: float, voices: int, cycle: bool) -> Variation {
+  let g = if ampDb > 0.0 then dbToGain(ampDb * white(k, seed + 7)) else 1.0;
+  let r = if cents > 0.0 then pow(2.0, cents * white(k, seed + 11) / 1200.0) else 1.0;
+  let v0 = if cycle then k % voices else floatToInt(floor(unit(k, seed + 13) * intToFloat(voices)));
+  {gain: g, ratio: r, voice: if v0 >= voices then voices - 1 else v0}
+}
+
+-- The seed offset of event k for its voice's noise and plucks: seed + 1009 k.
+export pure func eventSeed(seed: int, k: int) -> int = (seed + 1009 * k) % 2147483647

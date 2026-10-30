@@ -94,6 +94,9 @@ pure func vibAt(l: Layer, t: float) -> float =
   if l.vibCents <= 0.0 || l.vibRate <= 0.0 then 0.0
   else { let d = pow(2.0, l.vibCents / 1200.0) - 1.0; l.freq * d / l.vibRate * (1.0 - cos(twoPi() * l.vibRate * t)) }
 
+-- The amplitude beat of a layer at t (0.6.0 export for the `sound` renderer; unchanged).
+export pure func beatAt(l: Layer, t: float) -> float = amAt(l, t)
+
 pure func amAt(l: Layer, t: float) -> float =
   if l.amDepth <= 0.0 then 1.0 else 1.0 - l.amDepth + l.amDepth * (0.5 + 0.5 * sin(twoPi() * l.amRate * t))
 
@@ -125,8 +128,15 @@ pure func edgeAt(r: Recipe, i: int, n: int, fr: float) -> float =
 -- The recipe as floats in [-1, 1]: layers summed, drive, swell and edges applied, normalised to peakDb.
 export pure func render(r: Recipe) -> [float] {
   let n = frames(r);
+  finish(r, foldl(\acc l. add(acc, fromList(layerSamples(l, n, r.loop, r.rate))), make(n, 0.0), r.layers))
+}
+
+-- The post-chain every render shares (0.6.0 export, moved verbatim from render): drive (soft
+-- saturation after normalising to the summed peak), the swell, a one-shot's edge fades, then peak
+-- normalisation. `summed` is the layers' sum, frames(r) long.
+export pure func finish(r: Recipe, summed: Array[float]) -> [float] {
+  let n = frames(r);
   let fr = intToFloat(r.rate);
-  let summed = foldl(\acc l. add(acc, fromList(layerSamples(l, n, r.loop, r.rate))), make(n, 0.0), r.layers);
   let summed2 = if r.drive > 0.0 then { let pk = match maximumFloat(map(absF, toList(summed))) { Some(p) => p, None => 1.0 }; if pk <= 0.0 then toList(summed) else map(\x. softSat(r.drive, x / pk), toList(summed)) } else toList(summed);
   let shaped = zipWith(\x i. x * swellAt(r, intToFloat(i) / fr) * edgeAt(r, i, n, fr), summed2, range(0, n));
   normalisePeak(r.peakDb, shaped)
@@ -159,6 +169,9 @@ pure func envOf(j: Json) -> Env = match getObject(j, "env") {
   None => {delay: 0.0, attack: 0.0, tau: 0.0, stop: 0.0}
 }
 
+-- A layer's 0.5.0 fields from JSON with their defaults (0.6.0 export for the `sound` parser).
+export pure func layerOfJson(j: Json) -> Layer = layerOf(j)
+
 pure func layerOf(j: Json) -> Layer {
   let f = num(j, "freq", 0.0);
   {kind: match getString(j, "kind") { Some(k) => k, None => "sine" }, freq: f, freqTo: num(j, "glide_to", f),
@@ -171,6 +184,9 @@ pure func layerOf(j: Json) -> Layer {
 
 pure func kindErrors(id: string, ls: [Layer]) -> [string] =
   flatMap(\l. if l.kind == "sine" || l.kind == "noise" || l.kind == "white" then [] else ["${id}: unknown layer kind ${l.kind}"], ls)
+
+-- One recipe object, checked and validated as parseRecipes does (0.6.0 export for the `sound` parser).
+export pure func recipeOfJson(j: Json) -> Result[Recipe, string] = recipeOf(j)
 
 pure func recipeOf(j: Json) -> Result[Recipe, string] =
   match shapeErrors(j) {
@@ -241,7 +257,11 @@ pure func envErrors(j: Json) -> [string] = match getObject(j, "env") {
 pure func layerKeys() -> [string] = ["kind", "freq", "glide_to", "glide_from_s", "glide_until_s", "amp", "lowpass_hz", "lowpass_poles", "lowpass_to_hz",
   "highpass_hz", "seed", "env", "vib_hz", "vib_cents", "beat_hz", "beat_depth", "about"]
 pure func unknownKeys(j: Json, allowed: [string], what: string) -> [string] =
-  flatMap(\k. if foldl(\f a. f || a == k, false, allowed) then [] else ["${what}: unknown key ${k}"], keys(j))
+  flatMap(\k. if foldl(\f a. f || a == k, false, allowed) then [] else ["${what}: unknown key ${k}${soundHint(k)}"], keys(j))
+-- 0.6.0: a key of the richer sound format names the parser that accepts it.
+pure func soundHint(k: string) -> string =
+  if foldl(\f a. f || a == k, false, ["bands", "vowel", "vowel_to", "jitter_cents", "jitter_hz", "ratio", "index", "index_to", "index_tau", "t60", "bright", "pick", "voices", "times", "scatter", "vary", "space"])
+  then " (a 0.6 sound field: parse with sound.parseSounds)" else ""
 pure func layerShape(j: Json) -> [string] = match j {
   JObject(_) => unknownKeys(j, layerKeys(), "layer") ++ (match getObject(j, "env") { Some(e) => unknownKeys(e, ["delay", "attack", "tau", "stop"], "env"), None => [] })
     ++ fieldErrors(j, "kind", "string") ++ fieldErrors(j, "seed", "integer") ++ fieldErrors(j, "lowpass_poles", "integer") ++ fieldErrors(j, "env", "object") ++ envErrors(j)

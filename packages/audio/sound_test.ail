@@ -1,0 +1,123 @@
+-- Checks for sunholo/audio/sound (0.6.0): render stability through the new front end (design AC4),
+-- the vocabulary (AC6), the loop rules (AC7, one named "loop: ..." test per rule) and the budgets.
+module sunholo/audio/sound_test
+import std/list (map, range, foldl, zipWith, take, drop, length as size, any)
+import std/crypto (sha256Bytes)
+import std/result (Result, Ok, Err)
+import std/string (contains)
+import ./recipe (parseRecipes, render, frames)
+import ./pcm (pcm16)
+import ./compat (compatText, compatPins)
+import ./sound (Sound, parseSounds, renderSound, renderSoundChecked, classicOnly, soundFrames, defaultSoundLimits, soundLoopErrors)
+import ./safety (ResourceLimit)
+import ./dsp (absF, peakAbs, dbToGain)
+import ./analysis (seam)
+
+pure func one(body: string) -> string = "{\"schema\":\"sunholo.audio.recipes/1\",\"recipes\":[${body}]}"
+pure func sounds(t: string) -> [Sound] = match parseSounds(t) { Ok(ss) => ss, Err(_) => [] }
+pure func refused(t: string, word: string) -> bool = match parseSounds(t) { Ok(_) => false, Err(e) => contains(e, word) }
+pure func accepted(t: string) -> bool = match parseSounds(t) { Ok(_) => true, Err(_) => false }
+pure func oldRefused(t: string, word: string) -> bool = match parseRecipes(t) { Ok(_) => false, Err(e) => contains(e, word) }
+
+-- AC4
+test "every compat recipe renders the 0.5.0 bytes through renderSound" {
+  map(\s. "${s.base.id} ${sha256Bytes(pcm16(renderSound(s)))}", sounds(compatText())) == compatPins()
+}
+test "0.5.0 files parse to Classic-only sounds with the same frames" {
+  let ss = sounds(compatText());
+  size(ss) == 8 && foldl(\ok s. ok && classicOnly(s) && soundFrames(s) == frames(s.base), true, ss)
+}
+test "renderSoundChecked of a Classic-only sound is recipe.renderChecked: the same samples" {
+  foldl(\ok s. ok && (match renderSoundChecked(s, defaultSoundLimits()) { Ok(xs) => xs == render(s.base), Err(_) => false }), true, sounds(compatText()))
+}
+
+-- AC6
+pure func pinkShot() -> string = one("{\"id\":\"p\",\"seconds\":0.05,\"layers\":[{\"kind\":\"pink\",\"amp\":0.5,\"bands\":[{\"hz\":1000,\"q\":4}]}]}")
+test "parseRecipes refuses a 0.6 key and names parseSounds" {
+  oldRefused(one("{\"id\":\"x\",\"seconds\":0.05,\"layers\":[{\"kind\":\"white\",\"amp\":0.5,\"bands\":[{\"hz\":1000}]}]}"), "sound.parseSounds")
+  && oldRefused(one("{\"id\":\"x\",\"seconds\":0.05,\"layers\":[{\"kind\":\"sine\",\"freq\":440,\"amp\":0.5,\"space\":{\"t60\":1,\"wet\":0.2}}]}"), "sound.parseSounds")
+}
+test "parseSounds accepts the 0.6 kinds and keys" {
+  accepted(pinkShot())
+  && accepted(one("{\"id\":\"f\",\"seconds\":0.05,\"layers\":[{\"kind\":\"fm\",\"freq\":400,\"ratio\":1.4,\"index\":5,\"index_to\":0,\"index_tau\":0.02,\"amp\":0.5,\"env\":{\"tau\":0.02}}]}"))
+  && accepted(one("{\"id\":\"k\",\"seconds\":0.05,\"layers\":[{\"kind\":\"pluck\",\"freq\":440,\"t60\":0.5,\"bright\":0.7,\"pick\":0.1,\"amp\":0.5}]}"))
+  && accepted(one("{\"id\":\"s\",\"seconds\":0.05,\"layers\":[{\"kind\":\"saw\",\"freq\":120,\"jitter_cents\":20,\"jitter_hz\":4,\"vowel\":\"a\",\"vowel_to\":\"i\",\"amp\":0.5}]}"))
+  && accepted(one("{\"id\":\"e\",\"seconds\":0.1,\"layers\":[{\"kind\":\"events\",\"amp\":0.5,\"seed\":3,\"voices\":[{\"seconds\":0.02,\"layers\":[{\"kind\":\"sine\",\"freq\":3000,\"amp\":0.5,\"env\":{\"tau\":0.005}}]}],\"scatter\":{\"count\":5},\"vary\":{\"amp_db\":6,\"cents\":100}}]}"))
+}
+test "an unknown key is still refused; a 0.6 key on the wrong kind is refused" {
+  refused(one("{\"id\":\"x\",\"seconds\":0.05,\"layers\":[{\"kind\":\"pink\",\"amp\":0.5,\"bandz\":[]}]}"), "unknown key bandz")
+  && refused(one("{\"id\":\"x\",\"seconds\":0.05,\"layers\":[{\"kind\":\"white\",\"amp\":0.5,\"ratio\":2}]}"), "does not apply")
+  && refused(one("{\"id\":\"x\",\"seconds\":0.05,\"layers\":[{\"kind\":\"pluck\",\"freq\":200,\"glide_to\":300,\"amp\":0.5}]}"), "does not apply")
+  && refused(one("{\"id\":\"x\",\"seconds\":0.05,\"layers\":[{\"kind\":\"chirp\",\"amp\":0.5,\"space\":{}}]}"), "unknown kind")
+  && refused(one("{\"id\":\"x\",\"seconds\":0.05,\"layers\":[{\"kind\":\"pink\",\"amp\":0.5,\"vowel\":\"y\"}]}"), "vowel")
+  && refused(one("{\"id\":\"x\",\"seconds\":0.05,\"layers\":[{\"kind\":\"pink\",\"amp\":0.5,\"bands\":[{\"q\":2}]}]}"), "hz is required")
+}
+pure func rendered(t: string) -> [float] = match parseSounds(t) { Ok([s]) => renderSound(s), _ => [] }
+pure func classicFile(t: string) -> bool = match parseSounds(t) { Ok([s]) => classicOnly(s), _ => false }
+test "a sine carrying an explicit no-op 0.6 key renders as the Classic sine, bit for bit" {
+  let a = one("{\"id\":\"a\",\"seconds\":0.05,\"layers\":[{\"kind\":\"sine\",\"freq\":440,\"amp\":0.5,\"env\":{\"tau\":0.02},\"beat_hz\":30,\"beat_depth\":0.3}]}");
+  let b = one("{\"id\":\"a\",\"seconds\":0.05,\"layers\":[{\"kind\":\"sine\",\"freq\":440,\"amp\":0.5,\"env\":{\"tau\":0.02},\"beat_hz\":30,\"beat_depth\":0.3,\"jitter_cents\":0}]}");
+  classicFile(a) && not classicFile(b) && size(rendered(a)) == 2400 && rendered(a) == rendered(b)
+}
+test "a mixed sound renders frames(base) samples at its peak, deterministically" {
+  let t = one("{\"id\":\"m\",\"seconds\":0.1,\"peak_db\":-3,\"layers\":[{\"kind\":\"sine\",\"freq\":300,\"amp\":0.3},{\"kind\":\"pink\",\"amp\":0.4,\"bands\":[{\"hz\":800,\"q\":3}],\"seed\":4}]}");
+  let xs = rendered(t);
+  size(xs) == 4800 && absF(peakAbs(xs) - dbToGain(-3.0)) < 0.0000001 && xs == rendered(t)
+}
+
+test "an events layer may carry an envelope over all its events in a one-shot (a crowd swelling)" {
+  let t = one("{\"id\":\"sw\",\"seconds\":0.2,\"layers\":[{\"kind\":\"events\",\"amp\":0.5,\"env\":{\"attack\":0.1,\"tau\":0.05},\"voices\":[{\"seconds\":0.02,\"layers\":[{\"kind\":\"sine\",\"freq\":500,\"amp\":0.5}]}],\"scatter\":{\"count\":8}}]}");
+  let xs = rendered(t);
+  size(xs) == 9600 && peakAbs(take(960, xs)) < peakAbs(take(960, drop(4800, xs)))
+}
+
+-- AC7: one test per 0.6 loop rule. Each loop is 0.25 s.
+pure func loop(layer: string) -> string = one("{\"id\":\"L\",\"seconds\":0.25,\"loop\":true,\"layers\":[${layer}]}")
+test "loop: a clean 0.6 loop is accepted (pink with bands, saw and fm in whole cycles, events, space)" {
+  accepted(loop("{\"kind\":\"pink\",\"amp\":0.5,\"bands\":[{\"hz\":900,\"q\":4}],\"beat_hz\":4,\"beat_depth\":0.5}"))
+  && accepted(loop("{\"kind\":\"saw\",\"freq\":120,\"amp\":0.5,\"vowel\":\"o\"}"))
+  && accepted(loop("{\"kind\":\"fm\",\"freq\":400,\"ratio\":1.5,\"index\":2,\"amp\":0.5}"))
+  && accepted(loop("{\"kind\":\"events\",\"amp\":0.5,\"voices\":[{\"seconds\":0.05,\"layers\":[{\"kind\":\"pluck\",\"freq\":330,\"amp\":0.5}]}],\"times\":[0.0,0.2]}"))
+  && accepted(loop("{\"kind\":\"brown\",\"amp\":0.5,\"space\":{\"t60\":0.4,\"wet\":0.3}}"))
+}
+test "loop: a saw must complete whole cycles" { refused(loop("{\"kind\":\"saw\",\"freq\":121.1,\"amp\":0.5}"), "whole cycles") }
+test "loop: a tone cannot jitter" { refused(loop("{\"kind\":\"saw\",\"freq\":120,\"amp\":0.5,\"jitter_cents\":10,\"jitter_hz\":4}"), "jitter") }
+test "loop: an FM modulator must complete whole cycles" { refused(loop("{\"kind\":\"fm\",\"freq\":400,\"ratio\":1.401,\"index\":2,\"amp\":0.5}"), "modulator") }
+test "loop: an FM index must be constant" { refused(loop("{\"kind\":\"fm\",\"freq\":400,\"ratio\":1.5,\"index\":2,\"index_to\":0,\"index_tau\":0.1,\"amp\":0.5}"), "index must be constant") }
+test "loop: a pluck cannot be a loop layer" { refused(loop("{\"kind\":\"pluck\",\"freq\":440,\"amp\":0.5}"), "pluck") }
+test "loop: bands cannot sweep" {
+  refused(loop("{\"kind\":\"pink\",\"amp\":0.5,\"bands\":[{\"hz\":900,\"hz_to\":1200,\"q\":4}]}"), "sweep its bands")
+  && refused(loop("{\"kind\":\"saw\",\"freq\":120,\"amp\":0.5,\"vowel\":\"a\",\"vowel_to\":\"i\"}"), "sweep its bands")
+}
+test "loop: a band cannot ring longer than the loop" { refused(loop("{\"kind\":\"pink\",\"amp\":0.5,\"bands\":[{\"hz\":100,\"q\":20}]}"), "rings longer") }
+test "loop: a 0.6 part cannot have an envelope" { refused(loop("{\"kind\":\"pink\",\"amp\":0.5,\"env\":{\"tau\":0.1}}"), "envelope") }
+test "loop: a beat must complete whole cycles" { refused(loop("{\"kind\":\"pink\",\"amp\":0.5,\"beat_hz\":3.3,\"beat_depth\":0.5}"), "beat") }
+test "loop: an event voice cannot be longer than the loop" {
+  refused(loop("{\"kind\":\"events\",\"amp\":0.5,\"voices\":[{\"seconds\":0.3,\"layers\":[{\"kind\":\"sine\",\"freq\":300,\"amp\":0.5}]}],\"times\":[0.0]}"), "longer than the loop")
+}
+test "loop: a space needing more than 5 periods is refused" { refused(loop("{\"kind\":\"pink\",\"amp\":0.5,\"space\":{\"t60\":1.5,\"wet\":0.3}}"), "5 loop periods") }
+test "loop: event times must lie in [0, seconds)" {
+  refused(loop("{\"kind\":\"events\",\"amp\":0.5,\"voices\":[{\"seconds\":0.05,\"layers\":[{\"kind\":\"sine\",\"freq\":300,\"amp\":0.5}]}],\"times\":[0.25]}"), "event time")
+}
+
+pure func cleanSeam(layer: string) -> bool { let xs = rendered(loop(layer)); let sm = seam(xs); size(xs) == 12000 && sm.seam <= sm.maxStep + 1 }
+test "loop: every accepted 0.6 loop fixture has a clean seam (seam <= max step + 1)" {
+  cleanSeam("{\"kind\":\"pink\",\"amp\":0.5,\"bands\":[{\"hz\":900,\"q\":4}],\"beat_hz\":4,\"beat_depth\":0.5}")
+  && cleanSeam("{\"kind\":\"saw\",\"freq\":120,\"amp\":0.5,\"vowel\":\"o\"}")
+  && cleanSeam("{\"kind\":\"fm\",\"freq\":400,\"ratio\":1.5,\"index\":2,\"amp\":0.5}")
+  && cleanSeam("{\"kind\":\"events\",\"amp\":0.5,\"voices\":[{\"seconds\":0.05,\"layers\":[{\"kind\":\"pluck\",\"freq\":330,\"amp\":0.5}]}],\"times\":[0.0,0.23]}")
+  && cleanSeam("{\"kind\":\"brown\",\"amp\":0.5,\"space\":{\"t60\":0.4,\"wet\":0.3}}")
+}
+
+-- Budgets: refused before any sample is allocated.
+test "renderSoundChecked refuses too many events, event frames and work" {
+  let t = one("{\"id\":\"b\",\"seconds\":0.1,\"layers\":[{\"kind\":\"events\",\"amp\":0.5,\"voices\":[{\"seconds\":0.01,\"layers\":[{\"kind\":\"sine\",\"freq\":3000,\"amp\":0.5}]}],\"scatter\":{\"count\":50}}]}");
+  let lim = defaultSoundLimits();
+  match parseSounds(t) {
+    Ok([s]) => (match renderSoundChecked(s, {lim | maxEvents: 49}) { Err(ResourceLimit(e)) => contains(e, "event limit"), _ => false })
+      && (match renderSoundChecked(s, {lim | maxEventFrames: 1000}) { Err(ResourceLimit(e)) => contains(e, "event-frame"), _ => false })
+      && (match renderSoundChecked(s, {lim | maxWorkFrames: 5000}) { Err(ResourceLimit(e)) => contains(e, "work-frame"), _ => false })
+      && (match renderSoundChecked(s, lim) { Ok(xs) => size(xs) == 4800, _ => false }),
+    _ => false
+  }
+}

@@ -1,0 +1,70 @@
+module sunholo/audio/space
+-- A short reverb for distance (0.6.0): Schroeder (1962) with Moorer's (1979) low-pass in each comb's
+-- feedback. Four parallel feedback combs (29.7, 37.1, 41.1, 43.7 ms), summed and scaled by 1/4, into
+-- two series allpasses (5.0 and 1.7 ms, g 0.7). Each comb's gain gives the decay asked for:
+-- g = 10^(-3 d / (t60 rate)). The input reaches the combs after predelayMs; the output is the dry
+-- input plus wet times the reverb. Mono. Every delay line is blocked: one block of d samples is
+-- computed from the previous block (mapAccumL over blocks, carrying the damping state), which is the
+-- per-sample recurrence in the same order.
+import std/list (map, range, mapAccumL, zipWith, take, foldl, flatMap, length as size)
+import std/array (fromList, get, length as arrayLength, make, add, scale, toList)
+import std/math (pow, exp, round, floatToInt)
+import ./dsp (twoPi)
+
+-- wet 0 = off. dampHz 0 = no damping. Seconds and Hz.
+export type Space = {t60: float, dampHz: float, predelayMs: float, wet: float}
+
+export pure func spaceOff() -> Space = {t60: 0.0, dampHz: 0.0, predelayMs: 0.0, wet: 0.0}
+
+export pure func spaceOn(s: Space) -> bool = s.wet > 0.0 && s.t60 > 0.0
+
+export func combGain(delayFrames: int, t60: float, rate: int) -> float ! {}
+requires { delayFrames >= 1 && t60 > 0.0 && rate > 0 }
+ensures { result > 0.0 && result < 1.0 }
+{
+  pow(10.0, -3.0 * intToFloat(delayFrames) / (t60 * intToFloat(rate)))
+}
+
+export pure func msFrames(ms: float, rate: int) -> int { let d = floatToInt(round(ms * intToFloat(rate) / 1000.0)); if d < 1 then 1 else d }
+
+-- xs cut into blocks of d samples (the last block may be shorter), in O(n).
+pure func chunks(d: int, xs: [float]) -> [[float]] {
+  let a = fromList(xs);
+  let n = arrayLength(a);
+  map(\k. map(\j. get(a, k * d + j), range(0, if (k + 1) * d <= n then d else n - k * d)), range(0, (n + d - 1) / d))
+}
+
+-- A feedback comb with a damped loop: b[i] = x[i] + g f[i], f[i] = (1 - damp) b[i - d] + damp f[i - 1],
+-- output b[i - d]. damp = exp(-2 pi dampHz / rate) (0 when dampHz is 0).
+export pure func comb(d: int, g: float, damp: float, xs: [float]) -> [float] {
+  let n = size(xs);
+  let bs = match mapAccumL(\st blk. {
+      let r = mapAccumL(\f xb. match xb { (x, bp) => { let f2 = (1.0 - damp) * bp + damp * f; let b = x + g * f2; (b, f2) } }, st.f, zipWith(\x bp. (x, bp), blk, take(size(blk), st.prev)));
+      match r { (out, f2) => (out, {prev: out ++ map(\i. 0.0, range(0, d - size(out))), f: f2}) }
+    }, {prev: map(\i. 0.0, range(0, d)), f: 0.0}, chunks(d, xs)) { (out, _) => flatMap(\b. b, out) };
+  take(n, map(\i. 0.0, range(0, d)) ++ bs)
+}
+
+-- A Schroeder allpass: y[i] = -g x[i] + x[i - d] + g y[i - d].
+export pure func allpass(d: int, g: float, xs: [float]) -> [float] =
+  match mapAccumL(\st blk. {
+      let m = size(blk);
+      let y = zipWith(\x p. match p { (xp, yp) => 0.0 - g * x + xp + g * yp }, blk, zipWith(\a b. (a, b), take(m, st.x), take(m, st.y)));
+      (y, {x: blk, y: y})
+    }, {x: map(\i. 0.0, range(0, d)), y: map(\i. 0.0, range(0, d))}, chunks(d, xs)) { (out, _) => flatMap(\b. b, out) }
+
+pure func dampOf(s: Space, rate: int) -> float = if s.dampHz > 0.0 then exp(0.0 - twoPi() * s.dampHz / intToFloat(rate)) else 0.0
+
+-- The reverb alone (no dry), from rest.
+export pure func reverb(s: Space, rate: int, xs: [float]) -> [float] {
+  let n = size(xs);
+  let pre = if s.predelayMs > 0.0 then msFrames(s.predelayMs, rate) else 0;
+  let input = take(n, map(\i. 0.0, range(0, pre)) ++ xs);
+  let damp = dampOf(s, rate);
+  let sum = foldl(\acc ms. { let d = msFrames(ms, rate); add(acc, fromList(comb(d, combGain(d, s.t60, rate), damp, input))) }, make(n, 0.0), [29.7, 37.1, 41.1, 43.7]);
+  allpass(msFrames(1.7, rate), 0.7, allpass(msFrames(5.0, rate), 0.7, toList(scale(0.25, sum))))
+}
+
+-- Dry plus wet times the reverb. Off (wet 0 or t60 0): the input itself.
+export pure func schroeder(s: Space, rate: int, xs: [float]) -> [float] =
+  if not spaceOn(s) then xs else zipWith(\x r. x + s.wet * r, xs, reverb(s, rate, xs))

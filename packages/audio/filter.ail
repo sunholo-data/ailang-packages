@@ -1,0 +1,95 @@
+module sunholo/audio/filter
+-- A resonant filter (0.6.0): the topology-preserving state-variable filter (Zavalishin, "The Art of
+-- VA Filter Design", ch. 4; Simper's trapezoidal form). One recurrence gives low-pass, band-pass,
+-- high-pass and notch; it stays stable while its cutoff moves, which formant glides need. With fixed
+-- parameters it is the bilinear transform of the analog prototype prewarped at the centre (the same
+-- response as the RBJ cookbook biquads), so `svfGain` gives its magnitude in closed form.
+--
+-- The band-pass is the constant-peak form: 0 dB at the centre for every Q. Low + band + high is the
+-- input (the SVF identity). A bank sums band-passes in list order, each scaled by its gain.
+-- Pure; state is carried by mapAccumL in sample order, so the strict VM and the interpreter agree.
+import std/list (map, mapAccumL, zipWith, foldl, range, length as size)
+import std/array (fromList, toList, add, make, scale)
+import std/math (tan, pow, PI)
+
+export type SvfMode = BandPass | LowPass2 | HighPass2 | Notch deriving (Eq)
+
+-- A band of a bank: centre hz (moving exponentially to hzTo over the sound when they differ), Q, gain.
+export type Band = {hz: float, hzTo: float, q: float, gain: float}
+
+type SvfState = {ic1: float, ic2: float, i: int}
+
+-- |H(e^{j 2 pi f / rate})|: W = tan(pi f / rate) / tan(pi hz / rate), D = sqrt((1 - W^2)^2 + (W / q)^2);
+-- low 1 / D, band (W / q) / D, high W^2 / D, notch |1 - W^2| / D.
+export func svfGain(mode: SvfMode, hz: float, q: float, rate: float, f: float) -> float ! {}
+requires { hz > 0.0 && hz < rate / 2.0 && q > 0.0 && f > 0.0 && f < rate / 2.0 }
+ensures { result >= 0.0 }
+{
+  let w = tan(PI(()) * f / rate) / tan(PI(()) * hz / rate);
+  let k = 1.0 / q;
+  let u = 1.0 - w * w;
+  let d = pow(u * u + k * k * w * w, 0.5);
+  if mode == LowPass2 then 1.0 / d
+  else if mode == HighPass2 then w * w / d
+  else if mode == Notch then (if u < 0.0 then 0.0 - u else u) / d
+  else k * w / d
+}
+
+pure func outOf(mode: SvfMode, k: float, v0: float, v1: float, v2: float) -> float =
+  if mode == LowPass2 then v2
+  else if mode == HighPass2 then v0 - k * v1 - v2
+  else if mode == Notch then v0 - k * v1
+  else k * v1
+
+-- One sample of the trapezoidal SVF at prewarped gain g = tan(pi hz / rate) and damping k = 1 / q.
+pure func step(mode: SvfMode, g: float, k: float, st: SvfState, v0: float) -> (float, SvfState) {
+  let a1 = 1.0 / (1.0 + g * (g + k));
+  let a2 = g * a1;
+  let a3 = g * a2;
+  let v3 = v0 - st.ic2;
+  let v1 = a1 * st.ic1 + a2 * v3;
+  let v2 = st.ic2 + a2 * st.ic1 + a3 * v3;
+  (outOf(mode, k, v0, v1, v2), {ic1: 2.0 * v1 - st.ic1, ic2: 2.0 * v2 - st.ic2, i: st.i + 1})
+}
+
+-- The filter from rest at a fixed centre.
+export pure func svf(mode: SvfMode, hz: float, q: float, rate: float, xs: [float]) -> [float] {
+  let g = tan(PI(()) * hz / rate);
+  let k = 1.0 / q;
+  match mapAccumL(\st x. step(mode, g, k, st, x), {ic1: 0.0, ic2: 0.0, i: 0}, xs) { (out, _) => out }
+}
+
+-- The centre moving exponentially from hz0 to hz1 over n samples (period n, as dsp.sweepLowpass).
+-- hz0 == hz1 gives exactly svf.
+export pure func svfSweep(mode: SvfMode, hz0: float, hz1: float, q: float, n: int, rate: float, xs: [float]) -> [float] =
+  if hz0 == hz1 then svf(mode, hz0, q, rate, xs)
+  else {
+    let k = 1.0 / q;
+    let nf = intToFloat(n);
+    match mapAccumL(\st x. step(mode, tan(PI(()) * hz0 * pow(hz1 / hz0, intToFloat(st.i % n) / nf) / rate), k, st, x), {ic1: 0.0, ic2: 0.0, i: 0}, xs) { (out, _) => out }
+  }
+
+-- Parallel band-passes, each scaled by its gain, summed in list order. No bands: silence.
+export pure func bank(bands: [Band], n: int, rate: float, xs: [float]) -> [float] {
+  let m = size(xs);
+  toList(foldl(\acc b. add(acc, scale(b.gain, fromList(svfSweep(BandPass, b.hz, b.hzTo, b.q, n, rate, xs)))), make(m, 0.0), bands))
+}
+
+pure func formants(f1: float, f2: float, f3: float) -> [Band] =
+  [{hz: f1, hzTo: f1, q: f1 / 80.0, gain: 1.0}, {hz: f2, hzTo: f2, q: f2 / 100.0, gain: 0.6}, {hz: f3, hzTo: f3, q: f3 / 120.0, gain: 0.35}]
+
+-- The first three formants of five vowels (Peterson and Barney 1952, adult male means), bandwidths
+-- 80/100/120 Hz, gains 1, 0.6, 0.35. An unknown vowel gives no bands (callers validate names).
+export pure func vowelBands(v: string) -> [Band] =
+  if v == "i" then formants(270.0, 2290.0, 3010.0)
+  else if v == "e" then formants(530.0, 1840.0, 2480.0)
+  else if v == "a" then formants(730.0, 1090.0, 2440.0)
+  else if v == "o" then formants(570.0, 840.0, 2410.0)
+  else if v == "u" then formants(300.0, 870.0, 2240.0)
+  else []
+
+-- A move between two vowels: each formant of v glides to the same formant of w (fixed Q and gain of v).
+export pure func vowelMove(v: string, w: string) -> [Band] =
+  zipWith(\a b. {a | hzTo: b.hz}, vowelBands(v), vowelBands(w))
+
+export pure func isVowel(v: string) -> bool = size(vowelBands(v)) == 3

@@ -1,0 +1,88 @@
+-- Checks for sunholo/audio/filter against closed forms. The band-pass magnitude of the bilinear,
+-- centre-prewarped prototype is 1 / sqrt(1 + Q^2 (W - 1/W)^2), W = tan(pi f / fs) / tan(pi f0 / fs);
+-- the numbers below are that form at 48 kHz (design R3-SUNHOLO-AUDIO-REALISM §D1). Gains are measured
+-- as steady-state RMS ratios over whole cycles after at least 14 ring times (tau = Q / (pi f0)).
+module sunholo/audio/filter_test
+import std/list (map, range, drop, take, foldl, zipWith, length as size)
+import std/math (sqrt, log, sin, floatToInt)
+import ./filter (SvfMode, BandPass, LowPass2, HighPass2, Notch, svf, svfSweep, svfGain, bank, vowelBands, vowelMove, isVowel)
+import ./dsp (absF, twoPi)
+import ./noise (white)
+
+pure func sine(f: float, n: int) -> [float] = map(\i. sin(twoPi() * f * intToFloat(i) / 48000.0), range(0, n))
+pure func energy(xs: [float]) -> float = foldl(\a x. a + x * x, 0.0, xs)
+pure func db(g: float) -> float = 20.0 * log(g) / log(10.0)
+
+-- Settle, then measure over 9,600 samples (0.2 s: whole cycles of every multiple of 5 Hz).
+pure func settle(hz: float, q: float) -> int {
+  let s = floatToInt(14.0 * q / (3.141592653589793 * hz) * 48000.0);
+  if s < 2400 then 2400 else s
+}
+pure func measuredDb(mode: SvfMode, hz: float, q: float, f: float) -> float {
+  let s = settle(hz, q);
+  let x = sine(f, s + 9600);
+  let y = svf(mode, hz, q, 48000.0, x);
+  db(sqrt(energy(drop(s, y)) / energy(drop(s, x))))
+}
+pure func near(a: float, b: float, tol: float) -> bool = absF(a - b) <= tol
+
+test "band-pass 1 kHz Q 2: 0 dB at the centre (+-0.02)" { near(measuredDb(BandPass, 1000.0, 2.0, 1000.0), 0.0, 0.02) }
+test "band-pass 1 kHz Q 2: -10.014 dB an octave below, -10.056 dB an octave above (+-0.05)" {
+  near(measuredDb(BandPass, 1000.0, 2.0, 500.0), -10.014, 0.05) && near(measuredDb(BandPass, 1000.0, 2.0, 2000.0), -10.056, 0.05)
+}
+test "band-pass 1 kHz Q 0.7071: -3.282 / -3.307 dB at -/+1 octave (+-0.05)" {
+  near(measuredDb(BandPass, 1000.0, 0.7071, 500.0), -3.282, 0.05) && near(measuredDb(BandPass, 1000.0, 0.7071, 2000.0), -3.307, 0.05)
+}
+test "band-pass 3 kHz Q 8: -21.753 / -22.182 dB at -/+1 octave (+-0.05)" {
+  near(measuredDb(BandPass, 3000.0, 8.0, 1500.0), -21.753, 0.05) && near(measuredDb(BandPass, 3000.0, 8.0, 6000.0), -22.182, 0.05)
+}
+test "svfGain gives the closed-form numbers above" {
+  near(db(svfGain(BandPass, 1000.0, 2.0, 48000.0, 1000.0)), 0.0, 0.000001) && near(db(svfGain(BandPass, 1000.0, 2.0, 48000.0, 500.0)), -10.014, 0.001)
+  && near(db(svfGain(BandPass, 1000.0, 2.0, 48000.0, 2000.0)), -10.056, 0.001) && near(db(svfGain(BandPass, 3000.0, 8.0, 48000.0, 6000.0)), -22.182, 0.001)
+}
+
+-- Ten seeded cases over all four modes: hz 300..6,300, q 0.5..6.5, f a multiple of 5 Hz within two
+-- octaves of hz; the measured gain equals svfGain to 0.05 dB wherever it is above -40 dB.
+pure func u(k: int, s: int) -> float = (white(k, s) + 1.0) / 2.0
+pure func modeOf(k: int) -> SvfMode = if k % 4 == 0 then BandPass else if k % 4 == 1 then LowPass2 else if k % 4 == 2 then HighPass2 else Notch
+pure func caseOk(k: int) -> bool {
+  let hz = 300.0 + 6000.0 * u(k, 71);
+  let q = 0.5 + 6.0 * u(k, 72);
+  let f = 5.0 * intToFloat(floatToInt(hz * (0.25 + 3.75 * u(k, 73)) / 5.0));
+  let want = db(svfGain(modeOf(k), hz, q, 48000.0, f));
+  if want < -40.0 then true else near(measuredDb(modeOf(k), hz, q, f), want, 0.05)
+}
+test "svfGain equals the measured gain on ten seeded cases (+-0.05 dB)" { foldl(\ok k. ok && caseOk(k), true, range(0, 10)) }
+
+test "low + band + high reconstructs the input (the SVF identity, 1e-9)" {
+  let x = map(\i. white(i, 5), range(0, 4000));
+  let s = zipWith(\a b. a + b, zipWith(\a b. a + b, svf(LowPass2, 900.0, 3.0, 48000.0, x), svf(BandPass, 900.0, 3.0, 48000.0, x)), svf(HighPass2, 900.0, 3.0, 48000.0, x));
+  foldl(\ok p. ok && p, true, zipWith(\a b. absF(a - b) < 0.000000001, s, x))
+}
+test "notch: deep at the centre, low + high = notch (1e-9)" {
+  let x = map(\i. white(i, 6), range(0, 3000));
+  measuredDb(Notch, 2000.0, 1.0, 2000.0) < -60.0
+  && foldl(\ok p. ok && p, true, zipWith(\a b. absF(a - b) < 0.000000001, zipWith(\a b. a + b, svf(LowPass2, 700.0, 1.5, 48000.0, x), svf(HighPass2, 700.0, 1.5, 48000.0, x)), svf(Notch, 700.0, 1.5, 48000.0, x)))
+}
+test "a sweep with hz0 == hz1 is svf, bit for bit; a real sweep differs" {
+  let x = map(\i. white(i, 7), range(0, 3000));
+  svfSweep(BandPass, 800.0, 800.0, 4.0, 3000, 48000.0, x) == svf(BandPass, 800.0, 4.0, 48000.0, x)
+  && svfSweep(BandPass, 800.0, 1600.0, 4.0, 3000, 48000.0, x) != svf(BandPass, 800.0, 4.0, 48000.0, x)
+}
+test "a sweep ends near its target: the last 1,000 samples pass 1.6 kHz better than 800 Hz" {
+  let n = 9600;
+  let lo = svfSweep(BandPass, 800.0, 1600.0, 6.0, n, 48000.0, sine(800.0, n));
+  let hi = svfSweep(BandPass, 800.0, 1600.0, 6.0, n, 48000.0, sine(1600.0, n));
+  energy(drop(n - 1000, hi)) > 4.0 * energy(drop(n - 1000, lo))
+}
+test "bank: one band of gain 1 is that band-pass; gains scale; no bands is silence" {
+  let x = map(\i. white(i, 8), range(0, 2000));
+  bank([{hz: 1200.0, hzTo: 1200.0, q: 3.0, gain: 1.0}], 2000, 48000.0, x) == svf(BandPass, 1200.0, 3.0, 48000.0, x)
+  && foldl(\ok p. ok && p, true, zipWith(\a b. absF(a - 0.5 * b) < 0.000000000001, bank([{hz: 1200.0, hzTo: 1200.0, q: 3.0, gain: 0.5}], 2000, 48000.0, x), svf(BandPass, 1200.0, 3.0, 48000.0, x)))
+  && bank([], 2000, 48000.0, x) == map(\v. 0.0, x)
+}
+test "vowelBands: the formants of a (730, 1090, 2440 Hz) and i; unknown names give none" {
+  map(\b. b.hz, vowelBands("a")) == [730.0, 1090.0, 2440.0] && map(\b. b.hz, vowelBands("i")) == [270.0, 2290.0, 3010.0]
+  && size(vowelBands("y")) == 0 && isVowel("u") && not isVowel("x")
+  && map(\b. b.hzTo, vowelMove("a", "i")) == [270.0, 2290.0, 3010.0]
+}

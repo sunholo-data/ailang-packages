@@ -116,6 +116,54 @@ whole number of cycles over `seconds`; vibrato, beat and swell complete whole cy
 filter sweep. Noise in a loop is periodic: sample i reads the generator at i mod n and its filters
 run over two periods, keeping the second, to reduce filter startup transients. Two periods are not an exact periodic-state proof; check `analysis.seam` for the rendered loop.
 
+## Sounds (0.6.0): the richer recipe format
+
+`sound` parses the same files as `recipe` (schema `sunholo.audio.recipes/1`; a host's own id through `parseSoundsAs`). It accepts new layer kinds and stages. Use `parseSounds` → `renderSound` (or `parseSoundsChecked` → `renderSoundChecked` with `defaultSoundLimits()` for untrusted input), and `soundFrames(s)`, `s.base.id`, `s.base.rate` and `s.base.loop` where 0.5.0 code used the `Recipe`.
+
+**Render stability.** A layer that uses only 0.5.0 keys and kinds is `Classic`. When every layer of a recipe is Classic, `renderSound` is `recipe.render(base)` and the base comes from the 0.5.0 parser, so old recipes give the same bytes by construction. The frozen `compat` pins (eight recipes covering every 0.5.0 field) check it in every release. New keys are **layer-level only**, so `recipe.parseRecipes` refuses a 0.6 file and names `sound.parseSounds`.
+
+**Stage order in a 0.6 layer:** source → the 0.5.0 low-pass chain (`lowpass_hz`, `lowpass_to_hz`, `lowpass_poles`) and `highpass_hz` → `bands` → `amp` × `env` × beat → `space`. In a 0.6 layer every stage acts on every source. **Pitfall:** in a Classic `sine` layer the filter fields still do nothing, as in 0.5.0.
+
+| Kind | Fields (default) | Meaning |
+|---|---|---|
+| `pink` | as `white` | Kellet's refined pink filter on `white(i, seed)`: −3.01 dB/octave, RMS ≈ white's |
+| `brown` | as `white` | one-pole low-pass at 20 Hz on white: −6.02 dB/octave, RMS ≈ white's |
+| `saw` | `freq`, glide, vibrato, `jitter_cents` (0), `jitter_hz` (0) | polyBLEP sawtooth; jitter is a seeded, cosine-interpolated pitch drift (control points every 1/`jitter_hz` s) |
+| `sine` | + `jitter_cents`, `jitter_hz` | a 0.5.0 sine with drift and the 0.6 stages |
+| `fm` | `freq` (carrier), `ratio` (1), `index` (0), `index_to` (`index`), `index_tau` (0 = constant) | `sin(2π f t + I(t) sin(2π ratio f t))`, `I(t) = index_to + (index − index_to) e^(−t/index_tau)`. A bell: ratio 1.4, index 10 → 0 |
+| `pluck` | `freq` (20..4000), `t60` (1.5), `bright` (0.5), `pick` (0), `seed` | Karplus–Strong: a burst of white one period long, the half-sample averager, loss ρ = 10^(−3/(f·t60)), allpass tuning (within 1 cent). No glide or vibrato |
+| `events` | `voices`, `times` or `scatter`, `vary`, `amp`, `seed`, filters, beat, `bands`, `space` | one-shot voices placed in time (below) |
+
+| Stage (any kind) | Fields (default) | Meaning |
+|---|---|---|
+| `bands` | `[{"hz", "q" (0.7071), "gain" (1), "hz_to" (hz)}]` | parallel constant-peak state-variable band-passes, summed in list order; `hz_to` sweeps exponentially over the sound |
+| `vowel`, `vowel_to` | `a e i o u` | three formants (Peterson and Barney 1952 male means; bandwidths 80/100/120 Hz; gains 1, 0.6, 0.35); `vowel_to` moves each one. Not together with `bands` |
+| `space` | `{"t60", "damp_hz" (0), "predelay_ms" (0), "wet" (0 = off)}` | Schroeder combs (29.7, 37.1, 41.1, 43.7 ms; Moorer damping) into allpasses (5.0, 1.7 ms, g 0.7); dry stays 1. Per layer, so near and far parts can share a recipe |
+
+**Events.** `voices: [{"seconds", "fade_ms" (5), "layers": [leaf layers, no nested events]}]`.
+- **Timing:** `times: [seconds]`, or `scatter: {"count", "spread" (1), "min_gap_s" (0)}`, a jittered grid. Slot k is [k n / count, (k + 1) n / count), and the start is the slot start + ⌊u_k · spread · (slot − gap)⌋, so starts are at least `min_gap_s` apart, also across the loop point.
+- **Variation:** `vary: {"amp_db", "cents", "cycle"}`, a uniform gain in ±`amp_db`, and a pitch ratio in ±`cents` applied to the voice's source frequencies (not its filters, so formants stay put). The voice is picked by seed, or in turn with `cycle`.
+- **Seeds:** event k adds 1009·k to its voice layers' seeds, and the variation draws are `white(k, seed + 7/11/13)`.
+- **Rendering:** each voice renders as a one-shot (2 ms in, `fade_ms` out, no normalisation) and is summed at its start in event order. **In a loop the output is a circle:** a tail past the end wraps to the start, so the loop is exactly periodic. Envelopes, glides, plucks and FM decays belong inside events.
+
+**Loop rules (`soundLoopErrors`, beyond 0.5.0's):**
+- Parts at the top level of a loop:
+  - no 0.6 part may carry an envelope;
+  - beats complete whole cycles;
+  - no filter sweep, and no swept bands or `vowel_to`;
+  - no band ringing longer than the loop (2.2 Q/hz s).
+- Tones (saw, sine, fm) complete whole cycles; they do not glide or jitter. FM also needs a whole number of modulator cycles and a constant index.
+- `pluck` is refused at the top level.
+- Every event voice is at most the loop's length.
+- `space` renders over 1 + ⌈t60/seconds⌉ periods and keeps the last; more than 5 periods is refused.
+- Noise and coloured noise, and any filtered part, run over two periods and keep the second.
+
+**Budgets.** `SoundLimits = {render, maxEvents (4096), maxEventFrames (16 × maxFrames), maxWorkFrames (32 × maxFrames)}`. They are checked before allocation by `renderSoundChecked` and `parseSoundsChecked`. A Classic-only sound takes `recipe.renderChecked` unchanged.
+
+**Cost** (strict VM, Apple M4 Max, v0.54.18): about 50–65 ms per layer-second for 0.5.0 layers. The interpreter is about 45× slower than the VM on full renders, so compare the engines on short probes. Avoid `foldl` that conses onto its accumulator over long sample lists: it is superlinear on v0.54.18 (ailang#2029). Use `map`, `mapAccumL`, `zipWith` and `std/array`.
+
+**Modules:** `filter` (`SvfMode`, `Band`, `svfGain`, `svf`, `svfSweep`, `bank`, `vowelBands`, `vowelMove`, `isVowel`), `noise` (`pinkOf`, `brownOf`), `osc` (`FmVoice`, `PluckVoice`, `Period`, `phases`, `sawSamples`, `jitterCentsAt`, `fmIndexAt`, `fmSamples`, `pluckPeriod`, `pluckExcitation`, `pluckSamples`), `events` (`scatterStarts`, `fixedStarts`, `place`, `Variation`, `variation`, `eventSeed`), `space` (`Space`, `spaceOff`, `spaceOn`, `combGain`, `msFrames`, `comb`, `allpass`, `reverb`, `schroeder`), `sound` (`Extra`, `Leaf`, `Voice`, `Times`, `Vary`, `EventLayer`, `Part`, `Sound`, `SoundLimits`, `parseSoundsAs`, `parseSounds`, `parseSoundsChecked`, `parseSoundsAsChecked`, `validateSound`, `soundLoopErrors`, `soundFrames`, `classicOnly`, `renderSound`, `renderSoundChecked`, `leafSamples`, `partSamples`, `eventSamples`, `eventStarts`, `soundWork`), `compat` (`compatText`, `compatPins`).
+
 ## Render stability
 
 For a given recipe and rate, `render` and `pcm16` give the same bytes in every 0.x release unless
@@ -149,8 +197,9 @@ Do not "tidy" operation order in `dsp` or `recipe`: floating-point results depen
 
 `dsp`: twoPi, absF, clamp16, dbToGain, gainToDb, centiDb, onePole, lowpass, highpass,
 sweepLowpass, softSat, peakAbs, normalisePeak.
-`noise`: rampNoise, white.
-`recipe`: Env, Layer, Recipe, defaultRate, frames, envAt, phaseAt, layerSamples, render,
+`noise`: rampNoise, white, pinkOf, brownOf (0.6.0).
+`filter`, `osc`, `events`, `space`, `sound`, `compat` (0.6.0): see "Sounds (0.6.0)".
+`recipe`: Env, Layer, Recipe, defaultRate, frames, envAt, phaseAt, layerSamples, render, finish, beatAt, layerOfJson, recipeOfJson (0.6.0),
 loopErrors, recipeSchema, parseRecipes, parseRecipesAs, validateRecipe, renderChecked, parseRecipesChecked, parseRecipesAsChecked.
 `pcm`: pcm16, wav16, WavInfo, wavInfo, pcm16Floats, pcm16Checked, wav16Checked, pcm16FloatsChecked.
 `mix`: tile, sum.
@@ -171,9 +220,9 @@ startDelay, processDelay, resetDelay.
 
 ## Validation
 
-`ailang test --package .` runs 192 checks against closed forms and two byte pins; `_smoke.ail`
+`ailang test --package .` runs 270 checks against closed forms and byte pins (0.6.0: about 10 s with `--bytecode`, 5 minutes on the evaluator); `_smoke.ail`
 prints `OK:` and its three probes give the same bytes on `--strict-bytecode` and the interpreter.
-The first consumer, stapledons-godot, regenerates its 19 shipped WAVs byte for byte from this
+The first consumer, stapledons-godot, regenerates its 41 shipped WAVs byte for byte from this
 package (`make sound-synth-check`) and compares `analysis` with its GDScript loudness checks on
 every cue (`make sound-levels-parity`: 0 differences in centi-dB).
 

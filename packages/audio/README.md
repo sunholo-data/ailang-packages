@@ -25,6 +25,8 @@ ailang pkg-docs sunholo/audio   # AGENT.md: the recipe schema, conventions, pitf
   mono/stereo history, explicit tail rendering/reset and allocation budgets.
 - `automation` (0.4.0): linked linear-gain ramps, exact target frames,
   immediate changes and mid-ramp retargeting, independent of block partitioning.
+- `sound` (0.6.0): richer layers (pink, brown, saw, fm, pluck, events; bands, vowels, space) in the same schema; 0.5.0 recipes delegate to `recipe`.
+- `filter`, `osc`, `events`, `space` (0.6.0): the state-variable filter, the new sources, event placement, the reverb.
 - `recipe`: layers (sine with glide, vibrato, beat; white or legacy noise), envelopes, filters
   and sweeps, swell, drive, edge fades, peak normalisation; loop rules that refuse clicks.
 - `pcm`: `pcm16`, `wav16`, strict `wavInfo`, `pcm16Floats`; checked encoding and bounded decoding.
@@ -54,7 +56,7 @@ and `examples/block_pipeline.ail` for headless recipe and speech/model PCM fixtu
 Loop Lab has [its own application repository](https://github.com/sunholo-data/ailang-loop-lab)
 and consumes this package; its UI/session features are independently versioned.
 
-Version **0.5.0** adds per-layer `lowpass_poles` (dark sounds) and refuses unknown layer keys. Version **0.4.0** adds delay and gain automation. Both work on
+Version **0.6.0** adds `sound`: the same recipe JSON with pink and brown noise, polyBLEP saws with pitch jitter, FM, Karplus–Strong plucks, resonant band-pass banks and vowel formants, events inside loops (rain, chatter, crackle) and a short Schroeder reverb; every 0.5.0 recipe renders byte for byte. Version **0.5.0** adds per-layer `lowpass_poles` (dark sounds) and refuses unknown layer keys. Version **0.4.0** adds delay and gain automation. Both work on
 source-independent clips: process provider-produced PCM, game assets or DAW tracks
 with the same guards. `examples/effects_pipeline.ail` demonstrates a synthetic
 speech/model PCM fixture → fade → echo → peak preparation → measured WAV. Its

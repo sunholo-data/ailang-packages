@@ -1,0 +1,129 @@
+module sunholo/audio/osc
+-- New sources (0.6.0): a band-limited sawtooth (the glottal buzz under a murmur), two-operator FM
+-- (bells and chimes) and the Karplus-Strong plucked string. Each returns raw samples before amp,
+-- envelope and beat, which the `sound` renderer applies as it does to a 0.5.0 layer. Pure; phases
+-- are closed forms in t = i / rate except where a running state is stated (jitter, the pluck).
+import std/list (map, range, mapAccumL, zipWith, take, drop, reverse, foldl, flatMap, length as size)
+import std/array (fromList, get)
+import std/math (sin, cos, exp, pow, floor, round, floatToInt, log)
+import ./recipe (Layer, phaseAt)
+import ./dsp (twoPi, onePole, lowpass)
+import ./noise (white)
+
+-- Vibrato as a phase offset, the same formula as the 0.5.0 sine layer's.
+pure func vibPhase(l: Layer, t: float) -> float =
+  if l.vibCents <= 0.0 || l.vibRate <= 0.0 then 0.0
+  else { let d = pow(2.0, l.vibCents / 1200.0) - 1.0; l.freq * d / l.vibRate * (1.0 - cos(twoPi() * l.vibRate * t)) }
+
+-- Seeded pitch drift in cents: control points every 1 / jitterHz seconds, cents * white(k, seed + 977),
+-- joined by cosine interpolation. 0 cents or 0 Hz: none.
+export pure func jitterCentsAt(cents: float, hz: float, seed: int, t: float) -> float =
+  if cents <= 0.0 || hz <= 0.0 then 0.0
+  else {
+    let x = t * hz;
+    let k = floatToInt(floor(x));
+    let f = x - floor(x);
+    let w = 0.5 - 0.5 * cos(3.141592653589793 * f);
+    cents * ((1.0 - w) * white(k, seed + 977) + w * white(k + 1, seed + 977))
+  }
+
+-- The extra phase that jitter adds: 2 pi freq * the running sum of (2^(c/1200) - 1) / rate, in sample order.
+pure func jitterPhases(l: Layer, cents: float, hz: float, n: int, rate: int) -> [float] =
+  if cents <= 0.0 || hz <= 0.0 then map(\i. 0.0, range(0, n))
+  else {
+    let fr = intToFloat(rate);
+    match mapAccumL(\acc i. { let p = acc + twoPi() * l.freq * (pow(2.0, jitterCentsAt(cents, hz, l.seed, intToFloat(i) / fr) / 1200.0) - 1.0) / fr; (acc, p) }, 0.0, range(0, n)) { (out, _) => out }
+  }
+
+pure func frac(x: float) -> float = x - floor(x)
+
+-- The polyBLEP correction at phase t (cycles, 0..1) for a phase step dt (cycles per sample).
+pure func blep(t: float, dt: float) -> float =
+  if dt <= 0.0 then 0.0
+  else if t < dt then { let u = t / dt; u + u - u * u - 1.0 }
+  else if t > 1.0 - dt then { let u = (t - 1.0) / dt; u * u + u + u + 1.0 }
+  else 0.0
+
+-- A polyBLEP sawtooth in [-1, 1] following the layer's freq, glide (recipe.phaseAt) and vibrato,
+-- plus seeded jitter. The step dt is the phase difference to the previous sample.
+-- The phase in radians of a layer's sine at samples 0..n-1: recipe.phaseAt (glide) + the vibrato
+-- + seeded jitter. A sine source is sin of these.
+export pure func phases(l: Layer, jitterCents: float, jitterHz: float, n: int, rate: int) -> [float] {
+  let fr = intToFloat(rate);
+  if jitterCents <= 0.0 || jitterHz <= 0.0 then map(\i. phaseAt(l, intToFloat(i) / fr) + vibPhase(l, intToFloat(i) / fr), range(0, n))
+  else zipWith(\i j. phaseAt(l, intToFloat(i) / fr) + vibPhase(l, intToFloat(i) / fr) + j, range(0, n), jitterPhases(l, jitterCents, jitterHz, n, rate))
+}
+
+export pure func sawSamples(l: Layer, jitterCents: float, jitterHz: float, n: int, rate: int) -> [float] {
+  let fr = intToFloat(rate);
+  let ph = map(\p. p / twoPi(), phases(l, jitterCents, jitterHz, n, rate));
+  match mapAccumL(\prev p. { let dt = if prev < 0.0 then l.freq / fr else p - prev; let t = frac(p); (2.0 * t - 1.0 - blep(t, dt), p) }, 0.0 - 1.0, ph) { (out, _) => out }
+}
+
+-- Two-operator FM: carrier freq, modulator ratio * freq, index decaying from index0 to index1 with time
+-- constant indexTau (0: constant index0). Chowning's bell: ratio 1.4, index 10 -> 0.
+export type FmVoice = {freq: float, ratio: float, index0: float, index1: float, indexTau: float}
+
+export pure func fmIndexAt(v: FmVoice, t: float) -> float =
+  if v.indexTau <= 0.0 then v.index0 else v.index1 + (v.index0 - v.index1) * exp(0.0 - t / v.indexTau)
+
+-- sin(2 pi fc t + I(t) sin(2 pi r fc t)).
+export pure func fmSamples(v: FmVoice, n: int, rate: int) -> [float] {
+  let fr = intToFloat(rate);
+  map(\i. { let t = intToFloat(i) / fr; sin(twoPi() * v.freq * t + fmIndexAt(v, t) * sin(twoPi() * v.ratio * v.freq * t)) }, range(0, n))
+}
+
+-- Karplus-Strong (Karplus and Strong 1983; Jaffe and Smith 1983): a line of n samples, the
+-- half-sample averaging loop filter, a per-period loss rho = 10^(-3 / (freq t60)) and a first-order
+-- allpass with coefficient c for the fractional delay. The loop delay is n + 0.5 + d with d in
+-- [0.1, 1.1): rate / freq exactly at low frequencies.
+export type PluckVoice = {freq: float, t60: float, bright: float, pick: float}
+export type Period = {n: int, c: float}
+
+export func pluckPeriod(freq: float, rate: int) -> Period ! {}
+requires { freq >= 20.0 && freq <= 4000.0 && rate >= 8000 && rate <= 384000 }
+ensures { result.n >= 2 }
+{
+  let p = intToFloat(rate) / freq;
+  let n0 = floatToInt(floor(p - 0.5));
+  let d0 = p - 0.5 - intToFloat(n0);
+  let n = if d0 < 0.1 then n0 - 1 else n0;
+  let d = if d0 < 0.1 then d0 + 1.0 else d0;
+  {n: if n < 2 then 2 else n, c: (1.0 - d) / (1.0 + d)}
+}
+
+-- The excitation: one period of white(j, seed), low-passed at freq * 2^(1 + 6 bright) (capped at
+-- 0.45 rate), then combed at the pick position (x[j] - x[j - round(pick n)], pick 0 = off).
+export pure func pluckExcitation(v: PluckVoice, seed: int, n: int, rate: int) -> [float] {
+  let fr = intToFloat(rate);
+  let cut0 = v.freq * pow(2.0, 1.0 + 6.0 * v.bright);
+  let cut = if cut0 > 0.45 * fr then 0.45 * fr else cut0;
+  let raw = lowpass(onePole(cut, fr), map(\j. white(j, seed), range(0, n)));
+  let m = floatToInt(round(v.pick * intToFloat(n)));
+  if m <= 0 || m >= n then raw
+  else { let a = fromList(raw); map(\j. if j >= m then get(a, j) - get(a, j - m) else get(a, j), range(0, n)) }
+}
+
+pure func lastOf(xs: [float]) -> float = foldl(\a x. x, 0.0, xs)
+
+-- One period from the previous one: v = rho 0.5 (y[i - n] + y[i - n - 1]), y = c v + vPrev - c yPrev.
+pure func nextBlock(rho: float, c: float, prev: [float], before: float, st: {v: float, y: float}) -> ([float], {v: float, y: float}) {
+  let shifted = before :: take(size(prev) - 1, prev);
+  match mapAccumL(\s ab. match ab { (a, b) => { let v = rho * 0.5 * (a + b); let y = c * v + s.v - c * s.y; (y, {v: v, y: y}) } }, st, zipWith(\a b. (a, b), prev, shifted)) {
+    (out, s2) => (out, s2)
+  }
+}
+
+-- Every later period in order, by mapAccumL over the period count (no recursion depth).
+pure func blocks(rho: float, c: float, first: [float], count: int) -> [[float]] =
+  match mapAccumL(\s k. match nextBlock(rho, c, s.prev, s.before, s.st) { (b, s2) => (b, {prev: b, before: lastOf(s.prev), st: s2}) },
+      {prev: first, before: 0.0, st: {v: 0.0, y: 0.0}}, range(0, count)) { (out, _) => out }
+
+-- The plucked string, n samples: the excitation is the first period, then each period is computed
+-- from the one before (a blocked delay line: the textbook per-sample recurrence in the same order).
+export pure func pluckSamples(v: PluckVoice, seed: int, n: int, rate: int) -> [float] {
+  let p = pluckPeriod(v.freq, rate);
+  let rho = pow(10.0, -3.0 / (v.freq * v.t60));
+  let e = pluckExcitation(v, seed, p.n, rate);
+  take(n, e ++ flatMap(\b. b, blocks(rho, p.c, e, (n - p.n + p.n - 1) / p.n)))
+}

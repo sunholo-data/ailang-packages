@@ -1,0 +1,41 @@
+-- Checks for pink and brown noise (0.6.0): the power-spectral-density slope, fitted by least squares
+-- over six octave-spaced Goertzel bins (93.75 ... 3,000 Hz) of Hann-windowed 4,096-sample segments,
+-- and the RMS against uniform white noise's 1/sqrt(3). The Goertzel helper is independent of the
+-- package's filters. Expected slopes: white 0, pink -3.01, brown -6.02 dB/octave (+-0.5).
+module sunholo/audio/noise_colour_test
+import std/list (map, range, take, drop, foldl, zipWith, length as size)
+import std/math (sqrt, cos, sin, log)
+import ./noise (white, pinkOf, brownOf)
+import ./dsp (absF)
+
+pure func goertzel(xs: [float], f: float) -> float {
+  let w = 2.0 * 3.141592653589793 * f / 48000.0;
+  let c = 2.0 * cos(w);
+  let st = foldl(\s x. { let s0 = x + c * s.s1 - s.s2; {s1: s0, s2: s.s1} }, {s1: 0.0, s2: 0.0}, xs);
+  let re = st.s1 - st.s2 * cos(w);
+  let im = st.s2 * sin(w);
+  re * re + im * im
+}
+pure func hann(xs: [float]) -> [float] = zipWith(\x i. x * (0.5 - 0.5 * cos(2.0 * 3.141592653589793 * intToFloat(i) / 4096.0)), xs, range(0, 4096))
+pure func segments(xs: [float], k: int) -> [[float]] = map(\s. hann(take(4096, drop(s * 4096, xs))), range(0, k))
+pure func bins() -> [float] = [8.0, 16.0, 32.0, 64.0, 128.0, 256.0]
+pure func slope(xs: [float]) -> float {
+  let segs = segments(xs, 24);
+  let p = map(\b. 10.0 * log(foldl(\a s. a + goertzel(s, b * 48000.0 / 4096.0), 0.0, segs)) / log(10.0), bins());
+  let x = [0.0, 1.0, 2.0, 3.0, 4.0, 5.0];
+  let ym = foldl(\a v. a + v, 0.0, p) / 6.0;
+  foldl(\a v. a + v, 0.0, zipWith(\xi yi. (xi - 2.5) * (yi - ym), x, p)) / 17.5
+}
+pure func raw(n: int, seed: int) -> [float] = map(\i. white(i, seed), range(0, n))
+pure func rms(xs: [float]) -> float = sqrt(foldl(\a x. a + x * x, 0.0, xs) / intToFloat(size(xs)))
+
+test "white noise has a flat spectrum (0 +- 0.5 dB/octave)" { absF(slope(raw(98304, 31))) <= 0.5 }
+test "pink noise falls 3.01 dB/octave (+-0.5)" { absF(slope(pinkOf(raw(98304, 31))) + 3.0103) <= 0.5 }
+test "brown noise falls 6.02 dB/octave (+-0.5)" { absF(slope(brownOf(48000.0, raw(98304, 31))) + 6.0206) <= 0.5 }
+test "pink and brown RMS within 10% of 1/sqrt(3)" {
+  let w = 0.5773502691896258;
+  absF(rms(drop(4800, pinkOf(raw(96000, 32)))) / w - 1.0) <= 0.1 && absF(rms(drop(4800, brownOf(48000.0, raw(96000, 32)))) / w - 1.0) <= 0.1
+}
+test "coloured noise is deterministic and seed-sensitive" {
+  pinkOf(raw(500, 3)) == pinkOf(raw(500, 3)) && pinkOf(raw(500, 3)) != pinkOf(raw(500, 4)) && brownOf(48000.0, raw(500, 3)) == brownOf(48000.0, raw(500, 3))
+}

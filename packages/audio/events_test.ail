@@ -1,0 +1,73 @@
+-- Checks for sunholo/audio/events and event layers (0.6.0, design §D5): exact wrapping at the loop
+-- point, the scatter's range, count, gap and seeds, linearity, one-shot cutting, the variation rule
+-- that pitch moves sources and not filters.
+module sunholo/audio/events_test
+import std/list (map, range, take, drop, foldl, zipWith, length as size, any)
+import std/result (Result, Ok, Err)
+import ./events (scatterStarts, fixedStarts, place, variation, eventSeed)
+import ./sound (Sound, parseSounds, renderSound, partSamples, eventStarts)
+import ./analysis (seam)
+import ./dsp (absF)
+
+pure func ramp(m: int) -> [float] = map(\j. intToFloat(j + 1), range(0, m))
+
+test "an event starting at n - 100 puts its first 100 samples at the end and the rest at the start" {
+  let n = 1000;
+  let out = place([ramp(300)], [n - 100], n, true);
+  take(200, out) == drop(100, ramp(300)) && drop(900, out) == take(100, ramp(300)) && foldl(\ok x. ok && x == 0.0, true, take(700, drop(200, out)))
+}
+test "without wrap an event past the end is cut" {
+  let out = place([ramp(300)], [900], 1000, false);
+  drop(900, out) == take(100, ramp(300)) && foldl(\ok x. ok && x == 0.0, true, take(900, out))
+}
+test "scatter: count exact, starts in [0, n), min gap kept (also across the loop point), seeded" {
+  let n = 48000;
+  let s = scatterStarts(100, 7, 1.0, 120, n);
+  let gaps = zipWith(\a b. b - a, s, drop(1, s));
+  size(s) == 100 && foldl(\ok x. ok && x >= 0 && x < n, true, s) && foldl(\ok g. ok && g >= 120, true, gaps)
+  && (match (s, drop(99, s)) { (a :: _, [z]) => a + n - z >= 120, _ => false })
+  && s == scatterStarts(100, 7, 1.0, 120, n) && s != scatterStarts(100, 8, 1.0, 120, n)
+  && scatterStarts(4, 7, 0.0, 0, 1000) == [0, 250, 500, 750]
+}
+test "fixed starts round seconds to frames" { fixedStarts([0.0, 0.5, 0.25001], 48000) == [0, 24000, 12000] }
+test "non-overlapping events sum linearly (energy of the sum = sum of energies, 1e-9)" {
+  let a = map(\j. 0.5 * intToFloat(j % 7), range(0, 100));
+  let b = map(\j. 0.25 * intToFloat(j % 5), range(0, 80));
+  let e = \xs. foldl(\acc x. acc + x * x, 0.0, xs);
+  absF(e(place([a, b], [10, 500], 1000, true)) - (e(a) + e(b))) < 0.000000001
+}
+test "variation: gains within +-amp_db, ratios within +-cents, voices in range, cycle takes them in turn" {
+  let vs = map(\k. variation(5, k, 6.0, 100.0, 3, false), range(0, 200));
+  foldl(\ok v. ok && v.gain >= 0.5011872336272722 && v.gain <= 1.9952623149688795 && v.ratio >= 0.9438743126816935 && v.ratio <= 1.0594630943592953 && v.voice >= 0 && v.voice < 3, true, vs)
+  && any(\v. v.voice == 0, vs) && any(\v. v.voice == 2, vs)
+  && map(\k. (variation(5, k, 0.0, 0.0, 3, true)).voice, range(0, 6)) == [0, 1, 2, 0, 1, 2]
+  && variation(5, 3, 0.0, 0.0, 1, false).gain == 1.0 && variation(5, 3, 0.0, 0.0, 1, false).ratio == 1.0
+  && eventSeed(10, 3) == 3037
+}
+
+pure func one(body: string) -> string = "{\"schema\":\"sunholo.audio.recipes/1\",\"recipes\":[${body}]}"
+pure func rendered(t: string) -> [float] = match parseSounds(t) { Ok([s]) => renderSound(s), _ => [] }
+pure func voice(layer: string) -> string = "{\"seconds\":0.03,\"fade_ms\":5,\"layers\":[${layer}]}"
+
+test "an events loop of noise ticks, wrapping, has a clean seam" {
+  let t = one("{\"id\":\"rain\",\"seconds\":0.25,\"loop\":true,\"layers\":[{\"kind\":\"events\",\"amp\":0.6,\"seed\":41,\"voices\":[${voice("{\"kind\":\"sine\",\"freq\":3260,\"glide_to\":3900,\"glide_until_s\":0.02,\"amp\":0.5,\"env\":{\"attack\":0.0005,\"tau\":0.006}}")}],\"scatter\":{\"count\":30,\"min_gap_s\":0.001},\"vary\":{\"amp_db\":9,\"cents\":300}}]}");
+  let xs = rendered(t);
+  let sm = seam(xs);
+  size(xs) == 12000 && sm.seam <= sm.maxStep + 1 && xs == rendered(t)
+}
+test "a one-shot cuts an event past its end and fades it out" {
+  let t = one("{\"id\":\"cut\",\"seconds\":0.1,\"fade_ms\":20,\"layers\":[{\"kind\":\"events\",\"amp\":0.6,\"voices\":[{\"seconds\":0.05,\"layers\":[{\"kind\":\"sine\",\"freq\":1000,\"amp\":0.5}]}],\"times\":[0.08]}]}");
+  let xs = rendered(t);
+  size(xs) == 4800 && absF(foldl(\a x. x, 1.0, xs)) < 0.000001 && foldl(\ok x. ok && x == 0.0, true, take(3800, xs)) && any(\x. absF(x) > 0.1, drop(3840, xs))
+}
+pure func evPart(t: string) -> [float] = match parseSounds(t) { Ok([s]) => (match s.parts { [p] => partSamples(p, 4800, false, 48000), _ => [] }), _ => [] }
+test "vary.cents moves a voice's source frequency (the saw), and with cents 0 nothing moves" {
+  let mk = \c. one("{\"id\":\"v\",\"seconds\":0.1,\"layers\":[{\"kind\":\"events\",\"amp\":0.6,\"seed\":3,\"voices\":[{\"seconds\":0.05,\"layers\":[{\"kind\":\"saw\",\"freq\":150,\"amp\":0.5,\"bands\":[{\"hz\":800,\"q\":5}]}]}],\"times\":[0.0],\"vary\":{\"cents\":${c}}}]}");
+  let plain = one("{\"id\":\"v\",\"seconds\":0.1,\"layers\":[{\"kind\":\"events\",\"amp\":0.6,\"seed\":3,\"voices\":[{\"seconds\":0.05,\"layers\":[{\"kind\":\"saw\",\"freq\":150,\"amp\":0.5,\"bands\":[{\"hz\":800,\"q\":5}]}]}],\"times\":[0.0]}]}");
+  size(evPart(mk("400"))) == 4800 && evPart(mk("400")) != evPart(plain) && evPart(mk("0")) == evPart(plain)
+}
+test "an event's voice seeds its noise as seed + 1009 k: two events of one noise voice differ" {
+  let t = one("{\"id\":\"n\",\"seconds\":0.1,\"layers\":[{\"kind\":\"events\",\"amp\":0.6,\"voices\":[{\"seconds\":0.02,\"layers\":[{\"kind\":\"white\",\"amp\":0.5,\"seed\":5}]}],\"times\":[0.0,0.05]}]}");
+  let xs = rendered(t);
+  take(900, drop(100, xs)) != take(900, drop(2500, xs))
+}
