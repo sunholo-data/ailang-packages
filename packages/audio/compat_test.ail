@@ -1,0 +1,20 @@
+-- Render stability (R3-SUNHOLO-AUDIO-REALISM AR0, design AC4): every compat recipe, rendered by
+-- this version, gives the PCM sha256 that the published 0.5.0 gave. The pins in compat.ail are
+-- frozen; a failure here means an existing sound changed.
+module sunholo/audio/compat_test
+import std/list (map, zipWith, foldl, length as size)
+import std/crypto (sha256Bytes)
+import std/result (Result, Ok, Err)
+import ./recipe (parseRecipes, render)
+import ./pcm (pcm16)
+import ./compat (compatText, compatPins)
+import ./reference (loopRecipe, loopPcmSha)
+
+pure func shas() -> [string] = match parseRecipes(compatText()) {
+  Ok(rs) => map(\r. "${r.id} ${sha256Bytes(pcm16(render(r)))}", rs),
+  Err(e) => [e]
+}
+
+test "the compat corpus has eight recipes and eight pins" { size(compatPins()) == 8 && size(shas()) == 8 }
+test "every compat recipe renders the 0.5.0 bytes through recipe.render" { shas() == compatPins() }
+test "the reference loop keeps its 0.1.0 pin" { sha256Bytes(pcm16(render(loopRecipe()))) == loopPcmSha() }

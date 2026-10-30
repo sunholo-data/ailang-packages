@@ -1,0 +1,20 @@
+module sunholo/audio/compat
+-- Render-stability fixtures for 0.6.0 (R3-SUNHOLO-AUDIO-REALISM AR0). Eight short recipes that
+-- between them use every 0.5.0 field (glide, vibrato, beat, swell, a filter sweep, 1-4 low-pass
+-- poles, high-pass, drive, legacy noise, white, noise loops, envelopes with delay and stop, a
+-- one-shot fade, a 24 kHz rate), and the PCM sha256 of each as rendered by the published 0.5.0.
+-- FROZEN at AR0: these pins are never edited. A later release that changes one of them changes an
+-- existing sound and must be kind = "breaking" (AGENT.md, render stability).
+export pure func compatText() -> string = "{\"schema\":\"sunholo.audio.recipes/1\",\"recipes\":[{\"id\":\"c_glide\",\"seconds\":0.1,\"peak_db\":-3,\"fade_ms\":15,\"layers\":[{\"kind\":\"sine\",\"freq\":440,\"glide_to\":660,\"glide_from_s\":0.02,\"glide_until_s\":0.08,\"amp\":0.5,\"env\":{\"attack\":0.005,\"tau\":0.05}}]},{\"id\":\"c_vib_beat_loop\",\"seconds\":0.25,\"loop\":true,\"peak_db\":-6,\"swell\":{\"rate\":4,\"depth\":0.3},\"layers\":[{\"kind\":\"sine\",\"freq\":400,\"amp\":0.5,\"vib_hz\":8,\"vib_cents\":30,\"beat_hz\":4,\"beat_depth\":0.5},{\"kind\":\"sine\",\"freq\":200,\"amp\":0.3}]},{\"id\":\"c_sweep\",\"seconds\":0.12,\"peak_db\":-4,\"layers\":[{\"kind\":\"white\",\"amp\":0.5,\"lowpass_hz\":300,\"lowpass_to_hz\":6000,\"highpass_hz\":100,\"seed\":5,\"env\":{\"attack\":0.01,\"tau\":0.04}}]},{\"id\":\"c_poles_loop\",\"seconds\":0.25,\"loop\":true,\"peak_db\":-6,\"layers\":[{\"kind\":\"white\",\"amp\":0.5,\"lowpass_hz\":800,\"lowpass_poles\":3,\"highpass_hz\":200,\"seed\":11,\"beat_hz\":4,\"beat_depth\":0.6},{\"kind\":\"white\",\"amp\":0.3,\"lowpass_hz\":2000,\"lowpass_poles\":4,\"seed\":12},{\"kind\":\"white\",\"amp\":0.2,\"lowpass_hz\":5000,\"lowpass_poles\":2,\"seed\":13}]},{\"id\":\"c_drive\",\"seconds\":0.1,\"peak_db\":-1,\"fade_ms\":30,\"drive\":3,\"layers\":[{\"kind\":\"sine\",\"freq\":220,\"amp\":0.6,\"env\":{\"attack\":0.002,\"tau\":0.06}},{\"kind\":\"sine\",\"freq\":330,\"amp\":0.4,\"env\":{\"attack\":0.002,\"tau\":0.03}}]},{\"id\":\"c_noise_loop\",\"seconds\":0.2,\"loop\":true,\"peak_db\":-6,\"layers\":[{\"kind\":\"noise\",\"amp\":0.3,\"lowpass_hz\":1200,\"seed\":9},{\"kind\":\"sine\",\"freq\":250,\"amp\":0.4}]},{\"id\":\"c_fade_24k\",\"seconds\":0.1,\"rate\":24000,\"peak_db\":-3,\"fade_ms\":40,\"layers\":[{\"kind\":\"white\",\"amp\":0.5,\"lowpass_hz\":3000,\"seed\":21,\"env\":{\"delay\":0.01,\"attack\":0.01,\"tau\":0.03,\"stop\":0.09}}]},{\"id\":\"c_bed_loop\",\"seconds\":0.25,\"loop\":true,\"peak_db\":-6,\"swell\":{\"rate\":4,\"depth\":0.15},\"layers\":[{\"kind\":\"white\",\"amp\":0.5,\"lowpass_hz\":1000,\"highpass_hz\":250,\"seed\":101,\"beat_hz\":8,\"beat_depth\":0.55,\"lowpass_poles\":3},{\"kind\":\"white\",\"amp\":0.25,\"lowpass_hz\":160,\"seed\":104}]}]}"
+
+-- "id sha256(pcm16(render(r)))", in file order, from sunholo/audio 0.5.0.
+export pure func compatPins() -> [string] = [
+  "c_glide 9722104c77a8e9f19a74eb4ea2949bbbff256b465d14ff4614ba31a7b24dd7e8",
+  "c_vib_beat_loop d85a0f31de1101edbfefa5dca6b2e67ce2cc2f918b7bf29530b2a371273b0c41",
+  "c_sweep a2855d7733521fa0ed4bfb2b0a7f0ade5115e55cac2802739b2b659a9d1c8cb4",
+  "c_poles_loop 3f076b0c4617d7fbdc9f7210b5bd37de3973aa80da03f622b2b677bfd2be1a8d",
+  "c_drive 5055c66b4a22835f179d0d327fabd8669f11c8566000e81ac36b725a3c2492e5",
+  "c_noise_loop fcf96a127cd33bf4b3f118912ddf2326500cdd7b2c54eb33147d5006c0c78f97",
+  "c_fade_24k f01f75e8c6951ee4049aa29e34712756cd9ed8d42ddaff22888492e4bd9b11ad",
+  "c_bed_loop df95cc4cc1fd55a06acf68ad337a60a8c191644bf860747d470f9797e191a091"
+]
