@@ -1,0 +1,101 @@
+{
+  "schema": "ailang.package-quality/v1",
+  "package": "sunholo/audio",
+  "version": "0.6.0",
+  "stability": "experimental",
+  "mode": "publisher",
+  "compile": {
+    "source": "server",
+    "ok": true,
+    "files": 45
+  },
+  "contracts": {
+    "source": "server",
+    "evidence_schema": "ailang.verification-evidence/v1",
+    "numeric_model": {
+      "float_sort": "Real",
+      "int_sort": "Int",
+      "runtime_equivalence": "not_established"
+    },
+    "runtime_contracts": "not_measured",
+    "reason_counts": {
+      "missing_postcondition": 6,
+      "uncontracted": 83,
+      "unsupported_encoding": 53
+    },
+    "verified": 16,
+    "total": 75,
+    "counterexample": 0,
+    "skipped": 59,
+    "errors": 0,
+    "uncontracted_exports": 83,
+    "wall_seconds": 0.4214805
+  },
+  "tests": {
+    "source": "attested",
+    "files": 21,
+    "passed": 0,
+    "failed": 0,
+    "notes": "not run (--no-run)"
+  },
+  "smoke": {
+    "source": "attested",
+    "present": true,
+    "passed": false,
+    "not_run": true,
+    "notes": "not run (--no-run)"
+  },
+  "interface": {
+    "source": "server",
+    "hash_v1": "sha256:3e00883e52b45993590b92de45758930e0a0b3b55347495a746f7291ccb23dfd",
+    "hash_v2": "sha256:ifacev2:39895cf842584249536b2f7419147d983a3988d02a59f87f55805e032ffaa1c7",
+    "signatures": 237
+  },
+  "effects": {
+    "source": "server",
+    "max": [
+      "IO"
+    ],
+    "ceiling_declared": true,
+    "rank_max": "IO"
+  },
+  "release": {
+    "source": "server",
+    "kind": "feature",
+    "changelog_section": true,
+    "notes": "Feature: closer-to-real synthesis, additive. Every 0.5.0 type, signature and sample is unchanged.\nRequested by stapledons-godot (R3-SUNHOLO-AUDIO-REALISM, approved 2026-10-30) to re-voice its\n\"sound from home\" beds.\n\n- `sound` (new): the same recipe JSON (`sunholo.audio.recipes/1`, or a host id through\n  `parseSoundsAs`) with new layer kinds and stages. New keys are layer-level only, so 0.5.0\n  refuses a 0.6 file (`layer: unknown key bands (a 0.6 sound field: parse with\n  sound.parseSounds)`) and never renders it differently. A sound whose layers are all 0.5.0 layers\n  (Classic) renders through `recipe.render` itself, and its base is parsed by the 0.5.0 parser.\n  - Kinds: `pink`, `brown`, `saw` (polyBLEP, seeded `jitter_cents`/`jitter_hz`), `fm` (`ratio`,\n    `index`, `index_to`, `index_tau`), `pluck` (`t60`, `bright`, `pick`), and `events` (`voices`,\n    `times` or `scatter`, `vary`).\n  - Stages on any kind: `bands` (`hz`, `hz_to`, `q`, `gain`) or `vowel`/`vowel_to`, and `space`\n    (`t60`, `damp_hz`, `predelay_ms`, `wet`).\n  - Stage order: source, then the 0.5.0 low-pass chain and high-pass, then bands, then amp ×\n    envelope × beat, then space.\n  - Loop rules for every new part (`soundLoopErrors`). Events wrap at the loop point, so envelopes,\n    glides, plucks and index decays live inside loops as events.\n  - `validateSound`, and `renderSoundChecked`/`parseSoundsChecked` with `SoundLimits` (events,\n    event frames, work frames).\n- `filter` (new): the trapezoidal state-variable filter (low, band, high, notch; constant-peak\n  band-pass), `svfGain` in closed form, `svfSweep`, `bank`, and `vowelBands`/`vowelMove` (formants\n  from Peterson and Barney).\n- `noise`: `pinkOf` (Kellet refined) and `brownOf` (one-pole at 20 Hz, closed-form RMS scale).\n- `osc` (new): `sawSamples`, `phases`, `fmSamples`/`fmIndexAt`,\n  `pluckPeriod`/`pluckExcitation`/`pluckSamples` (a blocked delay line with allpass tuning).\n- `events` (new): `scatterStarts` (a jittered grid with a minimum gap), `fixedStarts`, `place`\n  (circular in lo"
+  },
+  "docs": {
+    "agent_md": true,
+    "ai_summary": true,
+    "agent_doc_exports_covered": 7
+  },
+  "style": {
+    "exported_funcs": 154,
+    "pure_exports": 154,
+    "pure_ratio": 1
+  },
+  "gates": [],
+  "badges": [
+    {
+      "code": "PUB016",
+      "level": "info",
+      "msg": "59 contract(s) skipped by the verifier — not proved; `ailang verify --package .` lists the reason per function"
+    },
+    {
+      "code": "PUB011",
+      "level": "warn",
+      "msg": "83 exported function(s) carry no contract"
+    },
+    {
+      "code": "PUB015",
+      "level": "info",
+      "msg": "_smoke.ail present but not run (--no-run)"
+    },
+    {
+      "code": "PUB012",
+      "level": "info",
+      "msg": "21 test file(s) present but not run (not run (--no-run))"
+    }
+  ]
+}

@@ -65,6 +65,12 @@ test "a mixed sound renders frames(base) samples at its peak, deterministically"
   size(xs) == 4800 && absF(peakAbs(xs) - dbToGain(-3.0)) < 0.0000001 && xs == rendered(t)
 }
 
+test "an events layer may carry an envelope over all its events in a one-shot (a crowd swelling)" {
+  let t = one("{\"id\":\"sw\",\"seconds\":0.2,\"layers\":[{\"kind\":\"events\",\"amp\":0.5,\"env\":{\"attack\":0.1,\"tau\":0.05},\"voices\":[{\"seconds\":0.02,\"layers\":[{\"kind\":\"sine\",\"freq\":500,\"amp\":0.5}]}],\"scatter\":{\"count\":8}}]}");
+  let xs = rendered(t);
+  size(xs) == 9600 && peakAbs(take(960, xs)) < peakAbs(take(960, drop(4800, xs)))
+}
+
 -- AC7: one test per 0.6 loop rule. Each loop is 0.25 s.
 pure func loop(layer: string) -> string = one("{\"id\":\"L\",\"seconds\":0.25,\"loop\":true,\"layers\":[${layer}]}")
 test "loop: a clean 0.6 loop is accepted (pink with bands, saw and fm in whole cycles, events, space)" {

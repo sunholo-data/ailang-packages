@@ -1,9 +1,9 @@
 [package]
 name = "sunholo/audio"
-version = "0.5.0"
+version = "0.6.0"
 edition = "1"
 ailang = ">=0.54.18"
-description = "Generic deterministic synthesis, checked mono/stereo clips, PCM16/WAV, editing, bounded levels, stateful filters, feedback delay and gain automation for procedural, recorded and model-produced audio"
+description = "Generic deterministic synthesis (sines, FM, plucked strings, polyBLEP saws, white/pink/brown noise, resonant state-variable filters and formant banks, events inside loops, a Schroeder reverb), checked mono/stereo clips, PCM16/WAV, editing, bounded levels, stateful filters, feedback delay and gain automation for procedural, recorded and model-produced audio"
 license = "Apache-2.0"
 
 [exports]
@@ -13,8 +13,8 @@ modules = ["sunholo/audio/dsp", "sunholo/audio/noise", "sunholo/audio/recipe", "
 max = ["IO"]  # every export is pure; IO is used only by _smoke.ail to print its verdict
 
 [metadata]
-tags = ["audio", "synthesis", "dsp", "wav", "pcm", "loudness", "games", "procedural", "speech", "ai-audio"]
-ai_summary = "Generic pure audio processing; no provider/device/session dependency. delay: bounded integer-frame mono/stereo feedback echo, independent ring histories and explicit tail/reset. automation: partition-independent linked linear-gain ramps and retargeting. block: checked per-channel stateful mono/stereo low-pass/high-pass/bypass, reset, per-block/cumulative frame budgets. levels: full and active-window RMS, peak/count reports, bounded Off/PeakSafe/MatchRms plans and checked preparation. clip/edit: validated planar finite-headroom clips and checked edits. clip_pcm: channel-preserving PCM16/WAV with explicit Reject/Saturate and legacy quantization. recipe: bounded deterministic procedural rendering; model-proposed recipes are data. Headless examples process recipe and speech/model PCM fixtures without inference. Legacy analysis and byte pins preserved. Contracts, runtime guards, tests and mathematical proofs are distinct. No resampling or general streaming engine. IO only for smoke."
+tags = ["audio", "synthesis", "dsp", "filter", "fm", "karplus-strong", "reverb", "wav", "pcm", "loudness", "games", "procedural", "speech", "ai-audio"]
+ai_summary = "Generic pure audio processing; no provider/device/session dependency. sound (0.6.0): richer recipes in the same JSON schema: kinds pink, brown, saw (polyBLEP, seeded jitter), fm (2-op, decaying index), pluck (Karplus-Strong, allpass-tuned), events (one-shot voices at fixed or seeded-scatter times that wrap at a loop point); stages bands/vowel (state-variable band-pass banks, Peterson-Barney formants) and space (Schroeder/Moorer reverb); every 0.5.0 recipe renders byte for byte (Classic delegation, frozen compat pins). delay: bounded integer-frame mono/stereo feedback echo, independent ring histories and explicit tail/reset. automation: partition-independent linked linear-gain ramps and retargeting. block: checked per-channel stateful mono/stereo low-pass/high-pass/bypass, reset, per-block/cumulative frame budgets. levels: full and active-window RMS, peak/count reports, bounded Off/PeakSafe/MatchRms plans and checked preparation. clip/edit: validated planar finite-headroom clips and checked edits. clip_pcm: channel-preserving PCM16/WAV with explicit Reject/Saturate and legacy quantization. recipe: bounded deterministic procedural rendering; model-proposed recipes are data. Headless examples process recipe and speech/model PCM fixtures without inference. Legacy analysis and byte pins preserved. Contracts, runtime guards, tests and mathematical proofs are distinct. No resampling or general streaming engine. IO only for smoke."
 repository = "https://github.com/sunholo-data/ailang-packages/tree/main/packages/audio"
 homepage = "https://ailang.sunholo.com/docs/packages/sunholo/audio"
 license_url = "https://github.com/sunholo-data/ailang-packages/blob/main/packages/audio/LICENSE"
@@ -23,4 +23,4 @@ license_url = "https://github.com/sunholo-data/ailang-packages/blob/main/package
 level = "experimental"
 
 [release]
-kind = "breaking"   # record shape only (Layer.lpPoles); no sample changes. security | fix | feature | breaking — what THIS version changes
+kind = "feature"   # additive sound/filter/osc/events/space/compat modules; every 0.5.0 type, signature and sample unchanged. security | fix | feature | breaking — what THIS version changes

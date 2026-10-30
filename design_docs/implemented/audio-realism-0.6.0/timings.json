@@ -1,0 +1,37 @@
+{
+  "kind": "descriptive whole-CLI timings (strict bytecode VM), startup and parse included; 0.06 s startup subtracted for per-second rates",
+  "machine": "Apple M4 Max (Mac Studio), Darwin arm64",
+  "ailang": "v0.54.18 (cd33d05)",
+  "measured": "2026-10-30",
+  "rate": 48000,
+  "baseline_0_5_0": {
+    "per_layer_second_s": [0.05, 0.065],
+    "home_set_v2": {"recipes": 13, "audio_seconds": 59.0, "strict_vm_s": 22.05},
+    "interpreter_vs_vm": 45
+  },
+  "primitives_5s_one_shot": [
+    {"case": "white, Classic (recipe.render)", "cli_s": 0.43, "per_second_s": 0.074},
+    {"case": "sine, Classic", "cli_s": 0.46, "per_second_s": 0.080},
+    {"case": "white + one-pole low-pass, Classic", "cli_s": 0.46, "per_second_s": 0.080},
+    {"case": "white + one SVF band", "cli_s": 0.63, "per_second_s": 0.114, "budget": "SVF pass <= 0.10 s per layer-second: 0.04 above the source", "within": true},
+    {"case": "white + vowel (3 bands)", "cli_s": 1.00, "per_second_s": 0.188, "budget": "3-band bank <= 0.30", "within": true},
+    {"case": "pink", "cli_s": 0.62, "per_second_s": 0.112, "budget": "<= 1.5x white (0.111)", "within": false, "note": "1.51x: at budget within run-to-run noise"},
+    {"case": "brown", "cli_s": 0.46, "per_second_s": 0.080, "budget": "<= 1.2x white", "within": true},
+    {"case": "saw (polyBLEP)", "cli_s": 0.595, "per_second_s": 0.107, "budget": "<= 1.5x sine (0.120)", "within": true},
+    {"case": "saw + jitter", "cli_s": 0.97, "per_second_s": 0.182},
+    {"case": "fm", "cli_s": 0.52, "per_second_s": 0.092, "budget": "<= 2x sine", "within": true},
+    {"case": "pluck", "cli_s": 0.50, "per_second_s": 0.088, "budget": "<= 2x sine", "within": true},
+    {"case": "events: 100 x 0.05 s sine voices over 5 s", "cli_s": 0.69, "budget": "<= 0.08 s per voice-second per leaf + 0.02 s per output second per 100 events (0.5 s)", "within": true},
+    {"case": "white + space (t60 1.5 s)", "cli_s": 1.20, "per_second_s_space_only": 0.154, "budget": "<= 0.6 s per output second", "within": true}
+  ],
+  "home_set_v3": {"recipes": 13, "audio_seconds": 59.0, "strict_vm_s": [58.42, 58.51], "budget_s": 60, "within": true,
+    "per_recipe_s_before_trim": {"home_family": 9.69, "home_home": 2.66, "home_town": 7.38, "home_world": 12.43, "home_science": 2.56, "home_sky": 3.11, "home_babble": 7.62, "home_static": 1.86, "home_family_tune": 2.19, "home_home_birds": 0.57, "home_town_bells": 5.33, "home_world_swell": 7.93, "home_science_pips": 1.85},
+    "note": "first draft 63.7 s; the breath layer of a syllable moved from a 3-band vowel to one band and two crowds thinned (90 -> 80, 75 -> 65 syllables)"},
+  "suite": {"bytecode_s": 10, "evaluator_s": 302, "tests": 270, "budget_s": 180,
+    "note": "ailang test --package . --bytecode (named-test bodies on the VM, same outcomes) runs in about 10 s; the plain evaluator run takes 302 s, over the 180 s budget, mostly the PSD-slope and filter checks; use --bytecode as the per-change gate"},
+  "probes_strict_vm_vs_interpreter_s": {"filterProbe": [0.10, 1.02], "colourProbe": [0.09, 0.76], "oscProbe": [0.11, 1.33], "eventsProbe": [0.09, 0.39], "spaceProbe": [0.12, 1.51], "soundProbe": [0.38, 15.01], "compatProbe": [0.63, 27.70]},
+  "within_budget": true,
+  "suite_seconds": 10,
+  "suite_seconds_evaluator": 302,
+  "over_budget": ["pink 1.51x white (budget 1.5x)", "evaluator suite 302 s (budget 180 s; bytecode 10 s)"]
+}

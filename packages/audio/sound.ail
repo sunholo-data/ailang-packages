@@ -291,10 +291,11 @@ pure func keys05() -> [string] = ["kind", "freq", "glide_to", "glide_from_s", "g
 pure func keys06() -> [string] = ["bands", "vowel", "vowel_to", "jitter_cents", "jitter_hz", "ratio", "index", "index_to", "index_tau", "t60", "bright", "pick", "voices", "times", "scatter", "vary", "space"]
 pure func kinds() -> [string] = ["sine", "noise", "white", "pink", "brown", "saw", "fm", "pluck", "events"]
 
--- Which 0.6 keys a kind may carry (any kind: bands, vowel, vowel_to, space).
+-- Which keys a kind may carry (any kind: bands, vowel, vowel_to, space, amp, seed, filters, beat;
+-- an events layer also its timing and an envelope over all its events, one-shots only).
 pure func keyFits(kind: string, k: string) -> bool =
   if member(k, ["bands", "vowel", "vowel_to", "space", "about", "kind", "amp", "seed", "lowpass_hz", "lowpass_poles", "highpass_hz", "beat_hz", "beat_depth"]) then true
-  else if kind == "events" then member(k, ["voices", "times", "scatter", "vary"])
+  else if kind == "events" then member(k, ["voices", "times", "scatter", "vary", "env"])
   else if member(k, ["voices", "times", "scatter", "vary"]) then false
   else if member(k, ["jitter_cents", "jitter_hz"]) then kind == "sine" || kind == "saw"
   else if member(k, ["ratio", "index", "index_to", "index_tau"]) then kind == "fm"

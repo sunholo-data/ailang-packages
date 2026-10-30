@@ -23,15 +23,25 @@ import ./block (LowPass, defaultBlockLimits, startFilter, processFilter, resetFi
 import ./delay (defaultDelayLimits, startDelay, processDelay, resetDelay)
 import ./automation (startGain, setGain, processGain)
 import std/math (log)
-import std/list (map, range, foldl, take, zipWith)
+import std/list (map, range, foldl, take, zipWith, length)
+import std/string (length as size)
 import std/result (Result, Ok, Err)
-import ./recipe (render, frames, renderChecked, validateRecipe)
+import ./recipe (render, frames, renderChecked, validateRecipe, parseRecipes)
 import ./pcm (pcm16, wav16, wavInfo, pcm16Floats, wav16Checked, pcm16FloatsChecked)
 import ./analysis (level, highpassKeepDb, lowbandDb, seam)
 import ./noise (white, rampNoise)
 import ./mix (tile, sum)
 import ./reference (loopRecipe, shotRecipe, sineWave, loopPcmSha)
 import ./safety (defaultLimits, ResourceLimit, InvalidRecipe, InvalidWav, InvalidClip)
+import ./filter (BandPass, LowPass2, svf, svfSweep, bank, vowelBands)
+import ./noise (pinkOf, brownOf)
+import ./osc (sawSamples, fmSamples, pluckSamples)
+import ./events (scatterStarts, place)
+import ./space (schroeder)
+import ./sound (parseSounds, renderSound)
+import ./compat (compatText, compatPins)
+import ./reference (sine)
+import std/string (join)
 
 -- The reference loop and one-shot as PCM hashes, and the first n samples of the one-shot as int16.
 export pure func renderProbe(n: int) -> string {
@@ -69,9 +79,12 @@ export func main() -> () ! {IO @limit=1} {
   let lv = level(sineWave(1000.0, 1.0, 48000), 0.0, 48000);
   let rmsOk = lv.rmsCdb == -283 && lv.peakCdb == 0;
   let whiteOk = absF(lag1(map(\i. white(i, 3), range(0, 20000)))) < 0.03;
-  if pinOk && wavOk && rmsOk && whiteOk && checkedProbe(0) == "true true true true" && clipProbe(0) == "true true true" && prepareLevelsProbe(0) == "true true true true" && blockProbe(0) == "true true true" && effectsProbe(0) == "true true true"
-  then println("OK: audio reference loop PCM sha256 28ee281f...7467 (render stability), WAV round trip 480 frames, gated RMS of a full-scale 1 kHz sine -2.83 dB (sqrt(24/46)), white noise lag-1 |r| < 0.03; checked boundaries, stereo clips, levels, filters, delay and automation passed")
-  else println("FAIL: pin ${show(pinOk)} wav ${show(wavOk)} rms ${show(lv.rmsCdb)} peak ${show(lv.peakCdb)} white ${show(whiteOk)} checked ${checkedProbe(0)} clips ${clipProbe(0)} levels ${prepareLevelsProbe(0)} blocks ${blockProbe(0)} effects ${effectsProbe(0)}")
+  let compatOk = compatQuick(0);
+  let sp = soundProbe(0);
+  let soundOk = size(sp) == 64;
+  if pinOk && compatOk && soundOk && wavOk && rmsOk && whiteOk && checkedProbe(0) == "true true true true" && clipProbe(0) == "true true true" && prepareLevelsProbe(0) == "true true true true" && blockProbe(0) == "true true true" && effectsProbe(0) == "true true true"
+  then println("OK: audio reference loop PCM sha256 28ee281f...7467 (render stability), WAV round trip 480 frames, gated RMS of a full-scale 1 kHz sine -2.83 dB (sqrt(24/46)), white noise lag-1 |r| < 0.03; checked boundaries, stereo clips, levels, filters, delay and automation passed; 0.6.0: the first two frozen 0.5.0 compat pins through renderSound (compatProbe checks all eight on both renderers), a sound with every new kind renders")
+  else println("FAIL: pin ${show(pinOk)} compat ${show(compatOk)} sound ${sp} wav ${show(wavOk)} rms ${show(lv.rmsCdb)} peak ${show(lv.peakCdb)} white ${show(whiteOk)} checked ${checkedProbe(0)} clips ${clipProbe(0)} levels ${prepareLevelsProbe(0)} blocks ${blockProbe(0)} effects ${effectsProbe(0)}")
 }
 
 
@@ -175,4 +188,39 @@ export pure func effectsProbe(n: int) -> string {
       }
     }, _ => "false false false"
   }
+}
+
+
+-- 0.6.0 probes (R3-SUNHOLO-AUDIO-REALISM): each the PCM sha256 of a short render; the strict VM must
+-- print the same bytes as the interpreter. Fixtures are 0.05-0.25 s (the interpreter is ~45x slower).
+pure func sha(xs: [float]) -> string = sha256Bytes(pcm16(xs))
+pure func wn(n: int, seed: int) -> [float] = map(\i. white(i, seed), range(0, n))
+
+export pure func filterProbe(n: int) -> string {
+  let x = wn(2400, 3);
+  "${sha(svf(BandPass, 1000.0, 4.0, 48000.0, x))} ${sha(svf(LowPass2, 700.0, 0.7071, 48000.0, x))} ${sha(svfSweep(BandPass, 500.0, 2000.0, 6.0, 2400, 48000.0, x))} ${sha(bank(vowelBands("a"), 2400, 48000.0, x))}"
+}
+export pure func colourProbe(n: int) -> string = "${sha(pinkOf(wn(4800, 5)))} ${sha(brownOf(48000.0, wn(4800, 5)))}"
+export pure func oscProbe(n: int) -> string =
+  "${sha(sawSamples({sine(220.0, 1.0) | kind: "saw", vibRate: 5.0, vibCents: 20.0}, 15.0, 4.0, 4800, 48000))} ${sha(fmSamples({freq: 400.0, ratio: 1.4, index0: 8.0, index1: 0.0, indexTau: 0.03}, 4800, 48000))} ${sha(pluckSamples({freq: 330.0, t60: 1.0, bright: 0.6, pick: 0.15}, 7, 4800, 48000))}"
+export pure func eventsProbe(n: int) -> string {
+  let st = scatterStarts(12, 9, 1.0, 48, 12000);
+  "${show(st)} ${sha(place(map(\k. take(600, wn(600, k)), range(0, 12)), st, 12000, true))}"
+}
+export pure func spaceProbe(n: int) -> string = sha(schroeder({t60: 0.3, dampHz: 4000.0, predelayMs: 5.0, wet: 0.4}, 48000, take(9600, 1.0 :: wn(9599, 2))))
+
+pure func soundText() -> string = "{\"schema\":\"sunholo.audio.recipes/1\",\"recipes\":[{\"id\":\"probe\",\"seconds\":0.25,\"loop\":true,\"layers\":[{\"kind\":\"pink\",\"amp\":0.3,\"bands\":[{\"hz\":900,\"q\":3}],\"space\":{\"t60\":0.3,\"damp_hz\":3000,\"wet\":0.3}},{\"kind\":\"fm\",\"freq\":400,\"ratio\":1.5,\"index\":2,\"amp\":0.2},{\"kind\":\"events\",\"amp\":0.5,\"seed\":4,\"voices\":[{\"seconds\":0.06,\"layers\":[{\"kind\":\"saw\",\"freq\":140,\"jitter_cents\":20,\"jitter_hz\":6,\"vowel\":\"a\",\"vowel_to\":\"i\",\"amp\":0.4,\"env\":{\"attack\":0.01,\"tau\":0.03}}]},{\"seconds\":0.05,\"layers\":[{\"kind\":\"pluck\",\"freq\":523.25,\"amp\":0.4}]}],\"scatter\":{\"count\":6,\"min_gap_s\":0.01},\"vary\":{\"amp_db\":4,\"cents\":50}}]}]}"
+export pure func soundProbe(n: int) -> string = match parseSounds(soundText()) { Ok([s]) => sha(renderSound(s)), Ok(_) => "ERR count", Err(e) => "ERR ${e}" }
+
+-- The frozen 0.5.0 pins through both renderers: prints compat-ok <n> when all hold.
+export pure func compatProbe(n: int) -> string {
+  let viaRecipe = match parseRecipes(compatText()) { Ok(rs) => map(\r. "${r.id} ${sha(render(r))}", rs), Err(e) => [e] };
+  let viaSound = match parseSounds(compatText()) { Ok(ss) => map(\s. "${s.base.id} ${sha(renderSound(s))}", ss), Err(e) => [e] };
+  if viaRecipe == compatPins() && viaSound == compatPins() then "compat-ok ${show(length(compatPins()))}" else "compat-FAIL ${join(" | ", viaSound)}"
+}
+
+-- The first two compat pins through renderSound: quick enough for main on the interpreter.
+pure func compatQuick(n: int) -> bool = match parseSounds(compatText()) {
+  Ok(ss) => take(2, map(\s. "${s.base.id} ${sha(renderSound(s))}", take(2, ss))) == take(2, compatPins()),
+  Err(_) => false
 }

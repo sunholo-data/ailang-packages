@@ -50,7 +50,8 @@ pure func blep(t: float, dt: float) -> float =
 -- + seeded jitter. A sine source is sin of these.
 export pure func phases(l: Layer, jitterCents: float, jitterHz: float, n: int, rate: int) -> [float] {
   let fr = intToFloat(rate);
-  zipWith(\i j. phaseAt(l, intToFloat(i) / fr) + vibPhase(l, intToFloat(i) / fr) + j, range(0, n), jitterPhases(l, jitterCents, jitterHz, n, rate))
+  if jitterCents <= 0.0 || jitterHz <= 0.0 then map(\i. phaseAt(l, intToFloat(i) / fr) + vibPhase(l, intToFloat(i) / fr), range(0, n))
+  else zipWith(\i j. phaseAt(l, intToFloat(i) / fr) + vibPhase(l, intToFloat(i) / fr) + j, range(0, n), jitterPhases(l, jitterCents, jitterHz, n, rate))
 }
 
 export pure func sawSamples(l: Layer, jitterCents: float, jitterHz: float, n: int, rate: int) -> [float] {

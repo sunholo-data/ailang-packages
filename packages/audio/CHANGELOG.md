@@ -1,5 +1,52 @@
 # Changelog
 
+## 0.6.0
+
+Feature: closer-to-real synthesis, additive. Every 0.5.0 type, signature and sample is unchanged.
+Requested by stapledons-godot (R3-SUNHOLO-AUDIO-REALISM, approved 2026-10-30) to re-voice its
+"sound from home" beds.
+
+- `sound` (new): the same recipe JSON (`sunholo.audio.recipes/1`, or a host id through
+  `parseSoundsAs`) with new layer kinds and stages. New keys are layer-level only, so 0.5.0
+  refuses a 0.6 file (`layer: unknown key bands (a 0.6 sound field: parse with
+  sound.parseSounds)`) and never renders it differently. A sound whose layers are all 0.5.0 layers
+  (Classic) renders through `recipe.render` itself, and its base is parsed by the 0.5.0 parser.
+  - Kinds: `pink`, `brown`, `saw` (polyBLEP, seeded `jitter_cents`/`jitter_hz`), `fm` (`ratio`,
+    `index`, `index_to`, `index_tau`), `pluck` (`t60`, `bright`, `pick`), and `events` (`voices`,
+    `times` or `scatter`, `vary`).
+  - Stages on any kind: `bands` (`hz`, `hz_to`, `q`, `gain`) or `vowel`/`vowel_to`, and `space`
+    (`t60`, `damp_hz`, `predelay_ms`, `wet`).
+  - Stage order: source, then the 0.5.0 low-pass chain and high-pass, then bands, then amp ×
+    envelope × beat, then space.
+  - Loop rules for every new part (`soundLoopErrors`). Events wrap at the loop point, so envelopes,
+    glides, plucks and index decays live inside loops as events.
+  - `validateSound`, and `renderSoundChecked`/`parseSoundsChecked` with `SoundLimits` (events,
+    event frames, work frames).
+- `filter` (new): the trapezoidal state-variable filter (low, band, high, notch; constant-peak
+  band-pass), `svfGain` in closed form, `svfSweep`, `bank`, and `vowelBands`/`vowelMove` (formants
+  from Peterson and Barney).
+- `noise`: `pinkOf` (Kellet refined) and `brownOf` (one-pole at 20 Hz, closed-form RMS scale).
+- `osc` (new): `sawSamples`, `phases`, `fmSamples`/`fmIndexAt`,
+  `pluckPeriod`/`pluckExcitation`/`pluckSamples` (a blocked delay line with allpass tuning).
+- `events` (new): `scatterStarts` (a jittered grid with a minimum gap), `fixedStarts`, `place`
+  (circular in loops), `variation`, `eventSeed`.
+- `space` (new): Schroeder combs with Moorer damping into two allpasses, plus pre-delay and wet;
+  `comb`, `allpass`, `reverb`, `schroeder`, `combGain`.
+- `compat` (new): eight frozen recipes covering every 0.5.0 field, with the PCM sha256 each
+  rendered on 0.5.0. They must hold through `render` and `renderSound` in every non-breaking release.
+- `recipe`: `finish` (the post-chain, moved verbatim out of `render`), plus `beatAt`, `layerOfJson`
+  and `recipeOfJson` exported for the `sound` front end. Nothing else changes.
+- Tests are closed forms:
+  - band-pass gains at the centre and ±1 octave within 0.05 dB (−10.014 / −10.056 dB at 1 kHz,
+    Q 2), and ten seeded cases against `svfGain`;
+  - PSD slopes by Goertzel: white −0.05, pink −3.05, brown −6.01 dB/octave;
+  - FM lines equal to |J_k(1)| and |J_k(2)| within 0.002;
+  - the pluck within 1 cent of its target, bit-identical to a per-sample reference;
+  - the reverb's T60 within 5%, and allpass energy 1;
+  - exact wraps, clean seams, one test per loop rule.
+- New `_smoke` probes give identical output on the strict VM and the interpreter: `filterProbe`,
+  `colourProbe`, `oscProbe`, `eventsProbe`, `spaceProbe`, `soundProbe` and `compatProbe`.
+
 ## 0.5.0
 
 Breaking (record shape only; no sample changes): per-layer low-pass poles, and closed layer keys.
