@@ -1,0 +1,60 @@
+-- Checks for sunholo/audio/space (0.6.0, design §D6): the comb's impulse response g^k at multiples
+-- of d exactly, the allpass's unit impulse-response energy, the measured T60 of the whole reverb,
+-- and the off switch returning the input bit for bit; the comb and allpass against per-sample references.
+module sunholo/audio/space_test
+import std/list (map, range, take, drop, foldl, zipWith, reverse, length as size)
+import std/array (make, set, get, toList)
+import std/math (pow, sqrt)
+import ./space (Space, spaceOff, schroeder, reverb, comb, allpass, combGain, msFrames)
+import ./noise (white)
+import ./dsp (absF)
+
+pure func impulse(n: int) -> [float] = 1.0 :: map(\i. 0.0, range(1, n))
+pure func at(xs: [float], i: int) -> float = match drop(i, xs) { x :: _ => x, [] => 0.0 }
+
+test "a comb's impulse response is g^k at multiples of d (1e-15), zero elsewhere (no damping)" {
+  let d = 37;
+  let g = 0.8;
+  let y = comb(d, g, 0.0, impulse(400));
+  foldl(\ok k. ok && absF(at(y, (k + 1) * d) - pow(g, intToFloat(k))) < 0.000000000000001, true, range(0, 9))
+  && foldl(\ok i. ok && (i % d == 0 || at(y, i) == 0.0), true, range(0, 400))
+}
+pure func combRef(d: int, g: float, damp: float, xs: [float]) -> [float] {
+  let n = size(xs);
+  let st = foldl(\s i. { let x = at(xs, i); let bp = if i >= d then get(s.b, i - d) else 0.0; let f = (1.0 - damp) * bp + damp * s.f; {b: set(s.b, i, x + g * f), f: f} }, {b: make(n, 0.0), f: 0.0}, range(0, n));
+  map(\i. if i >= d then get(st.b, i - d) else 0.0, range(0, n))
+}
+pure func apRef(d: int, g: float, xs: [float]) -> [float] {
+  let n = size(xs);
+  let st = foldl(\s i. { let x = at(xs, i); let xp = if i >= d then at(xs, i - d) else 0.0; let yp = if i >= d then get(s, i - d) else 0.0; set(s, i, 0.0 - g * x + xp + g * yp) }, make(n, 0.0), range(0, n));
+  toList(st)
+}
+test "the blocked comb and allpass equal their per-sample references, bit for bit" {
+  let x = map(\i. white(i, 3), range(0, 700));
+  comb(41, 0.83, 0.3, x) == combRef(41, 0.83, 0.3, x) && allpass(29, 0.7, x) == apRef(29, 0.7, x)
+}
+test "an allpass's impulse-response energy is 1 (1e-9)" {
+  let y = allpass(240, 0.7, impulse(24000));
+  absF(foldl(\a v. a + v * v, 0.0, y) - 1.0) < 0.000000001
+}
+test "combGain gives 60 dB of decay in t60" { absF(pow(combGain(1426, 2.0, 48000), 48000.0 * 2.0 / 1426.0) - 0.001) < 0.0000001 }
+
+-- T60 by Schroeder backward integration over 5 ms windows, -5 to -35 dB, extrapolated.
+pure func windows(xs: [float], w: int) -> [float] = map(\k. foldl(\a x. a + x * x, 0.0, take(w, drop(k * w, xs))), range(0, size(xs) / w))
+pure func t60Of(xs: [float]) -> float {
+  let es = windows(xs, 240);
+  let total = foldl(\a e. a + e, 0.0, es);
+  let rem = match foldl(\s e. {r: s.r - e, out: s.out ++ [s.r - e]}, {r: total, out: []}, es) { s => s.out };
+  let above = \lim. foldl(\a r. if r > total * lim then a + 1 else a, 0, rem);
+  2.0 * intToFloat(above(0.00031622776601683794) - above(0.31622776601683794)) * 240.0 / 48000.0
+}
+test "the reverb's measured T60 is within 5% of t60 (1.2 s, damping off)" {
+  let t = t60Of(reverb({t60: 1.2, dampHz: 0.0, predelayMs: 0.0, wet: 1.0}, 48000, impulse(96000)));
+  absF(t / 1.2 - 1.0) <= 0.05
+}
+test "wet 0 (or t60 0) returns the input itself; pre-delay shifts the reverb" {
+  let x = map(\i. white(i, 9), range(0, 2000));
+  schroeder(spaceOff(), 48000, x) == x && schroeder({t60: 1.0, dampHz: 0.0, predelayMs: 0.0, wet: 0.0}, 48000, x) == x
+  && take(1500, drop(480, reverb({t60: 0.5, dampHz: 3000.0, predelayMs: 10.0, wet: 1.0}, 48000, impulse(2000)))) == take(1500, reverb({t60: 0.5, dampHz: 3000.0, predelayMs: 0.0, wet: 1.0}, 48000, impulse(2000)))
+}
+test "msFrames rounds and never drops below one frame" { msFrames(29.7, 48000) == 1426 && msFrames(0.001, 48000) == 1 }
