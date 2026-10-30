@@ -46,9 +46,16 @@ pure func blep(t: float, dt: float) -> float =
 
 -- A polyBLEP sawtooth in [-1, 1] following the layer's freq, glide (recipe.phaseAt) and vibrato,
 -- plus seeded jitter. The step dt is the phase difference to the previous sample.
+-- The phase in radians of a layer's sine at samples 0..n-1: recipe.phaseAt (glide) + the vibrato
+-- + seeded jitter. A sine source is sin of these.
+export pure func phases(l: Layer, jitterCents: float, jitterHz: float, n: int, rate: int) -> [float] {
+  let fr = intToFloat(rate);
+  zipWith(\i j. phaseAt(l, intToFloat(i) / fr) + vibPhase(l, intToFloat(i) / fr) + j, range(0, n), jitterPhases(l, jitterCents, jitterHz, n, rate))
+}
+
 export pure func sawSamples(l: Layer, jitterCents: float, jitterHz: float, n: int, rate: int) -> [float] {
   let fr = intToFloat(rate);
-  let ph = zipWith(\i j. (phaseAt(l, intToFloat(i) / fr) + vibPhase(l, intToFloat(i) / fr) + j) / twoPi(), range(0, n), jitterPhases(l, jitterCents, jitterHz, n, rate));
+  let ph = map(\p. p / twoPi(), phases(l, jitterCents, jitterHz, n, rate));
   match mapAccumL(\prev p. { let dt = if prev < 0.0 then l.freq / fr else p - prev; let t = frac(p); (2.0 * t - 1.0 - blep(t, dt), p) }, 0.0 - 1.0, ph) { (out, _) => out }
 }
 
@@ -106,11 +113,10 @@ pure func nextBlock(rho: float, c: float, prev: [float], before: float, st: {v: 
   }
 }
 
-pure func blocks(rho: float, c: float, prev: [float], before: float, st: {v: float, y: float}, left: int, acc: [[float]]) -> [[float]] =
-  if left <= 0 then reverse(acc)
-  else match nextBlock(rho, c, prev, before, st) {
-    (b, s2) => blocks(rho, c, b, lastOf(prev), s2, left - size(b), b :: acc)
-  }
+-- Every later period in order, by mapAccumL over the period count (no recursion depth).
+pure func blocks(rho: float, c: float, first: [float], count: int) -> [[float]] =
+  match mapAccumL(\s k. match nextBlock(rho, c, s.prev, s.before, s.st) { (b, s2) => (b, {prev: b, before: lastOf(s.prev), st: s2}) },
+      {prev: first, before: 0.0, st: {v: 0.0, y: 0.0}}, range(0, count)) { (out, _) => out }
 
 -- The plucked string, n samples: the excitation is the first period, then each period is computed
 -- from the one before (a blocked delay line: the textbook per-sample recurrence in the same order).
@@ -118,5 +124,5 @@ export pure func pluckSamples(v: PluckVoice, seed: int, n: int, rate: int) -> [f
   let p = pluckPeriod(v.freq, rate);
   let rho = pow(10.0, -3.0 / (v.freq * v.t60));
   let e = pluckExcitation(v, seed, p.n, rate);
-  take(n, e ++ flatMap(\b. b, blocks(rho, p.c, e, 0.0, {v: 0.0, y: 0.0}, n - p.n, [])))
+  take(n, e ++ flatMap(\b. b, blocks(rho, p.c, e, (n - p.n + p.n - 1) / p.n)))
 }

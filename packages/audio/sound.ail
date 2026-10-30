@@ -1,0 +1,487 @@
+module sunholo/audio/sound
+-- Sounds (0.6.0): the 0.5.0 recipe format plus new layer kinds and stages, without changing any
+-- 0.5.0 type. A sound is a 0.5.0 Recipe (`base`: id, seconds, loop, peak, fade, swell, drive, rate;
+-- its `layers` are the Classic ones) and its parts in file order.
+--
+-- Render stability by construction: when every part is Classic (a 0.5.0 layer with only 0.5.0
+-- keys), renderSound is recipe.render(base), the same call, and the base is parsed by
+-- recipe.recipeOfJson, the 0.5.0 parser. Otherwise the parts are summed in file order and handed
+-- to recipe.finish, the 0.5.0 post-chain (drive, swell, edges, peak normalisation).
+--
+-- Stage order in a 0.6 layer: source -> the 0.5.0 low-pass chain and high-pass -> bands -> amp x
+-- envelope x beat -> space. New keys are layer-level only (0.5.0 refuses them: fail-closed).
+import std/list (map, range, foldl, flatMap, zipWith, take, drop, filter, length as size, nth, any)
+import std/array (fromList, toList, add, make)
+import std/math (sin, round, floatToInt, floor, ceil, PI)
+import std/option (Option, Some, None)
+import std/result (Result, Ok, Err)
+import std/string (join, length as textLength)
+import std/bytes (fromString, length as byteLength)
+import std/json (Json, decode, get, getString, getNumber, getInt, getBool, getArray, getObject, keys, JNull, JBool, JNumber, JString, JArray, JObject)
+import ./recipe (Recipe, Layer, Env, frames, layerSamples, envAt, beatAt, render, finish, loopErrors, validateRecipe, recipeOfJson, layerOfJson, recipeSchema, renderChecked)
+import ./dsp (twoPi, absF, onePole, lowpass, sweepLowpass)
+import ./noise (white, rampNoise, pinkOf, brownOf)
+import ./filter (Band, bank, vowelBands, vowelMove, isVowel)
+import ./osc (FmVoice, PluckVoice, phases, sawSamples, fmSamples, pluckSamples)
+import ./events (scatterStarts, fixedStarts, place, variation, eventSeed)
+import ./space (Space, spaceOff, spaceOn, schroeder)
+import ./safety (AudioError, InvalidRecipe, ResourceLimit, InvalidSamples, RenderLimits, defaultLimits, limitsValid, inRange, samplesInRange)
+
+-- The 0.6 stages of a layer. Off: no bands, no vowel (""), no jitter, spaceOff().
+export type Extra = {bands: [Band], vowel: string, vowelTo: string, jitterCents: float, jitterHz: float, space: Space}
+
+-- A part that can also sound inside an event voice.
+export type Leaf = Classic(Layer) | Shaped(Layer, Extra) | Fm(Layer, FmVoice, Extra) | Pluck(Layer, PluckVoice, Extra)
+
+-- An event voice: a one-shot of `seconds`, a 2 ms fade-in and fadeMs fade-out, no normalisation.
+export type Voice = {seconds: float, fadeMs: float, parts: [Leaf]}
+export type ScatterSpec = {count: int, spread: float, minGap: float}
+export type Times = Fixed([float]) | Scatter(ScatterSpec)
+export type Vary = {ampDb: float, cents: float, cycle: bool}
+export type EventLayer = {voices: [Voice], times: Times, vary: Vary}
+
+-- Events carry the layer's amp, seed, filters and beat in their Layer record.
+export type Part = Leaf(Leaf) | Events(Layer, EventLayer, Extra)
+export type Sound = {base: Recipe, parts: [Part]}
+
+-- Work bounds checked before any sample is allocated (lists, not wall time).
+export type SoundLimits = {render: RenderLimits, maxEvents: int, maxEventFrames: int, maxWorkFrames: int}
+
+export pure func defaultSoundLimits() -> SoundLimits {
+  let r = defaultLimits();
+  {render: r, maxEvents: 4096, maxEventFrames: 16 * r.maxFrames, maxWorkFrames: 32 * r.maxFrames}
+}
+
+export pure func noExtra() -> Extra = {bands: [], vowel: "", vowelTo: "", jitterCents: 0.0, jitterHz: 0.0, space: spaceOff()}
+
+export pure func soundFrames(s: Sound) -> int = frames(s.base)
+
+pure func isClassicPart(p: Part) -> bool = match p { Leaf(Classic(_)) => true, _ => false }
+export pure func classicOnly(s: Sound) -> bool = not any(\p. not isClassicPart(p), s.parts)
+
+-- ===== Rendering =====
+
+pure func noiseKind(k: string) -> bool = k == "white" || k == "noise" || k == "pink" || k == "brown"
+pure func gen(l: Layer, i: int) -> float = if l.kind == "noise" then rampNoise(i, l.seed) else white(i, l.seed)
+
+pure func bandsOf(x: Extra) -> [Band] = if x.vowel == "" then x.bands else if x.vowelTo == "" then vowelBands(x.vowel) else vowelMove(x.vowel, x.vowelTo)
+
+pure func hasFilters(l: Layer, x: Extra) -> bool = l.lowpass > 0.0 || l.highpass > 0.0 || size(bandsOf(x)) > 0
+
+pure func times(k: int, f: [float] -> [float], xs: [float]) -> [float] = if k <= 1 then f(xs) else times(k - 1, f, f(xs))
+
+-- The 0.5.0 low-pass chain (fixed or swept over period n, lpPoles in series) and high-pass, then bands.
+pure func stages(l: Layer, x: Extra, n: int, fr: float, xs: [float]) -> [float] {
+  let lp = if l.lowpass > 0.0 && l.lowpassTo > 0.0 && l.lowpassTo != l.lowpass then times(l.lpPoles, \v. sweepLowpass(l.lowpass, l.lowpassTo, n, fr, v), xs)
+    else if l.lowpass > 0.0 then times(l.lpPoles, \v. lowpass(onePole(l.lowpass, fr), v), xs) else xs;
+  let hp = if l.highpass > 0.0 then zipWith(\a b. a - b, lp, lowpass(onePole(l.highpass, fr), lp)) else lp;
+  let bs = bandsOf(x);
+  if size(bs) > 0 then bank(bs, n, fr, hp) else hp
+}
+
+pure func tile(k: int, xs: [float]) -> [float] = flatMap(\i. xs, range(0, k))
+
+-- Space over a loop runs 1 + ceil(t60 / seconds) periods and keeps the last.
+export pure func spacePeriods(x: Extra, seconds: float) -> int = if spaceOn(x.space) then 1 + floatToInt(ceil(x.space.t60 / seconds)) else 1
+
+pure func applySpace(x: Extra, loop: bool, n: int, rate: int, xs: [float]) -> [float] =
+  if not spaceOn(x.space) then xs
+  else if loop then { let k = spacePeriods(x, intToFloat(n) / intToFloat(rate)); drop((k - 1) * n, schroeder(x.space, rate, tile(k, xs))) }
+  else schroeder(x.space, rate, xs)
+
+-- raw is `periods` periods of the source; the stages run over all of them and the last n are kept.
+pure func shapeRaw(l: Layer, x: Extra, raw: [float], periods: int, n: int, loop: bool, rate: int) -> [float] {
+  let fr = intToFloat(rate);
+  let f = drop((periods - 1) * n, if hasFilters(l, x) then stages(l, x, n, fr, raw) else raw);
+  applySpace(x, loop, n, rate, zipWith(\v i. { let t = intToFloat(i) / fr; l.amp * v * envAt(l.env, t) * beatAt(l, t) }, f, range(0, n)))
+}
+
+pure func scaled(l: Layer, ratio: float, seedAdd: int) -> Layer =
+  if ratio == 1.0 && seedAdd == 0 then l else {l | freq: l.freq * ratio, freqTo: l.freqTo * ratio, seed: (l.seed + seedAdd) % 2147483647}
+
+-- One leaf, n samples. ratio and seedAdd vary an event's voice (1.0 and 0 at the top level).
+export pure func leafSamples(p: Leaf, n: int, loop: bool, rate: int, ratio: float, seedAdd: int) -> [float] =
+  match p {
+    Classic(l0) => recipeLayer(scaled(l0, ratio, seedAdd), n, loop, rate),
+    Shaped(l0, x) => {
+      let l = scaled(l0, ratio, seedAdd);
+      let periods = if loop && (hasFilters(l, x) || l.kind == "pink" || l.kind == "brown") then 2 else 1;
+      let m = periods * n;
+      let raw = if l.kind == "pink" then pinkOf(map(\i. white(i % n, l.seed), range(0, m)))
+        else if l.kind == "brown" then brownOf(intToFloat(rate), map(\i. white(i % n, l.seed), range(0, m)))
+        else if noiseKind(l.kind) then map(\i. gen(l, i % n), range(0, m))
+        else if l.kind == "saw" then sawSamples(l, x.jitterCents, x.jitterHz, m, rate)
+        else map(sin, phases(l, x.jitterCents, x.jitterHz, m, rate));
+      shapeRaw(l, x, raw, periods, n, loop, rate)
+    },
+    Fm(l0, v, x) => {
+      let l = scaled(l0, ratio, seedAdd);
+      let periods = if loop && hasFilters(l, x) then 2 else 1;
+      shapeRaw(l, x, fmSamples({v | freq: v.freq * ratio}, periods * n, rate), periods, n, loop, rate)
+    },
+    Pluck(l0, v, x) => {
+      let l = scaled(l0, ratio, seedAdd);
+      shapeRaw(l, x, pluckSamples({v | freq: v.freq * ratio}, l.seed, n, rate), 1, n, false, rate)
+    }
+  }
+
+-- A Classic layer is rendered by the 0.5.0 code itself.
+pure func recipeLayer(l: Layer, n: int, loop: bool, rate: int) -> [float] = layerSamples(l, n, loop, rate)
+
+pure func voiceFrames(v: Voice, rate: int) -> int = floatToInt(round(v.seconds * intToFloat(rate)))
+
+pure func voiceSamples(v: Voice, rate: int, ratio: float, seedAdd: int, gain: float) -> [float] {
+  let m = voiceFrames(v, rate);
+  let fr = intToFloat(rate);
+  let summed = foldl(\acc p. add(acc, fromList(leafSamples(p, m, false, rate, ratio, seedAdd))), make(m, 0.0), v.parts);
+  zipWith(\x i. {
+    let fin = intToFloat(i) / (0.002 * fr);
+    let fo = if v.fadeMs > 0.0 then intToFloat(m - 1 - i) / (v.fadeMs / 1000.0 * fr) else 1.0;
+    gain * x * (if fin < 1.0 then fin else 1.0) * (if fo < 1.0 then fo else 1.0)
+  }, toList(summed), range(0, m))
+}
+
+export pure func eventStarts(l: Layer, e: EventLayer, n: int, rate: int) -> [int] =
+  match e.times {
+    Fixed(ts) => fixedStarts(ts, rate),
+    Scatter(sc) => scatterStarts(sc.count, l.seed, sc.spread, floatToInt(round(sc.minGap * intToFloat(rate))), n)
+  }
+
+pure func voiceAt(vs: [Voice], k: int) -> Voice = match nth(vs, k) { Some(v) => v, None => {seconds: 0.001, fadeMs: 0.0, parts: []} }
+
+-- The events of a layer placed over n samples (wrapping in a loop), before the layer's stages.
+export pure func eventSamples(l: Layer, e: EventLayer, n: int, loop: bool, rate: int) -> [float] {
+  let starts = eventStarts(l, e, n, rate);
+  let nv = size(e.voices);
+  let evs = map(\k. { let va = variation(l.seed, k, e.vary.ampDb, e.vary.cents, nv, e.vary.cycle); voiceSamples(voiceAt(e.voices, va.voice), rate, va.ratio, eventSeed(0, k), va.gain) }, range(0, size(starts)));
+  place(evs, starts, n, loop)
+}
+
+export pure func partSamples(p: Part, n: int, loop: bool, rate: int) -> [float] =
+  match p {
+    Leaf(lf) => leafSamples(lf, n, loop, rate, 1.0, 0),
+    Events(l, e, x) => {
+      let placed = eventSamples(l, e, n, loop, rate);
+      let periods = if loop && hasFilters(l, x) then 2 else 1;
+      shapeRaw(l, x, tile(periods, placed), periods, n, loop, rate)
+    }
+  }
+
+-- The sound as floats in [-1, 1].
+export pure func renderSound(s: Sound) -> [float] =
+  if classicOnly(s) then render(s.base)
+  else {
+    let n = frames(s.base);
+    finish(s.base, foldl(\acc p. add(acc, fromList(partSamples(p, n, s.base.loop, s.base.rate))), make(n, 0.0), s.parts))
+  }
+
+-- ===== Validation and loop rules =====
+
+pure func layerOfPart(p: Part) -> Layer = match p { Leaf(Classic(l)) => l, Leaf(Shaped(l, _)) => l, Leaf(Fm(l, _, _)) => l, Leaf(Pluck(l, _, _)) => l, Events(l, _, _) => l }
+
+pure func whole(f: float, seconds: float) -> bool { let c = f * seconds; absF(c - round(c)) < 0.000001 }
+pure func hasEnv(l: Layer) -> bool = l.env.attack > 0.0 || l.env.tau > 0.0 || l.env.delay > 0.0 || l.env.stop > 0.0
+pure func swept(x: Extra) -> bool = x.vowelTo != "" || any(\b. b.hzTo != b.hz, x.bands)
+-- The slowest band's ring time to -60 dB, about 2.2 Q / hz seconds.
+pure func ringTime(x: Extra) -> float = foldl(\m b. { let r = 2.2 * b.q / b.hz; if r > m then r else m }, 0.0, bandsOf(x))
+
+pure func commonLoop(id: string, l: Layer, x: Extra, seconds: float) -> [string] =
+  (if hasEnv(l) then ["${id}: a loop part cannot have an envelope"] else [])
+  ++ (if l.amDepth > 0.0 && not whole(l.amRate, seconds) then ["${id}: a beat does not complete whole cycles over the loop"] else [])
+  ++ (if l.lowpassTo > 0.0 && l.lowpassTo != l.lowpass then ["${id}: a loop cannot sweep its filter"] else [])
+  ++ (if swept(x) then ["${id}: a loop cannot sweep its bands (vowel_to, hz_to); put the move in an event"] else [])
+  ++ (if ringTime(x) > seconds then ["${id}: a band rings longer than the loop"] else [])
+  ++ (if spacePeriods(x, seconds) > 5 then ["${id}: the space's t60 needs more than 5 loop periods"] else [])
+
+pure func tonalLoop(id: string, l: Layer, x: Extra, seconds: float) -> [string] =
+  (if l.freqTo != l.freq then ["${id}: a loop cannot glide"] else [])
+  ++ (if not whole(l.freq, seconds) then ["${id}: a tone does not complete whole cycles over the loop"] else [])
+  ++ (if l.vibCents > 0.0 && not whole(l.vibRate, seconds) then ["${id}: a vibrato does not complete whole cycles over the loop"] else [])
+  ++ (if x.jitterCents > 0.0 && x.jitterHz > 0.0 then ["${id}: a loop tone cannot jitter; put it in an event"] else [])
+
+pure func partLoopErrors(id: string, seconds: float, rate: int, p: Part) -> [string] =
+  match p {
+    Leaf(Classic(_)) => [],
+    Leaf(Shaped(l, x)) => commonLoop(id, l, x, seconds) ++ (if noiseKind(l.kind) then [] else tonalLoop(id, l, x, seconds)),
+    Leaf(Fm(l, v, x)) => commonLoop(id, l, x, seconds) ++ tonalLoop(id, l, x, seconds)
+      ++ (if not whole(v.ratio * v.freq, seconds) then ["${id}: an FM modulator does not complete whole cycles over the loop"] else [])
+      ++ (if v.indexTau > 0.0 && v.index1 != v.index0 then ["${id}: a loop's FM index must be constant"] else []),
+    Leaf(Pluck(_, _, _)) => ["${id}: a pluck decays, so it cannot be a loop layer; put it in an event"],
+    Events(l, e, x) => commonLoop(id, l, x, seconds)
+      ++ flatMap(\v. if v.seconds > seconds then ["${id}: an event voice is longer than the loop"] else [], e.voices)
+  }
+
+-- recipe.loopErrors for the Classic layers, then the 0.6 rules. Empty for a one-shot or a clean loop.
+export pure func soundLoopErrors(s: Sound) -> [string] =
+  loopErrors(s.base) ++ (if s.base.loop then flatMap(\p. partLoopErrors(s.base.id, s.base.seconds, s.base.rate, p), s.parts) else [])
+
+pure func ok(b: bool, e: string) -> [string] = if b then [] else [e]
+
+pure func extraErrors(x: Extra, rate: int) -> [string] {
+  let ny = 0.45 * intToFloat(rate);
+  flatMap(\b. ok(inRange(b.hz, 1.0, ny) && inRange(b.hzTo, 1.0, ny) && inRange(b.q, 0.1, 100.0) && inRange(b.gain, -100.0, 100.0), "band: hz and hz_to 1..0.45 rate, q 0.1..100, gain -100..100"), x.bands)
+  ++ ok(x.vowel == "" || isVowel(x.vowel), "vowel must be a, e, i, o or u")
+  ++ ok(x.vowelTo == "" || (isVowel(x.vowelTo) && x.vowel != ""), "vowel_to needs a vowel and must be a, e, i, o or u")
+  ++ ok(x.vowel == "" || size(x.bands) == 0, "bands and vowel cannot both be set")
+  ++ ok(inRange(x.jitterCents, 0.0, 1200.0) && inRange(x.jitterHz, 0.0, 100.0), "jitter: cents 0..1200, hz 0..100")
+  ++ ok(inRange(x.space.t60, 0.0, 20.0) && inRange(x.space.dampHz, 0.0, ny) && inRange(x.space.predelayMs, 0.0, 500.0) && inRange(x.space.wet, 0.0, 4.0), "space: t60 0..20 s, damp_hz 0..0.45 rate, predelay_ms 0..500, wet 0..4")
+}
+
+-- The 0.5.0 domains of a layer, checked by validateRecipe on a one-layer probe recipe.
+pure func layerDomain(base: Recipe, l: Layer) -> [string] =
+  match validateRecipe({base | loop: false, layers: [{l | kind: if noiseKind(l.kind) then "white" else "sine"}]}) {
+    Ok(_) => [], Err(InvalidRecipe(e)) => [e], Err(_) => ["invalid layer"]
+  }
+
+pure func leafErrors(base: Recipe, p: Leaf) -> [string] =
+  match p {
+    Classic(l) => layerDomain(base, l),
+    Shaped(l, x) => layerDomain(base, l) ++ extraErrors(x, base.rate)
+      ++ ok(noiseKind(l.kind) || l.kind == "sine" || l.kind == "saw", "${base.id}: unknown layer kind ${l.kind}")
+      ++ ok(noiseKind(l.kind) || l.freq > 0.0 || l.amp == 0.0, "${base.id}: a ${l.kind} layer needs freq > 0"),
+    Fm(l, v, x) => layerDomain(base, l) ++ extraErrors(x, base.rate)
+      ++ ok(v.freq > 0.0 && inRange(v.ratio, 0.001, 100.0) && inRange(v.index0, 0.0, 100.0) && inRange(v.index1, 0.0, 100.0) && inRange(v.indexTau, 0.0, 100000.0), "${base.id}: fm needs freq > 0, ratio 0.001..100, index and index_to 0..100, index_tau 0..100000"),
+    Pluck(l, v, x) => layerDomain(base, l) ++ extraErrors(x, base.rate)
+      ++ ok(inRange(v.freq, 20.0, 4000.0) && inRange(v.t60, 0.001, 60.0) && inRange(v.bright, 0.0, 1.0) && inRange(v.pick, 0.0, 0.5), "${base.id}: pluck needs freq 20..4000, t60 0.001..60, bright 0..1, pick 0..0.5")
+      ++ ok(l.freqTo == l.freq && l.vibCents == 0.0, "${base.id}: a pluck cannot glide or carry vibrato")
+      ++ ok(base.rate >= 8000, "${base.id}: a pluck needs a rate of at least 8000")
+  }
+
+pure func eventErrors(base: Recipe, l: Layer, e: EventLayer, x: Extra) -> [string] =
+  layerDomain(base, {l | kind: "white"}) ++ extraErrors(x, base.rate)
+  ++ ok(size(e.voices) > 0, "${base.id}: events need at least one voice")
+  ++ flatMap(\v. ok(inRange(v.seconds, 0.0, 60.0) && v.seconds > 0.0 && voiceFrames(v, base.rate) >= 1 && inRange(v.fadeMs, 0.0, 100000.0) && size(v.parts) > 0, "${base.id}: a voice needs seconds 0..60 (at least one frame), fade_ms 0..100000 and layers")
+      ++ flatMap(\p. leafErrors(base, p), v.parts), e.voices)
+  ++ (match e.times {
+      Fixed(ts) => flatMap(\t. ok(inRange(t, 0.0, base.seconds) && t < base.seconds, "${base.id}: an event time must be in [0, seconds)"), ts),
+      Scatter(sc) => ok(sc.count >= 0 && sc.count <= 100000 && inRange(sc.spread, 0.0, 1.0) && inRange(sc.minGap, 0.0, base.seconds), "${base.id}: scatter needs count 0..100000, spread 0..1, min_gap_s 0..seconds")
+    })
+  ++ ok(inRange(e.vary.ampDb, 0.0, 60.0) && inRange(e.vary.cents, 0.0, 2400.0), "${base.id}: vary needs amp_db 0..60 and cents 0..2400")
+
+pure func partErrors(base: Recipe, p: Part) -> [string] =
+  match p { Leaf(lf) => leafErrors(base, lf), Events(l, e, x) => eventErrors(base, l, e, x) }
+
+pure func silentStub() -> Layer = {kind: "sine", freq: 0.0, freqTo: 0.0, glide0: 0.0, glide1: 0.0, amp: 0.0, lowpass: 0.0, highpass: 0.0, seed: 1, env: {delay: 0.0, attack: 0.0, tau: 0.0, stop: 0.0}, vibRate: 0.0, vibCents: 0.0, amRate: 0.0, amDepth: 0.0, lowpassTo: 0.0, lpPoles: 1}
+
+-- Validates direct record construction as well as JSON. The recipe-level fields go through
+-- recipe.validateRecipe (with a silent stub layer when no part is Classic); then every part.
+export func validateSound(s: Sound) -> Result[Sound, AudioError] ! {}
+{
+  let classics = map(layerOfPart, filter(isClassicPart, s.parts));
+  let probe = {s.base | layers: if size(classics) == 0 then [silentStub()] else classics};
+  if size(s.parts) == 0 then Err(InvalidRecipe("no layers"))
+  else if not (size(classics) == 0 || size(classics) == size(s.base.layers)) then Err(InvalidRecipe("base.layers must be the Classic parts"))
+  else match validateRecipe(probe) {
+    Err(e) => Err(e),
+    Ok(_) => match flatMap(\p. partErrors(s.base, p), s.parts) ++ soundLoopErrors(s) {
+      [] => Ok(s),
+      es => Err(InvalidRecipe(join("; ", es)))
+    }
+  }
+}
+
+-- ===== JSON (schema sunholo.audio.recipes/1; every 0.5.0 file parses to the same Recipe) =====
+
+pure func num(j: Json, k: string, d: float) -> float = match getNumber(j, k) { Some(x) => x, None => d }
+pure func str(j: Json, k: string) -> string = match getString(j, k) { Some(x) => x, None => "" }
+pure func member(k: string, ks: [string]) -> bool = any(\a. a == k, ks)
+
+pure func keys05() -> [string] = ["kind", "freq", "glide_to", "glide_from_s", "glide_until_s", "amp", "lowpass_hz", "lowpass_poles", "lowpass_to_hz",
+  "highpass_hz", "seed", "env", "vib_hz", "vib_cents", "beat_hz", "beat_depth", "about"]
+pure func keys06() -> [string] = ["bands", "vowel", "vowel_to", "jitter_cents", "jitter_hz", "ratio", "index", "index_to", "index_tau", "t60", "bright", "pick", "voices", "times", "scatter", "vary", "space"]
+pure func kinds() -> [string] = ["sine", "noise", "white", "pink", "brown", "saw", "fm", "pluck", "events"]
+
+-- Which 0.6 keys a kind may carry (any kind: bands, vowel, vowel_to, space).
+pure func keyFits(kind: string, k: string) -> bool =
+  if member(k, ["bands", "vowel", "vowel_to", "space", "about", "kind", "amp", "seed", "lowpass_hz", "lowpass_poles", "highpass_hz", "beat_hz", "beat_depth"]) then true
+  else if kind == "events" then member(k, ["voices", "times", "scatter", "vary"])
+  else if member(k, ["voices", "times", "scatter", "vary"]) then false
+  else if member(k, ["jitter_cents", "jitter_hz"]) then kind == "sine" || kind == "saw"
+  else if member(k, ["ratio", "index", "index_to", "index_tau"]) then kind == "fm"
+  else if member(k, ["t60", "bright", "pick"]) then kind == "pluck"
+  else if member(k, ["glide_to", "glide_from_s", "glide_until_s", "vib_hz", "vib_cents"]) then kind != "pluck"
+  else true
+
+pure func typeOk(v: Json, t: string) -> bool = match v {
+  JNumber(x) => if t == "integer" then inRange(x, -2147483647.0, 2147483647.0) && x == floor(x) else t == "number",
+  JString(_) => t == "string", JBool(_) => t == "boolean", JObject(_) => t == "object", JArray(_) => t == "array", JNull => false
+}
+pure func typed(j: Json, k: string, t: string) -> [string] = match get(j, k) { None => [], Some(v) => if typeOk(v, t) then [] else ["${k}: expected ${t}"] }
+pure func numbers(j: Json, ks: [string]) -> [string] = flatMap(\k. typed(j, k, "number"), ks)
+pure func closed(j: Json, allowed: [string], what: string) -> [string] = flatMap(\k. if member(k, allowed) then [] else ["${what}: unknown key ${k}"], keys(j))
+pure func objects(j: Json, k: string, allowed: [string], what: string, check: Json -> [string]) -> [string] =
+  match getArray(j, k) { None => [], Some(xs) => flatMap(\x. match x { JObject(_) => closed(x, allowed, what) ++ check(x), _ => ["${what} must be an object"] }, xs) }
+pure func object(j: Json, k: string, allowed: [string], check: Json -> [string]) -> [string] =
+  match getObject(j, k) { None => [], Some(o) => closed(o, allowed, k) ++ check(o) }
+
+pure func leafShape(j: Json, depth: int) -> [string] = match j {
+  JObject(_) => {
+    let kind = match getString(j, "kind") { Some(k) => k, None => "sine" };
+    closed(j, keys05() ++ keys06(), "layer")
+    ++ (if member(kind, kinds()) then [] else ["layer: unknown kind ${kind}"])
+    ++ (if kind == "events" && depth > 0 then ["layer: events cannot nest inside an event voice"] else [])
+    ++ flatMap(\k. if member(k, keys06()) || member(k, keys05()) then (if keyFits(kind, k) then [] else ["layer: ${k} does not apply to kind ${kind}"]) else [], keys(j))
+    ++ typed(j, "kind", "string") ++ typed(j, "seed", "integer") ++ typed(j, "lowpass_poles", "integer") ++ typed(j, "vowel", "string") ++ typed(j, "vowel_to", "string")
+    ++ typed(j, "env", "object") ++ typed(j, "bands", "array") ++ typed(j, "voices", "array") ++ typed(j, "times", "array") ++ typed(j, "scatter", "object") ++ typed(j, "vary", "object") ++ typed(j, "space", "object")
+    ++ numbers(j, ["freq", "glide_to", "glide_from_s", "glide_until_s", "amp", "lowpass_hz", "highpass_hz", "vib_hz", "vib_cents", "beat_hz", "beat_depth", "lowpass_to_hz",
+         "jitter_cents", "jitter_hz", "ratio", "index", "index_to", "index_tau", "t60", "bright", "pick"])
+    ++ object(j, "env", ["delay", "attack", "tau", "stop"], \o. numbers(o, ["delay", "attack", "tau", "stop"]))
+    ++ objects(j, "bands", ["hz", "hz_to", "q", "gain"], "band", \o. numbers(o, ["hz", "hz_to", "q", "gain"]) ++ (match getNumber(o, "hz") { Some(_) => [], None => ["band: hz is required"] }))
+    ++ object(j, "space", ["t60", "damp_hz", "predelay_ms", "wet"], \o. numbers(o, ["t60", "damp_hz", "predelay_ms", "wet"]))
+    ++ object(j, "scatter", ["count", "spread", "min_gap_s"], \o. typed(o, "count", "integer") ++ numbers(o, ["spread", "min_gap_s"]))
+    ++ object(j, "vary", ["amp_db", "cents", "cycle"], \o. numbers(o, ["amp_db", "cents"]) ++ typed(o, "cycle", "boolean"))
+    ++ (match getArray(j, "times") { None => [], Some(ts) => flatMap(\t. if typeOk(t, "number") then [] else ["times: expected numbers"], ts) })
+    ++ objects(j, "voices", ["seconds", "fade_ms", "layers", "about"], "voice", \o. numbers(o, ["seconds", "fade_ms"]) ++ typed(o, "layers", "array")
+         ++ (match getArray(o, "layers") { None => ["voice: layers are required"], Some(ls) => flatMap(\l. leafShape(l, depth + 1), ls) }))
+    ++ (if kind == "events" then (match (get(j, "times"), get(j, "scatter")) { (Some(_), Some(_)) => ["layer: events take times or scatter, not both"], (None, None) => ["layer: events need times or scatter"], _ => [] }) else [])
+  },
+  _ => ["layer must be an object"]
+}
+
+-- A layer is Classic when its kind is a 0.5.0 kind and it carries no 0.6 key.
+pure func isClassicJson(j: Json) -> bool {
+  let kind = match getString(j, "kind") { Some(k) => k, None => "sine" };
+  (kind == "sine" || kind == "noise" || kind == "white") && not any(\k. member(k, keys06()), keys(j))
+}
+
+pure func extraOf(j: Json) -> Extra = {
+  bands: match getArray(j, "bands") { None => [], Some(bs) => map(\b. { let hz = num(b, "hz", 0.0); {hz: hz, hzTo: num(b, "hz_to", hz), q: num(b, "q", 0.7071), gain: num(b, "gain", 1.0)} }, bs) },
+  vowel: str(j, "vowel"), vowelTo: str(j, "vowel_to"),
+  jitterCents: num(j, "jitter_cents", 0.0), jitterHz: num(j, "jitter_hz", 0.0),
+  space: match getObject(j, "space") { None => spaceOff(), Some(o) => {t60: num(o, "t60", 0.0), dampHz: num(o, "damp_hz", 0.0), predelayMs: num(o, "predelay_ms", 0.0), wet: num(o, "wet", 0.0)} }
+}
+
+pure func leafOf(j: Json) -> Leaf {
+  let l = layerOfJson(j);
+  if isClassicJson(j) then Classic(l)
+  else if l.kind == "fm" then { let i = num(j, "index", 0.0); Fm(l, {freq: l.freq, ratio: num(j, "ratio", 1.0), index0: i, index1: num(j, "index_to", i), indexTau: num(j, "index_tau", 0.0)}, extraOf(j)) }
+  else if l.kind == "pluck" then Pluck(l, {freq: l.freq, t60: num(j, "t60", 1.5), bright: num(j, "bright", 0.5), pick: num(j, "pick", 0.0)}, extraOf(j))
+  else Shaped(l, extraOf(j))
+}
+
+pure func voiceOf(j: Json) -> Voice = {seconds: num(j, "seconds", 0.0), fadeMs: num(j, "fade_ms", 5.0),
+  parts: match getArray(j, "layers") { Some(ls) => map(leafOf, ls), None => [] }}
+
+pure func partOf(j: Json) -> Part =
+  if str(j, "kind") == "events" then {
+    let times = match getArray(j, "times") {
+      Some(ts) => Fixed(map(\t. match t { JNumber(x) => x, _ => 0.0 }, ts)),
+      None => match getObject(j, "scatter") { Some(o) => Scatter({count: match getInt(o, "count") { Some(c) => c, None => 0 }, spread: num(o, "spread", 1.0), minGap: num(o, "min_gap_s", 0.0)}), None => Fixed([]) }
+    };
+    let vary = match getObject(j, "vary") { Some(o) => {ampDb: num(o, "amp_db", 0.0), cents: num(o, "cents", 0.0), cycle: match getBool(o, "cycle") { Some(b) => b, None => false }}, None => {ampDb: 0.0, cents: 0.0, cycle: false} };
+    Events(layerOfJson(j), {voices: match getArray(j, "voices") { Some(vs) => map(voiceOf, vs), None => [] }, times: times, vary: vary}, extraOf(j))
+  }
+  else Leaf(leafOf(j))
+
+pure func withLayers(j: Json, ls: [Json]) -> Json = match j {
+  JObject(kvs) => JObject(map(\e. if e.key == "layers" then {key: "layers", value: JArray(ls)} else e, kvs)),
+  _ => j
+}
+
+pure func stubJson() -> Json = JObject([{key: "kind", value: JString("sine")}, {key: "amp", value: JNumber(0.0)}])
+
+-- One recipe object. All Classic: recipe.recipeOfJson gives the base exactly as 0.5.0 parses it.
+-- Otherwise the recipe-level fields are parsed the same way over the Classic layers (a silent stub
+-- when there are none), then every part is built and the whole is validated.
+pure func soundOf(j: Json) -> Result[Sound, string] =
+  match j {
+    JObject(_) => match getArray(j, "layers") {
+      None => match recipeOfJson(j) { Ok(r) => Ok({base: r, parts: map(\l. Leaf(Classic(l)), r.layers)}), Err(e) => Err(e) },
+      Some(ls) => if not any(\l. not isClassicJson(l), ls) then match recipeOfJson(j) { Ok(r) => Ok({base: r, parts: map(\l. Leaf(Classic(l)), r.layers)}), Err(e) => Err(e) }
+        else match flatMap(\l. leafShape(l, 0), ls) {
+          e :: _ => Err(e),
+          [] => {
+            let classics = filter(isClassicJson, ls);
+            match recipeOfJson(withLayers(j, if size(classics) == 0 then [stubJson()] else classics)) {
+              Err(e) => Err(e),
+              Ok(r) => {
+                let s = {base: {r | layers: if size(classics) == 0 then [] else r.layers}, parts: map(partOf, ls)};
+                match validateSound(s) { Ok(v) => Ok(v), Err(InvalidRecipe(e)) => Err(e), Err(_) => Err("invalid sound") }
+              }
+            }
+          }
+        }
+    },
+    _ => Err("recipe must be an object")
+  }
+
+-- Parse a recipe file whose "schema" is the given id (a host may keep its own id). Every 0.5.0 file
+-- parses to the same Recipes; 0.6 layer keys are accepted. Refuses an empty list and the first bad recipe.
+@allow_empty_ok("the fold starts from no sounds parsed; an empty recipe list is refused before it as Err(\"no recipes\")")
+export pure func parseSoundsAs(schema: string, text: string) -> Result[[Sound], string] = match decode(text) {
+  Err(e) => Err(e),
+  Ok(j) => if getString(j, "schema") != Some(schema) then Err("not a ${schema} file")
+    else match getArray(j, "recipes") {
+      None => Err("no recipes"),
+      Some([]) => Err("no recipes"),
+      Some(rs) => foldl(\acc x. match acc { Err(e) => Err(e), Ok(done) => match soundOf(x) { Err(e) => Err(e), Ok(s) => Ok(done ++ [s]) } }, Ok([]), rs)
+    }
+}
+
+export pure func parseSounds(text: string) -> Result[[Sound], string] = parseSoundsAs(recipeSchema(), text)
+
+-- ===== Budgets and the checked path =====
+
+pure func voiceWork(v: Voice, rate: int, loop: bool) -> int = voiceFrames(v, rate) * size(v.parts)
+
+-- {events, event frames, work frames} of a sound: frames times passes (two-period filters, space
+-- periods), plus every event voice's frames times its parts.
+export pure func soundWork(s: Sound) -> {events: int, eventFrames: int, work: int} {
+  let n = frames(s.base);
+  let secs = s.base.seconds;
+  foldl(\acc p. match p {
+    Leaf(lf) => { let l = layerOfPart(p); let x = match lf { Classic(_) => noExtra(), Shaped(_, x) => x, Fm(_, _, x) => x, Pluck(_, _, x) => x };
+      let passes = (if s.base.loop && (noiseKind(l.kind) || hasFilters(l, x)) then 2 else 1) + (if s.base.loop then spacePeriods(x, secs) else (if spaceOn(x.space) then 1 else 0));
+      {events: acc.events, eventFrames: acc.eventFrames, work: acc.work + n * passes} },
+    Events(l, e, x) => {
+      let count = match e.times { Fixed(ts) => size(ts), Scatter(sc) => sc.count };
+      let longest = foldl(\m v. if voiceWork(v, s.base.rate, false) > m then voiceWork(v, s.base.rate, false) else m, 0, e.voices);
+      let passes = (if s.base.loop && hasFilters(l, x) then 2 else 1) + (if s.base.loop then spacePeriods(x, secs) else (if spaceOn(x.space) then 1 else 0));
+      {events: acc.events + count, eventFrames: acc.eventFrames + count * longest, work: acc.work + n * passes + count * longest}
+    }
+  }, {events: 0, eventFrames: 0, work: 0}, s.parts)
+}
+
+pure func soundLimitsValid(l: SoundLimits) -> bool =
+  limitsValid(l.render) && l.maxEvents >= 0 && l.maxEvents <= 1000000 && l.maxEventFrames >= 0 && l.maxEventFrames <= 2147483647 && l.maxWorkFrames >= 1 && l.maxWorkFrames <= 2147483647
+
+pure func checkSoundBudget(s: Sound, limits: SoundLimits) -> Result[int, AudioError] =
+  if not soundLimitsValid(limits) then Err(ResourceLimit("invalid sound limits"))
+  else if size(s.parts) > limits.render.maxLayers then Err(ResourceLimit("layer limit exceeded"))
+  else match validateSound(s) {
+    Err(e) => Err(e),
+    Ok(_) => if round(s.base.seconds * intToFloat(s.base.rate)) > intToFloat(limits.render.maxFrames) then Err(ResourceLimit("frame limit exceeded"))
+      else {
+        let w = soundWork(s);
+        if w.events > limits.maxEvents then Err(ResourceLimit("event limit exceeded"))
+        else if w.eventFrames > limits.maxEventFrames then Err(ResourceLimit("event-frame limit exceeded"))
+        else if w.work > limits.maxWorkFrames then Err(ResourceLimit("work-frame limit exceeded"))
+        else Ok(frames(s.base))
+      }
+  }
+
+-- A Classic-only sound takes recipe.renderChecked (0.5.0's checked path, unchanged). Otherwise every
+-- domain and budget is checked before any sample is allocated, and the result is scanned.
+export func renderSoundChecked(s: Sound, limits: SoundLimits) -> Result[[float], AudioError] ! {}
+{
+  if classicOnly(s) then (if soundLimitsValid(limits) then renderChecked(s.base, limits.render) else Err(ResourceLimit("invalid sound limits")))
+  else match checkSoundBudget(s, limits) {
+    Err(e) => Err(e),
+    Ok(_) => { let xs = renderSound(s); if samplesInRange(xs, -1.000000000001, 1.000000000001) then Ok(xs) else Err(InvalidSamples("render produced non-finite or out-of-range samples")) }
+  }
+}
+
+export func parseSoundsAsChecked(schema: string, text: string, limits: SoundLimits) -> Result[[Sound], AudioError] ! {}
+{
+  if not soundLimitsValid(limits) then Err(ResourceLimit("invalid sound limits"))
+  else if textLength(text) > limits.render.maxInputBytes || byteLength(fromString(text)) > limits.render.maxInputBytes then Err(ResourceLimit("recipe input byte limit exceeded"))
+  else match parseSoundsAs(schema, text) {
+    Err(e) => Err(InvalidRecipe(e)),
+    Ok(ss) => match foldl(\acc s. match acc { Err(e) => Err(e), Ok(_) => checkSoundBudget(s, limits) }, Ok(0), ss) { Err(e) => Err(e), Ok(_) => Ok(ss) }
+  }
+}
+
+export func parseSoundsChecked(text: string, limits: SoundLimits) -> Result[[Sound], AudioError] ! {}
+{
+  parseSoundsAsChecked(recipeSchema(), text, limits)
+}
