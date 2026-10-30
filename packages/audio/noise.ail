@@ -2,6 +2,9 @@ module sunholo/audio/noise
 -- Two deterministic noise generators over (sample index, seed), both in [-1, 1). Integer maths
 -- only until the last step, every product below 2^62, so they are identical on every machine and
 -- on the strict VM and the interpreter.
+import std/list (mapAccumL)
+import std/math (sqrt)
+import ./dsp (onePole)
 
 -- The legacy generator: three affine LCG rounds. It is NOT white: affine rounds over a sequential
 -- index stay affine in the index, so it is a fast ramp mod 2^31 with a buzzy, tonal edge. It is
@@ -24,4 +27,29 @@ export pure func white(i: int, seed: int) -> float {
   let x2 = (x1 * x1 + i * 40503 + 97) % m;
   let x3 = (x2 * x2 + 7) % m;
   intToFloat(x3) / 1073741824.0 - 1.0
+}
+
+-- Coloured noise (0.6.0), from a sequence (white(i, seed) over the layer's indices). Both are scaled so
+-- their RMS matches uniform white noise's 1/sqrt(3) within 10%.
+
+-- Pink (equal power per octave, -3.01 dB/octave): Paul Kellet's refined filter, seven first-order
+-- sections (music-dsp archive: within 0.05 dB of the slope above 9.2 Hz at 44.1 kHz), then 0.34.
+export pure func pinkOf(xs: [float]) -> [float] =
+  match mapAccumL(\b w. {
+    let b0 = 0.99886 * b.b0 + w * 0.0555179;
+    let b1 = 0.99332 * b.b1 + w * 0.0750759;
+    let b2 = 0.969 * b.b2 + w * 0.153852;
+    let b3 = 0.8665 * b.b3 + w * 0.3104856;
+    let b4 = 0.55 * b.b4 + w * 0.5329522;
+    let b5 = 0.0 - 0.7616 * b.b5 - w * 0.016898;
+    let y = b0 + b1 + b2 + b3 + b4 + b5 + b.b6 + w * 0.5362;
+    (y * 0.34, {b0: b0, b1: b1, b2: b2, b3: b3, b4: b4, b5: b5, b6: w * 0.115926})
+  }, {b0: 0.0, b1: 0.0, b2: 0.0, b3: 0.0, b4: 0.0, b5: 0.0, b6: 0.0}, xs) { (out, _) => out }
+
+-- Brown (-6.02 dB/octave above 20 Hz): a one-pole low-pass at 20 Hz, a leaky integrator that never
+-- drifts, scaled by sqrt((2 - a) / a), which restores the input's variance for coefficient a.
+export pure func brownOf(rate: float, xs: [float]) -> [float] {
+  let a = onePole(20.0, rate);
+  let g = sqrt((2.0 - a) / a);
+  match mapAccumL(\y x. { let y2 = y + a * (x - y); (g * y2, y2) }, 0.0, xs) { (out, _) => out }
 }
