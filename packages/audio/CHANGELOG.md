@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.6.1
+
+Fix: `_smoke.ail`'s 0.6 sound probe renders 0.06 s (was 0.25 s; three scattered events, a 0.04 s reverb tail), so the smoke fits CI's 30 s limit (it took 30.0 s on a GitHub runner, PUB015). No code or sample change: every module and every rendered sound is as in 0.6.0.
+
 ## 0.6.0
 
 Feature: closer-to-real synthesis, additive. Every 0.5.0 type, signature and sample is unchanged.
