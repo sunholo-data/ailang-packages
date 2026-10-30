@@ -1,0 +1,119 @@
+-- Checks for sunholo/audio/osc against closed forms: a sawtooth's harmonics 2/(pi k); FM sidebands
+-- |J_k(I)| (the Bessel series, computed here); the Karplus-Strong pitch rate / (n + 0.5) untuned and
+-- the target frequency tuned; its T60; and the blocked string against a per-sample reference.
+module sunholo/audio/osc_test
+import std/list (map, range, take, drop, foldl, zipWith, length as size)
+import std/array (make, set, get, toList)
+import std/math (sqrt, cos, sin, log, pow, floor, floatToInt)
+import ./osc (sawSamples, fmSamples, fmIndexAt, pluckPeriod, pluckSamples, pluckExcitation, jitterCentsAt, FmVoice, PluckVoice)
+import ./recipe (Layer)
+import ./reference (sine, sineWave)
+import ./dsp (absF, twoPi)
+
+pure func amp(xs: [float], f: float) -> float {
+  let w = twoPi() * f / 48000.0;
+  let c = 2.0 * cos(w);
+  let st = foldl(\s x. { let s0 = x + c * s.s1 - s.s2; {s1: s0, s2: s.s1} }, {s1: 0.0, s2: 0.0}, xs);
+  let re = st.s1 - st.s2 * cos(w);
+  let im = st.s2 * sin(w);
+  2.0 * sqrt(re * re + im * im) / intToFloat(size(xs))
+}
+pure func db(g: float) -> float = 20.0 * log(g) / log(10.0)
+pure func pi() -> float = 3.141592653589793
+pure func saw(f: float) -> Layer = {sine(f, 1.0) | kind: "saw"}
+
+test "saw: harmonics 1-5 of 1 kHz within 0.5 dB of 2/(pi k)" {
+  let xs = sawSamples(saw(1000.0), 0.0, 0.0, 48000, 48000);
+  foldl(\ok k. ok && absF(db(amp(xs, 1000.0 * intToFloat(k)) / (2.0 / (pi() * intToFloat(k))))) <= 0.5, true, range(1, 6))
+}
+test "saw: the 1.6 kHz alias of a 3.1 kHz saw is at least 20 dB below a naive saw's" {
+  let xs = sawSamples(saw(3100.0), 0.0, 0.0, 48000, 48000);
+  let naive = map(\i. { let p = 3100.0 * intToFloat(i) / 48000.0; 2.0 * (p - floor(p)) - 1.0 }, range(0, 48000));
+  db(amp(naive, 1600.0)) - db(amp(xs, 1600.0)) >= 20.0
+}
+test "saw: jitter 0 is no jitter; jitter is deterministic, bounded and moves the waveform" {
+  let a = sawSamples(saw(200.0), 0.0, 0.0, 4800, 48000);
+  let b = sawSamples(saw(200.0), 30.0, 5.0, 4800, 48000);
+  a == sawSamples(saw(200.0), 0.0, 5.0, 4800, 48000) && b == sawSamples(saw(200.0), 30.0, 5.0, 4800, 48000) && a != b
+  && foldl(\ok i. ok && absF(jitterCentsAt(30.0, 5.0, 1, intToFloat(i) / 1000.0)) <= 30.0, true, range(0, 2000))
+}
+
+-- J_k(x) by its series: sum over m of (-1)^m / (m! (m + k)!) (x / 2)^(2m + k).
+pure func fact(n: int) -> float = foldl(\a i. a * intToFloat(i), 1.0, range(1, n + 1))
+pure func bessel(k: int, x: float) -> float =
+  foldl(\a m. a + pow(-1.0, intToFloat(m)) / (fact(m) * fact(m + k)) * pow(x / 2.0, intToFloat(2 * m + k)), 0.0, range(0, 25))
+pure func fmLinesOk(i: float) -> bool {
+  let xs = fmSamples({freq: 6000.0, ratio: 0.1, index0: i, index1: i, indexTau: 0.0}, 48000, 48000);
+  foldl(\ok k. ok && absF(amp(xs, 6000.0 + 600.0 * intToFloat(k)) - absF(bessel(if k < 0 then 0 - k else k, i))) <= 0.002, true, range(-3, 4))
+}
+test "FM, constant index 1: the lines at 6 kHz + k 600 Hz are |J_k(1)| (0.7652, 0.4401, 0.1149, 0.0196) within 0.002" { fmLinesOk(1.0) }
+test "FM, constant index 2: |J_k(2)| (0.2239, 0.5767, 0.3528, 0.1289) within 0.002" { fmLinesOk(2.0) }
+test "FM: index 0 is a sine; the index decays from index0 to index1" {
+  let xs = fmSamples({freq: 441.0, ratio: 1.4, index0: 0.0, index1: 0.0, indexTau: 0.0}, 2000, 48000);
+  let s = sineWave(441.0, 1.0, 2000);
+  let v = {freq: 200.0, ratio: 1.4, index0: 10.0, index1: 0.0, indexTau: 0.5};
+  foldl(\ok p. ok && p, true, zipWith(\a b. absF(a - b) < 0.000000000001, xs, s))
+  && fmIndexAt(v, 0.0) == 10.0 && absF(fmIndexAt(v, 0.5) - 10.0 * 0.36787944117144233) < 0.000000001 && fmIndexAt(v, 3.0) < 0.03
+}
+
+-- Pitch by the autocorrelation peak over 0.1-0.6 s with parabolic interpolation.
+pure func f0(xs: [float], p: float) -> float {
+  let seg = take(24000, drop(4800, xs));
+  let arr = make(0, 0.0);
+  let lo = floatToInt(floor(p * 0.95));
+  let hi = floatToInt(floor(p * 1.05)) + 1;
+  let r = \k. foldl(\a v. a + v, 0.0, zipWith(\x y. x * y, seg, drop(k, seg)));
+  let rs = map(\k. (k, r(k)), range(lo, hi + 2));
+  let best = foldl(\b kv. match (b, kv) { ((bk, bv), (k, v)) => if v > bv then (k, v) else (bk, bv) }, (lo, 0.0 - 1000000000.0), rs);
+  match best { (k, _) => {
+    let a = r(k - 1); let b = r(k); let c = r(k + 1);
+    48000.0 / (intToFloat(k) + 0.5 * (a - c) / (a - 2.0 * b + c))
+  } }
+}
+pure func cents(a: float, b: float) -> float = 1200.0 * log(a / b) / log(2.0)
+pure func voice(f: float) -> PluckVoice = {freq: f, t60: 2.0, bright: 0.5, pick: 0.0}
+pure func tunedOk(f: float) -> bool = absF(cents(f0(pluckSamples(voice(f), 3, 33600, 48000), 48000.0 / f), f)) <= 1.0
+
+test "pluck: the tuned fundamental is within 1 cent at 110, 440 and 1046.5 Hz" { tunedOk(110.0) && tunedOk(440.0) && tunedOk(1046.5) }
+test "pluck: pluckPeriod(440, 48000) is a 108-sample line with a 0.591-sample allpass" {
+  let p = pluckPeriod(440.0, 48000);
+  p.n == 108 && absF(p.c - (1.0 - 0.5909090909090935) / (1.0 + 0.5909090909090935)) < 0.000000001
+}
+
+-- The per-sample reference: an Array ring of the whole output, the same recurrence in the same order.
+pure func reference(v: PluckVoice, seed: int, n: int) -> [float] {
+  let p = pluckPeriod(v.freq, 48000);
+  let rho = pow(10.0, -3.0 / (v.freq * v.t60));
+  let e = pluckExcitation(v, seed, p.n, 48000);
+  let start = foldl(\a j. set(a, j, match drop(j, e) { x :: _ => x, [] => 0.0 }), make(n, 0.0), range(0, p.n));
+  let fin = foldl(\s i. {
+    let a = get(s.ys, i - p.n);
+    let b = if i - p.n - 1 >= 0 then get(s.ys, i - p.n - 1) else 0.0;
+    let vv = rho * 0.5 * (a + b);
+    let y = p.c * vv + s.v - p.c * s.y;
+    {ys: set(s.ys, i, y), v: vv, y: y}
+  }, {ys: start, v: 0.0, y: 0.0}, range(p.n, n));
+  toList(fin.ys)
+}
+test "pluck: the blocked string equals the per-sample reference, bit for bit" {
+  pluckSamples(voice(440.0), 5, 2000, 48000) == reference(voice(440.0), 5, 2000)
+  && pluckSamples({freq: 1046.5, t60: 0.7, bright: 0.9, pick: 0.2}, 6, 1500, 48000) == reference({freq: 1046.5, t60: 0.7, bright: 0.9, pick: 0.2}, 6, 1500)
+}
+
+-- T60 by Schroeder backward integration over 5 ms windows: the -5 to -35 dB slope extrapolated to -60.
+pure func windows(xs: [float], w: int) -> [float] =
+  map(\k. foldl(\a x. a + x * x, 0.0, take(w, drop(k * w, xs))), range(0, size(xs) / w))
+pure func t60Of(xs: [float]) -> float {
+  let es = windows(xs, 240);
+  let total = foldl(\a e. a + e, 0.0, es);
+  let rem = match foldl(\s e. {r: s.r - e, out: s.out ++ [s.r - e]}, {r: total, out: []}, es) { s => s.out };
+  let above = \lim. foldl(\a r. if r > total * lim then a + 1 else a, 0, rem);
+  2.0 * intToFloat(above(0.00031622776601683794) - above(0.31622776601683794)) * 240.0 / 48000.0
+}
+test "pluck: T60 within 10% (220 Hz, dark, t60 1 s)" {
+  let t = t60Of(pluckSamples({freq: 220.0, t60: 1.0, bright: 0.0, pick: 0.0}, 9, 72000, 48000));
+  absF(t - 1.0) <= 0.1
+}
+test "pluck: the same seed gives the same note, another seed another" {
+  pluckSamples(voice(330.0), 1, 1000, 48000) == pluckSamples(voice(330.0), 1, 1000, 48000) && pluckSamples(voice(330.0), 1, 1000, 48000) != pluckSamples(voice(330.0), 2, 1000, 48000)
+}
