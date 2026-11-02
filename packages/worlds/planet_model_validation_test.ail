@@ -1,0 +1,77 @@
+module sunholo/worlds/planet_model_validation_test
+
+-- Independent numerical/source checks for the adopted approximation; not a
+-- validation of Forecaster's posterior. Reference calculations used 70-digit
+-- Decimal exp/ln in a throwaway oracle, not this module's output.
+import ./planet_model (massForRadius, centralRadiusEarth, dwarfMassSun, dwarfInTable)
+import std/math (abs_Float as abs, intToFloat, pow)
+import std/list (map, foldl, range)
+import std/json (encode, ja, jnum)
+import std/io (println)
+
+pure func near(x: float, y: float) -> bool = abs(x - y) < 1e-12
+
+pure func sourceDwarfs() -> [(float, float)] =
+  [(2380.0, 0.079), (2570.0, 0.085), (2680.0, 0.09), (2810.0, 0.102), (3060.0, 0.162), (3210.0, 0.23), (3430.0, 0.37), (3560.0, 0.44), (3660.0, 0.5), (3850.0, 0.57), (4100.0, 0.64), (4440.0, 0.7), (5270.0, 0.88), (5660.0, 0.98), (5770.0, 1.0), (5930.0, 1.06), (6550.0, 1.33), (7220.0, 1.61)]
+
+pure func sourceRadii() -> [(float, float)] =
+  [(0.001, 0.14671027532266218), (0.1, 0.5302254045218318), (1.0, 1.008), (2.04, 1.2298364167665525), (10.0, 3.136715862714679), (100.0, 12.175174101213747), (131.58094932, 14.311325722327693), (1000.0, 13.08953922691283), (4200.0, 12.288571201240513)]
+
+pure func allSourceDwarfs() -> bool = foldl(\ok p. match p {
+  (t, m) => ok && near(dwarfMassSun(t), m)
+}, true, sourceDwarfs())
+
+pure func allSourceRadii() -> bool = foldl(\ok p. match p {
+  (m, r) => ok && near(centralRadiusEarth(m), r)
+}, true, sourceRadii())
+
+test "all 18 adopted stellar mass nodes equal Mamajek2022.04.16 Msun column" {
+  allSourceDwarfs()
+}
+
+test "central mass-radius curve: independent 70-digit source-coefficient evaluations across all three branches" {
+  allSourceRadii()
+}
+
+test "both mass-radius branch transitions continuous from each side, including correct Jupiter/Earth conversion" {
+  abs(centralRadiusEarth(2.04 - 1e-09) - centralRadiusEarth(2.04 + 1e-09)) < 1e-08 && abs(centralRadiusEarth(131.58094932 - 1e-07) - centralRadiusEarth(131.58094932 + 1e-07)) < 1e-07
+}
+
+test "stellar mass applicability boundaries and NaN reject without silently clamping" {
+  dwarfInTable(2380.0) && dwarfInTable(7220.0) && not dwarfInTable(2379.999) && not dwarfInTable(7220.001) && not dwarfInTable(0.0 / 0.0)
+}
+
+pure func uniforms() -> [float] =
+  [0.0, 1.1102230246251565e-16, 0.001, 0.01, 0.1, 0.25, 0.5, 0.75, 0.9, 0.99, 0.999999, 0.9999999999999999]
+
+pure func radiusAt(i: int) -> float = 0.5 + 15.5 * intToFloat(i) / 64.0
+
+pure func checkUniforms(r: float, us: [float], last: float) -> bool = match us {
+  [] => true,
+  u :: rest => {
+    let m = massForRadius(r, u)
+    m - m == 0.0 && m > 0.0 && m < 4200.0 && m >= last && checkUniforms(r, rest, m)
+  }
+}
+
+pure func checkRadiusGrid(i: int) -> bool =
+  if i > 64 then true else checkUniforms(radiusAt(i), uniforms(), 0.0) && checkRadiusGrid(i + 1)
+
+test "65 radii by 12 uniforms: conditional masses finite, bounded, quantiles ordered, exact endpoint uniforms included" {
+  checkRadiusGrid(0)
+}
+
+pure func checkMassGrid(i: int) -> bool = if i > 512 then true else {
+  let r = centralRadiusEarth(0.001 * pow(4.2e+06, intToFloat(i) / 512.0))
+  r - r == 0.0 && r > 0.0 && checkMassGrid(i + 1)
+}
+
+test "513 log-mass points: central radii finite and strictly positive across adopted planet-only prior" {
+  checkMassGrid(0)
+}
+
+-- Complete, untruncated output for byte comparison between interpreter and VM.
+export func main() -> () ! {IO} = println(encode(ja(map(\i. {
+  let r = radiusAt(i)
+  ja([jnum(r)] ++ map(\u. jnum(massForRadius(r, u)), uniforms()))
+}, range(0, 65)))))

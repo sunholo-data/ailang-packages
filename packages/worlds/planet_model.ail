@@ -1,0 +1,72 @@
+module sunholo/worlds/planet_model
+
+-- Explicit INFERRED models for synthetic planets, never applied over archive values.
+-- Stellar mass: linear interpolation of a selected 18-knot subset of the
+-- Msun column in Pecaut & Mamajek
+-- (2013 ApJS208:9), author's dwarf sequence version2022.04.16, F0V..M9V.
+-- This is a dwarf-sequence estimate, NOT Mann2019's K-band mass relation.
+-- Planet radii: Chen & Kipping2017 (arXiv1603.08614v2), Table1 pp7-9,
+-- median coefficients and transitions. The conditional mass sampler below
+-- is an adopted 128-cell log-mass prior/linear-radius Gaussian approximation,
+-- NOT the authors' full Forecaster posterior or a measured planet mass.
+import std/math (pow, exp, intToFloat)
+import std/list (map, foldl)
+
+export pure func dwarfInTable(teff: float) -> bool = teff >= 2380.0 && teff <= 7220.0
+
+pure func massNodes() -> [(float, float)] =
+  [(2380.0, 0.079), (2570.0, 0.085), (2680.0, 0.09), (2810.0, 0.102), (3060.0, 0.162), (3210.0, 0.23), (3430.0, 0.37), (3560.0, 0.44), (3660.0, 0.5), (3850.0, 0.57), (4100.0, 0.64), (4440.0, 0.7), (5270.0, 0.88), (5660.0, 0.98), (5770.0, 1.0), (5930.0, 1.06), (6550.0, 1.33), (7220.0, 1.61)]
+
+pure func interpolate(t: float, xs: [(float, float)]) -> float = match xs {
+  (x, y) :: (nx, ny) :: rest => if t <= x then y else if t <= nx then y + (ny - y) * (t - x) / (nx - x) else interpolate(t, (nx, ny) :: rest),
+  [(_, y)] => y,
+  [] => 0.0
+}
+
+export pure func dwarfMassSun(teff: float) -> float
+requires { dwarfInTable(teff) }
+ensures { result >= 0.079, result <= 1.61 } {
+  interpolate(teff, massNodes())
+}
+
+pure func giantBreakEarth() -> float = 0.414 * 317.82838
+
+-- Central deterministic curve from the componentwise median coefficients,
+-- not the arithmetic mean radius or the posterior-predictive median.
+export pure func centralRadiusEarth(m: float) -> float
+requires { m > 0.0, m <= 4200.0 }
+ensures { result > 0.0 } {
+  let r1 = 1.008 * pow(2.04, 0.279)
+  if m <= 2.04 then 1.008 * pow(m, 0.279) else if m <= giantBreakEarth() then r1 * pow(m / 2.04, 0.589) else r1 * pow(giantBreakEarth() / 2.04, 0.589) * pow(m / giantBreakEarth(), -0.044)
+}
+
+pure func nodes(i: int) -> [float] =
+  if i >= 128 then [] else 0.001 * pow(4.2e+06, (intToFloat(i) + 0.5) / 128.0) :: nodes(i + 1)
+
+pure func weight(r: float, m: float) -> float {
+  let mu = centralRadiusEarth(m)
+  let frac = if m <= 2.04 then 0.0403 else if m <= giantBreakEarth() then 0.146 else 0.0737
+  let sigma = frac * mu
+  let z = (r - mu) / sigma
+  exp(-0.5 * z * z) / sigma
+}
+
+pure func selectMass(xs: [(float, float)], goal: float) -> float = match xs {
+  (m, w) :: rest => if goal < w then m else match rest {
+    [] => m,
+    _ => selectMass(rest, goal - w)
+  },
+  [] => 1.0
+}
+
+-- Equal-width log-mass cells on an explicitly adopted planet-only prior.
+-- Gaussian normalization common to every cell cancels from the categorical CDF.
+export pure func massForRadius(radiusEarth: float, u: float) -> float
+requires { radiusEarth >= 0.5, radiusEarth <= 16.0, u >= 0.0, u < 1.0 }
+ensures { result > 0.0, result < 4200.0 } {
+  let ws = map(\m. (m, weight(radiusEarth, m)), nodes(0))
+  let total = foldl(\a x. match x {
+    (_, w) => a + w
+  }, 0.0, ws)
+  selectMass(ws, u * total)
+}

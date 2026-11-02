@@ -4,7 +4,7 @@
 
 Use for teaching or simulating the Drake chain with explicit priors and
 reproducible histories. All public functions are pure and deterministic;
-`_smoke.ail` alone prints results. Callers own and key their RNG. This package
+`_smoke.ail` and the validation test probe print results. Callers own and key their RNG. This package
 has no instrument model, selection policy, world catalogue or game preset.
 
 ## Modules and units
@@ -60,6 +60,27 @@ has no instrument model, selection policy, world catalogue or game preset.
   returns timed changes only, including collapse trace expiry, not an invented
   start for the long-lived background. It is not a model of repeated epochs.
 
+- `planet_model`: explicitly inferred synthesis priors, not measured values.
+  `dwarfInTable` / `dwarfMassSun` linearly interpolate a selected 18-knot subset
+  of the Msun column in Pecaut & Mamajek's dwarf sequence, version 2022.04.16,
+  2380–7220 K. This sparse approximation differs from omitted source nodes by
+  up to 6.34% (M5.5V); it is not Mann 2019's K-band calibration, not a giant or
+  compact-remnant relation, and not a measurement of any individual star.
+  The applicability flag tests temperature support only; callers must establish
+  dwarf class separately before using this relation.
+  `centralRadiusEarth` composes Chen & Kipping 2017's Table 1 componentwise
+  median coefficients into a continuous three-branch curve (0<m<=4200 Earth
+  masses). It is neither an arithmetic mean radius nor the full posterior's
+  predictive median. `massForRadius` accepts .5–16 Earth radii and one uniform
+  in [0,1). It uses an adopted 128-cell log-uniform mass prior on .001–4200 Earth
+  masses and a Gaussian in *linear* radius with widths 4.03%/14.6%/7.37% times
+  the central curve. The source paper models scatter in log10 radius and
+  propagates hyperparameter uncertainty; this approximation does neither.
+  It is not Forecaster and must not be described as its posterior. Source
+  coefficient medians are verified against arXiv 1603.08614v2 Table 1 pp 7–9.
+  High-radius predictions are broad and prior-dependent. Apply to labelled
+  synthetic populations only; never replace archive or curated values.
+
 ## Example
 
 ```ailang
@@ -87,15 +108,13 @@ Validation commands: `ailang lock`, `ailang check --package .`,
 that involve transcendental functions are runtime assertions, not claimed
 SMT proofs. Packages remain unpublished until the attended release handoff.
 
-Current release handoff: local native tests 20/20 (including 100 generated
-property cases), package check 11/11 and direct strict-VM/interpreter smoke
-pass. `pkg quality` reports PUB015 for its staged smoke: the staging manifest
-rewrites the local celestial path to registry `sunholo/celestial@0.6.0`, which
-is not published yet. Do not waive or remove the smoke gate. Publish celestial
-at the attended handoff, then regenerate this lock and rerun full quality
-before considering worlds ready to publish. The native tests and local smoke
-are distinct from staged release validation. Contracts currently carry no SMT
-proofs (0/7 verified, 0 refuted; float/encoding limits); do not claim proof.
+Latest local validation on AILANG v0.56.0: check 14 files; native 29 passed,
+0 failed, 0 skipped; strict-VM suite 29 passed; conditional-CDF oracle 780 quantiles;
+VM/interpreter grid JSON byte-identical. Full quality now reports no gates and
+staged smoke passed after celestial 0.6.0 appeared in the registry. Contracts:
+0/10verified,0 refuted,13 uncontracted; 10 skipped by verifier. Float contracts
+remain runtime assertions, not proofs. Worlds publication remains attended;
+a clean quality report is not a publication result.
 
 AILANG v0.54.18 formatter limitation: named test bodies with let-bound records
 produce `nil expression node` in `ailang fmt` although check/test accept them.
