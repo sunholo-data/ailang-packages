@@ -54,7 +54,8 @@ pure func cashKarp(y:State,c:Context,h:float)->Result[Pair,string] =
       low:blend(y,h,[(2825.0/27648.0,a),(18575.0/48384.0,d),(13525.0/55296.0,e),(277.0/14336.0,f),(1.0/4.0,g)])})
   }}}}}}
 pure func error(a:State,b:State,c:Context)->float =
-  absf(a.x-b.x)+sphereError(a.a,b.a,(c.l/c.u0)*(c.l/c.u0)+(c.e/c.u0)/c.u0)+absf(a.drag-b.drag)+absf(a.phase-b.phase)+absf(a.node-b.node)
+  absf(a.x-b.x)+sphereError(a.a,b.a,(c.l/c.u0)*(c.l/c.u0)+(c.e/c.u0)/c.u0)
+    +absf(a.drag-b.drag)/(1.0+absf(a.drag))+absf(a.phase-b.phase)/(1.0+absf(a.phase))+absf(a.node-b.node)/(1.0+absf(a.node))
 type Step={y:State,h:float}
 pure func retry(y:State,c:Context,h:float,tol:float,n:int)->Result[Step,string] =
   if n==0 then Err("step_refinement") else match cashKarp(y,c,h) {
@@ -113,7 +114,9 @@ export pure func traceLens(u:float,s:float,n:Vec3,step:float)->Result[LensTrace,
       let y={x:x,a:{m:{x:1.0,y:0.0,z:0.0},v:{x:0.0,y:0.0-c.lambda/u,z:0.0-n.y/c.energy}},drag:0.0,time:0.0,phase:0.0,node:0.0};
       let far=maxf(u*1000.0,100000.0);let xf=if rt>0.0 then sqrt(1.0-rt/far) else u/far;
       let k=(c.lambda/u)*(c.lambda/u)+(c.eta/u)/u+(s/u)*(s/u);
-      loop(y,ctx,xf,0.02,20.0*step/sqrt(maxf(k,1.0e-12)),maxf(1.0e-15,1.0e-13*pow(step/0.005,5.0)),0.0,0,0)
+      -- Embedded estimates below accumulated binary64 rounding are not useful
+      -- truncation estimates. The fixed 2e-14 floor is independently refined.
+      loop(y,ctx,xf,0.02,20.0*step/sqrt(maxf(k,1.0e-12)),maxf(2.0e-14,1.0e-13*pow(step/0.005,5.0)),0.0,0,0)
     }
   }
   }
@@ -121,3 +124,8 @@ export pure func traceLens(u:float,s:float,n:Vec3,step:float)->Result[LensTrace,
 export pure func traceSky(u:float,s:float,n:Vec3,step:float)->Result[SkyTrace,string]
   requires {u>=4.0 && u<=2000000.0 && s>=0.0 && s<=0.998 && step>0.0 && step<=0.02}
 {match traceLens(u,s,n,step) {Err(m)=>Err(m),Ok(r)=>Ok(r.ray)}}
+export type LensAngles={bend:float,twist:float}
+-- Remove the flat-space arc before F32 storage, retaining weak-field accuracy.
+export pure func lensAngles(ray:LensTrace,psi:float)->LensAngles
+  requires {psi>=0.0 && psi<=3.141592653589793}
+{ {bend:ray.phase+psi-3.141592653589793,twist:ray.node} }

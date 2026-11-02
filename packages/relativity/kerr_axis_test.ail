@@ -1,5 +1,5 @@
 module sunholo/relativity/kerr_axis_test
-import std/math (sqrt)
+import std/math (sqrt,sin,cos)
 import std/result (Ok,Err)
 import ./hyper (absf)
 import ./kerr_trace (traceSky)
@@ -26,4 +26,12 @@ test "far-radius near-axis returning rays retain their allowed radial chart" {
 test "invalid source directions are refused before metric roots and capture" {
   match traceSky(6.0,0.9,{x:0.0,y:0.0,z:0.0},0.005) {Ok(_)=>false,Err(c)=>c=="invalid_ray"}
     && match traceSky(6.0,0.9,{x:0.0,y:0.0,z:0.0/0.0},0.005) {Ok(_)=>false,Err(c)=>c=="invalid_ray"}
+}
+test "refined near-critical chart does not stall on accumulated-phase rounding" {
+  let psi=0.977920452141398*(1.0+1.0e-8);let chi=0.7;
+  let n={x:0.0-cos(psi),y:sin(psi)*sin(chi),z:sin(psi)*cos(chi)};
+  match traceSky(6.0,0.9,n,0.0025) {Err(_)=>false,Ok(r)=>
+    absf(r.sky.x+0.6063575941257582)<1.2e-4 && absf(r.sky.y+0.4931450632000425)<1.2e-4 && absf(r.sky.z+0.6238095981046209)<1.2e-4
+      && match traceSky(6.0,0.9,n,0.005) {Err(_)=>false,Ok(a)=>absf(a.sky.x-r.sky.x)+absf(a.sky.y-r.sky.y)+absf(a.sky.z-r.sky.z)<1.2e-4}
+  }
 }
