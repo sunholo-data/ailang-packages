@@ -1,6 +1,6 @@
 [package]
 name = "sunholo/gemini_files"
-version = "0.2.2"
+version = "0.2.3"
 edition = "1"
 ailang = ">=0.50.0"
 description = "Upload files for Gemini AI — GCS (Vertex AI) and AI Studio Files API, with auto-backend detection"
@@ -14,13 +14,12 @@ modules = [
 
 [dependencies]
 "sunholo/gcp_auth" = { path = "../gcp-auth" }
-"sunholo/http_helpers" = { path = "../http-helpers" }
 
 [effects]
 max = ["Net", "FS", "Env", "Clock"]
 
 [release]
-kind = "fix"   # 0.2.2: GCS upload sends decoded bytes, not base64 text. security | fix | feature | breaking
+kind = "fix"   # 0.2.3: drop the unused sunholo/http_helpers dependency. security | fix | feature | breaking
 
 [metadata]
 tags = ["gemini", "files-api", "gcs", "upload", "pdf", "vertex-ai"]
