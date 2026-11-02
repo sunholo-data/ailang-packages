@@ -1,0 +1,30 @@
+module sunholo/relativity/kerr_capture_test
+import std/math (sqrt)
+import ./kerr_geodesic (Capture, Captured, Escaped, Critical, InvalidRay, classifyCapture)
+import ./kerr_shadow (shadowLambdaEta)
+test "Schwarzschild analytic boundary, returning outer interval, both directions" {
+  classifyCapture(20.0,0.0,26.0,0.0,false)==Captured
+  && classifyCapture(20.0,0.0,28.0,0.0,false)==Escaped
+  && classifyCapture(20.0,0.0,27.0,0.0,false)==Critical
+  && classifyCapture(20.0,0.0,27.0,0.0,true)==Escaped
+}
+test "outward branch in inner allowed interval encounters a root and returns to horizon" {
+  classifyCapture(2.1,0.0,28.0,0.0,true)==Captured
+  && classifyCapture(2.1,0.0,28.0,0.0,false)==Captured
+  && classifyCapture(3.0,0.0,28.0,0.0,false)==InvalidRay
+}
+test "nonzero spin double radial roots, inward grazing vs outward escape" {
+  let p=shadowLambdaEta(3.0,0.9);
+  classifyCapture(20.0,p.lambda,p.eta,0.9,false)==Critical
+  && classifyCapture(20.0,p.lambda,p.eta,0.9,true)==Escaped
+  && classifyCapture(20.0,p.lambda,p.eta*1.00001,0.9,false)==Escaped
+  && classifyCapture(20.0,p.lambda,p.eta*0.99999,0.9,false)==Captured
+}
+test "axial/equatorial radial rays and domain validation before comparisons" {
+  classifyCapture(4.0,0.0,0.0,0.998,false)==Captured
+  && classifyCapture(4.0,0.0,0.0,0.998,true)==Escaped
+  && classifyCapture(4.0,0.0/0.0,0.0,0.9,false)==InvalidRay
+  && classifyCapture(4.0,0.0,1.0/0.0,0.9,false)==InvalidRay
+  && classifyCapture(4.0,0.0,-1.0,0.9,false)==InvalidRay
+  && classifyCapture(1.0,0.0,0.0,0.9,false)==InvalidRay
+}
