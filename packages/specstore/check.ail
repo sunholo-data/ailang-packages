@@ -9,6 +9,7 @@ import std/option (Option, Some, None)
 import std/io (println)
 import std/list (map, filter, length, nth, foldl, range, any, zip, flatMap)
 import std/string (join, startsWith, trim)
+import ./qa (visitChecks)
 import ./rules (statusFitsVersion, movesForward, roundTestsKnownVersion, passAllowed)
 import ./model (Field, Rule, Std, Dev, Param, Event, Dict, Hist, Res, Round, Spec, str, arr, strs, obj, loadYaml, toStd, toSpec, toRound, loadSpec, matches, varsIn, parseVersion, keyOf, present, fieldsOf, missingIn, dup)
 export func all(xss: [[(string, string)]]) -> [(string, string)] = flatMap(\xs. xs, xss)
@@ -85,7 +86,8 @@ export func checks(std: Std, sp: Spec) -> [(string, string)] {
     when(sp.version == lastHist, "versions", "spec: version ${sp.version} is not the last row of the history (${lastHist})"),
     flatMap(\p. match p { (h, hj) => histChecks(std, h, hj) }, zip(sp.hist, arr(sp.j, "history"))),
     flatMap(\p. match p { (a, b) => when(movesForward(keyOf(a), keyOf(b)), "versions", "history: ${b} does not come after ${a}") }, pairs),
-    flatMap(\p. match p { (i, r) => roundChecks(std, sp, ids, known, i, r) }, zip(range(0, length(sp.rounds)), sp.rounds))
+    flatMap(\p. match p { (i, r) => roundChecks(std, sp, ids, known, i, r) }, zip(range(0, length(sp.rounds)), sp.rounds)),
+    visitChecks(sp)
   ])
 }
 

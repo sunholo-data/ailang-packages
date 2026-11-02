@@ -15,6 +15,8 @@ specstore template my-standard.yaml          # a starting standard: name the own
 specstore check my-standard.yaml example/demo-bank-web
 specstore guide my-standard.yaml STANDARD.md
 specstore view  my-standard.yaml example/demo-bank-web demo-bank-web.xlsx
+specstore visits  my-standard.yaml <spec> visits.json          # scheduled QA: the run list for a browser
+specstore compare my-standard.yaml <spec> observed.json round.yaml   # what the browser saw → a QA round
 ```
 
 `check` prints each problem with the rule that caught it and that rule's status:
@@ -40,3 +42,12 @@ cell does not compile.
 
 **Telemetry:** AILANG exports trace spans (which include file paths) when `GOOGLE_CLOUD_PROJECT`
 or `OTLP_GOOGLE_CLOUD_PROJECT` is set. Unset both when the files are confidential.
+
+## Scheduled tag QA
+
+A spec with a `site` block and `visits` can be checked on a schedule. `specstore visits` writes the
+run list; a browser script (Playwright, headless Chromium) visits each page and writes
+`observed.json`, a list of visits with `status` (`ok`, `blocked`, `error`), `datalayer` (each push
+as `{t, url, item}`) and `hits` (each GA4 hit as `{host, tid, en, params}`); `specstore compare`
+reads it against the spec and writes the next QA round. The browser half is not part of this
+package: it needs a browser, which AILANG does not drive. The comparison never records a pass.

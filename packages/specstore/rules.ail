@@ -34,3 +34,18 @@ ensures { result == (!isPass || byPerson) }
 export pure func needsRetest(changed: int, lastTested: int, everTested: bool) -> bool ! {}
 ensures { result == (!everTested || changed > lastTested) }
 { !everTested || changed > lastTested }
+
+-- An automated comparison's outcome for one event in one visit, as a severity:
+-- 0 matched, 1 could not be checked (blocked, error, did not run), 2 failed.
+-- Several visits can expect the same event; the worst outcome stands, so a failure in one
+-- visit is never hidden by a match in another.
+export pure func worstOutcome(a: int, b: int) -> int ! {}
+requires { a >= 0, a <= 2, b >= 0, b <= 2 }
+ensures { result >= a, result >= b, result <= 2, result == a || result == b }
+{ if a >= b then a else b }
+
+-- A visit that was blocked or broke checks nothing: its events are "could not be checked",
+-- never "matched" and never "failed", whatever was captured before it stopped.
+export pure func visitOutcome(ran: bool, blocked: bool, failed: bool) -> int ! {}
+ensures { result >= 0, result <= 2, (ran && !blocked) || result == 1, !(ran && !blocked) || result == (if failed then 2 else 0) }
+{ if !ran || blocked then 1 else if failed then 2 else 0 }
