@@ -10,7 +10,9 @@ Feature: package-first Kerr physics for Stapledon's Voyage R2-KERR.
   Schwarzschild circle and the prescribed N200000 equal-u diagnostic.
 - `kerr_geodesic`, `kerr_carter`, `kerr_events`, `kerr_trace`: independent
   analytic capture, full four-coordinate Mino RK4, root events, unwrapped
-  axis chart, adaptive error control, and finite-observer outgoing directions.
+  regular Cartesian sphere chart (`kerr_sphere`), signed pole phase, adaptive
+  error control, and finite-observer outgoing directions. Exact tangential
+  rays depart their simple radial root; near-axis rays are never discarded.
   Near-root radial evaluation uses `kerr_radial` compensated arithmetic.
 - `kerr_frame`: source-directed photon projection, single pure ship boost,
   non-collinear radial approach and ray-dependent frequency transport.
@@ -28,8 +30,10 @@ The test suite includes 49 ordinary and 12 near-critical escaping directions
 (cutoff 1e-8), plus 80 full tidal tensors. These samples do not establish the
 convergence of a production lookup-table set; tables and rendered skies belong
 to the consumer. No charged holes, disks/jets, ergosphere entry or Kerr inverse
-star images. This candidate has an unresolved arbitrary near-axis solver gate and still awaits independent cross-family evaluation
-and Mark's publication; it is not published by committing this changelog.
+star images. Additional tests pin 280 independent near-axis escapes across
+seven spins, both hemispheres and both azimuth senses. This candidate still
+awaits independent cross-family evaluation and Mark's publication; it is not
+published by committing this changelog.
 
 ## 0.13.0
 

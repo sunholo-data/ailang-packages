@@ -23,5 +23,5 @@ drill() {
   echo "kerr-critical mutation $5: killed"
 }
 drill kerr_radial.ail kerr_radial_test.ail 'r.hi+r.lo' 'u*u*(u*u+s*s-l*l-e)+2.0*(e+(l-s)*(l-s))*u-s*s*e' cancellation
-drill kerr_trace.ail kerr_nearcritical_test.ail 'let h=0.0-minf(basic,radialLimit);' 'let h=0.0-basic;' turning-resolution
+drill kerr_trace.ail kerr_nearcritical_test.ail 'retry(y,s,l,e,minf(basic,radialLimit),50)' 'retry(y,s,l,e,basic,50)' turning-resolution
 test "$killed" = 2

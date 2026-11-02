@@ -413,8 +413,11 @@ pair of non-collinear boosts. Frequency transport depends on the ray's lambda.
 It returns `Result`: `captured`/`critical` are analytic classifications;
 `solver_steps`, `step_refinement` and other errors are failed rays, never masks.
 No caller may relabel an integration failure as capture. Both root signs are
-tracked, phi/time evolve, exact lambda-zero axes use an unwrapped theta chart,
-and escaping directions use the far Cartesian tangent. The 49-ray matrix and
+tracked, phi/time evolve, and `kerr_sphere` transports angular motion in a
+regular Cartesian sphere chart with a separate dragging rotation. Nonzero
+lambda has signed pole-transition phase; at exactly zero lambda the reported
+coordinate phi uses positive-pi continuation. The physical Cartesian sky is
+unique across the axis. Escaping directions use the far Cartesian tangent. The 49-ray matrix and
 12 near-critical probes pass a 1.2e-4 angular budget; that does not prove a LUT
 regularisation or interpolation scheme. Refine and validate your own table.
 
@@ -433,13 +436,12 @@ not a physical radius/observable. Source/commands and independent Python
 oracles live on the linked R2-KERR consumer branch. Do not publish this
 candidate until independent evaluation and Mark's explicit publication step.
 
-### Current candidate blocker (attended 2026-11-02)
+### Candidate validation (attended 2026-11-02, v0.56.0)
 
-This branch is **not publish-ready**. The bounded sweep exposed a far-radius
-root-departure scale defect (corrected with a representable relative offset),
-and an arbitrary near-axis ray still reaches `Err("solver_steps")` rather
-than the independently verified escape. Repro: u=6, s=.9, source direction
-(-.6, sqrt(.64-1e-28), 1e-14), step .005. The required regular angular chart
-and its pole-phase/event closure remain open. No consumer may generate or pin
-a production table from this candidate. Passing sampled matrices and package
-quality are not evidence that this whole-domain gate has passed.
+The former failing ray u=6, s=.9, n=(-.6,sqrt(.64-1e-28),1e-14) now escapes
+and preserves its pole phase. Native regression tests include tangent-root
+departure, both hemispheres, both azimuth senses, sphere invariants, and 280
+independent escaping near-axis literals over seven spins and three radii.
+Full quality, dense-sweep evidence and cross-family evaluation are recorded in
+the consumer's R2-KERR evidence. Publication remains Mark's explicit step;
+these ray tests do not certify a consumer's table layout or interpolation.

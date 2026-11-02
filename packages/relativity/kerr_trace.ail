@@ -1,61 +1,83 @@
--- Finite-equatorial observer, complete Carter trace. EXPERIMENTAL until the
--- independent multi-ray/refinement gate closes. Failures never mean capture.
+-- Finite-equatorial observer, Carter radial first integral + regular sphere.
+-- Past Mino time is positive. Failures never mean capture. phi is unwrapped.
 module sunholo/relativity/kerr_trace
 import std/result (Result,Ok,Err)
-import std/math (sin,cos)
+import std/math (cos,sin,sqrt)
 import ./hyper (absf)
 import ./optics (Vec3,normalize)
+import ./kerr (horizonR)
 import ./kerr_frame (sourceConstants)
 import ./kerr_geodesic (radialPotential,classifyCapture,Captured,Escaped,Critical,InvalidRay)
-import ./kerr_carter (CarterState,CarterRates,carterRates,carterStep)
-import ./kerr_events (outerTurningRadius,polarTurningAngle,eventPatch)
+import ./kerr_events (outerTurningRadius)
+import ./kerr_sphere (Sphere,axpy,sphereRates,sphereAdvance,sphereCombine,sphereError,polePhase,sphereInvariants)
 export type SkyTrace={sky:Vec3,phi:float,time:float,steps:int,turns:int}
+type State={u:float,a:Sphere,drag:float,time:float,sr:float}
+type Rates={u:float,a:Sphere,drag:float,time:float}
 pure func minf(a:float,b:float)->float=if a<b then a else b
-pure func discrepancy(a:CarterState,b:CarterState)->float =
-  absf(a.u-b.u)/(1.0+absf(a.u))+absf(a.theta-b.theta)+absf(a.phi-b.phi)
-pure func halfStep(y:CarterState,s:float,l:float,e:float,h:float)->Result[CarterState,string] =
-  match carterStep(y,s,l,e,h/2.0) { Err(msg)=>Err(msg),Ok(a)=>carterStep(a,s,l,e,h/2.0) }
-pure func retry(y:CarterState,s:float,l:float,e:float,h:float,n:int)->Result[CarterState,string] =
-  if n==0 then Err("step_refinement") else match carterStep(y,s,l,e,h) {
-    Err(_)=>retry(y,s,l,e,h/2.0,n-1),
-    Ok(full)=>match halfStep(y,s,l,e,h) {
-      Err(_)=>retry(y,s,l,e,h/2.0,n-1),
-      Ok(z)=>if radialPotential(z.u,l,e,s)<0.0 || discrepancy(full,z)>1.0e-11 then retry(y,s,l,e,h/2.0,n-1)
-        else match carterRates(z,s,l,e) { Err(_)=>retry(y,s,l,e,h/2.0,n-1),Ok(_)=>Ok(z) }
+pure func rates(y:State,s:float,l:float,e:float)->Result[Rates,string] {
+  let u=y.u;let rp=radialPotential(u,l,e,s);
+  let tol=1.0e-13*(u*u*u*u+(s*s+l*l+e)*u*u+2.0*(e+(l-s)*(l-s))*u+s*s*e+1.0);
+  if u<=2.0*horizonR(s) || rp < 0.0-tol then Err("forbidden_potential") else {
+    let delta=(u-2.0*horizonR(s))*(u-s*s/(2.0*horizonR(s)));
+    let p=u*u+s*s-s*l;let sn2=y.a.m.x*y.a.m.x+y.a.m.y*y.a.m.y;
+    Ok({u:y.sr*sqrt(if rp<0.0 then 0.0 else rp),a:sphereRates(y.a,s,l*l+e),
+      drag:0.0-s*(2.0*u-s*l)/delta,time:0.0-(u*u+s*s)*p/delta-s*(l-s*sn2)})
+  }
+}
+pure func advance(y:State,d:Rates,h:float)->State =
+  {u:y.u+h*d.u,a:sphereAdvance(y.a,d.a,h),drag:y.drag+h*d.drag,time:y.time+h*d.time,sr:y.sr}
+pure func combine(a:Rates,b:Rates,c:Rates,d:Rates)->Rates =
+  {u:(a.u+2.0*b.u+2.0*c.u+d.u)/6.0,a:sphereCombine(a.a,b.a,c.a,d.a),
+   drag:(a.drag+2.0*b.drag+2.0*c.drag+d.drag)/6.0,time:(a.time+2.0*b.time+2.0*c.time+d.time)/6.0}
+pure func rk(y:State,s:float,l:float,e:float,h:float)->Result[State,string] =
+  match rates(y,s,l,e) { Err(msg)=>Err(msg),Ok(a)=>match rates(advance(y,a,h/2.0),s,l,e) {
+    Err(msg)=>Err(msg),Ok(b)=>match rates(advance(y,b,h/2.0),s,l,e) {Err(msg)=>Err(msg),Ok(c)=>
+      match rates(advance(y,c,h),s,l,e) {Err(msg)=>Err(msg),Ok(d)=>Ok(advance(y,combine(a,b,c,d),h))}
+    }
+  }}
+pure func discrepancy(a:State,b:State,k:float)->float =
+  absf(a.u-b.u)/(1.0+absf(a.u))+sphereError(a.a,b.a,k)+absf(a.drag-b.drag)
+pure func retry(y:State,s:float,l:float,e:float,h:float,n:int)->Result[State,string] =
+  if n==0 then Err("step_refinement") else match rk(y,s,l,e,h) {Err(_)=>retry(y,s,l,e,h/2.0,n-1),Ok(full)=>
+    match rk(y,s,l,e,h/2.0) {Err(_)=>retry(y,s,l,e,h/2.0,n-1),Ok(mid)=>
+      match rk(mid,s,l,e,h/2.0) {Err(_)=>retry(y,s,l,e,h/2.0,n-1),Ok(z)=>
+        if radialPotential(z.u,l,e,s)<0.0 || discrepancy(full,z,l*l+e)>1.0e-11 then retry(y,s,l,e,h/2.0,n-1) else Ok(z)
+      }
     }
   }
-pure func finish(y:CarterState,d:CarterRates,i:int,turns:int)->SkyTrace {
-  let sn=sin(y.theta);let co=cos(y.theta);let cp=cos(y.phi);let sp=sin(y.phi);
-  -- Asymptotic Cartesian tangent removes the O(impact/u) position offset.
-  let vr=0.0-d.u;let vt=0.0-y.u*d.theta;let vp=0.0-y.u*sn*d.phi;
-  {sky:normalize({x:vr*sn*cp+vt*co*cp-vp*sp,y:vr*sn*sp+vt*co*sp+vp*cp,z:vr*co-vt*sn}),
-    phi:y.phi,time:y.time,steps:i,turns:turns}
+-- Same simple radial-root departure as the independently tested BL kernel.
+-- Angular motion stays in its regular chart throughout the event interval.
+pure func radialPatch(y:State,s:float,l:float,e:float,root:float,depart:bool)->Result[State,string] {
+  let derivative=4.0*root*root*root+2.0*(s*s-l*l-e)*root+2.0*(e+(l-s)*(l-s));
+  let distance=absf(y.u-root);
+  let h=if depart then 1.0e-5*sqrt(1.0+absf(root))/sqrt(absf(derivative)) else 2.0*sqrt(distance/absf(derivative));
+  match rk(y,s,l,e,h) {Err(msg)=>Err(msg),Ok(z)=>
+    Ok({z | u:if depart then root+derivative*h*h/4.0 else root,sr:if depart then y.sr else 0.0-y.sr})}
 }
-pure func loop(y:CarterState,s:float,l:float,e:float,rt:float,pt:float,far:float,step:float,i:int,turns:int)->Result[SkyTrace,string] =
-  if i>=200000 then Err("solver_steps") else match carterRates(y,s,l,e) {
-    Err(msg)=>Err(msg),
-    Ok(d)=>if y.u>=far then Ok(finish(y,d,i,turns)) else {
-      let polarRoot=if y.st>0.0 then pt else 3.141592653589793-pt;
-      let radialEvent=rt>0.0 && y.sr>0.0 && absf(y.u-rt)<1.0e-13*rt;
-      let polarEvent=e>1.0e-24*(1.0+l*l+s*s) && l!=0.0 && absf(y.theta-polarRoot)<1.0e-9*pt;
-      if radialEvent || polarEvent then {
-        let root=if radialEvent then rt else polarRoot;
-        match eventPatch(y,s,l,e,radialEvent,root,false) {
-          Err(msg)=>Err(msg),
-          Ok(at)=>match eventPatch(at,s,l,e,radialEvent,root,true) {
-            Err(msg)=>Err(msg),
-            Ok(z)=>loop(z,s,l,e,rt,pt,far,step,i+1,turns+1)
-          }
-        }
-      } else {
-        let basic=minf(step/y.u,step/(1.0+absf(d.theta)+absf(d.phi)));
-        let radialLimit=if rt>0.0 && y.sr>0.0 && y.u-rt<0.01*rt && d.u>0.0 then 0.02*(y.u-rt)/d.u else basic;
-        let h=0.0-minf(basic,radialLimit);
-        match retry(y,s,l,e,h,50) {
-          Err(msg)=>Err(msg),
-          Ok(z)=>loop(z,s,l,e,rt,pt,far,step,i+1,turns)
-        }
-      }
+pure func finish(y:State,d:Rates,phase:float,i:int,turns:int)->SkyTrace {
+  let m=y.a.m;
+  -- Asymptotic Cartesian tangent removes the O(impact/u) position offset.
+  let tail=if d.u>0.0 then y.u/d.u else 0.0;
+  let dv=axpy(y.a.v,d.drag,{x:0.0-m.y,y:m.x,z:0.0});
+  let v=axpy(m,tail,dv);let cp=cos(y.drag);let sp=sin(y.drag);
+  {sky:normalize({x:cp*v.x-sp*v.y,y:sp*v.x+cp*v.y,z:v.z}),
+    phi:phase+y.drag,time:y.time,steps:i,turns:turns}
+}
+pure func loop(y:State,s:float,l:float,e:float,rt:float,far:float,step:float,phase:float,i:int,turns:int)->Result[SkyTrace,string] =
+  if i>=200000 then Err("solver_steps") else match rates(y,s,l,e) {Err(msg)=>Err(msg),Ok(d)=>
+    if y.u>=far then {
+      let inv=sphereInvariants(y.a,s,l,e);
+      if inv.sphere>1.0e-7 || inv.tangent>1.0e-7 || inv.angular>1.0e-7 || inv.lambda>1.0e-7 then Err("angular_conservation")
+      else Ok(finish(y,d,phase,i,turns))
+    } else {
+      let radialEvent=rt>0.0 && y.sr<0.0 && absf(y.u-rt)<1.0e-13*rt;
+      let basic=minf(step/y.u,step/sqrt(1.0+l*l+e+s*s));
+      let radialLimit=if rt>0.0 && y.sr<0.0 && y.u-rt<0.01*rt && d.u<0.0 then 0.02*(y.u-rt)/(0.0-d.u) else basic;
+      let next=if radialEvent then match radialPatch(y,s,l,e,rt,false) {Err(msg)=>Err(msg),Ok(at)=>radialPatch(at,s,l,e,rt,true)}
+        else retry(y,s,l,e,minf(basic,radialLimit),50);
+      match next {Err(msg)=>Err(msg),Ok(z)=>
+        loop(z,s,l,e,rt,far,step,phase+polePhase(y.a.m,z.a.m,l),i+1,
+          turns+(if radialEvent then 1 else 0)+(if y.a.v.z*z.a.v.z<0.0 then 1 else 0))}
     }
   }
 export pure func traceSky(u:float,s:float,n:Vec3,step:float)->Result[SkyTrace,string]
@@ -63,14 +85,14 @@ export pure func traceSky(u:float,s:float,n:Vec3,step:float)->Result[SkyTrace,st
 {
   let c=sourceConstants(u,s,n);
   match classifyCapture(u,c.lambda,c.eta,s,n.x>=0.0) {
-    Captured=>Err("captured"), Critical=>Err("critical"),InvalidRay=>Err("invalid_ray"),
-    Escaped=>{
+    Captured=>Err("captured"),Critical=>Err("critical"),InvalidRay=>Err("invalid_ray"),Escaped=>{
       let rt=match outerTurningRadius(u,c.lambda,c.eta,s) {Ok(r)=>r,Err(_)=>0.0};
-      let pt=polarTurningAngle(c.lambda,c.eta,s);
-      let y={u:u,theta:1.5707963267948966,phi:0.0,time:0.0,
-        sr:if n.x<0.0 then 1.0 else -1.0,st:if n.y>0.0 then -1.0 else 1.0};
+      let y={u:u,a:{m:{x:1.0,y:0.0,z:0.0},v:{x:0.0,y:0.0-c.lambda,z:0.0-u*n.y/c.energy}},
+        drag:0.0,time:0.0,sr:if n.x<0.0 then -1.0 else 1.0};
       let far=if u*1000.0>100000.0 then u*1000.0 else 100000.0;
-      loop(y,s,c.lambda,c.eta,rt,pt,far,step,0,0)
+      if n.x==0.0 then match radialPatch(y,s,c.lambda,c.eta,u,true) {
+        Err(msg)=>Err(msg),Ok(z)=>loop(z,s,c.lambda,c.eta,rt,far,step,polePhase(y.a.m,z.a.m,c.lambda),1,1)
+      } else loop(y,s,c.lambda,c.eta,rt,far,step,0.0,0,0)
     }
   }
 }

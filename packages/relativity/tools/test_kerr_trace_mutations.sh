@@ -23,6 +23,6 @@ drill() {
   killed=$((killed+1))
   echo "kerr-package mutation $3: killed"
 }
-drill 'absf(a.theta-b.theta)+absf(a.phi-b.phi)' '0.0' angular-refinement
-drill 'if n.x<0.0 then 1.0 else -1.0' 'if n.x<0.0 then -1.0 else 1.0' past-radial-sign
+drill 'z:0.0-u*n.y/c.energy' 'z:u*n.y/c.energy' polar-orientation
+drill 'if n.x<0.0 then -1.0 else 1.0' 'if n.x<0.0 then 1.0 else -1.0' past-radial-sign
 test "$killed" = 2
