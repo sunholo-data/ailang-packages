@@ -1,0 +1,20 @@
+module sunholo/relativity/kerr_tides_test
+import ./hyper (absf)
+import ./kerr_tides (HoverFrame,RadialFrame,OrbitFrame,tidalReadout,tidalTensor)
+import ./kerr_frame (radialVelocity)
+import ./schwarzschild (tidalRadial,tidalTransverse,tidalRadialOrbit)
+pure func near(a:float,b:float)->bool=absf(a-b)<1.0e-12*absf(b)
+test "DI-10 metric-curvature literals: hover and both orbit senses, c²/r_s²" {
+  let h=tidalReadout(4.0,0.9,HoverFrame);let p=tidalReadout(4.0,0.9,OrbitFrame(1.0));let r=tidalReadout(4.0,0.9,OrbitFrame(-1.0));
+  near(h.stretch,4.0*0.03599609375) && near(h.transverse,0.0625)
+  && near(p.stretch,4.0*0.038712993421052631579) && near(r.stretch,4.0*1.016796875)
+}
+test "radial motion projects full Weyl, not principal eigenvalues" {
+  let r=tidalReadout(4.0,0.9,RadialFrame(-0.5));let t=tidalTensor(4.0,0.9,radialVelocity(4.0,0.9,-0.5));
+  near(r.stretch,4.0*0.037578125) && absf(t.rr+t.tt+t.pp)<1.0e-13 && absf(t.rp)>0.0
+}
+test "exact legacy zero-spin tide semantics: transverse is along motion in orbit" {
+  let h=tidalReadout(6.2,0.0,HoverFrame);let r=tidalReadout(6.2,0.0,RadialFrame(-0.5));let o=tidalReadout(6.2,0.0,OrbitFrame(-1.0));
+  h.stretch==tidalRadial(3.1) && r.stretch==tidalRadial(3.1)
+  && o.stretch==tidalRadialOrbit(3.1) && o.transverse==tidalTransverse(3.1)
+}
