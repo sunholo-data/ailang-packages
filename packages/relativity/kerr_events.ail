@@ -32,7 +32,7 @@ export pure func eventPatch(y:CarterState,s:float,l:float,e:float,radial:bool,ro
   else match carterRates(y,s,l,e) {
     Err(msg)=>Err(msg),
     Ok(d)=>{
-      let h=if depart then (0.0-1.0e-5)/sqrt(absf(derivative)) else 0.0-2.0*sqrt(distance/absf(derivative));
+      let h=if depart then (0.0-1.0e-5)*sqrt(if radial then 1.0+absf(root) else 1.0)/sqrt(absf(derivative)) else 0.0-2.0*sqrt(distance/absf(derivative));
       let value=if depart then root+derivative*h*h/4.0 else root;
       Ok({u:if radial then value else y.u+h*d.u,
         theta:if radial then y.theta+h*d.theta else value,

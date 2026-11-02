@@ -1,0 +1,11 @@
+module sunholo/relativity/kerr_domain_test
+import std/math (cos,sin)
+import std/result (Ok,Err)
+import ./kerr_trace (traceSky)
+pure func escaped(chi:float)->bool {
+  let psi=0.23561944901923448;
+  match traceSky(2000000.0,0.9,{x:0.0-cos(psi),y:sin(psi)*sin(chi),z:sin(psi)*cos(chi)},0.005) {
+    Ok(_)=>true,Err(_)=>false
+  }
+}
+test "far-domain simple-root departure is representable in binary64" {escaped(0.0)}
