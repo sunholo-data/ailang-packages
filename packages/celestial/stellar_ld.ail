@@ -20,7 +20,12 @@ module sunholo/celestial/stellar_ld
 -- model family (0 = ATLAS, 1 = PHOENIX).
 export type LdRow = { logg: float, teff: float, a: float, b: float, model: int }
 
-export pure func ldRows() -> [LdRow] = [
+-- Private batches bound inference work for this 508-row constant table.
+-- Values and order are unchanged; ldRows remains the only table accessor.
+export pure func ldRows() -> [LdRow] =
+  rows0() ++ rows1() ++ rows2() ++ rows3() ++ rows4() ++ rows5() ++ rows6() ++ rows7()
+
+pure func rows0() -> [LdRow] = [
   { logg: 3.50, teff: 2000.0, a: 1.7743, b: -0.7750, model: 1 },
   { logg: 4.00, teff: 2000.0, a: 1.6811, b: -0.6783, model: 1 },
   { logg: 4.50, teff: 2000.0, a: 1.6133, b: -0.6086, model: 1 },
@@ -84,7 +89,10 @@ export pure func ldRows() -> [LdRow] = [
   { logg: 3.00, teff: 4000.0, a: 0.9200, b: -0.0948, model: 0 },
   { logg: 3.50, teff: 4000.0, a: 0.9065, b: -0.0893, model: 0 },
   { logg: 4.00, teff: 4000.0, a: 0.8285, b: -0.0250, model: 0 },
-  { logg: 4.50, teff: 4000.0, a: 0.6137, b: 0.1603, model: 0 },
+  { logg: 4.50, teff: 4000.0, a: 0.6137, b: 0.1603, model: 0 }
+]
+
+pure func rows1() -> [LdRow] = [
   { logg: 5.00, teff: 4000.0, a: 0.4089, b: 0.3273, model: 0 },
   { logg: 0.00, teff: 4250.0, a: 0.8553, b: -0.0457, model: 0 },
   { logg: 0.50, teff: 4250.0, a: 0.8485, b: -0.0283, model: 0 },
@@ -148,7 +156,10 @@ export pure func ldRows() -> [LdRow] = [
   { logg: 2.00, teff: 5500.0, a: 0.4992, b: 0.2284, model: 0 },
   { logg: 2.50, teff: 5500.0, a: 0.4963, b: 0.2356, model: 0 },
   { logg: 3.00, teff: 5500.0, a: 0.4982, b: 0.2366, model: 0 },
-  { logg: 3.50, teff: 5500.0, a: 0.5070, b: 0.2306, model: 0 },
+  { logg: 3.50, teff: 5500.0, a: 0.5070, b: 0.2306, model: 0 }
+]
+
+pure func rows2() -> [LdRow] = [
   { logg: 4.00, teff: 5500.0, a: 0.5163, b: 0.2234, model: 0 },
   { logg: 4.50, teff: 5500.0, a: 0.5213, b: 0.2200, model: 0 },
   { logg: 5.00, teff: 5500.0, a: 0.5236, b: 0.2191, model: 0 },
@@ -212,7 +223,10 @@ export pure func ldRows() -> [LdRow] = [
   { logg: 3.00, teff: 7000.0, a: 0.3519, b: 0.2969, model: 0 },
   { logg: 3.50, teff: 7000.0, a: 0.3104, b: 0.3344, model: 0 },
   { logg: 4.00, teff: 7000.0, a: 0.3104, b: 0.3324, model: 0 },
-  { logg: 4.50, teff: 7000.0, a: 0.3095, b: 0.3309, model: 0 },
+  { logg: 4.50, teff: 7000.0, a: 0.3095, b: 0.3309, model: 0 }
+]
+
+pure func rows3() -> [LdRow] = [
   { logg: 5.00, teff: 7000.0, a: 0.3071, b: 0.3321, model: 0 },
   { logg: 0.50, teff: 7250.0, a: 0.4734, b: 0.2035, model: 0 },
   { logg: 1.00, teff: 7250.0, a: 0.4660, b: 0.2215, model: 0 },
@@ -276,7 +290,10 @@ export pure func ldRows() -> [LdRow] = [
   { logg: 3.50, teff: 8750.0, a: 0.2905, b: 0.3161, model: 0 },
   { logg: 4.00, teff: 8750.0, a: 0.2947, b: 0.3130, model: 0 },
   { logg: 4.50, teff: 8750.0, a: 0.2975, b: 0.3118, model: 0 },
-  { logg: 5.00, teff: 8750.0, a: 0.2568, b: 0.3484, model: 0 },
+  { logg: 5.00, teff: 8750.0, a: 0.2568, b: 0.3484, model: 0 }
+]
+
+pure func rows4() -> [LdRow] = [
   { logg: 1.50, teff: 9000.0, a: 0.3214, b: 0.2817, model: 0 },
   { logg: 2.00, teff: 9000.0, a: 0.2947, b: 0.3075, model: 0 },
   { logg: 2.50, teff: 9000.0, a: 0.2816, b: 0.3172, model: 0 },
@@ -340,7 +357,10 @@ export pure func ldRows() -> [LdRow] = [
   { logg: 3.50, teff: 11000.0, a: 0.1991, b: 0.3271, model: 0 },
   { logg: 4.00, teff: 11000.0, a: 0.1977, b: 0.3263, model: 0 },
   { logg: 4.50, teff: 11000.0, a: 0.1967, b: 0.3256, model: 0 },
-  { logg: 5.00, teff: 11000.0, a: 0.1961, b: 0.3249, model: 0 },
+  { logg: 5.00, teff: 11000.0, a: 0.1961, b: 0.3249, model: 0 }
+]
+
+pure func rows5() -> [LdRow] = [
   { logg: 2.00, teff: 11250.0, a: 0.2372, b: 0.3071, model: 0 },
   { logg: 2.50, teff: 11250.0, a: 0.2100, b: 0.3193, model: 0 },
   { logg: 3.00, teff: 11250.0, a: 0.1979, b: 0.3238, model: 0 },
@@ -404,7 +424,10 @@ export pure func ldRows() -> [LdRow] = [
   { logg: 3.50, teff: 15000.0, a: 0.1477, b: 0.2913, model: 0 },
   { logg: 4.00, teff: 15000.0, a: 0.1437, b: 0.2845, model: 0 },
   { logg: 4.50, teff: 15000.0, a: 0.1414, b: 0.2822, model: 0 },
-  { logg: 5.00, teff: 15000.0, a: 0.1401, b: 0.2831, model: 0 },
+  { logg: 5.00, teff: 15000.0, a: 0.1401, b: 0.2831, model: 0 }
+]
+
+pure func rows6() -> [LdRow] = [
   { logg: 2.50, teff: 16000.0, a: 0.1804, b: 0.3110, model: 0 },
   { logg: 3.00, teff: 16000.0, a: 0.1528, b: 0.3006, model: 0 },
   { logg: 3.50, teff: 16000.0, a: 0.1424, b: 0.2873, model: 0 },
@@ -468,7 +491,10 @@ export pure func ldRows() -> [LdRow] = [
   { logg: 4.00, teff: 27000.0, a: 0.0841, b: 0.2842, model: 0 },
   { logg: 4.50, teff: 27000.0, a: 0.0832, b: 0.2615, model: 0 },
   { logg: 5.00, teff: 27000.0, a: 0.0856, b: 0.2478, model: 0 },
-  { logg: 3.50, teff: 28000.0, a: 0.0926, b: 0.3254, model: 0 },
+  { logg: 3.50, teff: 28000.0, a: 0.0926, b: 0.3254, model: 0 }
+]
+
+pure func rows7() -> [LdRow] = [
   { logg: 4.00, teff: 28000.0, a: 0.0826, b: 0.2869, model: 0 },
   { logg: 4.50, teff: 28000.0, a: 0.0806, b: 0.2619, model: 0 },
   { logg: 5.00, teff: 28000.0, a: 0.0822, b: 0.2470, model: 0 },
