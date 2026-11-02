@@ -2,6 +2,8 @@ module sunholo/relativity/kerr_test
 import ./hyper (absf)
 import ./kerr (horizonR, horizonInnerR, staticLimitR, horizonOmega, frameDragOmega, zamoClockRate, staticClockRateKerr)
 import ./schwarzschild (staticClockRate)
+import ./kerr (photonOrbitPro, photonOrbitRet, iscoPro, iscoRet)
+import ./schwarzschild (photonSphere, isco)
 pure func near(a: float, b: float) -> bool = absf(a-b) <= 1.0e-12 * absf(b)
 test "RK-1/2 horizons in r_s, all oracle spins" {
   near(horizonR(0.5)*2.0, 1.8660254037844386) && near(horizonInnerR(0.5)*2.0, 0.13397459621556135)
@@ -18,4 +20,19 @@ test "RK-13/Q1 exact zero-spin dispatch and equatorial operation order" {
   && staticClockRateKerr(6.2, 0.3, 0.0) == staticClockRate(3.1)
   && zamoClockRate(6.2, 0.3, 0.0) == staticClockRate(3.1)
   && staticClockRateKerr(6.2, 0.0, 0.9) == staticClockRate(3.1)
+}
+
+-- BPT72 photon-orbit/ISCO values, independent Decimal60 oracle (RK-4..7).
+test "RK-4/5 handed photon radii, units r_s" {
+  near(2.0*photonOrbitPro(0.9),1.5578546274233828) && near(2.0*photonOrbitRet(0.9),3.9102679391030367)
+  && near(2.0*photonOrbitPro(0.998),1.0739092576799517) && near(2.0*photonOrbitRet(0.998),3.9982218928479460)
+}
+test "RK-6/7 ISCO handedness, stable at r=3 only prograde at s=.9" {
+  near(2.0*iscoPro(0.5),4.2330025295308257) && near(2.0*iscoRet(0.5),7.5545847145123584)
+  && near(2.0*iscoPro(0.9),2.3208830417618872) && near(2.0*iscoRet(0.9),8.7173522796064893)
+  && iscoPro(0.9)<3.0 && iscoRet(0.9)>3.0
+}
+test "RK-Q1 exact nonrotating orbit radii" {
+  photonOrbitPro(0.0)==photonSphere() && photonOrbitRet(0.0)==photonSphere()
+  && iscoPro(0.0)==isco() && iscoRet(0.0)==isco()
 }

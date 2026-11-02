@@ -26,3 +26,6 @@ drill() {
 drill '(1.0 + spinRoot(s))/2.0' '(1.0 + spinRoot(s))' horizon-units
 drill '1.0 + spinRoot(s)' '1.0 - spinRoot(s)' horizon-branch
 drill 'else 2.0*(s/u)/u/u/aScaled(u,c,s)' 'else 0.0' frame-drag
+drill 'acos(0.0-s)' 'acos(s)' photon-handedness
+drill '(3.0+z2-k*sqrt(if d < 0.0 then 0.0 else d))/2.0' '(3.0+z2-k*sqrt(if d < 0.0 then 0.0 else d))' isco-units
+test "$killed" = 5
