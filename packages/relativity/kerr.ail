@@ -5,7 +5,7 @@
 -- Accuracy: represented binary64 s, 1e-12 references only through s=.998.
 module sunholo/relativity/kerr
 import std/math (sqrt, cos, acos, pow)
-import ./schwarzschild (staticClockRate, photonSphere, isco)
+import ./schwarzschild (staticClockRate, photonSphere, isco, circularOrbitClockRate, circularOrbitSpeed, orbitalAngularVelocity)
 export pure func validSpin(s: float) -> bool = s >= 0.0 && s < 1.0
 pure func validCos(c: float) -> bool = c >= -1.0 && c <= 1.0
 pure func spinRoot(s: float) -> float = sqrt((1.0-s)*(1.0+s))
@@ -75,3 +75,26 @@ export pure func iscoPro(s: float) -> float
 export pure func iscoRet(s: float) -> float
   requires { validSpin(s) }
 { if s == 0.0 then isco() else iscoRadius(s,-1.0) }
+-- BPT72 eqs 2.12-2.13; k=+1 prograde, -1 retrograde. No speed magnitude
+-- is silently reused as a signed velocity. u is in M; omega in c^3/GM.
+pure func validOrbit(u: float, s: float, k: float) -> bool =
+  validSpin(s) && (k == 1.0 || k == -1.0) && u > 2.0*(if k > 0.0 then photonOrbitPro(s) else photonOrbitRet(s))
+export pure func orbitOmegaKerr(u: float, s: float, k: float) -> float
+  requires { validOrbit(u,s,k) }
+{
+  if s == 0.0 then k*orbitalAngularVelocity(u/2.0)/2.0
+  else k/(u*sqrt(u)+k*s)
+}
+export pure func orbitClockRateKerr(u: float, s: float, k: float) -> float
+  requires { validOrbit(u,s,k) }
+{
+  if s == 0.0 then circularOrbitClockRate(u/2.0)
+  else { let x = k*(s/u)/sqrt(u); sqrt(1.0-3.0/u+2.0*x)/(1.0+x) }
+}
+-- BPT72 eq 3.10: v_Z=(Omega-omega)*sqrt(g_phiphi)/N, signed.
+export pure func orbitLocalSpeedKerr(u: float, s: float, k: float) -> float
+  requires { validOrbit(u,s,k) }
+{
+  if s == 0.0 then k*circularOrbitSpeed(u/2.0)
+  else (orbitOmegaKerr(u,s,k)-frameDragOmega(u,0.0,s))*u*sqrt(aScaled(u,0.0,s))/zamoClockRate(u,0.0,s)
+}

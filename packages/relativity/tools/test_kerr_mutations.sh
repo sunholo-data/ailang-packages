@@ -28,4 +28,6 @@ drill '1.0 + spinRoot(s)' '1.0 - spinRoot(s)' horizon-branch
 drill 'else 2.0*(s/u)/u/u/aScaled(u,c,s)' 'else 0.0' frame-drag
 drill 'acos(0.0-s)' 'acos(s)' photon-handedness
 drill '(3.0+z2-k*sqrt(if d < 0.0 then 0.0 else d))/2.0' '(3.0+z2-k*sqrt(if d < 0.0 then 0.0 else d))' isco-units
-test "$killed" = 5
+drill 'else k/(u*sqrt(u)+k*s)' 'else 1.0/(u*sqrt(u)+k*s)' omega-direction
+drill '*u*sqrt(aScaled(u,0.0,s))' '*u' orbit-zamo-frame
+test "$killed" = 7

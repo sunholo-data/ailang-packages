@@ -1,4 +1,6 @@
 module sunholo/relativity/kerr_test
+import ./kerr (orbitOmegaKerr, orbitClockRateKerr, orbitLocalSpeedKerr)
+import ./schwarzschild (circularOrbitClockRate, circularOrbitSpeed, orbitalAngularVelocity, rsPerSolarMassMetres)
 import ./hyper (absf)
 import ./kerr (horizonR, horizonInnerR, staticLimitR, horizonOmega, frameDragOmega, zamoClockRate, staticClockRateKerr)
 import ./schwarzschild (staticClockRate)
@@ -35,4 +37,23 @@ test "RK-6/7 ISCO handedness, stable at r=3 only prograde at s=.9" {
 test "RK-Q1 exact nonrotating orbit radii" {
   photonOrbitPro(0.0)==photonSphere() && photonOrbitRet(0.0)==photonSphere()
   && iscoPro(0.0)==isco() && iscoRet(0.0)==isco()
+}
+test "RK-8/8b/12 ISCO clock and ZAMO local velocity" {
+  near(orbitClockRateKerr(2.0*iscoPro(0.9),0.9,1.0),0.37086794439864592)
+  && near(orbitClockRateKerr(2.0*iscoRet(0.9),0.9,-1.0),0.79319251811829484)
+  && near(orbitClockRateKerr(2.0*iscoPro(0.998),0.998,1.0),0.092670308365368573)
+  && near(orbitLocalSpeedKerr(2.0*iscoPro(0.9),0.9,1.0),0.62454869546086524)
+  && near(orbitLocalSpeedKerr(2.0*iscoPro(0.5),0.5,1.0),0.56164924228192780)
+}
+test "orbit handedness includes retrograde velocity sign" {
+  orbitOmegaKerr(6.0,0.9,1.0)>0.0 && orbitOmegaKerr(6.0,0.9,-1.0)<0.0
+  && orbitLocalSpeedKerr(6.0,0.9,-1.0)<0.0
+}
+test "RK-Q1 orbit clock, velocity and coordinate frequency dispatch exactly" {
+  orbitClockRateKerr(6.2,0.0,1.0)==circularOrbitClockRate(3.1)
+  && orbitLocalSpeedKerr(6.2,0.0,-1.0)==0.0-circularOrbitSpeed(3.1)
+  && orbitOmegaKerr(6.2,0.0,-1.0)==0.0-orbitalAngularVelocity(3.1)/2.0
+}
+test "RK-18 IAU nominal solar mass: prograde ISCO period milliseconds" {
+  near(6.283185307179586/orbitOmegaKerr(2.0*iscoPro(0.9),0.9,1.0)*10.0*rsPerSolarMassMetres()/2.0/299792458.0*1000.0,1.3727616115380832)
 }
