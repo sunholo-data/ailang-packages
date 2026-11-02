@@ -1,0 +1,69 @@
+-- Pure planetary habitability and detection geometry. Float64, no effects or dependencies.
+-- Kopparapu et al.2014 (ApJL787 L29), Table1 (PDF p12), Eqs4–5 (p9), one-Earth-mass
+-- atmosphere models. Coefficients valid at 2600–7200 K; callers must preserve the flag.
+-- Check values: stapledons-design physics/life-and-worlds.md LW-13..22; habitability_test.ail.
+module sunholo/celestial/habitability
+import std/math (sqrt, pow)
+
+-- Fluxes in terrestrial insolation units; conservative HZ is maximum..runaway.
+-- Recent Venus / early Mars give optimistic limits. These do not establish habitability.
+export type HzFluxes = { recentVenus: float, runaway: float, maximum: float, earlyMars: float, teffUsed: float, extrapolated: bool }
+
+pure func flux(t: float, s: float, a: float, b: float, c: float, d: float) -> float =
+  s + t * (a + t * (b + t * (c + t * d)))
+
+-- Out-of-table temperatures use the nearest edge, reported rather than silently extrapolated.
+export pure func hzFluxes(teffK: float) -> HzFluxes ! {}
+requires { teffK > 0.0 }
+ensures { result.teffUsed >= 2600.0, result.teffUsed <= 7200.0 } {
+  let used = if teffK < 2600.0 then 2600.0 else if teffK > 7200.0 then 7200.0 else teffK
+  let t = used - 5780.0;
+  { recentVenus: flux(t, 1.776, 0.0002136, 2.533e-08, 0.0 - 1.332e-11, 0.0 - 3.097e-15), runaway: flux(t, 1.107, 0.0001332, 1.58e-08, 0.0 - 8.308e-12, 0.0 - 1.931e-15), maximum: flux(t, 0.356, 6.171e-05, 1.698e-09, 0.0 - 3.198e-12, 0.0 - 5.575e-16), earlyMars: flux(t, 0.32, 5.547e-05, 1.526e-09, 0.0 - 2.874e-12, 0.0 - 5.011e-16), teffUsed: used, extrapolated: teffK < 2600.0 || teffK > 7200.0 }
+}
+
+-- Kopparapu Eq5, AU. Astronomical input bounds avoid IEEE overflow/underflow in the ratio.
+export pure func hzDistanceAu(lSun: float, sEff: float) -> float ! {}
+requires { lSun >= 1e-12, lSun <= 1e+12, sEff >= 1e-12, sEff <= 1e+12 }
+ensures { result > 0.0 } {
+  sqrt(lSun / sEff)
+}
+
+export pure func insolationEarth(lSun: float, aAu: float) -> float ! {}
+requires { lSun >= 0.0, lSun <= 1e+12, aAu >= 1e-12, aAu <= 1e+12 }
+ensures { result >= 0.0 } {
+  lSun / (aAu * aAu)
+}
+
+-- Full redistribution and Bond albedo; no atmospheric greenhouse correction.
+-- IAU2015 nominal solar radius 695700 km, exact AU 149597870.7 km.
+export pure func equilibriumK(teffK: float, rSun: float, aAu: float, bondAlbedo: float) -> float ! {}
+requires { teffK > 0.0, teffK <= 1e+09, rSun > 0.0, rSun <= 1e+09, aAu >= 1e-12, aAu <= 1e+12, bondAlbedo >= 0.0, bondAlbedo <= 1.0 }
+ensures { result >= 0.0 } {
+  teffK * sqrt(rSun * 695700.0 / (2.0 * aAu * 1.495978707e+08)) * pow(1.0 - bondAlbedo, 0.25)
+}
+
+-- Two-body Keplerian RV semi-amplitude, m/s; period days, planet Earth masses, star solar masses.
+-- CODATA2018 G; adopted masses (kg) match the normative LW check cases. sinI is sin(inclination).
+export pure func rvSemiAmplitude(periodD: float, mPlanetEarth: float, mStarSun: float, sinI: float, e: float) -> float ! {}
+requires { periodD >= 1e-12, periodD <= 1e+12, mPlanetEarth >= 0.0, mPlanetEarth <= 1e+09, mStarSun >= 1e-12, mStarSun <= 1e+09, sinI >= 0.0, sinI <= 1.0, e >= 0.0, e < 1.0 }
+ensures { result >= 0.0 } {
+  let planetKg = mPlanetEarth * 5.9722e+24
+  let starKg = mStarSun * 1.98847e+30
+  pow(2.0 * 3.141592653589793 * 6.6743e-11 / (periodD * 86400.0), 1.0 / 3.0) * planetKg * sinI / pow(starKg + planetKg, 2.0 / 3.0) / sqrt(1.0 - e * e)
+}
+
+-- Circular geometry, neglecting planet radius; requires the orbit to be outside the star.
+export pure func transitProbability(rStarSun: float, aAu: float) -> float ! {}
+requires { rStarSun >= 1e-12, rStarSun <= 1e+09, aAu <= 1e+12, aAu * 1.495978707e+08 > rStarSun * 695700.0 }
+ensures { result > 0.0, result < 1.0 } {
+  rStarSun * 695700.0 / (aAu * 1.495978707e+08)
+}
+
+-- Chambers et al.1996, Icarus119 261, section2. a in AU; planet masses Earth, star solar.
+-- Positive spacing does not by itself prove stability, especially for eccentric orbits.
+export pure func mutualHillSpacing(a1: float, m1: float, a2: float, m2: float, mStar: float) -> float ! {}
+requires { a1 >= 1e-12, a2 > a1, a2 <= 1e+12, m1 >= 0.0, m1 <= 1e+09, m2 >= 0.0, m2 <= 1e+09, m1 + m2 >= 1e-12, mStar >= 1e-12, mStar <= 1e+09 }
+ensures { result > 0.0 } {
+  let rHill = pow((m1 + m2) * 5.9722e+24 / (3.0 * mStar * 1.98847e+30), 1.0 / 3.0) * (a1 + a2) / 2.0;
+  (a2 - a1) / rHill
+}
