@@ -1,6 +1,8 @@
 module sunholo/relativity/kerr_test
 import ./kerr (orbitOmegaKerr, orbitClockRateKerr, orbitLocalSpeedKerr)
 import ./schwarzschild (circularOrbitClockRate, circularOrbitSpeed, orbitalAngularVelocity, rsPerSolarMassMetres)
+import ./kerr (validSpin, metricDelta)
+import std/math (sqrt)
 import ./hyper (absf)
 import ./kerr (horizonR, horizonInnerR, staticLimitR, horizonOmega, frameDragOmega, zamoClockRate, staticClockRateKerr)
 import ./schwarzschild (staticClockRate)
@@ -56,4 +58,18 @@ test "RK-Q1 orbit clock, velocity and coordinate frequency dispatch exactly" {
 }
 test "RK-18 IAU nominal solar mass: prograde ISCO period milliseconds" {
   near(6.283185307179586/orbitOmegaKerr(2.0*iscoPro(0.9),0.9,1.0)*10.0*rsPerSolarMassMetres()/2.0/299792458.0*1000.0,1.3727616115380832)
+}
+test "spin validation rejects nonfinite, negative and extremal inputs" {
+  validSpin(0.0) && validSpin(0.998) && validSpin(0.9999999999999999)
+  && !validSpin(-0.1) && !validSpin(1.0) && !validSpin(0.0/0.0) && !validSpin(1.0/0.0)
+}
+test "small-spin ISCO retains the linear splitting instead of sqrt roundoff" {
+  near(iscoPro(1.0e-9),3.0-1.632993161855452e-9)
+  && near(iscoRet(1.0e-9),3.0+1.632993161855452e-9)
+}
+test "factored Delta near the .998 horizon and finite near extremality" {
+  absf(metricDelta(1.0632139226171164,0.998)-1.2642782726410759e-11)<4.0e-18
+  && horizonR(0.9999999999999999)>0.5 && horizonInnerR(1.0e-9)>0.0
+  && zamoClockRate(4.0,0.0,0.9999999999999999)>0.0
+  && staticClockRateKerr(1.0e200,0.5,0.998)==1.0
 }

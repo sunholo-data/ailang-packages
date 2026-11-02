@@ -30,4 +30,6 @@ drill 'acos(0.0-s)' 'acos(s)' photon-handedness
 drill '(3.0+z2-k*sqrt(if d < 0.0 then 0.0 else d))/2.0' '(3.0+z2-k*sqrt(if d < 0.0 then 0.0 else d))' isco-units
 drill 'else k/(u*sqrt(u)+k*s)' 'else 1.0/(u*sqrt(u)+k*s)' omega-direction
 drill '*u*sqrt(aScaled(u,0.0,s))' '*u' orbit-zamo-frame
-test "$killed" = 7
+drill '(u-2.0*horizonR(s))*(u-2.0*horizonInnerR(s))' 'u*u-2.0*u+s*s' unfactored-delta
+drill 'if s < 0.01 then iscoSmall(s,k,sqrt(6.0),4) else' 'if false then iscoSmall(s,k,sqrt(6.0),4) else' small-spin-conditioning
+test "$killed" = 9

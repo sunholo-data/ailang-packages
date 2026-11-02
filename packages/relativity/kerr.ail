@@ -7,6 +7,7 @@ module sunholo/relativity/kerr
 import std/math (sqrt, cos, acos, pow)
 import ./schwarzschild (staticClockRate, photonSphere, isco, circularOrbitClockRate, circularOrbitSpeed, orbitalAngularVelocity)
 export pure func validSpin(s: float) -> bool = s >= 0.0 && s < 1.0
+pure func finiteU(u: float) -> bool = u > 0.0 && u <= 1.7976931348623157e308
 pure func validCos(c: float) -> bool = c >= -1.0 && c <= 1.0
 pure func spinRoot(s: float) -> float = sqrt((1.0-s)*(1.0+s))
 export pure func horizonR(s: float) -> float
@@ -38,10 +39,10 @@ pure func aScaled(u: float, c: float, s: float) -> float {
   (1.0+x2)*(1.0+x2)-x2*(1.0-2.0/u+x2)*(1.0-c*c)
 }
 export pure func frameDragOmega(u: float, c: float, s: float) -> float
-  requires { validSpin(s) && validCos(c) && u > 2.0*horizonR(s) }
+  requires { validSpin(s) && validCos(c) && finiteU(u) && u > 2.0*horizonR(s) }
 { if s == 0.0 then 0.0 else 2.0*(s/u)/u/u/aScaled(u,c,s) }
 export pure func zamoClockRate(u: float, c: float, s: float) -> float
-  requires { validSpin(s) && validCos(c) && u > 2.0*horizonR(s) }
+  requires { validSpin(s) && validCos(c) && finiteU(u) && u > 2.0*horizonR(s) }
 {
   if s == 0.0 then staticClockRate(u/2.0)
   else sqrt((1.0-2.0*horizonR(s)/u)*(1.0-2.0*horizonInnerR(s)/u)*sigmaScaled(u,c,s)/aScaled(u,c,s))
@@ -49,7 +50,7 @@ export pure func zamoClockRate(u: float, c: float, s: float) -> float
 -- Static observers exist only strictly outside the static limit.
 -- The zero at the limit is a limiting value, NOT an observer there.
 export pure func staticClockRateKerr(u: float, c: float, s: float) -> float
-  requires { validSpin(s) && validCos(c) && u > 2.0*staticLimitR(s,c) }
+  requires { validSpin(s) && validCos(c) && finiteU(u) && u > 2.0*staticLimitR(s,c) }
 {
   if s == 0.0 || c == 0.0 then staticClockRate(u/2.0)
   else sqrt(1.0-2.0/u/sigmaScaled(u,c,s))
@@ -61,13 +62,19 @@ export pure func photonOrbitPro(s: float) -> float
 export pure func photonOrbitRet(s: float) -> float
   requires { validSpin(s) }
 { if s == 0.0 then photonSphere() else 1.0+cos((2.0/3.0)*acos(s)) }
+-- Newton solves BPT72 eq 2.21's quartic where 3-Z1 loses the O(s^2) term.
+pure func iscoSmall(s: float, k: float, x: float, n: int) -> float =
+  if n == 0 then x*x/2.0
+  else iscoSmall(s,k,x-(x*x*x*x-6.0*x*x+8.0*k*s*x-3.0*s*s)/(4.0*x*x*x-12.0*x+8.0*k*s),n-1)
 pure func iscoRadius(s: float, k: float) -> float {
+  if s < 0.01 then iscoSmall(s,k,sqrt(6.0),4) else {
   let q = 1.0-s;
   let z1 = 1.0+pow(q*(1.0+s),1.0/3.0)*(pow(1.0+s,1.0/3.0)+pow(q,1.0/3.0));
   let z2 = sqrt(3.0*s*s+z1*z1);
   let d = (3.0-z1)*(3.0+z1+2.0*z2);
   -- Analytically d>=0. Tiny s can round z1 above 3 by one ulp.
   (3.0+z2-k*sqrt(if d < 0.0 then 0.0 else d))/2.0
+  }
 }
 export pure func iscoPro(s: float) -> float
   requires { validSpin(s) }
@@ -78,7 +85,7 @@ export pure func iscoRet(s: float) -> float
 -- BPT72 eqs 2.12-2.13; k=+1 prograde, -1 retrograde. No speed magnitude
 -- is silently reused as a signed velocity. u is in M; omega in c^3/GM.
 pure func validOrbit(u: float, s: float, k: float) -> bool =
-  validSpin(s) && (k == 1.0 || k == -1.0) && u > 2.0*(if k > 0.0 then photonOrbitPro(s) else photonOrbitRet(s))
+  validSpin(s) && finiteU(u) && (k == 1.0 || k == -1.0) && u > 2.0*(if k > 0.0 then photonOrbitPro(s) else photonOrbitRet(s))
 export pure func orbitOmegaKerr(u: float, s: float, k: float) -> float
   requires { validOrbit(u,s,k) }
 {
