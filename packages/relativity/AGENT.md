@@ -21,12 +21,19 @@ near a black hole and the numbers must be physically right:
   works for r > 1.5): the lens map, image positions, Einstein angle, magnification,
   inverse lens-table rows (`geodesic`, 0.10.0).
 
-It is pure: no effects, deterministic, and the same results on the VM and the
+- Kerr rotating holes (0.14.0): scalar horizons/orbits/clocks, infinity shadow
+  critical curves, equatorial finite-observer Carter rays, source-directed
+  ZAMO projection and single pure ship boosts, and full equatorial Weyl tides.
+  These are offline physics APIs, not a baked GPU sky/table asset.
+
+It is pure: no effects
+, deterministic, and the same results on the VM and the
 interpreter.
 
 Do NOT use it for:
 - Orbital mechanics or Newtonian gravity.
-- Rotating (Kerr) black holes.
+- Kerr interiors, non-equatorial finite-observer ray tables, accretion disks,
+  jets, charge, or inverse point-star images (not supplied).
 - Per-frame ray tracing. `geodesic` integrates one ray per call (hundreds to
   thousands of RK4 steps); bake a table offline and interpolate it per pixel.
 - Massive-particle geodesics (free fall), charged holes, accretion disks.
@@ -387,3 +394,52 @@ V is good to about +-0.1 mag. Treat results as approximate.
   `glowDigest`, `discDigest`, `glowSpectrumDigest`, `approachDigest`, `schwarzschildDigest` and `lensDigest` check that bit for bit.
 - Colours use the Wyman–Sloan–Shirley (2013) fit to the CIE 1931 colour
   matching functions, which is accurate to about 0.002 in chromaticity.
+
+## Kerr API and limits (0.14.0)
+
+`kerr` returns horizon/photon/ISCO radii in **r_s**; its coordinate argument
+**u = 2r/r_s** is in GM/c². Frequencies are c³/GM. `kerr_shadow` lambda,
+alpha and beta are GM/c² (eta and beta2 are squared); negative beta2 means an
+invisible arc and must not be square-rooted. At zero spin use `shadowCircle`:
+the spherical-photon u interval collapses and cannot parameterize a circle.
+
+`kerr_frame` vectors use (radial, theta, phi) components, source directions
+point toward the source, and constants come from future incoming momentum
+p=e0−n·e. `boostSource(n,-v,gamma)` converts ship pixels to ZAMO. A radial
+approach combines radial/static velocities in one pure ZAMO boost, never a
+pair of non-collinear boosts. Frequency transport depends on the ray's lambda.
+
+`traceSky(u,s,n,step)` is **offline**, u in [4,2e6], s in [0,.998], and n unit.
+It returns `Result`: `captured`/`critical` are analytic classifications;
+`solver_steps`, `step_refinement` and other errors are failed rays, never masks.
+No caller may relabel an integration failure as capture. Both root signs are
+tracked, phi/time evolve, exact lambda-zero axes use an unwrapped theta chart,
+and escaping directions use the far Cartesian tangent. The 49-ray matrix and
+12 near-critical probes pass a 1.2e-4 angular budget; that does not prove a LUT
+regularisation or interpolation scheme. Refine and validate your own table.
+
+`tidalTensor(u,s,v)` projects the **full** equatorial Weyl tensor into the
+single-boost ship frame; v is in the radial/phi plane. E=C_i a j b U^a U^b,
+deviation = −E·separation. Units are c²/r_s² (4 times the metric oracle's M⁻²).
+`tidalReadout` stretch is the negative radial-plane eigenvalue; transverse is
+the positive eigenvalue in that plane (along motion for a circular orbit),
+and polar is E_theta,theta. `TideFrame` selects ZAMO, hover, radial or handed
+circular motion. At spin zero stretch/transverse use the legacy functions
+exactly; the new polar field completes the trace-free tensor.
+
+`_smoke.kerrDigest(16)` includes scalars, frame transport, full-curvature
+readouts and escaping-ray direction. It is a deterministic test aggregate,
+not a physical radius/observable. Source/commands and independent Python
+oracles live on the linked R2-KERR consumer branch. Do not publish this
+candidate until independent evaluation and Mark's explicit publication step.
+
+### Current candidate blocker (attended 2026-11-02)
+
+This branch is **not publish-ready**. The bounded sweep exposed a far-radius
+root-departure scale defect (corrected with a representable relative offset),
+and an arbitrary near-axis ray still reaches `Err("solver_steps")` rather
+than the independently verified escape. Repro: u=6, s=.9, source direction
+(-.6, sqrt(.64-1e-28), 1e-14), step .005. The required regular angular chart
+and its pole-phase/event closure remain open. No consumer may generate or pin
+a production table from this candidate. Passing sampled matrices and package
+quality are not evidence that this whole-domain gate has passed.
