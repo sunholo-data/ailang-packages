@@ -1,0 +1,21 @@
+module sunholo/relativity/kerr_test
+import ./hyper (absf)
+import ./kerr (horizonR, horizonInnerR, staticLimitR, horizonOmega, frameDragOmega, zamoClockRate, staticClockRateKerr)
+import ./schwarzschild (staticClockRate)
+pure func near(a: float, b: float) -> bool = absf(a-b) <= 1.0e-12 * absf(b)
+test "RK-1/2 horizons in r_s, all oracle spins" {
+  near(horizonR(0.5)*2.0, 1.8660254037844386) && near(horizonInnerR(0.5)*2.0, 0.13397459621556135)
+  && near(horizonR(0.9)*2.0, 1.4358898943540674) && near(horizonInnerR(0.9)*2.0, 0.56411010564593264)
+  && near(horizonR(0.998)*2.0, 1.0632139225171164) && near(horizonInnerR(0.998)*2.0, 0.93678607748288357)
+}
+test "RK-3/9/10/11 equatorial static limit, horizon frequency, ZAMO frame" {
+  staticLimitR(0.9, 0.0) == 1.0 && near(horizonOmega(0.9), 0.31339450313662925)
+  && near(frameDragOmega(2.0, 0.0, 0.9), 0.16014234875444840)
+  && near(zamoClockRate(2.0, 0.0, 0.9), 0.37964208654863802)
+}
+test "RK-13/Q1 exact zero-spin dispatch and equatorial operation order" {
+  horizonR(0.0) == 1.0 && horizonInnerR(0.0) == 0.0 && frameDragOmega(6.2, 0.3, 0.0) == 0.0
+  && staticClockRateKerr(6.2, 0.3, 0.0) == staticClockRate(3.1)
+  && zamoClockRate(6.2, 0.3, 0.0) == staticClockRate(3.1)
+  && staticClockRateKerr(6.2, 0.0, 0.9) == staticClockRate(3.1)
+}

@@ -1,0 +1,56 @@
+-- Kerr scalars: radii returned in r_s; input u = r/(GM/c^2) = 2 r/r_s.
+-- Frequencies are c^3/(GM), spin s = Jc/(GM^2). Signature (-,+,+,+).
+-- Source: Bardeen, Press & Teukolsky 1972, ApJ 178, 347, eqs 2.1-2.7.
+-- https://articles.adsabs.harvard.edu/pdf/1972ApJ...178..347B
+-- Accuracy: represented binary64 s, 1e-12 references only through s=.998.
+module sunholo/relativity/kerr
+import std/math (sqrt)
+import ./schwarzschild (staticClockRate)
+export pure func validSpin(s: float) -> bool = s >= 0.0 && s < 1.0
+pure func validCos(c: float) -> bool = c >= -1.0 && c <= 1.0
+pure func spinRoot(s: float) -> float = sqrt((1.0-s)*(1.0+s))
+export pure func horizonR(s: float) -> float
+  requires { validSpin(s) }
+  ensures { result >= 0.5 && result <= 1.0 }
+  tests [(0.0, 1.0)]
+{ (1.0 + spinRoot(s))/2.0 }
+-- Rationalized inner root avoids cancellation as s -> 0.
+export pure func horizonInnerR(s: float) -> float
+  requires { validSpin(s) }
+  ensures { result >= 0.0 && result < 0.5 }
+  tests [(0.0, 0.0)]
+{ s*s/(2.0*(1.0+spinRoot(s))) }
+export pure func staticLimitR(s: float, c: float) -> float
+  requires { validSpin(s) && validCos(c) }
+{ let x = s*c; (1.0+sqrt((1.0-x)*(1.0+x)))/2.0 }
+export pure func horizonOmega(s: float) -> float
+  requires { validSpin(s) }
+{ s/(4.0*horizonR(s)) }
+-- Delta factored at BOTH represented roots (DI-05), in M^2.
+export pure func metricDelta(u: float, s: float) -> float
+  requires { validSpin(s) && u >= 0.0 && u <= 2000000.0 }
+{ (u-2.0*horizonR(s))*(u-2.0*horizonInnerR(s)) }
+-- Divide metric functions by powers of u BEFORE evaluating. Ratios stay
+-- finite at large u; avoid A ~ u^4 overflowing for distant scalar callers.
+pure func sigmaScaled(u: float, c: float, s: float) -> float = 1.0+(s/u)*(s/u)*c*c
+pure func aScaled(u: float, c: float, s: float) -> float {
+  let x = s/u; let x2 = x*x;
+  (1.0+x2)*(1.0+x2)-x2*(1.0-2.0/u+x2)*(1.0-c*c)
+}
+export pure func frameDragOmega(u: float, c: float, s: float) -> float
+  requires { validSpin(s) && validCos(c) && u > 2.0*horizonR(s) }
+{ if s == 0.0 then 0.0 else 2.0*(s/u)/u/u/aScaled(u,c,s) }
+export pure func zamoClockRate(u: float, c: float, s: float) -> float
+  requires { validSpin(s) && validCos(c) && u > 2.0*horizonR(s) }
+{
+  if s == 0.0 then staticClockRate(u/2.0)
+  else sqrt((1.0-2.0*horizonR(s)/u)*(1.0-2.0*horizonInnerR(s)/u)*sigmaScaled(u,c,s)/aScaled(u,c,s))
+}
+-- Static observers exist only strictly outside the static limit.
+-- The zero at the limit is a limiting value, NOT an observer there.
+export pure func staticClockRateKerr(u: float, c: float, s: float) -> float
+  requires { validSpin(s) && validCos(c) && u > 2.0*staticLimitR(s,c) }
+{
+  if s == 0.0 || c == 0.0 then staticClockRate(u/2.0)
+  else sqrt(1.0-2.0/u/sigmaScaled(u,c,s))
+}
