@@ -421,6 +421,14 @@ unique across the axis. Escaping directions use the far Cartesian tangent. The 4
 12 near-critical probes pass a 1.2e-4 angular budget; that does not prove a LUT
 regularisation or interpolation scheme. Refine and validate your own table.
 
+`SkyTrace.phi` and `time` are coordinates at the finite far integration sphere,
+not asymptotic sky coordinates or a finite arrival time at infinity. Close to a
+pole, the azimuth of `sky` can differ visibly from that finite-sphere phi;
+consumers must use `sky` or the asymptotic action/node phases below. The legacy
+`kerr_carter`/`kerr_events` exports are BL-chart primitives and can refuse a
+near-axis step with `polar_chart`; the production `traceSky`/`traceLens` APIs
+are the regular-chart path.
+
 `traceLens` additionally returns two unwrapped regular action angles, `phase`
 and `node`, alongside the same ray. With B the positive root of
 B²−(lambda²+eta−s²)B−s² eta=0, A=−sign(n_theta)sqrt(eta/B),
