@@ -120,3 +120,23 @@ AILANG v0.54.18 formatter limitation: named test bodies with let-bound records
 produce `nil expression node` in `ailang fmt` although check/test accept them.
 Reported with a reduced reproduction to the upstream GCP inbox; no VM or
 interpreter workaround is present in package logic.
+
+- `epoch_statistics`: `Probabilities`, `historyProbabilities`, `traceCappedMean`.
+  Reusable exact marginals of `history`'s finite uniform onset window. `life`
+  is the immutable inhabited background, including ended lineages;
+  `mindsWindow` is a technological epoch intersecting [0,futureWindowYr];
+  `tech` and `remnant` are probabilities at t=0. These are per-habitable-world
+  probabilities, before occurrence/eligibility; they are not detections.
+  Positive finite time inputs span 1e-100–1e100 years; fractions obey the
+  history sampler's domain/order. Trace means integrate log-uniform persistence
+  with clipping and support equal bounds; a narrow-interval log series avoids
+  hi/lo cancellation. The adopted collapse share remains 0.75. No history,
+  physical input or RNG result is changed by this statistics module.
+
+Validation caveat on AILANG v0.56.0 (reported as
+`inbox_1793648615351_707bec99`): `--verify-contracts` rejects invalid `requires`
+inputs on the interpreter but the strict VM currently ignores that check,
+even in a minimal same-module function. Valid-domain VM/interpreter numerical
+parity is measured; VM rejection of invalid domains is **not** claimed. Keep
+caller inputs within the documented domains. No alternate sampler or VM math
+workaround is included in this package.

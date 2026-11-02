@@ -19,3 +19,9 @@ This is not Forecaster's posterior or Mann 2019's K-band mass relation, and is
 for labelled synthetic values only. Independent source-node/70-digit numeric
 checks, finite/endpoints/quantile-order grids and a Python conditional-CDF oracle
 cover the helper, with strict-VM/interpreter byte parity.
+
+`epoch_statistics` keeps the reusable finite-window expectations with the
+history model: exact clipped technology/trace probabilities and a capped
+log-uniform persistence mean, including equal/narrow-bound cases. The game's
+census now composes these probabilities rather than owning scientific maths.
+Existing sampler outputs and broad-prior float64 expectations are unchanged.

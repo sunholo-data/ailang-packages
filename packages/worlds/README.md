@@ -22,3 +22,9 @@ K-band calibration. Neither helper overwrites measured planets.
 
 See [AGENT.md](AGENT.md) for units, API, exact uniform slots and limitations.
 Publication is an attended handoff; this checkout is not a published version.
+
+`epoch_statistics` supplies the exact finite-window probabilities for an
+inhabited background, technology intersecting a future interval, technology
+at now and surviving collapse traces. Its clipped log-uniform trace integral
+also handles deterministic and narrow persistence intervals. It describes the
+existing history model; it adds no detection assumption or new physics.
