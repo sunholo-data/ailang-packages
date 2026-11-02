@@ -1,0 +1,9 @@
+module sunholo/relativity/kerr_digest_test
+import ./hyper (absf)
+import ./kerr_digest (kerrDigest)
+test "Kerr scalar/frame/curvature/ray digest n1 against independent oracle" {
+  absf(kerrDigest(1)-38.486419384226075)<1.0e-9
+}
+test "Kerr digest n16 against independent Decimal/metric/DOP853 oracle" {
+  absf(kerrDigest(16)-560.50171485172541)<1.0e-9
+}
