@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.2.3
+
+Fix: drop the `sunholo/http_helpers` dependency, which no module imports. Publishing rewrites a
+path dependency to the newest registry version (0.1.5 in 0.2.2), so 0.2.2 pulled http_helpers
+0.1.5 into every consumer. A consumer that also uses `sunholo/billing_stripe`, which pins 0.1.4,
+then could not resolve at all (DocParse, 2026-11-02). No code change from 0.2.2.
+
 ## 0.2.2
 
 Fix: the GCS backend (Vertex AI) uploads the file's bytes, not its base64 text.
