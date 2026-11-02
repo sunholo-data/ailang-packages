@@ -421,6 +421,24 @@ unique across the axis. Escaping directions use the far Cartesian tangent. The 4
 12 near-critical probes pass a 1.2e-4 angular budget; that does not prove a LUT
 regularisation or interpolation scheme. Refine and validate your own table.
 
+`traceLens` additionally returns two unwrapped regular action angles, `phase`
+and `node`, alongside the same ray. With B the positive root of
+B²−(lambda²+eta−s²)B−s² eta=0, A=−sign(n_theta)sqrt(eta/B),
+C=−lambda/sqrt(B+s²), the asymptotic direction is
+Rot_z(node)*(cos(phase), C*sin(phase), A*sin(phase)). For eta=0 use
+A=0, C=−sign(lambda), phase'=|lambda|. Otherwise phase'=sqrt(B+s²q²)
+and node'=drag−lambda*s²/[sqrt(B+s²)(sqrt(B+s²)+phase')]. These are
+past Mino rates; no polar denominator remains. At s=0, node=0 and
+phase+psi−pi is the existing Schwarzschild deflection. Coefficient fitting
+and reconstruction accuracy still belong to the consumer, before pinning.
+
+The numerical radial chart is compact: for an accessible simple outer root
+rt, x=sign(du/dzeta_past)*sqrt(1−rt/u) passes smoothly through the turning
+point; x'=rt sqrt(Q)/(2u_observer), R/u⁴=(1−rt/u)Q. Outward root-free rays
+use x=u_observer/u. Cash–Karp 5(4) controls local radial, sphere and phase
+error; `step` sets the angular cap and fifth-power tolerance scaling. This
+avoids representability-sensitive root departures at distant observers.
+
 `tidalTensor(u,s,v)` projects the **full** equatorial Weyl tensor into the
 single-boost ship frame; v is in the radial/phi plane. E=C_i a j b U^a U^b,
 deviation = −E·separation. Units are c²/r_s² (4 times the metric oracle's M⁻²).

@@ -14,6 +14,9 @@ Feature: package-first Kerr physics for Stapledon's Voyage R2-KERR.
   error control, and finite-observer outgoing directions. Exact tangential
   rays depart their simple radial root; near-axis rays are never discarded.
   Near-root radial evaluation uses `kerr_radial` compensated arithmetic.
+  The production trace uses a compact simple-root radial chart and adaptive
+  Cash–Karp 5(4), with regular unwrapped action angles exposed by `traceLens`
+  for table fitting. The standalone BL RK4/event exports remain available.
 - `kerr_frame`: source-directed photon projection, single pure ship boost,
   non-collinear radial approach and ray-dependent frequency transport.
 - `kerr_tides`: full equatorial Weyl projection including spatial curvature,

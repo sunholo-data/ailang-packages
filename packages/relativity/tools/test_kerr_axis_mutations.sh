@@ -25,5 +25,5 @@ drill() {
 }
 drill kerr_sphere.ail '(f+s*s)*y.m.z' 'f*y.m.z' kerr_sphere_test.ail angular-force
 drill kerr_sphere.ail 'if l>0.0 then 0.0-angle else angle' '0.0' kerr_sphere_test.ail pole-phase-reset
-drill kerr_trace.ail 'if n.x==0.0 then match' 'if false then match' kerr_axis_test.ail tangent-root-stall
+drill kerr_trace.ail 'r/(2.0*c.u0)*sqrt(q)' 'absf(y.x)*r/(2.0*c.u0)*sqrt(q)' kerr_axis_test.ail tangent-root-stall
 test "$killed" = 3

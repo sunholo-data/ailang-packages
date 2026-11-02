@@ -18,3 +18,12 @@ test "exact tangent near-axis ray leaves its simple radial root" {
 test "opposite hemisphere and azimuth have a regular escaping chart" {
   match traceSky(6.0,0.998,{x:-0.6,y:0.0-sqrt(0.64-1.0e-28),z:-1.0e-14},0.005) {Err(_)=>false,Ok(_)=>true}
 }
+test "far-radius near-axis returning rays retain their allowed radial chart" {
+  let n={x:-0.6,y:0.79999999375,z:-0.0001};
+  match traceSky(2000000.0,0.5,n,0.005) {Err(_)=>false,Ok(_)=>
+    match traceSky(2000000.0,0.75,n,0.005) {Err(_)=>false,Ok(_)=>true}}
+}
+test "invalid source directions are refused before metric roots and capture" {
+  match traceSky(6.0,0.9,{x:0.0,y:0.0,z:0.0},0.005) {Ok(_)=>false,Err(c)=>c=="invalid_ray"}
+    && match traceSky(6.0,0.9,{x:0.0,y:0.0,z:0.0/0.0},0.005) {Ok(_)=>false,Err(c)=>c=="invalid_ray"}
+}
