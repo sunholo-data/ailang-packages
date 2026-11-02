@@ -1,0 +1,191 @@
+module sunholo/specstore/qa
+-- Scheduled tag QA against a spec, in two halves around a browser:
+--
+--   specstore visits  <standard> <spec-folder> <visits.json>     the run list for the browser
+--   (a browser script visits each page and writes observed.json: dataLayer pushes, GA4 hits)
+--   specstore compare <standard> <spec-folder> <observed.json> <round.yaml>
+--
+-- A spec's `site` block names the base URL and the consent buttons; its `visits` list says,
+-- for each visit, the page, the consent state, the steps and the events it should produce.
+-- The comparison writes a QA round by an automated tester, so it can record a failure but
+-- never a pass (passAllowed): a match is "not tested" with a note, for a person to confirm.
+
+import std/result (Result, Ok, Err)
+import std/option (Option, Some, None)
+import std/json (Json, JString, JNumber, JBool, JNull, encode, decode, get, js, ja, jo, kv)
+import std/fs (readFile, writeFile)
+import std/io (println)
+import std/list (map, filter, length, any, flatMap, foldl)
+import std/string (split, join, trim, endsWith, substring, length as strLength)
+import ./rules (worstOutcome, visitOutcome)
+import ./model (Std, Event, Param, Spec, Round, str, arr, strs, obj, matches, dup)
+
+export type Visit = { id: string, url: string, consent: string, expects: [string], forbids: [string], j: Json }
+export type Seen = { id: string, status: string, reason: string, pushes: [Json], hits: [string] }
+
+export func visitsOf(sp: Spec) -> [Visit] =
+  map(\v. { id: str(v, "id"), url: str(v, "url"),
+            consent: if str(v, "consent") == "" then "none" else str(v, "consent"),
+            expects: strs(v, "expects"), forbids: strs(v, "forbids"), j: v }, arr(sp.j, "visits"))
+
+export func has(j: Json, k: string) -> bool = match get(j, k) { Some(_) => true, None => false }
+
+-- ── check: the visits cover the spec ─────────────────────────────────────────
+
+export func ok(cond: bool, msg: string) -> [(string, string)] = if cond then [] else [("visits", msg)]
+
+export func visitChecks(sp: Spec) -> [(string, string)] {
+  let vs = visitsOf(sp);
+  let ids = map(\e. e.id, sp.events);
+  let site = obj(sp.j, "site");
+  let covered = flatMap(\v. v.expects, vs);
+  if length(vs) == 0 then [("visits", "spec: no visits, so scheduled QA has nothing to run")]
+  else flatMap(\xs. xs, [
+    ok(str(site, "base_url") != "", "site: no base_url"),
+    map(\i. ("visits", "${i}: the visit ID is used twice"), dup(map(\v. v.id, vs))),
+    flatMap(\v. flatMap(\xs. xs, [
+        ok(v.url != "", "${v.id}: no url"),
+        ok(v.consent == "accept" || v.consent == "reject" || v.consent == "none",
+           "${v.id}: consent is \"${v.consent}\"; it is accept, reject or none"),
+        ok(v.consent == "none" || has(obj(site, "consent"), v.consent),
+           "${v.id}: consent ${v.consent}, but the site block names no button for it"),
+        ok(length(v.expects) + length(v.forbids) > 0, "${v.id}: expects and forbids no events"),
+        flatMap(\i. ok(any(\k. k == i, ids), "${v.id}: expects ${i}, which is not in the spec"), v.expects),
+        flatMap(\i. ok(any(\k. k == i, ids), "${v.id}: forbids ${i}, which is not in the spec"), v.forbids)
+      ]), vs),
+    flatMap(\e. ok(e.priority != "high" || any(\c. c == e.id, covered),
+                   "${e.id}: high priority, but no visit expects it, so scheduled QA never checks it"), sp.events)
+  ])
+}
+
+-- ── visits: the run list ─────────────────────────────────────────────────────
+
+export func planJson(sp: Spec) -> string =
+  encode(jo([
+    kv("site", obj(sp.j, "site")),
+    kv("spec_version", js(sp.version)),
+    kv("visits", ja(map(\v. jo([
+        kv("id", js(v.id)), kv("url", js(v.url)), kv("consent", js(v.consent)),
+        kv("steps", match get(v.j, "steps") { Some(s) => s, None => ja([]) }),
+        kv("expects", ja(map(\i. js(i), v.expects))),
+        kv("forbids", ja(map(\i. js(i), v.forbids)))
+      ]), visitsOf(sp))))
+  ]))
+
+-- ── compare: what was seen against what the spec says ────────────────────────
+
+export func seenOf(o: Json) -> [Seen] =
+  map(\v. { id: str(v, "id"), status: str(v, "status"), reason: str(v, "reason"),
+            pushes: map(\r. obj(r, "item"), arr(v, "datalayer")),
+            hits: map(\h. str(h, "en"), arr(v, "hits")) }, arr(o, "visits"))
+
+export func numText(s: string) -> string =
+  if endsWith(s, ".0") then substring(s, 0, strLength(s) - 2) else s
+
+export func valueText(j: Json) -> string =
+  match j {
+    JString(s) => s,
+    JNumber(n) => numText(show(n)),
+    JBool(b) => if b then "true" else "false",
+    JNull => "",
+    _ => encode(j)
+  }
+
+-- A key as written (GTM's own keys contain dots: gtm.scrollThreshold), else as a path:
+-- page.type → push["page"]["type"]
+export func pathGet(j: Json, key: string) -> Option[Json] =
+  if has(j, key) then get(j, key) else foldl(\acc. \seg. match acc { Some(x) => get(x, seg), None => None }, Some(j), split(key, "."))
+
+export func paramProblems(std: Std, e: Event, push: Json) -> [string] =
+  flatMap(\p. match pathGet(push, p.key) {
+      None => ["${p.key} missing"],
+      Some(v) => {
+        let t = valueText(v);
+        if matches(std.pVar, p.value) then (if trim(t) == "" then ["${p.key} empty"] else [])
+        else if t == p.value then []
+        else ["${p.key} is \"${t}\", the spec says \"${p.value}\""]
+      }
+    }, e.params)
+
+-- One event in one visit: (severity, note). Severity as in rules.visitOutcome.
+export func inVisit(std: Std, e: Event, s: Seen) -> (int, string) {
+  let blocked = s.status != "ok";
+  let gaOnly = e.dlEvent == "none";
+  let pushes = filter(\x. str(x, "event") == e.dlEvent, s.pushes);
+  let probs = map(\x. paramProblems(std, e, x), pushes);
+  let paramFail = length(pushes) > 0 && !any(\ps. length(ps) == 0, probs);
+  let firstProbs = match probs { [ps, ..._] => ps, [] => [] };
+  let ga = any(\en. en == e.eventName, s.hits);
+  let fails = flatMap(\xs. xs, [
+    if gaOnly || length(pushes) > 0 then [] else ["no dataLayer push with event \"${e.dlEvent}\""],
+    if !gaOnly && paramFail then firstProbs else [],
+    if ga then [] else ["no GA4 hit with en=${e.eventName}"]
+  ]);
+  let sev = visitOutcome(true, blocked, length(fails) > 0);
+  let note = if blocked then "${s.id}: could not check (${s.status}: ${s.reason})"
+    else if length(fails) > 0 then "${s.id}: ${join("; ", fails)}"
+    else if gaOnly then "${s.id}: GA4 hit matches the spec (no dataLayer push expected)" else "${s.id}: dataLayer push and GA4 hit match the spec";
+  (sev, note)
+}
+
+-- A visit that forbids an event (consent rejected, say): any GA4 hit or dataLayer push for it fails.
+export func absentIn(e: Event, s: Seen) -> (int, string) {
+  let blocked = s.status != "ok";
+  let hit = any(\en. en == e.eventName, s.hits);
+  let pushed = e.dlEvent != "none" && any(\x. str(x, "event") == e.dlEvent, s.pushes);
+  let sev = visitOutcome(true, blocked, hit || pushed);
+  let note = if blocked then "${s.id}: could not check (${s.status}: ${s.reason})"
+    else if hit then "${s.id}: GA4 hit en=${e.eventName} sent, which this visit forbids"
+    else if pushed then "${s.id}: dataLayer push \"${e.dlEvent}\", which this visit forbids"
+    else "${s.id}: correctly absent";
+  (sev, note)
+}
+
+export func outcomeFor(std: Std, vs: [Visit], seen: [Seen], e: Event) -> (int, string) {
+  let run = \v. \f. match filter(\s. s.id == v.id, seen) {
+      [s, ..._] => f(s),
+      [] => (visitOutcome(false, false, false), "${v.id}: did not run")
+    };
+  let each = flatMap(\xs. xs, [
+    map(\v. run(v, \s. inVisit(std, e, s)), filter(\v. any(\i. i == e.id, v.expects), vs)),
+    map(\v. run(v, \s. absentIn(e, s)), filter(\v. any(\i. i == e.id, v.forbids), vs))
+  ]);
+  if length(each) == 0 then (-1, "no visit covers this event")
+  else (foldl(\acc. \p. match p { (s, _) => worstOutcome(acc, s) }, 0, each),
+        join(" | ", map(\p. match p { (_, n) => n }, each)))
+}
+
+export func stateOf(sev: int) -> string =
+  if sev == 2 then "fail" else if sev == 1 then "blocked" else "not tested"
+
+export func commentOf(sev: int, note: string) -> string =
+  if sev == 0 then "Matched automatically; a person sets the pass. ${note}" else note
+
+export func roundYaml(n: int, version: string, date: string, rows: [(string, string, string)]) -> string =
+  join("\n", flatMap(\xs. xs, [
+    ["# Written by specstore compare from a scheduled run. Not edited after writing.",
+     "round: ${show(n)}", "version: ${encode(js(version))}", "date: ${encode(js(date))}",
+     "tester: specstore compare", "by: automated", "results:"],
+    map(\r. match r { (i, st, c) => "  - {event: ${i}, state: ${st}, comment: ${encode(js(c))}}" }, rows),
+    [""]
+  ]))
+
+export func runCompare(std: Std, sp: Spec, obsPath: string, out: string) -> () ! {IO, FS} =
+  match decode(readFile(obsPath)) {
+    Err(e) => println("✗ ${obsPath}: ${e}"),
+    Ok(o) => {
+      let vs = visitsOf(sp);
+      let seen = seenOf(o);
+      let observedFor = str(o, "spec_version");
+      let n = 1 + foldl(\acc. \r. if r.n > acc then r.n else acc, 0, sp.rounds);
+      let date = substring(str(o, "captured_at"), 0, 10);
+      let rows = map(\e. match outcomeFor(std, vs, seen, e) {
+          (sev, note) => if sev < 0 then (e.id, "not tested", note) else (e.id, stateOf(sev), commentOf(sev, note))
+        }, sp.events);
+      writeFile(out, roundYaml(n, sp.version, date, rows));
+      let count = \st. length(filter(\r. match r { (_, s, _) => s == st }, rows));
+      if observedFor != sp.version then println("  ~ the run was planned from v${observedFor}; the spec is now v${sp.version}") else ();
+      foldl(\u. \r. match r { (i, st, c) => println("  ${if st == "fail" then "✗" else if st == "blocked" then "!" else "·"} ${i}  ${st}  ${c}") }, (), rows);
+      println("✓ wrote ${out}: QA round ${show(n)} of v${sp.version}, ${show(count("fail"))} failed, ${show(count("blocked"))} could not be checked, ${show(length(rows) - count("fail") - count("blocked"))} not failed (a person sets the pass)")
+    }
+  }

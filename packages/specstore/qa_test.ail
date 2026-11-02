@@ -1,0 +1,87 @@
+-- Tests for scheduled tag QA: the comparison of what a run saw with what the spec says, on inline
+-- JSON and YAML, so no browser and nothing on disk.
+module sunholo/specstore/qa_test
+
+import std/yaml (decode as yamlDecode)
+import std/json (Json, JNull)
+import std/list (map, length)
+import ./rules (worstOutcome, visitOutcome)
+import ./model (Std, Spec, toStd, toSpec)
+import ./qa (seenOf, outcomeFor, visitsOf, visitChecks)
+
+func y(s: string) -> Json = match yamlDecode(s) { Ok(j) => j, Err(_) => JNull }
+
+func std() -> Std = toStd(y("standard: {name: T, version: \"0.1\", status: draft, owner: Ana}
+rules: []
+vocab: {qa_states: [not tested, pass, fail, blocked], priority: [high, low], types: [text], statuses: [Internal]}
+patterns:
+  variable: \"\\\\{\\\\{([A-Za-z][A-Za-z0-9]*)\\\\}\\\\}\"
+fields: {}"))
+
+-- E01 pushed as cta_click with a run-time label; E02 sent by GA4 only; E03 low priority.
+func spec(visits: string) -> Spec = toSpec(y("spec: {client: C, project: P, owner: Ana, version: \"1.0\", standard: \"0.1\"}
+site: {base_url: \"https://example.com\", consent: {accept: \"#ok\"}}
+events:
+  - {id: E01, eventName: cta_click, priority: high, parameters: [{key: cta.label, value: \"{{ctaLabel}}\"}, {key: cta.type, value: primary}]}
+  - {id: E02, eventName: page_view, datalayer_event: none, priority: high}
+  - {id: E03, eventName: contact_click, priority: low}
+visits:
+${visits}"), [])
+
+func seen(status: string, pushes: string, hits: string) -> Json =
+  y("{visits: [{id: V01, status: ${status}, reason: r, datalayer: [${pushes}], hits: [${hits}]}]}")
+
+func outcome(sp: Spec, o: Json, n: int) -> int =
+  match outcomeFor(std(), visitsOf(sp), seenOf(o), match sp.events { [a, b, c] => if n == 1 then a else if n == 2 then b else c, _ => match sp.events { [x, ..._] => x } }) {
+    (s, _) => s
+  }
+
+func v01() -> string = "  - {id: V01, url: /, consent: accept, expects: [E01, E02]}"
+
+func good() -> string = "{item: {event: cta_click, cta: {label: Apply, type: primary}}}"
+
+func gaBoth() -> string = "{en: cta_click}, {en: page_view}"
+
+test "the worst outcome stands" { worstOutcome(0, 2) == 2 && worstOutcome(1, 0) == 1 && worstOutcome(0, 0) == 0 }
+
+test "a blocked visit is could-not-check, never matched or failed" {
+  visitOutcome(true, true, true) == 1 && visitOutcome(true, true, false) == 1 && visitOutcome(false, false, true) == 1
+}
+
+test "push and hit as specified: matched" { outcome(spec(v01()), seen("ok", good(), gaBoth()), 1) == 0 }
+
+test "a fixed value that differs fails" {
+  outcome(spec(v01()), seen("ok", "{item: {event: cta_click, cta: {label: Apply, type: secondary}}}", gaBoth()), 1) == 2
+}
+
+test "an empty run-time value fails" {
+  outcome(spec(v01()), seen("ok", "{item: {event: cta_click, cta: {label: \"\", type: primary}}}", gaBoth()), 1) == 2
+}
+
+test "pushed but never sent to GA4 fails" { outcome(spec(v01()), seen("ok", good(), "{en: page_view}"), 1) == 2 }
+
+test "a GA4-only event needs no dataLayer push" { outcome(spec(v01()), seen("ok", "", gaBoth()), 2) == 0 }
+
+test "a blocked visit checks nothing" { outcome(spec(v01()), seen("blocked", "", ""), 1) == 1 }
+
+test "a visit that did not run checks nothing" {
+  outcome(spec(v01()), y("{visits: []}"), 1) == 1
+}
+
+test "an event sent although the visit forbids it fails" {
+  outcome(spec("  - {id: V01, url: /, consent: none, forbids: [E02]}"), seen("ok", "", "{en: page_view}"), 2) == 2
+}
+
+test "a forbidden event that stays absent is not a failure" {
+  outcome(spec("  - {id: V01, url: /, consent: none, forbids: [E02]}"), seen("ok", "", ""), 2) == 0
+}
+
+test "an event no visit covers is not judged" { outcome(spec(v01()), seen("ok", good(), gaBoth()), 3) == -1 }
+
+test "every high-priority event needs a visit" {
+  length(visitChecks(spec("  - {id: V01, url: /, consent: accept, expects: [E02]}"))) == 1
+}
+
+test "a consent state the site block has no button for is refused" {
+  length(visitChecks(spec("  - {id: V01, url: /, consent: reject, expects: [E01, E02]}"))) == 1
+}

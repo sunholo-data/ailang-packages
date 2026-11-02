@@ -4,6 +4,8 @@ module sunholo/specstore/main
 --   specstore check <standard.yaml> <spec-folder>
 --   specstore guide <standard.yaml> <STANDARD.md>
 --   specstore view  <standard.yaml> <spec-folder> <out.xlsx>
+--   specstore visits  <standard.yaml> <spec-folder> <visits.json>
+--   specstore compare <standard.yaml> <spec-folder> <observed.json> <round.yaml>
 --
 -- Without the shim: ailang run --quiet --caps IO,FS,Env specstore/main.ail -- <command> …
 
@@ -20,6 +22,7 @@ import ./guide (guide)
 import ./view (view)
 import ./xlsx (workbook)
 import ./audit (runAudit)
+import ./qa (planJson, runCompare, visitsOf)
 import std/package (assetPath)
 
 export func main() -> () ! {IO, FS, Env, Declassify} {
@@ -41,7 +44,16 @@ export func main() -> () ! {IO, FS, Env, Declassify} {
         Err(e) => println("✗ ${e}")
       },
     ["audit", manifest, names] => runAudit(manifest, names),
-    _ => println("usage: specstore template <out.yaml> | audit <manifest.tsv> <names.txt> | check <standard.yaml> <spec-folder> | guide <standard.yaml> <out.md> | view <standard.yaml> <spec-folder> <out.xlsx>")
+    ["visits", stdPath, dir, out] => withStd(stdPath, \std. match loadSpec(dir) {
+        Err(es) => foldl(\u. \e. println("✗ ${e}"), (), es),
+        Ok(sp) => if runCheck(std, sp) then { writeFile(out, planJson(sp)); println("✓ wrote ${out}: ${show(length(visitsOf(sp)))} visits for v${sp.version}") }
+          else println("Nothing written: the spec does not meet the standard.")
+      }),
+    ["compare", stdPath, dir, observed, out] => withStd(stdPath, \std. match loadSpec(dir) {
+        Err(es) => foldl(\u. \e. println("✗ ${e}"), (), es),
+        Ok(sp) => runCompare(std, sp, observed, out)
+      }),
+    _ => println("usage: specstore template <out.yaml> | audit <manifest.tsv> <names.txt> | check <standard.yaml> <spec-folder> | guide <standard.yaml> <out.md> | view <standard.yaml> <spec-folder> <out.xlsx> | visits <standard.yaml> <spec-folder> <visits.json> | compare <standard.yaml> <spec-folder> <observed.json> <round.yaml>")
   }
 }
 
