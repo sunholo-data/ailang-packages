@@ -52,7 +52,7 @@ test "TRAPPIST-1 e insolation within 2 percent of NASA ps default .646" {
 }
 
 test "LW-19 Earth Teq at Bond albedo .3 is 255 K; full redistribution excludes greenhouse" {
-  near(equilibriumK(5772.0, 1.0, 1.0, 0.3), 255.0, 1.0)
+  near(equilibriumK(5772.0, 1.0, 1.0, 0.3), 255.0, 0.5)
 }
 
 test "albedo one gives zero absorbed flux; albedo zero Earth's Teq about 278 K" {
@@ -60,7 +60,7 @@ test "albedo one gives zero absorbed flux; albedo zero Earth's Teq about 278 K" 
 }
 
 test "LW-20..21 circular Jupiter and Earth stellar RV amplitudes" {
-  near(rvSemiAmplitude(4332.59, 317.828, 1.0, 1.0, 0.0), 12.458879266374836, 1e-10) && near(rvSemiAmplitude(365.25, 1.0, 1.0, 1.0, 0.0), 0.0895, 0.0001)
+  near(rvSemiAmplitude(4332.59, 317.828, 1.0, 1.0, 0.0), 12.458879266374836, 1e-10) && near(rvSemiAmplitude(365.25, 1.0, 1.0, 1.0, 0.0), 0.0895, 0.00005)
 }
 
 test "RV zero for face-on/zero-mass; eccentricity .6 raises K by 1.25" {
