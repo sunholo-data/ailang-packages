@@ -67,6 +67,16 @@ The existing human-readable source table format is preserved. The v0.56.0
 formatter also reports drift for the original table and collapses each batch
 onto one long line; no unrelated table reformat was applied.
 
-Full final-head package quality is coordinated by the parent execution session,
-which may add separate W2.1 APIs. This note records only the memory change's
-scope and its tested checkpoint; it does not attest those later edits.
+Final celestial `ailang pkg quality .` on v0.56.0 reports **no gates**:
+compile 22 files; contracts 2/42 verified, 0 refuted, 90 uncontracted exports;
+missing_postcondition=18, unsupported_encoding=19, verifier_error=3; interface
+v2 `b46585cf82b9…` (155 signatures); effects max/rank IO with ceiling declared;
+release kind feature and changelog present; AGENT.md/ai_summary present;
+132/132 pure exports; attested tests 156 passed, 0 failed, 0 skipped; smoke passed.
+PUB016 records 37 skipped contracts and PUB011 records 90 uncontracted exports.
+The encoded proof model treats floats as Reals and ints as mathematical Ints:
+those two successes are not IEEE/machine-arithmetic proofs. Runtime equivalence
+is not established by the static report. No new proof claim is made here.
+
+Separate W2.1 work may add APIs to the worlds package. This evidence attests
+celestial's memory-only change, not those later worlds additions.
