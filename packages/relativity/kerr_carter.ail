@@ -51,3 +51,19 @@ export pure func carterStep(y:CarterState,s:float,l:float,e:float,h:float)->Resu
       }
     }
   }
+-- Recover constants and null norm independently through the BL metric.
+export type CarterInvariants={energy:float,lambda:float,eta:float,nullResidual:float}
+export pure func carterInvariants(y:CarterState,s:float,l:float,e:float)->Result[CarterInvariants,string] =
+  match carterRates(y,s,l,e) {
+    Err(msg)=>Err(msg),
+    Ok(d)=>{
+      let sn=sin(y.theta);let co=cos(y.theta);let u=y.u;let sig=u*u+s*s*co*co;
+      let de=u*u-2.0*u+s*s;let gtt=0.0-1.0+2.0*u/sig;let gtp=0.0-2.0*s*u*sn*sn/sig;
+      let gpp=(u*u+s*s+2.0*s*s*u*sn*sn/sig)*sn*sn;
+      let en=(0.0-gtt*d.time-gtp*d.phi)/sig;let la=(gtp*d.time+gpp*d.phi)/sig;
+      let et=d.theta*d.theta+co*co*((if l==0.0 then 0.0 else la*la/(sn*sn))-s*s);
+      let a=gtt*d.time*d.time;let b=2.0*gtp*d.time*d.phi;let c=gpp*d.phi*d.phi;
+      let f=sig/de*d.u*d.u;let g=sig*d.theta*d.theta;
+      Ok({energy:en,lambda:la,eta:et,nullResidual:absf(a+b+c+f+g)/(1.0+absf(a)+absf(b)+absf(c)+absf(f)+absf(g))})
+    }
+  }

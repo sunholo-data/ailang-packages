@@ -6,7 +6,7 @@ import std/math (sin,cos)
 import ./hyper (absf)
 import ./optics (Vec3,normalize)
 import ./kerr_frame (sourceConstants)
-import ./kerr_geodesic (classifyCapture,Captured,Escaped,Critical,InvalidRay)
+import ./kerr_geodesic (radialPotential,classifyCapture,Captured,Escaped,Critical,InvalidRay)
 import ./kerr_carter (CarterState,CarterRates,carterRates,carterStep)
 import ./kerr_events (outerTurningRadius,polarTurningAngle,eventPatch)
 export type SkyTrace={sky:Vec3,phi:float,time:float,steps:int,turns:int}
@@ -20,7 +20,7 @@ pure func retry(y:CarterState,s:float,l:float,e:float,h:float,n:int)->Result[Car
     Err(_)=>retry(y,s,l,e,h/2.0,n-1),
     Ok(full)=>match halfStep(y,s,l,e,h) {
       Err(_)=>retry(y,s,l,e,h/2.0,n-1),
-      Ok(z)=>if discrepancy(full,z)>1.0e-11 then retry(y,s,l,e,h/2.0,n-1)
+      Ok(z)=>if radialPotential(z.u,l,e,s)<0.0 || discrepancy(full,z)>1.0e-11 then retry(y,s,l,e,h/2.0,n-1)
         else match carterRates(z,s,l,e) { Err(_)=>retry(y,s,l,e,h/2.0,n-1),Ok(_)=>Ok(z) }
     }
   }
@@ -32,11 +32,11 @@ pure func finish(y:CarterState,d:CarterRates,i:int,turns:int)->SkyTrace {
     phi:y.phi,time:y.time,steps:i,turns:turns}
 }
 pure func loop(y:CarterState,s:float,l:float,e:float,rt:float,pt:float,far:float,step:float,i:int,turns:int)->Result[SkyTrace,string] =
-  if i>=20000 then Err("solver_steps") else match carterRates(y,s,l,e) {
+  if i>=200000 then Err("solver_steps") else match carterRates(y,s,l,e) {
     Err(msg)=>Err(msg),
     Ok(d)=>if y.u>=far then Ok(finish(y,d,i,turns)) else {
       let polarRoot=if y.st>0.0 then pt else 3.141592653589793-pt;
-      let radialEvent=rt>0.0 && y.sr>0.0 && absf(y.u-rt)<1.0e-8*rt;
+      let radialEvent=rt>0.0 && y.sr>0.0 && absf(y.u-rt)<1.0e-13*rt;
       let polarEvent=e>1.0e-24*(1.0+l*l+s*s) && l!=0.0 && absf(y.theta-polarRoot)<1.0e-9*pt;
       if radialEvent || polarEvent then {
         let root=if radialEvent then rt else polarRoot;
@@ -48,7 +48,9 @@ pure func loop(y:CarterState,s:float,l:float,e:float,rt:float,pt:float,far:float
           }
         }
       } else {
-        let h=0.0-minf(step/y.u,step/(1.0+absf(d.theta)+absf(d.phi)));
+        let basic=minf(step/y.u,step/(1.0+absf(d.theta)+absf(d.phi)));
+        let radialLimit=if rt>0.0 && y.sr>0.0 && y.u-rt<0.01*rt && d.u>0.0 then 0.02*(y.u-rt)/d.u else basic;
+        let h=0.0-minf(basic,radialLimit);
         match retry(y,s,l,e,h,50) {
           Err(msg)=>Err(msg),
           Ok(z)=>loop(z,s,l,e,rt,pt,far,step,i+1,turns)
