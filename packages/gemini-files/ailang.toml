@@ -1,8 +1,8 @@
 [package]
 name = "sunholo/gemini_files"
-version = "0.2.1"
+version = "0.2.2"
 edition = "1"
-ailang = ">=0.12.1"
+ailang = ">=0.50.0"
 description = "Upload files for Gemini AI — GCS (Vertex AI) and AI Studio Files API, with auto-backend detection"
 license = "Apache-2.0"
 
@@ -18,6 +18,9 @@ modules = [
 
 [effects]
 max = ["Net", "FS", "Env", "Clock"]
+
+[release]
+kind = "fix"   # 0.2.2: GCS upload sends decoded bytes, not base64 text. security | fix | feature | breaking
 
 [metadata]
 tags = ["gemini", "files-api", "gcs", "upload", "pdf", "vertex-ai"]

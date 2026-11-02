@@ -16,7 +16,8 @@
 module sunholo/gemini_files/upload
 
 import std/env (getEnvOr)
-import std/net (httpRequest)
+import std/net (httpRequest, httpRequestBytes)
+import std/bytes (fromBase64)
 import std/string (length, intToStr, substring)
 import std/json (decode, encode, jo, kv, js, getString, get)
 import std/option (Some, None, getOrElse)
@@ -75,22 +76,30 @@ func uploadToGcs(base64Data: string, mimeType: string, displayName: string, buck
       let objectName = "docparse-temp/${ts}-${sanitizeName(displayName)}";
       let url = gcsUploadUrl(bucket, objectName);
 
+      -- Upload the DECODED bytes. GCS's simple (uploadType=media) upload
+      -- stores the request body verbatim and ignores Content-Transfer-Encoding,
+      -- so posting the base64 string (what <= 0.2.1 did) stored base64 TEXT
+      -- under a PDF/image content type. Vertex then rejected every such gs://
+      -- reference with 400 "Request contains an invalid argument", so every
+      -- PDF above the caller's inline threshold failed on Vertex/GCS.
       let headers = [
         { name: "Authorization", value: "Bearer ${token}" },
-        { name: "Content-Type", value: mimeType },
-        { name: "Content-Transfer-Encoding", value: "base64" }
+        { name: "Content-Type", value: mimeType }
       ];
 
-      match httpRequest("POST", url, headers, base64Data) {
-        Err(e) => Err("gemini_files: GCS upload network error: ${show(e)}"),
-        Ok(resp) =>
-          if resp.ok then Ok({
-            uri: gcsUri(bucket, objectName),
-            mimeType: mimeType,
-            backend: "gcs",
-            ref: objectName
-          })
-          else Err("gemini_files: GCS upload failed HTTP ${intToStr(resp.status)}: ${resp.body}")
+      match fromBase64(base64Data) {
+        None => Err("gemini_files: input is not valid base64; nothing uploaded"),
+        Some(raw) => match httpRequestBytes("POST", url, headers, raw) {
+          Err(e) => Err("gemini_files: GCS upload network error: ${show(e)}"),
+          Ok(resp) =>
+            if resp.ok then Ok({
+              uri: gcsUri(bucket, objectName),
+              mimeType: mimeType,
+              backend: "gcs",
+              ref: objectName
+            })
+            else Err("gemini_files: GCS upload failed HTTP ${intToStr(resp.status)}: ${resp.body}")
+        }
       }
     }
   }
