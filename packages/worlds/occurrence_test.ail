@@ -1,0 +1,27 @@
+module sunholo/worlds/occurrence_test
+import ./occurrence (FGK, MDwarf, Other, etaEarth, sag13Expected, sag13Sample, planetCount)
+import std/math (abs_Float,intToFloat,pow as powR)
+
+test "LW-5/6: occurrence is fixed by stellar class" {
+ etaEarth(FGK)==0.4 && etaEarth(MDwarf)==0.16 && etaEarth(Other)==0.0
+}
+test "SAG13 integration converts days to years, splits the radius break and adds rectangles" {
+ abs_Float(sag13Expected(0.5,3.4,365.25,730.5)-0.38*((powR(3.4,-0.19)-powR(0.5,-0.19)) / -0.19)*((powR(2.0,0.26)-1.0)/0.26))<1e-12
+ && abs_Float(sag13Expected(0.5,16.0,1.0,640.0)-sag13Expected(0.5,3.4,1.0,640.0)-sag13Expected(3.4,16.0,1.0,640.0))<1e-12
+ && sag13Expected(2.0,2.0,1.0,640.0)==0.0
+ && planetCount(0.0,0.5,0.5)==0
+}
+-- A 100x100 rank-one lattice, uniform in both axes, exercises the independent
+-- conditional quantiles and mixture weights without a package-owned RNG.
+pure func histogram(n:int,small:int,short:int) -> (int,int) =
+ if n==10000 then (small,short) else {
+  let sample=sag13Sample((intToFloat(n)+0.5)/10000.0,(intToFloat((n*7919)%10000)+0.5)/10000.0);
+  match sample { (r,p) => histogram(n+1,small+(if r<3.4 then 1 else 0),short+(if p<64.0 then 1 else 0)) }
+ }
+test "10000 sampler points reproduce SAG13 radius and period marginals" {
+ let total=sag13Expected(0.5,16.0,0.5,640.0);
+ match histogram(0,0,0) { (small,short) =>
+  abs_Float(intToFloat(small)/10000.0-sag13Expected(0.5,3.4,0.5,640.0)/total)<0.001
+  && abs_Float(intToFloat(short)/10000.0-sag13Expected(0.5,16.0,0.5,64.0)/total)<0.003
+ }
+}

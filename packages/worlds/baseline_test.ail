@@ -1,0 +1,25 @@
+module sunholo/worlds/baseline_test
+import ./baseline (Prior, LogUniform, Measured, Fixed, AbiogenesisRate, baseline, baselineVersion, medianOf, quantileOf)
+import std/math (abs_Float)
+import std/list (length)
+
+test "LW-7/8/9/10: published rate and log priors have the specified medians" {
+  abs_Float(medianOf(AbiogenesisRate) - 0.632120558828558) < 1e-14
+  && abs_Float(medianOf(LogUniform(0.001, 1.0)) - 0.0316227766016838) < 1e-15
+  && medianOf(LogUniform(0.01, 1.0)) == 0.1
+  && medianOf(LogUniform(100.0, 1e8)) == 1e5
+}
+test "life prior preserves the published rate, not a uniform range of probabilities" {
+  quantileOf(AbiogenesisRate, 0.25) > 1e-34
+  && quantileOf(AbiogenesisRate, 0.25) < 3e-34
+  && quantileOf(AbiogenesisRate, 0.75) == 1.0
+  && quantileOf(AbiogenesisRate, 0.0) == 0.0
+  && quantileOf(AbiogenesisRate, 1.0) == 1.0
+}
+test "baseline pins all factors and the named version" {
+  baselineVersion() == "baseline-2026.11" && length(baseline()) >= 15
+  && quantileOf(LogUniform(100.0, 1e8), 0.0) == 100.0
+  && quantileOf(LogUniform(100.0, 1e8), 1.0) == 1e8
+  && quantileOf(Fixed(0.4), 0.7) == 0.4
+  && quantileOf(Measured(1.65, 1.46, 1.84), 0.5) == 1.65
+}

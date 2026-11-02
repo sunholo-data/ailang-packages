@@ -1,0 +1,33 @@
+module sunholo/worlds/disc
+import ./dial (Params)
+import std/math (exp, intToFloat)
+export type Disc = {rho0Pc3:float,scaleHeightPc:float}
+
+-- Integral of u(1-exp(-u)) from 0 to x. Taylor branch avoids the
+-- catastrophic cancellation of x^2/2-1+(x+1)exp(-x) near the origin.
+pure func series(x:float,n:int,term:float,acc:float) -> float =
+ if n>30 then acc else series(x,n+1,-term*x/intToFloat(n+1),acc+term/intToFloat(n+2))
+pure func volume(x:float) -> float =
+ if x < 0.5 then series(x,1,x*x*x,0.0) else x*x/2.0-1.0+(x+1.0)*exp(-x)
+export pure func starsWithin(m:Disc,rLy:float) -> float
+requires {rLy>=0.0,m.rho0Pc3>=0.0,m.scaleHeightPc>0.0}
+ensures {result>=0.0}
+{
+ let h=m.scaleHeightPc;
+ 4.0*3.141592653589793*m.rho0Pc3*h*h*h*volume(rLy/3.26156/h)
+}
+pure func bisect(m:Disc,goal:float,lo:float,hi:float,n:int) -> float =
+ if n==0 then (lo+hi)/2.0 else {
+  let mid=(lo+hi)/2.0;
+  if starsWithin(m,mid)<goal then bisect(m,goal,mid,hi,n-1) else bisect(m,goal,lo,mid,n-1)
+ }
+export pure func radiusQuantile(m:Disc,rMaxLy:float,u:float) -> float
+requires {rMaxLy>=0.0,u>=0.0,u<1.0,m.rho0Pc3>0.0,m.scaleHeightPc>0.0}
+{
+ if u==0.0 then 0.0 else bisect(m,u*starsWithin(m,rMaxLy),0.0,rMaxLy,60)
+}
+-- perStar is the complete probability of a technological lineage ever,
+-- including occurrence and all three conditional life/minds/tech factors.
+export pure func everWithin(m:Disc,rLy:float,perStar:float) -> float = starsWithin(m,rLy)*perStar
+export pure func aliveWithin(m:Disc,rLy:float,perStar:float,p:Params) -> float = everWithin(m,rLy,perStar)*p.lifetimeYr/p.windowYr
+export pure func existInWindow(m:Disc,rLy:float,perStar:float,p:Params,windowYr:float) -> float = everWithin(m,rLy,perStar)*(p.lifetimeYr+windowYr)/p.windowYr

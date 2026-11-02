@@ -1,0 +1,67 @@
+module sunholo/worlds/baseline
+-- Normative transcription: stapledons-design physics/life-and-worlds.md,
+-- baseline-2026.11. Priors describe uncertainty across universes, not RNG.
+import std/math (pow, exp, sqrt, log)
+
+export type Prior = LogUniform(float, float) | Measured(float, float, float) | Fixed(float) | AbiogenesisRate
+export type Factor = {key: string, prior: Prior, dialled: bool, cite: string, note: string}
+
+export pure func baselineVersion() -> string = "baseline-2026.11"
+export pure func baseline() -> [Factor] = [
+ {key:"rho0Pc3",prior:Fixed(0.079),dialled:false,cite:"Smart2021 abstract/6",note:"adopted raw-count density; corrected main sequence .081+/-.003"},
+ {key:"scaleHeightPc",prior:Fixed(300.0),dialled:false,cite:"Juric2008 Table10",note:"local thin disc only"},
+ {key:"fgkShare",prior:Fixed(0.20),dialled:false,cite:"life-and-worlds LW-3",note:"adopted type mix"},
+ {key:"mShare",prior:Fixed(0.75),dialled:false,cite:"Reyle2021 Table3",note:"UNVERIFIED empirical attribution; approved nominal approximation"},
+ {key:"etaFGK",prior:Fixed(0.4),dialled:false,cite:"Bryson2021 Table5",note:"adopted point between extrapolation medians; not their confidence interval"},
+ {key:"etaM",prior:Fixed(0.16),dialled:false,cite:"Dressing2015 Table8",note:"1-1.5 Rearth moist/maximum greenhouse; habitability debated"},
+ {key:"life",prior:AbiogenesisRate,dialled:true,cite:"Sandberg2018 3.1.1",note:"log10(lambda Vt)~N(0,50^2); game maps competent life to biosphere"},
+ {key:"minds",prior:LogUniform(0.001,1.0),dialled:true,cite:"Sandberg2018 Table1",note:"conditional on life"},
+ {key:"complex",prior:Fixed(0.31622776601683794),dialled:false,cite:"life-and-worlds LW-12",note:"design split; follows minds; always >= fMinds"},
+ {key:"tech",prior:LogUniform(0.01,1.0),dialled:true,cite:"Sandberg2018 Table1",note:"conditional on minds"},
+ {key:"lifetime",prior:LogUniform(100.0,1e8),dialled:true,cite:"D-144, Sandberg2018 Table1",note:"canon upper 1e8; paper upper 1e10"},
+ {key:"window",prior:Fixed(5e9),dialled:false,cite:"life-and-worlds LW-11",note:"epoch onset window, years"},
+ {key:"remnantLo",prior:Fixed(1e3),dialled:false,cite:"D-144 OQ8",note:"design lower persistence, years"},
+ {key:"remnantHi",prior:Fixed(1e7),dialled:false,cite:"D-144 OQ8",note:"design upper persistence, years"},
+ {key:"sfrMass",prior:Measured(1.65,1.46,1.84),dialled:false,cite:"Licquia2015 Table1/3.3",note:"solar masses/year; not stars/year or a count multiplier"}
+]
+
+-- Acklam's inverse-normal rational approximation. Its approximation error is
+-- numerical (<~1.2e-9 relative in z), not an alternative scientific prior.
+-- https://web.archive.org/web/20150910044717/http://home.online.no/~pjacklam/notes/invnorm/
+pure func normalTail(q: float) -> float =
+ (((((-0.007784894002430293*q-0.3223964580411365)*q-2.400758277161838)*q-2.549732539343734)*q+4.374664141464968)*q+2.938163982698783)
+ / ((((0.007784695709041462*q+0.3224671290700398)*q+2.445134137142996)*q+3.754408661907416)*q+1.0)
+pure func normalQuantile(u: float) -> float =
+ if u < 0.02425 then normalTail(sqrt(-2.0*log(u)))
+ else if u > 0.97575 then -normalTail(sqrt(-2.0*log(1.0-u)))
+ else {
+  let q=u-0.5;
+  let r=q*q;
+  (((((-39.69683028665376*r+220.9460984245205)*r-275.9285104469687)*r+138.3577518672690)*r-30.66479806614716)*r+2.506628277459239)*q
+  / (((((-54.47609879822406*r+161.5858368580409)*r-155.6989798598866)*r+66.80131188771972)*r-13.28068155288572)*r+1.0)
+ }
+
+-- Stable f_l for tiny rates. At large rates it is exactly 1 at float64
+-- precision; at extreme normal tails the correctly rounded result may be 0.
+pure func lifeQuantile(u: float) -> float =
+ if u <= 0.0 then 0.0 else if u >= 1.0 then 1.0 else {
+  let x=50.0*normalQuantile(u);
+  if x > 2.0 then 1.0 else {
+   let rate=pow(10.0,x);
+   if rate < 1e-5 then rate*(1.0-rate*(0.5-rate/6.0)) else 1.0-exp(-rate)
+  }
+ }
+
+export pure func medianOf(p: Prior) -> float = quantileOf(p,0.5)
+-- A Measured row carries reported centre/lower/upper but no invented PDF:
+-- quantileOf returns its adopted point for every u. Only named priors vary.
+export pure func quantileOf(p: Prior, u: float) -> float
+requires {u >= 0.0, u <= 1.0}
+{
+ match p {
+  Fixed(v) => v,
+  Measured(v,lo,hi) => v,
+  LogUniform(lo,hi) => if u==0.0 then lo else if u==1.0 then hi else pow(10.0,log(lo)/log(10.0)+(log(hi)-log(lo))/log(10.0)*u),
+  AbiogenesisRate => lifeQuantile(u)
+ }
+}

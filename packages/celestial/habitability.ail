@@ -59,7 +59,8 @@ ensures { result > 0.0, result < 1.0 } {
   rStarSun * 695700.0 / (aAu * 1.495978707e+08)
 }
 
--- Chambers et al.1996, Icarus119 261, section2. a in AU; planet masses Earth, star solar.
+-- Chambers et al.1996, Icarus119 261; mutual Hill definition also in
+-- MNRAS463 (2016) 3226, Eqs1–2 (original Chambers section locator unverified). a in AU; planet masses Earth, star solar.
 -- Positive spacing does not by itself prove stability, especially for eccentric orbits.
 export pure func mutualHillSpacing(a1: float, m1: float, a2: float, m2: float, mStar: float) -> float ! {}
 requires { a1 >= 1e-12, a2 > a1, a2 <= 1e+12, m1 >= 0.0, m1 <= 1e+09, m2 >= 0.0, m2 <= 1e+09, m1 + m2 >= 1e-12, mStar >= 1e-12, mStar <= 1e+09 }

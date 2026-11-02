@@ -1,0 +1,28 @@
+module sunholo/worlds/dial_test
+import ./baseline (baseline)
+import ./dial (applyDial, zeroDial, luckDex)
+import std/math (abs_Float,intToFloat)
+
+test "zero dial is exactly the baseline medians and zero effective luck" {
+  let p = applyDial(baseline(), zeroDial());
+  abs_Float(p.fLife - 0.632120558828558) < 1e-14 && p.fTech == 0.1
+  && p.lifetimeYr == 1e5 && p.windowYr == 5e9 && luckDex(baseline(), zeroDial()) == 0.0
+}
+test "fractions saturate and complex life always bounds intelligence" {
+  let p = applyDial(baseline(), {life: 2.0, minds: 3.0, tech: 3.0, lifetime: 2.0});
+  p.fLife == 1.0 && p.fMinds == 1.0 && p.fComplex == 1.0 && p.fTech == 1.0
+  && p.lifetimeYr == 1e7
+}
+test "effective luck sums offsets before clamps and discounts saturated gains" {
+  abs_Float(luckDex(baseline(), {life: -1.0, minds: 0.5, tech: 0.5, lifetime: 2.0}) - 2.0) < 1e-12
+  && luckDex(baseline(), {life: 10.0, minds: 10.0, tech: 10.0, lifetime: 2.0}) < 5.0
+}
+
+property "finite bounded offsets preserve positive fractions and fraction ordering" {
+ forall(n:int) => {
+  let d=intToFloat(n%100)/10.0;
+  let p=applyDial(baseline(),{life:d,minds:d,tech:d,lifetime:d});
+  p.fLife>0.0 && p.fLife<=1.0 && p.fMinds>0.0 && p.fMinds<=p.fComplex
+  && p.fComplex<=1.0 && p.fTech>0.0 && p.fTech<=1.0 && p.lifetimeYr>0.0
+ }
+}

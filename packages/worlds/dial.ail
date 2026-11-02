@@ -1,0 +1,45 @@
+module sunholo/worlds/dial
+import ./baseline (Factor, medianOf)
+import std/math (pow, log10)
+
+export type Dial = {life:float,minds:float,tech:float,lifetime:float}
+export type Params = {fLife:float,fComplex:float,fMinds:float,fTech:float,lifetimeYr:float,windowYr:float,remnantLoYr:float,remnantHiYr:float}
+export pure func zeroDial() -> Dial = {life:0.0,minds:0.0,tech:0.0,lifetime:0.0}
+pure func point(b: [Factor], key:string) -> float = match b {
+ [] => 0.0,
+ f::rest => if f.key==key then medianOf(f.prior) else point(rest,key)
+}
+pure func fraction(x:float) -> float = if x>1.0 then 1.0 else x
+-- Numerically bounded domain: complete baseline rows and finite offsets. Bounds
+-- avoid overflow/underflow while covering far more than calibration's grid.
+pure func validBaseline(b:[Factor]) -> bool =
+ point(b,"life")>=1e-100 && point(b,"life")<=1.0
+ && point(b,"minds")>=1e-100 && point(b,"minds")<=1.0
+ && point(b,"tech")>=1e-100 && point(b,"tech")<=1.0
+ && point(b,"complex")>=point(b,"minds") && point(b,"complex")<=1.0
+ && point(b,"lifetime")>=1e-100 && point(b,"lifetime")<=1e100
+ && point(b,"window")>0.0 && point(b,"window")<=1e100
+ && point(b,"remnantLo")>0.0 && point(b,"remnantLo")<=point(b,"remnantHi")
+ && point(b,"remnantHi")<=1e100
+pure func validDial(d:Dial) -> bool =
+ d.life>= -100.0 && d.life<=100.0 && d.minds>= -100.0 && d.minds<=100.0
+ && d.tech>= -100.0 && d.tech<=100.0 && d.lifetime>= -100.0 && d.lifetime<=100.0
+export pure func applyDial(b:[Factor],d:Dial) -> Params
+requires {validBaseline(b),validDial(d)}
+ensures {result.fLife>0.0,result.fLife<=1.0,result.fMinds>0.0,result.fMinds<=1.0,result.fTech>0.0,result.fTech<=1.0,result.fComplex>=result.fMinds,result.fComplex<=1.0,result.lifetimeYr>0.0,result.windowYr>0.0}
+{
+
+ let minds=fraction(point(b,"minds")*pow(10.0,d.minds));
+ let complex=fraction(point(b,"complex")*pow(10.0,d.minds));
+ {fLife:fraction(point(b,"life")*pow(10.0,d.life)),fMinds:minds,
+  fComplex:if complex<minds then minds else complex,fTech:fraction(point(b,"tech")*pow(10.0,d.tech)),
+  lifetimeYr:point(b,"lifetime")*pow(10.0,d.lifetime),windowYr:point(b,"window"),
+  remnantLoYr:point(b,"remnantLo"),remnantHiYr:point(b,"remnantHi")}
+}
+export pure func luckDex(b:[Factor],d:Dial) -> float
+requires {validBaseline(b),validDial(d)}
+{
+ let p=applyDial(b,d);
+ let z=applyDial(b,zeroDial());
+ log10(p.fLife)-log10(z.fLife)+log10(p.fMinds)-log10(z.fMinds)+log10(p.fTech)-log10(z.fTech)+log10(p.lifetimeYr)-log10(z.lifetimeYr)
+}
