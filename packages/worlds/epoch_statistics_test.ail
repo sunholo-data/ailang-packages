@@ -1,0 +1,49 @@
+module sunholo/worlds/epoch_statistics_test
+import ./epoch_statistics (traceCappedMean,historyProbabilities)
+import ./baseline (baseline)
+import ./dial (applyDial,zeroDial)
+import std/math (abs_Float,log,intToFloat)
+
+pure func near(a:float,b:float) -> bool = abs_Float(a-b)<1e-13
+pure func fixture() -> {fLife:float,fComplex:float,fMinds:float,fTech:float,lifetimeYr:float,windowYr:float,remnantLoYr:float,remnantHiYr:float} =
+ {fLife:0.5,fComplex:0.5,fMinds:0.4,fTech:0.5,lifetimeYr:4.0,windowYr:10.0,remnantLoYr:1.0,remnantHiYr:2.0}
+test "capped log-uniform trace expectation: endpoints, equal bounds and uncapped integral" {
+ traceCappedMean(1.0,2.0,0.0)==0.0 && traceCappedMean(1.0,2.0,0.5)==0.5
+ && traceCappedMean(10.0,10.0,5.0)==5.0 && traceCappedMean(10.0,10.0,20.0)==10.0
+ && near(traceCappedMean(1.0,2.0,10.0),1.0/log(2.0))
+ && near(traceCappedMean(1.0,2.0,1.5),(0.5+1.5*log(2.0/1.5))/log(2.0))
+}
+test "finite epoch window clips technological overlap and remnant traces at the past edge" {
+ let q=historyProbabilities(fixture(),3.0);
+ let saturated=historyProbabilities({fixture() | lifetimeYr:20.0},100.0);
+ near(q.life,0.5) && near(q.tech,0.04) && near(q.mindsWindow,0.07) && near(q.remnant,0.0075)
+ && near(saturated.tech,0.05) && saturated.remnant==0.0 && near(saturated.mindsWindow,0.1)
+}
+test "zero future interval means minds in window equal technology at now; life is background" {
+ let p=applyDial(baseline(),zeroDial());
+ let q=historyProbabilities(p,0.0);
+ q.mindsWindow==q.tech && q.life==p.fLife && q.remnant>q.tech
+}
+test "near-degenerate persistence intervals remain finite and within their physical support" {
+ let lo=1.23456789;let hi=lo+1e-10;
+ let v=traceCappedMean(lo,hi,10.0);
+ v>=lo && v<=hi && traceCappedMean(lo,hi,lo)==lo
+}
+property "epoch probabilities remain ordered and normalized over finite positive lifetimes" {
+ forall(n:int) => {
+ let u=intToFloat(n%1000)/1000.0;
+ let life=if u<0.0 then -u else u;
+ let p={fixture() | fLife:life,lifetimeYr:life*30.0+0.01};
+ let q=historyProbabilities(p,life*30.0);
+ q.life>=0.0 && q.life<=1.0 && q.tech>=0.0 && q.tech<=q.mindsWindow && q.mindsWindow<=q.life
+ && q.remnant>=0.0 && q.remnant<=q.life
+ }
+}
+export pure func epochProbe() -> string {
+ let q=historyProbabilities(fixture(),3.0);
+ "${q.life},${q.mindsWindow},${q.tech},${q.remnant};${traceCappedMean(1.0,2.0,1.5)}"
+}
+
+-- CLI domain probes are run with --verify-contracts, independently of native
+-- property outcomes. They are not part of the public package exports.
+export pure func traceCase(a:{lo:float,hi:float,cap:float}) -> float = traceCappedMean(a.lo,a.hi,a.cap)

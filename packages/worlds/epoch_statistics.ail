@@ -1,0 +1,49 @@
+module sunholo/worlds/epoch_statistics
+-- Exact marginal probabilities of history.ail's epoch model, not a detector
+-- or a change to its sampler. Onset is uniform on [-windowYr/2,windowYr/2].
+-- "life" means an inhabited immutable background, including ended lineages;
+-- "mindsWindow" means a technological epoch overlaps [0,futureWindowYr].
+import ./dial (Params)
+import std/math (log)
+
+export type Probabilities = {life:float,mindsWindow:float,tech:float,remnant:float}
+pure func minF(a:float,b:float) -> float = if a<b then a else b
+pure func positive(x:float) -> float = if x>0.0 then x else 0.0
+-- The short series avoids losing a narrow positive interval to hi/lo rounding.
+-- The ordinary branch preserves existing broad-prior float64 results exactly.
+pure func logRatio(hi:float,lo:float) -> float {
+ let x=(hi-lo)/lo;
+ if x<1e-6 then x*(1.0+x*(-0.5+x*(1.0/3.0+x*(-0.25+x/5.0)))) else log(hi/lo)
+}
+
+-- E[min(T,cap)] for T log-uniform on [lo,hi], in years. Equal bounds
+-- represent a deterministic duration. All branches include clipping exactly.
+export pure func traceCappedMean(lo:float,hi:float,cap:float) -> float
+requires {lo>=1e-100,hi>=lo,hi<=1e100,cap>=0.0,cap<=1e100}
+ensures {result>=0.0,result<=cap,result<=hi}
+{
+ if cap<=0.0 then 0.0 else if hi==lo then minF(lo,cap)
+ else if cap<=lo then cap else if cap>=hi then (hi-lo)/logRatio(hi,lo)
+ else (cap-lo+cap*logRatio(hi,cap))/logRatio(hi,lo)
+}
+pure func validParams(p:Params) -> bool =
+ p.fLife>=0.0 && p.fLife<=1.0 && p.fMinds>=0.0 && p.fMinds<=1.0
+ && p.fComplex>=p.fMinds && p.fComplex<=1.0 && p.fTech>=0.0 && p.fTech<=1.0
+ && p.lifetimeYr>=1e-100 && p.lifetimeYr<=1e100 && p.windowYr>=1e-100 && p.windowYr<=1e100
+ && p.remnantLoYr>=1e-100 && p.remnantLoYr<=p.remnantHiYr && p.remnantHiYr<=1e100
+
+-- Technology at t=0, technological epochs intersecting a future interval,
+-- and collapse traces at t=0. The 0.75 ending share is history.ail's adopted
+-- collapse probability. Finite onset-window edges are respected even for
+-- lifetimes longer than half that window; neither L/W nor traceMean/W is
+-- blindly extrapolated past it. These are per-habitable-world probabilities.
+export pure func historyProbabilities(p:Params,futureWindowYr:float) -> Probabilities
+requires {validParams(p),futureWindowYr>=0.0,futureWindowYr<=1e100}
+ensures {result.life>=0.0,result.life<=1.0,result.tech>=0.0,result.tech<=result.mindsWindow,result.mindsWindow<=result.life,result.remnant>=0.0,result.remnant<=result.life}
+{
+ let lineage=p.fLife*p.fMinds*p.fTech;
+ let past=minF(p.lifetimeYr,p.windowYr/2.0);
+ {life:p.fLife,mindsWindow:lineage*(past+minF(positive(futureWindowYr),p.windowYr/2.0))/p.windowYr,
+ tech:lineage*past/p.windowYr,
+ remnant:lineage*0.75*traceCappedMean(p.remnantLoYr,p.remnantHiYr,positive(p.windowYr/2.0-p.lifetimeYr))/p.windowYr}
+}

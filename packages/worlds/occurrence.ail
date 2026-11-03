@@ -1,0 +1,32 @@
+module sunholo/worlds/occurrence
+-- NASA ExSDET Final Report 2019, section 3.a.i.1, Eq1/Table1 p5;
+-- SAG13 closeout slide18: d^2N/(dlnR dlnP) = Gamma R^alpha P^beta,
+-- R in Earth radii, P in YEARS. These are G-dwarf nominal coefficients.
+import std/math (pow)
+import pkg/sunholo/celestial/ism (poissonDraw)
+export type StarClass = FGK | MDwarf | Other deriving (Eq)
+export pure func etaEarth(c:StarClass) -> float = match c {FGK=>0.4,MDwarf=>0.16,Other=>0.0}
+pure func integral(lo:float,hi:float,a:float) -> float = (pow(hi,a)-pow(lo,a))/a
+pure func part(rLo:float,rHi:float,pLo:float,pHi:float,g:float,a:float,b:float) -> float =
+ if rHi<=rLo then 0.0 else g*integral(rLo,rHi,a)*integral(pLo/365.25,pHi/365.25,b)
+export pure func sag13Expected(rLoEarth:float,rHiEarth:float,pLoD:float,pHiD:float) -> float
+requires {rLoEarth>0.0,rHiEarth>=rLoEarth,pLoD>0.0,pHiD>=pLoD}
+ensures {result>=0.0}
+{
+ part(rLoEarth,if rHiEarth<3.4 then rHiEarth else 3.4,pLoD,pHiD,0.38,-0.19,0.26)
+ +part(if rLoEarth>3.4 then rLoEarth else 3.4,rHiEarth,pLoD,pHiD,0.73,-1.18,0.59)
+}
+pure func invPower(lo:float,hi:float,a:float,u:float) -> float = pow(pow(lo,a)+u*(pow(hi,a)-pow(lo,a)),1.0/a)
+-- Fixed, explicitly bounded sampling domain: 0.5–16 Rearth, 0.5–640 days.
+-- The upper period avoids silently extending the Kepler fit to cold worlds.
+export pure func sag13Sample(u1:float,u2:float) -> (float,float)
+requires {u1>=0.0,u1<1.0,u2>=0.0,u2<1.0}
+{
+ let small=sag13Expected(0.5,3.4,0.5,640.0);
+ let total=small+sag13Expected(3.4,16.0,0.5,640.0);
+ let share=small/total;
+ if u1<share then (invPower(0.5,3.4,-0.19,u1/share),365.25*invPower(0.5/365.25,640.0/365.25,0.26,u2))
+ else (invPower(3.4,16.0,-1.18,(u1-share)/(1.0-share)),365.25*invPower(0.5/365.25,640.0/365.25,0.59,u2))
+}
+-- Reuse the package's existing two-uniform Poisson draw; never own an RNG.
+export pure func planetCount(mean:float,u:float,v:float) -> int = poissonDraw(mean,u,v)

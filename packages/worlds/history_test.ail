@@ -1,0 +1,61 @@
+module sunholo/worlds/history_test
+import ./history (History, Mind, PlanetState, Sterile, Microbial, Complex, PreTech, Technological, Remnant, Transcended, Ecocide, historyOf, stateAt, epochs)
+import ./baseline (baseline)
+import ./dial (Params,applyDial,zeroDial)
+import std/option (Some,None)
+import std/math (intToFloat,abs_Float)
+import std/list (length)
+
+pure func allTech() -> Params = {fLife:1.0,fComplex:1.0,fMinds:1.0,fTech:1.0,lifetimeYr:10000.0,windowYr:5e9,remnantLoYr:1e3,remnantHiYr:1e7}
+pure func us() -> [float] = [0.2,0.2,0.2,0.2,0.5,0.5,0.2,0.5]
+test "a measured habitability veto always wins; empty uniforms cannot create secret randomness" {
+ stateAt(historyOf(allTech(),false,us()),0.0)==Sterile
+ && stateAt(historyOf(allTech(),true,[]),0.0)==Sterile
+ && stateAt(historyOf({allTech()|fMinds:2.0},true,us()),0.0)==Sterile
+ && stateAt(historyOf({allTech()|windowYr:0.0},true,us()),0.0)==Sterile
+ && stateAt(historyOf(allTech(),true,[0.0,0.0,0.0,0.0,2.0,0.0,0.0,0.0]),0.0)==Sterile
+}
+test "ordered states have exact epoch duration and half-open boundaries" {
+ let h=historyOf(allTech(),true,us());
+ match h.mind {
+  None => false,
+  Some(m) => m.preTechT<m.techT && m.techT==0.0 && m.endT-m.techT==10000.0
+   && stateAt(h,m.preTechT-1.0)==Complex && stateAt(h,m.preTechT)==PreTech
+   && stateAt(h,0.0)==Technological && stateAt(h,m.endT)==Remnant
+   && stateAt(h,m.tracesUntilT)==Complex && length(epochs(h))==4
+ }
+}
+test "ending shares use fixed thresholds; ecocide persists, transcendence outlives traces" {
+ let p=allTech();
+ let ec=historyOf(p,true,[0.2,0.2,0.2,0.2,0.5,0.5,0.8,0.5]);
+ let tr=historyOf(p,true,[0.2,0.2,0.2,0.2,0.5,0.5,0.95,0.5]);
+ stateAt(ec,1e8)==Ecocide && stateAt(tr,1e8)==Transcended
+}
+-- Independent rank-one lattice coordinates, no RNG. Large lifetime makes
+-- the t=0 shares visible in 10k draws: expected tech=L/window=0.2.
+pure func uniforms(n:int) -> [float] = [
+ (intToFloat((n*7919)%10000)+0.5)/10000.0,(intToFloat((n*3571)%10000)+0.5)/10000.0,
+ (intToFloat((n*1237)%10000)+0.5)/10000.0,(intToFloat((n*1777)%10000)+0.5)/10000.0,
+ (intToFloat(n)+0.5)/10000.0,(intToFloat((n*3019)%10000)+0.5)/10000.0,
+ (intToFloat((n*4567)%10000)+0.5)/10000.0,(intToFloat((n*4051)%10000)+0.5)/10000.0]
+pure func checkMany(n:int,valid:bool,alive:int) -> (bool,int) =
+ if n==10000 then (valid,alive) else {
+  let p={allTech()|lifetimeYr:1e9};
+  let h=historyOf(p,true,uniforms(n));
+  let ok=match h.mind {None=>false,Some(m)=>m.preTechT<m.techT && abs_Float(m.endT-m.techT-p.lifetimeYr)<1e-6 && m.tracesUntilT>=m.endT};
+  checkMany(n+1,valid && ok,alive+(if stateAt(h,0.0)==Technological then 1 else 0))
+ }
+test "10000 histories preserve order/duration and the closed-form technological share" {
+ match checkMany(0,true,0) {(valid,alive)=>valid && alive==2000}
+}
+-- Life/minds/tech are thresholded on the same *joint* intelligence uniform:
+-- nesting must survive complex-life saturation under a richer dial.
+pure func nesting(n:int) -> bool =
+ if n==10000 then true else {
+  let u=uniforms(n);
+  let low=historyOf(applyDial(baseline(),zeroDial()),true,u);
+  let high=historyOf(applyDial(baseline(),{life:0.2,minds:1.5,tech:1.0,lifetime:1.0}),true,u);
+  let ok=match low.mind {None=>true,Some(a)=>match high.mind {None=>false,Some(b)=>a.techT==b.techT && b.endT>=a.endT}};
+  ok && nesting(n+1)
+ }
+test "10000 low-dial technological lineages nest with identical onsets in the richer dial" { nesting(0) }

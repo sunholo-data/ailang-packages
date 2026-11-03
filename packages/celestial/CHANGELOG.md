@@ -1,5 +1,31 @@
 # Changelog
 
+## 0.6.1
+
+Perf (patch fix): split the 508-row limb-darkening literal into private
+64-row batches. The public API, row ordering and numerical results are unchanged.
+Cold `ailang check` peak RSS falls from 296–302 MB to 100–106 MB on the
+measured v0.56.0 runs; all 508 rows and 1,400 interpolation samples matched
+byte for byte on the strict VM and interpreter. Release quality is rechecked
+on AILANG v0.56.1.
+
+## 0.6.0
+
+Feature (minor bump): pure `habitability` module, seven functions and `HzFluxes`.
+
+- Kopparapu et al. 2014 Table 1 one-Earth-mass recent Venus, runaway greenhouse,
+  maximum greenhouse and early Mars flux polynomials. Clamp to 2600–7200 K and
+  report `teffUsed` / `extrapolated`; solar conservative bounds 0.9504–1.6760 AU.
+- HZ distance and inverse-square insolation, full-redistribution equilibrium
+  temperature with Bond albedo, two-body RV semi-amplitude, circular geometric
+  transit probability, and mutual Hill spacing with explicit mass/length units.
+- Native tests include LW-13–LW-22, independent Decimal polynomial/Hill/RV
+  checks, NASA ps Proxima b and TRAPPIST-1 e insolation, albedo/inclination
+  boundaries, and a 1001-point finite-domain sweep. `_smoke.habitabilityProbe`
+  exercises every output for strict-VM/interpreter byte parity.
+- Positive-input physical domains are explicit contracts; these transcendental
+  float formulas use runtime assertions/tests, not claims of SMT proof.
+
 ## 0.5.0
 
 Feature (minor bump, new exports; stapledons ledger D-105, stapledons-godot R2-STAR-SURFACES,

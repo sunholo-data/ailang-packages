@@ -4,6 +4,10 @@
 
 Use this package when you need where a planet or moon is, how fast it moves,
 or which way its pole points, on a real date, with numbers you can cite:
+- Habitability and survey geometry (`habitability`, 0.6.0): Kopparapu 2014
+  habitable-zone fluxes and distances, insolation, equilibrium temperature,
+  RV semi-amplitude, transit probability and mutual Hill spacing. Keep the
+  extrapolation flag and distinguish a climate-model zone from evidence of life.
 - Solving Kepler's equation and turning orbital elements into position and
   velocity (`kepler`).
 - Heliocentric planet positions from the JPL approximate elements, 3000 BC to
@@ -124,6 +128,7 @@ Inner planets (Mercury-Mars) have b = c = s = f = 0.
 | `ism` | 0.4.0. `Interval {t0, t1}`, `realSphericalHarmonicAt(l, m, u)`, `realSphericalHarmonic(l, m, theta, phi)`, `starSurfaceRadius(coeffs, dir)`, `insideStarSurface(centre, coeffs, p)`, `starSurfaceCrossings(centre, coeffs, a, b)`, `starSurfaceChords(...)`, `rayExitDistance(centre, coeffs, u, sMax)`, `chordsOf(boundaries, inside, a, b)`, `coneShellChord(axis, cosHalf, rIn, rOut, a, b)`, `insideConeShell(...)`, `ellipsoidChord(centre, u1, u2, u3, s1, s2, s3, a, b)`, `insideEllipsoid(...)`, `slabChord(normal, d0, d1, a, b)`, `nHFromExtinction(avPerPc, nhPerEbv, rV)`, `healpixRingVec(nside, pix)`, `GrainDist {k, aMin, aBreak, aMax, q, rhoGrain}`, `grainDist(rhoDust, aMin, aBreak, aMax, q, rhoGrain)`, `grainMassDensity(d)`, `grainTailMassFraction(d)`, `grainMass(d, a)`, `grainsAbove(d, a)`, `grainRadiusAt(d, a0, u)`, `poissonDraw(mean, u, v)` |
 | `frames` | `obliquityJ2000`, `eclipticToEquatorial`, `equatorialToEcliptic`, `equatorialToGalactic`, `eclipticToGalactic`, `unitFromAngles(lon, lat)`, `LonLat {lon, lat}`, `lonLat(v)`, `PoleTerm {phase0, rate, ra, dec, w}`, `PoleModel {ra0, ra1, dec0, dec1, w0, w1, w2, terms}`, `Spin {pole, ra, dec, w}`, `poleAndSpin(model, jd)`, `rotationPeriod(model)` |
 | `stellar` | 0.5.0. `ldLinear(u, mu)`, `ldLinearMean(u)`, `ldQuadratic(a, b, mu)`, `ldQuadraticMean(a, b)`, `LdQuad {a, b, source, teffUsed, loggUsed}`, `ldCoeffs(teff, logg)`, `loggFromMassRadius(m, r)`, `solarLogg`, `solarTeff`, `scaleHeightRatio(teff, logg)`, `cellSizeKm(teff, logg)`, `granulationLifetimeS(teff, logg)`, `dLnIdLnT(lambdaNm, t)`, `granulationSigmaT`, `sunUmbraTeff`, `sunPenumbraTeff`, `mDwarfSpotRatio`, `faculaSigmaT`, `diffRotation(latDeg)`, `solarCycleYears`, `solarCycle25StartJd`, `solarCyclePhase(jd)`, `sporerLatitudeDeg(phase)`, `activityLevel(phase)`, `baumbach(r)`, `hAlphaNm`, `lineObservedNm(lambda0, d)`, `lineVisible(lambda)` |
+| `habitability` | 0.6.0. `HzFluxes {recentVenus,runaway,maximum,earlyMars,teffUsed,extrapolated}`, `hzFluxes(teffK)`, `hzDistanceAu(lSun,sEff)`, `insolationEarth(lSun,aAu)`, `equilibriumK(teffK,rSun,aAu,bondAlbedo)`, `rvSemiAmplitude(periodD,mPlanetEarth,mStarSun,sinI,e)`, `transitProbability(rStarSun,aAu)`, `mutualHillSpacing(a1,m1,a2,m2,mStar)` |
 | `stellar_ld` | 0.5.0. `LdRow {logg, teff, a, b, model}`, `ldRows()` (508 Claret & Bloemen 2011 V-band rows) |
 
 ## Kepler
@@ -424,3 +429,50 @@ done
 ```
 
 (`--relax-modules`: the module path is the package's, not the directory's.)
+
+## Habitability (0.6.0)
+
+`hzFluxes` uses Kopparapu et al. 2014 Table 1, Eqs. 4–5 (1 Earth mass),
+not a universal temperature for habitability. `runaway` / `maximum` are the
+conservative inner / outer fluxes; recent Venus / early Mars are optimistic.
+Temperatures outside 2600–7200 K use the closest boundary and set
+`extrapolated=true`; propagate that label. `hzDistanceAu` takes bolometric
+luminosity in solar units. `insolationEarth` returns terrestrial flux units.
+
+`equilibriumK` assumes full heat redistribution with Bond albedo in [0,1],
+no greenhouse warming. Radius inputs use solar radii, semimajor axes AU.
+`rvSemiAmplitude` accepts days, Earth masses, solar masses, sin(i), and
+elliptic eccentricity e in [0,1), returning m/s. Mass constants are CODATA
+G=6.67430e-11, Msun=1.98847e30 kg, Mearth=5.9722e24 kg. Geometric transit
+probability assumes circular orbits and negligible planet radius, outside
+the stellar photosphere. Hill spacing requires a2>a1, positive combined
+planet mass, and star mass in solar units; planet masses are Earth masses.
+It does not establish multi-body dynamical stability.
+
+The documented physical input bounds avoid IEEE overflow/underflow.
+Contracts are meaningful runtime assertions; transcendental float
+postconditions are not claimed as SMT proofs. Validation: native
+`habitability_test.ail`; `_smoke.habitabilityProbe(1000)` for strict VM vs
+interpreter byte parity; `_smoke.main` includes solar independent checks.
+
+```ailang
+import pkg/sunholo/celestial/habitability (hzFluxes, hzDistanceAu, equilibriumK)
+let h = hzFluxes(5780.0);
+let inner = hzDistanceAu(1.0, h.runaway);  -- 0.950443 AU
+let outer = hzDistanceAu(1.0, h.maximum);  -- 1.676004 AU
+let earthTeq = equilibriumK(5772.0, 1.0, 1.0, 0.3); -- about 255 K
+```
+
+## 0.6.1 validation (AILANG v0.56.1)
+
+The private limb-darkening literal split reduces cold-check peak RSS from
+296–302 MB to 100–106 MB in the recorded v0.56.0 measurements, preserving
+all 508 rows and numerical results. This patch changes no public API.
+`ailang pkg quality .` on released v0.56.1 reports: compile 22 files;
+2/42 contracts verified, 0 refuted, 90 uncontracted exports; 37 contracts
+skipped (not proved); 132/132 exported functions pure; effects max/rank IO;
+kind fix with a matching CHANGELOG section; AGENT.md/ai_summary present;
+156 passed, 0 failed, 0 skipped across 10 test files; smoke passed; no gates.
+The verifier uses Real/Int models, not an IEEE/machine-arithmetic proof.
+This version awaits Mark's attended publication; consumers stay on the
+registry's 0.6.0 until that release is published and explicitly pinned.

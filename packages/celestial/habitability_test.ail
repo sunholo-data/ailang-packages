@@ -1,0 +1,90 @@
+module sunholo/celestial/habitability_test
+
+-- Expected values: stapledons-design physics/life-and-worlds.md LW-13..LW-22.
+-- Kopparapu et al. 2014 Table 1, PDF p12, Eqs 4–5; solar reference Teff=5780 K.
+-- NASA Exoplanet Archive ps default rows retrieved 2026-11-02 through TAP:
+--   Proxima Cen b: a=.04848 AU, log10(L/Lsun)=-2.82102, pl_insol=.641
+--   TRAPPIST-1 e: a=.02925 AU, log10(L/Lsun)=-3.25727, pl_insol=.646
+-- References Suarez Mascareno et al.2025 and Agol et al.2021 respectively.
+import std/math (pow, intToFloat, isNaN)
+import ./habitability (HzFluxes, hzFluxes, hzDistanceAu, insolationEarth, equilibriumK, rvSemiAmplitude, transitProbability, mutualHillSpacing)
+import ./kepler (absf)
+
+pure func near(x: float, y: float, tol: float) -> bool = absf(x - y) <= tol
+
+pure func solar() -> bool {
+  let h = hzFluxes(5780.0)
+  h.recentVenus == 1.776 && h.runaway == 1.107 && h.maximum == 0.356 && h.earlyMars == 0.32 && not h.extrapolated && h.teffUsed == 5780.0
+}
+
+test "LW-13..16 Kopparapu Table 1 exact solar fluxes" {
+  solar()
+}
+
+test "LW-17..18 solar conservative distances, Eq5, independently square rooted" {
+  near(hzDistanceAu(1.0, 1.107), 0.950443247520335, 1e-14) && near(hzDistanceAu(1.0, 0.356), 1.6760038078849773, 1e-14)
+}
+
+pure func cooler() -> bool {
+  let h = hzFluxes(2600.0)
+  -- The polynomial evaluated independently with decimal arithmetic (T=-3180 K).
+  near(h.recentVenus, 1.46453490348528, 1e-13) && near(h.runaway, 0.91289858126544, 1e-13) && near(h.maximum, 0.2227622194148, 1e-13) && near(h.earlyMars, 0.200214578390864, 1e-13)
+}
+
+test "Kopparapu cool boundary coefficients, independent polynomial" {
+  cooler()
+}
+
+test "outside 2600..7200 K clamps and flags; boundary itself is in range" {
+  (hzFluxes(2500.0)).extrapolated && (hzFluxes(8000.0)).extrapolated && (hzFluxes(2500.0)).teffUsed == 2600.0 && (hzFluxes(8000.0)).teffUsed == 7200.0 && (hzFluxes(2500.0)).runaway == (hzFluxes(2600.0)).runaway && (hzFluxes(8000.0)).maximum == (hzFluxes(7200.0)).maximum && not (hzFluxes(2600.0)).extrapolated && not (hzFluxes(7200.0)).extrapolated
+}
+
+test "inverse square illumination and luminosity scaling" {
+  insolationEarth(1.0, 1.0) == 1.0 && insolationEarth(1.0, 2.0) == 0.25 && near(hzDistanceAu(4.0, 1.0), 2.0, 1e-15)
+}
+
+test "Proxima b insolation within 2 percent of NASA ps default .641" {
+  near(insolationEarth(pow(10.0, 0.0 - 2.82102), 0.04848), 0.641, 0.02 * 0.641)
+}
+
+test "TRAPPIST-1 e insolation within 2 percent of NASA ps default .646" {
+  near(insolationEarth(pow(10.0, 0.0 - 3.25727), 0.02925), 0.646, 0.02 * 0.646)
+}
+
+test "LW-19 Earth Teq at Bond albedo .3 is 255 K; full redistribution excludes greenhouse" {
+  near(equilibriumK(5772.0, 1.0, 1.0, 0.3), 255.0, 0.5)
+}
+
+test "albedo one gives zero absorbed flux; albedo zero Earth's Teq about 278 K" {
+  equilibriumK(5772.0, 1.0, 1.0, 1.0) == 0.0 && near(equilibriumK(5772.0, 1.0, 1.0, 0.0), 278.3, 0.2)
+}
+
+test "LW-20..21 circular Jupiter and Earth stellar RV amplitudes" {
+  near(rvSemiAmplitude(4332.59, 317.828, 1.0, 1.0, 0.0), 12.458879266374836, 1e-10) && near(rvSemiAmplitude(365.25, 1.0, 1.0, 1.0, 0.0), 0.0895, 0.00005)
+}
+
+test "RV zero for face-on/zero-mass; eccentricity .6 raises K by 1.25" {
+  rvSemiAmplitude(365.25, 1.0, 1.0, 0.0, 0.0) == 0.0 && rvSemiAmplitude(365.25, 0.0, 1.0, 1.0, 0.0) == 0.0 && near(rvSemiAmplitude(365.25, 1.0, 1.0, 1.0, 0.6), 1.25 * rvSemiAmplitude(365.25, 1.0, 1.0, 1.0, 0.0), 1e-15)
+}
+
+test "LW-22 circular Earth transit probability; half at twice the distance" {
+  near(transitProbability(1.0, 1.0), 0.004650467260962158, 1e-16) && near(transitProbability(1.0, 2.0), 0.002325233630481079, 1e-16)
+}
+
+test "mutual Hill spacing, two Earths at 1 and 2 AU about 52.9; masses symmetric" {
+  near(mutualHillSpacing(1.0, 1.0, 2.0, 1.0, 1.0), 52.89330778378757, 1e-10) && mutualHillSpacing(1.0, 0.5, 2.0, 1.5, 1.0) == mutualHillSpacing(1.0, 1.5, 2.0, 0.5, 1.0)
+}
+
+-- Sweep every public formula over the physical domain, not just the solar rows.
+pure func finiteSweep(i: int) -> bool = if i > 1000 then true else {
+  let u = intToFloat(i) / 1000.0
+  let h = hzFluxes(2600.0 + 4600.0 * u)
+  let l = 0.0001 + 100.0 * u
+  let a = 0.01 + 30.0 * u
+  let k = rvSemiAmplitude(0.1 + 10000.0 * u, 1.0 + 1000.0 * u, 0.01 + 10.0 * u, u, 0.99 * u)
+  h.recentVenus > h.runaway && h.runaway > h.maximum && h.maximum > h.earlyMars && h.earlyMars > 0.0 && not isNaN(k) && k >= 0.0 && insolationEarth(l, a) > 0.0 && hzDistanceAu(l, h.runaway) > 0.0 && equilibriumK(2600.0 + 4600.0 * u, 0.01 + u, a, u) >= 0.0 && transitProbability(1.0, a) > 0.0 && mutualHillSpacing(a, 1.0, a + 0.1, 1.0 + u, 0.1 + u) > 0.0 && finiteSweep(i + 1)
+}
+
+test "1001 temperature/orbit samples are finite and keep ordered HZ boundaries" {
+  finiteSweep(0)
+}

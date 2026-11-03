@@ -1,0 +1,15 @@
+module sunholo/worlds/planet_model_test
+import ./planet_model (massForRadius, centralRadiusEarth, dwarfMassSun, dwarfInTable)
+import std/math (abs_Float as abs)
+
+test "central-radius source nodes, Earth units" {
+  abs(centralRadiusEarth(1.0) - 1.008) < 1e-14 && abs(centralRadiusEarth(2.04) - 1.2298364167665525) < 1e-12 && centralRadiusEarth(10.0) > 2.0 && centralRadiusEarth(1000.0) > 8.0
+}
+
+test "conditional synthetic masses finite, bounded and deterministic, including giant radii" {
+  massForRadius(1.0, 0.5) > 0.5 && massForRadius(1.0, 0.5) < 2.0 && massForRadius(16.0, 0.0) > 0.0 && massForRadius(16.0, 0.999999) < 4200.0 && massForRadius(4.0, 0.5) == massForRadius(4.0, 0.5)
+}
+
+test "Pecaut-Mamajek adopted mass nodes, interpolation and applicability flag" {
+  dwarfMassSun(5770.0) == 1.0 && dwarfMassSun(3850.0) == 0.57 && dwarfMassSun(2570.0) == 0.085 && dwarfMassSun(2890.0) > 0.102 && dwarfInTable(2380.0) && not dwarfInTable(2379.0) && not dwarfInTable(7221.0)
+}

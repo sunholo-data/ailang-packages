@@ -1,0 +1,55 @@
+module sunholo/worlds/history
+import ./dial (Params)
+import std/option (Option,Some,None)
+import std/math (pow)
+import std/list (length,nth_or,foldl)
+
+export type PlanetState = Sterile | Microbial | Complex | PreTech | Technological | Remnant | Transcended | Ecocide deriving (Eq)
+export type Mind = {preTechT:float,techT:float,endT:float,ending:PlanetState,tracesUntilT:float}
+export type History = {biosphere:PlanetState,mind:Option[Mind]}
+pure func barren() -> History = {biosphere:Sterile,mind:None}
+pure func logarithmic(lo:float,hi:float,u:float) -> float = lo*pow(hi/lo,u)
+pure func ending(u:float) -> PlanetState = if u<0.75 then Remnant else if u<0.90 then Ecocide else Transcended
+
+-- Eight keyed uniforms, in [0,1): life, pathway rank, reserved, technology,
+-- onset, pre-tech lead, ending, trace persistence. One pathway rank thresholds
+-- complex and intelligent life together: P(complex|life)=fComplex and
+-- P(minds|complex)=fMinds/fComplex. This coupling preserves nesting even as
+-- fComplex saturates. The reserved draw keeps subsequent field slots stable.
+-- Invalid/short vectors fail closed; no RNG and no fallback draw stream.
+pure func validParams(p:Params) -> bool =
+ p.fLife>=0.0 && p.fLife<=1.0 && p.fMinds>=0.0 && p.fMinds<=1.0
+ && p.fComplex>=p.fMinds && p.fComplex<=1.0 && p.fTech>=0.0 && p.fTech<=1.0
+ && p.lifetimeYr>0.0 && p.lifetimeYr<=1e100 && p.windowYr>0.0 && p.windowYr<=1e100
+ && p.remnantLoYr>0.0 && p.remnantLoYr<=p.remnantHiYr && p.remnantHiYr<=1e100
+export pure func historyOf
+(p:Params,habitable:bool,u:[float]) -> History =
+ if not habitable || not validParams(p) || length(u)<8 || not foldl(\valid x. valid && x>=0.0 && x<1.0,true,u) then barren() else {
+  let life=nth_or(u,0,1.0);
+  let rank=nth_or(u,1,1.0);
+  let tech=nth_or(u,3,1.0);
+  if life<0.0 || life>=1.0 || rank<0.0 || rank>=1.0 || tech<0.0 || tech>=1.0 then barren()
+  else if life>=p.fLife then barren() else {
+   let bio=if rank<p.fComplex then Complex else Microbial;
+   if rank>=p.fMinds || tech>=p.fTech then {biosphere:bio,mind:None}
+   else {
+    let onset=(nth_or(u,4,0.5)-0.5)*p.windowYr;
+    let endT=onset+p.lifetimeYr;
+    {biosphere:bio,mind:Some({preTechT:onset-logarithmic(1e4,1e5,nth_or(u,5,0.5)),techT:onset,endT:endT,
+     ending:ending(nth_or(u,6,0.5)),tracesUntilT:endT+logarithmic(p.remnantLoYr,p.remnantHiYr,nth_or(u,7,0.5))})}
+   }
+  }
+ }
+export pure func stateAt(h:History,t:float) -> PlanetState = match h.mind {
+ None=>h.biosphere,
+ Some(m)=>if t<m.preTechT then h.biosphere else if t<m.techT then PreTech else if t<m.endT then Technological
+  else match m.ending {Remnant=>if t<m.tracesUntilT then Remnant else h.biosphere,_=>m.ending}
+}
+-- Timed changes only. The long-lived background has no invented start date.
+-- Collapse traces eventually fade back into the background; ecocide and
+-- transcendence are absorbing labels. Boundaries are [start,nextStart).
+export pure func epochs(h:History) -> [(PlanetState,float)] = match h.mind {
+ None=>[],
+ Some(m)=>[(PreTech,m.preTechT),(Technological,m.techT),(m.ending,m.endT)]
+  ++ (match m.ending {Remnant=>[(h.biosphere,m.tracesUntilT)],_=>[]})
+}
