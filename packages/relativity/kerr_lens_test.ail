@@ -1,0 +1,17 @@
+module sunholo/relativity/kerr_lens_test
+import std/math (sin,cos)
+import std/result (Ok,Err)
+import ./hyper (absf)
+import ./geodesic (deflectionExactAt)
+import ./kerr_trace (traceLens,lensAngles)
+test "regular lens phase reduces independently to Schwarzschild deflection" {
+  let psi=1.2;let chi=0.7;
+  match traceLens(4.0,0.0,{x:0.0-cos(psi),y:sin(psi)*sin(chi),z:sin(psi)*cos(chi)},0.005) {
+    Err(_)=>false,Ok(r)=>absf(lensAngles(r,psi).bend-deflectionExactAt(2.0,psi))<1.2e-4 && r.node==0.0
+  }
+}
+test "regular lens phase retains many windings at a near-critical prograde edge" {
+  match traceLens(6.0,0.998,{x:-0.9575863029166325,y:0.0,z:-0.288146616267579},0.005) {
+    Err(_)=>false,Ok(r)=>r.phase>6.283185307179586 && r.node<0.0 && r.ray.steps<10000
+  }
+}

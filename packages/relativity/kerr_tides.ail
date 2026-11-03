@@ -1,0 +1,57 @@
+-- Full equatorial Weyl projection, signature -+++. E_ij=C_i a j b U^a U^b;
+-- deviation is -E times separation. Outputs in c^2/r_s^2 (4 x M^-2).
+-- Carter principal frame at theta=pi/2: E=diag(-2q,q,q), H=0, q=1/u^3.
+-- Spatial C_ijkl=-epsilon_ijm epsilon_kln E_mn is retained. Boosting only
+-- principal E eigenvalues is NOT this calculation: all six bivectors enter.
+-- Independently checked against Decimal60 metric derivatives (DI-10).
+module sunholo/relativity/kerr_tides
+import std/math (sqrt)
+import ./optics (Vec3,dot)
+import ./kerr (validSpin,metricDelta)
+import ./kerr_frame (gammaVelocity,staticVelocity,radialVelocity,circularVelocity)
+import ./schwarzschild (tidalRadial,tidalTransverse,tidalRadialOrbit)
+export type TideFrame=ZamoFrame|HoverFrame|RadialFrame(float)|OrbitFrame(float)
+export type TideTensor={rr:float,rt:float,rp:float,tt:float,tp:float,pp:float}
+export type TideReadout={stretch:float,transverse:float,polar:float}
+type Four={t:float,r:float,q:float,p:float}
+type Wedge={tr:float,tq:float,tp:float,rq:float,qp:float,pr:float}
+pure func row(v:Vec3,g:float,i:int)->Four {
+  if i==0 then {t:g,r:g*v.x,q:g*v.y,p:g*v.z} else {
+    let vi=if i==1 then v.x else if i==2 then v.y else v.z;let fac=g*g/(g+1.0);
+    {t:g*vi,r:(if i==1 then 1.0 else 0.0)+fac*vi*v.x,
+      q:(if i==2 then 1.0 else 0.0)+fac*vi*v.y,p:(if i==3 then 1.0 else 0.0)+fac*vi*v.z}
+  }
+}
+pure func carter(a:Four,vc:float,gc:float)->Four=
+  {t:gc*(a.t-vc*a.p),r:a.r,q:a.q,p:gc*(a.p-vc*a.t)}
+pure func wedge(a:Four,b:Four)->Wedge=
+  {tr:a.t*b.r-a.r*b.t,tq:a.t*b.q-a.q*b.t,tp:a.t*b.p-a.p*b.t,
+    rq:a.r*b.q-a.q*b.r,qp:a.q*b.p-a.p*b.q,pr:a.p*b.r-a.r*b.p}
+pure func electric(a:Four,b:Four,observer:Four,q:float)->float {
+  let x=wedge(a,observer);let y=wedge(b,observer);
+  q*((0.0-2.0)*(x.tr*y.tr-x.qp*y.qp)+(x.tq*y.tq-x.pr*y.pr)+(x.tp*y.tp-x.rq*y.rq))
+}
+export pure func tidalTensor(u:float,s:float,v:Vec3)->TideTensor
+  requires { validSpin(s) && u>=4.0 && u<=2000000.0 && v.y==0.0 && dot(v,v)<1.0 }
+{
+  let vc=s*sqrt(metricDelta(u,s))/(u*u+s*s);let gc=1.0/sqrt((1.0-vc)*(1.0+vc));let g=gammaVelocity(v);
+  let observer=carter(row(v,g,0),vc,gc);let r=carter(row(v,g,1),vc,gc);
+  let t=carter(row(v,g,2),vc,gc);let p=carter(row(v,g,3),vc,gc);let q=4.0/(u*u*u);
+  {rr:electric(r,r,observer,q),rt:electric(r,t,observer,q),rp:electric(r,p,observer,q),
+    tt:electric(t,t,observer,q),tp:electric(t,p,observer,q),pp:electric(p,p,observer,q)}
+}
+pure func velocity(u:float,s:float,f:TideFrame)->Vec3=match f {
+  ZamoFrame=>{x:0.0,y:0.0,z:0.0},HoverFrame=>staticVelocity(u,s),
+  RadialFrame(b)=>radialVelocity(u,s,b),OrbitFrame(k)=>circularVelocity(u,s,k)
+}
+export pure func tidalReadout(u:float,s:float,f:TideFrame)->TideReadout
+  requires { validSpin(s) && u>=4.0 && u<=2000000.0 }
+{
+  if s==0.0 then {
+    let stretch=match f {OrbitFrame(_)=>tidalRadialOrbit(u/2.0),_=>tidalRadial(u/2.0)};
+    let transverse=tidalTransverse(u/2.0);{stretch:stretch,transverse:transverse,polar:stretch-transverse}
+  } else {
+    let t=tidalTensor(u,s,velocity(u,s,f));let d=sqrt((t.rr-t.pp)*(t.rr-t.pp)+4.0*t.rp*t.rp);
+    {stretch:(d-t.rr-t.pp)/2.0,transverse:(d+t.rr+t.pp)/2.0,polar:t.tt}
+  }
+}

@@ -1,0 +1,26 @@
+module sunholo/relativity/kerr_frame_test
+import ./hyper (absf)
+import ./kerr_frame (metricFrame, staticVelocity, radialVelocity, circularVelocity, gammaVelocity, boostSource, sourceConstants, frequencyRatio)
+pure func near(a: float,b: float) -> bool = absf(a-b)<1.0e-12
+pure func ns() -> {x:float,y:float,z:float} = {x:0.8,y:0.0,z:0.6}
+test "V33 ZAMO projection: signs, Killing energy and frame metric" {
+  let f=metricFrame(4.0,0.9); let c=sourceConstants(4.0,0.9,ns());
+  near(f.lapse,0.71537612301921329) && near(f.omega,0.026139994191112402)
+  && near(f.h,4.1490962871449489) && near(c.lambda,-3.8281581133503123) && c.eta==0.0
+}
+test "V33 hover/pro/retro ray dependent shifts" {
+  near(frequencyRatio(4.0,0.9,ns(),staticVelocity(4.0,0.9)),1.4142135623730950)
+  && near(frequencyRatio(4.0,0.9,ns(),circularVelocity(4.0,0.9,1.0)),2.3084941047201764)
+  && near(frequencyRatio(4.0,0.9,ns(),circularVelocity(4.0,0.9,-1.0)),2.5866181264388675)
+}
+test "V33 noncollinear radial approach: one pure boost and inverse roundtrip" {
+  let v=radialVelocity(4.0,0.9,-0.5); let g=gammaVelocity(v);
+  let n={x:0.6,y:0.0,z:0.8}; let nz=boostSource(n,{x:0.0-v.x,y:0.0,z:0.0-v.z},g); let back=boostSource(nz,v,g);
+  near(g,1.1682043170450399) && near(nz.x,0.78930098917940921) && near(nz.z,0.61400647266979697)
+  && near(back.x,n.x) && near(back.z,n.z)
+}
+test "hover frequency is independent of the chosen incoming ray, zero spin reduces" {
+  let n={x:0.0,y:0.8,z:-0.6};
+  near(frequencyRatio(4.0,0.9,n,staticVelocity(4.0,0.9)),1.4142135623730950)
+  && near(frequencyRatio(4.0,0.0,n,staticVelocity(4.0,0.0)),1.4142135623730950)
+}

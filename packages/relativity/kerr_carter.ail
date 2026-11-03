@@ -1,0 +1,69 @@
+-- Carter 1968 / BPT72 eqs 2.8-2.10: complete Mino first integrals.
+-- Future incoming momentum signs; past tracing uses h<0. phi is UNWRAPPED.
+module sunholo/relativity/kerr_carter
+import std/result (Result, Ok, Err)
+import std/math (sqrt, sin, cos)
+import ./hyper (absf)
+import ./kerr (validSpin, horizonR)
+import ./kerr_geodesic (radialPotential)
+export type CarterState={u:float,theta:float,phi:float,time:float,sr:float,st:float}
+export type CarterRates={u:float,theta:float,phi:float,time:float}
+export pure func carterRates(y:CarterState,s:float,l:float,e:float)->Result[CarterRates,string] {
+  let u=y.u;
+  if !(validSpin(s) && u>2.0*horizonR(s) && u<=1.0e50 && absf(l)<=1.0e50 && e>=0.0 && e<=1.0e100
+    && absf(y.theta)<1.0e50 && (y.sr==1.0 || y.sr == -1.0) && (y.st==1.0 || y.st == -1.0)) then Err("domain")
+  else {
+    let sn=sin(y.theta); let co=cos(y.theta); let sn2=sn*sn;
+    -- lambda=0 crosses a pole in an unwrapped theta chart. sin(theta)
+    -- remains signed in the outgoing Cartesian map; never drop axis rays.
+    if l!=0.0 && sn2<1.0e-300 then Err("polar_chart") else {
+      let cotTerm=if l==0.0 then 0.0 else l*l*co*co/sn2;
+      let rp=radialPotential(u,l,e,s); let tp=e+s*s*co*co-cotTerm;
+      let rtol=1.0e-13*(u*u*u*u+(s*s+l*l+e)*u*u+2.0*(e+(l-s)*(l-s))*u+s*s*e+1.0);
+      let ttol=1.0e-13*(e+s*s+cotTerm+1.0);
+      if rp < 0.0-rtol || tp < 0.0-ttol then Err("forbidden_potential")
+      else {
+        let delta=(u-2.0*horizonR(s))*(u-s*s/(2.0*horizonR(s)));
+        let p=u*u+s*s-s*l;
+        Ok({u:y.sr*sqrt(if rp<0.0 then 0.0 else rp),theta:y.st*sqrt(if tp<0.0 then 0.0 else tp),
+          phi:s*p/delta+(if l==0.0 then 0.0 else l/sn2)-s,
+          time:(u*u+s*s)*p/delta+s*(l-s*sn2)})
+      }
+    }
+  }
+}
+pure func advance(y:CarterState,d:CarterRates,h:float)->CarterState =
+  {u:y.u+h*d.u,theta:y.theta+h*d.theta,phi:y.phi+h*d.phi,time:y.time+h*d.time,sr:y.sr,st:y.st}
+pure func combine(a:CarterRates,b:CarterRates,c:CarterRates,d:CarterRates)->CarterRates =
+  {u:(a.u+2.0*b.u+2.0*c.u+d.u)/6.0,theta:(a.theta+2.0*b.theta+2.0*c.theta+d.theta)/6.0,
+    phi:(a.phi+2.0*b.phi+2.0*c.phi+d.phi)/6.0,time:(a.time+2.0*b.time+2.0*c.time+d.time)/6.0}
+export pure func carterStep(y:CarterState,s:float,l:float,e:float,h:float)->Result[CarterState,string] =
+  match carterRates(y,s,l,e) {
+    Err(msg)=>Err(msg),
+    Ok(a)=>match carterRates(advance(y,a,h/2.0),s,l,e) {
+      Err(msg)=>Err(msg),
+      Ok(b)=>match carterRates(advance(y,b,h/2.0),s,l,e) {
+        Err(msg)=>Err(msg),
+        Ok(c)=>match carterRates(advance(y,c,h),s,l,e) {
+          Err(msg)=>Err(msg),
+          Ok(d)=>Ok(advance(y,combine(a,b,c,d),h))
+        }
+      }
+    }
+  }
+-- Recover constants and null norm independently through the BL metric.
+export type CarterInvariants={energy:float,lambda:float,eta:float,nullResidual:float}
+export pure func carterInvariants(y:CarterState,s:float,l:float,e:float)->Result[CarterInvariants,string] =
+  match carterRates(y,s,l,e) {
+    Err(msg)=>Err(msg),
+    Ok(d)=>{
+      let sn=sin(y.theta);let co=cos(y.theta);let u=y.u;let sig=u*u+s*s*co*co;
+      let de=u*u-2.0*u+s*s;let gtt=0.0-1.0+2.0*u/sig;let gtp=0.0-2.0*s*u*sn*sn/sig;
+      let gpp=(u*u+s*s+2.0*s*s*u*sn*sn/sig)*sn*sn;
+      let en=(0.0-gtt*d.time-gtp*d.phi)/sig;let la=(gtp*d.time+gpp*d.phi)/sig;
+      let et=d.theta*d.theta+co*co*((if l==0.0 then 0.0 else la*la/(sn*sn))-s*s);
+      let a=gtt*d.time*d.time;let b=2.0*gtp*d.time*d.phi;let c=gpp*d.phi*d.phi;
+      let f=sig/de*d.u*d.u;let g=sig*d.theta*d.theta;
+      Ok({energy:en,lambda:la,eta:et,nullResidual:absf(a+b+c+f+g)/(1.0+absf(a)+absf(b)+absf(c)+absf(f)+absf(g))})
+    }
+  }

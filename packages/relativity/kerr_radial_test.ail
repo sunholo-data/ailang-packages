@@ -1,0 +1,10 @@
+module sunholo/relativity/kerr_radial_test
+import ./hyper (absf)
+import ./kerr_radial (radialPotentialAccurate)
+pure func near(a:float,b:float)->bool=absf(a-b)<5.0e-12*absf(b)
+test "Decimal80 represented-input radial potential near double roots" {
+  near(radialPotentialAccurate(3.00000001,-1.8,27.0,0.9),2.4569999821353075e-15)
+  && near(radialPotentialAccurate(3.0000000001,-1.996,27.0,0.998),2.401199197472176e-19)
+  && near(radialPotentialAccurate(1.07391,2.110887794552831,0.0,0.998),1.9065080701943107e-12)
+}
+export pure func probe()->[float] = [radialPotentialAccurate(3.00000001,-1.8,27.0,0.9),radialPotentialAccurate(3.0000000001,-1.996,27.0,0.998),radialPotentialAccurate(1.07391,2.110887794552831,0.0,0.998)]

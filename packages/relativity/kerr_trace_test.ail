@@ -1,0 +1,20 @@
+module sunholo/relativity/kerr_trace_test
+import std/math (sin,cos)
+import std/result (Result,Ok,Err)
+import ./hyper (absf)
+import ./kerr_trace (SkyTrace,traceSky)
+pure func sample(s:float,psi:float,chi:float,x:float,y:float,z:float)->bool {
+  let n={x:0.0-cos(psi),y:sin(psi)*sin(chi),z:sin(psi)*cos(chi)};
+  match traceSky(4.0,s,n,0.005) {
+    Err(_)=>false,
+    Ok(r)=>absf(r.sky.x-x)<1.2e-4 && absf(r.sky.y-y)<1.2e-4 && absf(r.sky.z-z)<1.2e-4
+  }
+}
+test "independent escaping Schwarzschild ray with radial and polar returns" {
+  sample(0.0,1.2,0.7,0.43310032710732715,-0.6893872318558439,0.5806628550317844)
+}
+test "analytic captured ray never becomes a timeout classification" {
+  match traceSky(4.0,0.9,{x:-1.0,y:0.0,z:0.0},0.005) { Err(c)=>c=="captured",Ok(_)=>false }
+}
+export pure func probe()->Result[SkyTrace,string] =
+  traceSky(4.0,0.0,{x:0.0-cos(1.2),y:sin(1.2)*sin(0.7),z:sin(1.2)*cos(0.7)},0.005)

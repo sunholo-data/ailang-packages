@@ -1,0 +1,131 @@
+-- Compact regular radial chart + Cash-Karp 5(4), past Mino time / u_observer.
+-- A simple outer root rt is crossed smoothly with x=sign(dr)*sqrt(1-rt/u).
+-- R/u^4=(1-rt/u) Q(rt/u): x'=rt/(2u0) sqrt(Q), including x=0.
+module sunholo/relativity/kerr_trace
+import std/result (Result,Ok,Err)
+import std/math (sqrt,cos,sin,pow)
+import ./hyper (absf)
+import ./optics (Vec3,normalize)
+import ./kerr_frame (sourceConstants)
+import ./kerr_geodesic (radialPotential,classifyCapture,Captured,Escaped,Critical,InvalidRay)
+import ./kerr_events (outerTurningRadius)
+import ./kerr_sphere (Sphere,axpy,sphereRates,sphereAdvance,sphereError,polePhase,sphereInvariants)
+export type SkyTrace={sky:Vec3,phi:float,time:float,steps:int,turns:int}
+export type LensTrace={ray:SkyTrace,phase:float,node:float}
+type Context={u0:float,s:float,l:float,e:float,rt:float,b:float,amp:float,ci:float}
+type State={x:float,a:Sphere,drag:float,time:float,phase:float,node:float}
+type Weighted=(float,State)
+pure func minf(a:float,b:float)->float=if a<b then a else b
+pure func maxf(a:float,b:float)->float=if a>b then a else b
+pure func radius(x:float,c:Context)->float=if c.rt>0.0 then c.rt/((1.0-x)*(1.0+x)) else c.u0/x
+pure func rates(y:State,c:Context)->Result[State,string] {
+  if (c.rt>0.0 && absf(y.x)>=1.0) || (c.rt==0.0 && y.x<=0.0) then Err("radial_chart") else {
+    let u=radius(y.x,c);let s=c.s;let l=c.l;let e=c.e;
+    let t=(1.0-y.x)*(1.0+y.x);let r=c.rt;
+    let aa=s*s-l*l-e;let bb=2.0*(e+(l-s)*(l-s));
+    let q=if r>0.0 then 1.0+t+(1.0+aa/(r*r))*t*t+(1.0+aa/(r*r)+bb/(r*r*r))*t*t*t
+      else radialPotential(u,l,e,s)/u/u/u/u;
+    if q<0.0 then Err("forbidden_potential") else {
+      let de=u*u-2.0*u+s*s;let p=u*u+s*s-s*l;
+      let sn2=y.a.m.x*y.a.m.x+y.a.m.y*y.a.m.y;
+      let a=sphereRates(y.a,s/c.u0,(l/c.u0)*(l/c.u0)+(e/c.u0)/c.u0);
+      let drag=(0.0-s*(2.0*u-s*l)/de)/c.u0;
+      let sb=s/c.u0;let lb=l/c.u0;let c0=sqrt(c.b+sb*sb);
+      let phase=if e==0.0 then absf(lb) else sqrt(c.b+sb*sb*y.a.m.z*y.a.m.z);
+      let node=drag-(if e==0.0 then 0.0 else lb*sb*sb/(c0*(c0+phase)));
+      Ok({x:if r>0.0 then r/(2.0*c.u0)*sqrt(q) else 0.0-sqrt(q),a:a,drag:drag,
+        time:(0.0-(u*u+s*s)*p/de-s*(l-s*sn2))/c.u0,phase:phase,node:node})
+    }
+  }
+}
+pure func advance(y:State,h:float,d:State)->State =
+  {x:y.x+h*d.x,a:sphereAdvance(y.a,d.a,h),drag:y.drag+h*d.drag,time:y.time+h*d.time,phase:y.phase+h*d.phase,node:y.node+h*d.node}
+pure func blend(y:State,h:float,ks:[Weighted])->State =
+  match ks {[]=>y,(w,k)::rest=>blend(advance(y,h*w,k),h,rest)}
+type Pair={high:State,low:State}
+pure func cashKarp(y:State,c:Context,h:float)->Result[Pair,string] =
+  match rates(y,c) {Err(m)=>Err(m),Ok(a)=>
+  match rates(blend(y,h,[(1.0/5.0,a)]),c) {Err(m)=>Err(m),Ok(b)=>
+  match rates(blend(y,h,[(3.0/40.0,a),(9.0/40.0,b)]),c) {Err(m)=>Err(m),Ok(d)=>
+  match rates(blend(y,h,[(3.0/10.0,a),(-9.0/10.0,b),(6.0/5.0,d)]),c) {Err(m)=>Err(m),Ok(e)=>
+  match rates(blend(y,h,[(-11.0/54.0,a),(5.0/2.0,b),(-70.0/27.0,d),(35.0/27.0,e)]),c) {Err(m)=>Err(m),Ok(f)=>
+  match rates(blend(y,h,[(1631.0/55296.0,a),(175.0/512.0,b),(575.0/13824.0,d),(44275.0/110592.0,e),(253.0/4096.0,f)]),c) {Err(m)=>Err(m),Ok(g)=>
+    Ok({high:blend(y,h,[(37.0/378.0,a),(250.0/621.0,d),(125.0/594.0,e),(512.0/1771.0,g)]),
+      low:blend(y,h,[(2825.0/27648.0,a),(18575.0/48384.0,d),(13525.0/55296.0,e),(277.0/14336.0,f),(1.0/4.0,g)])})
+  }}}}}}
+pure func error(a:State,b:State,c:Context)->float =
+  absf(a.x-b.x)+sphereError(a.a,b.a,(c.l/c.u0)*(c.l/c.u0)+(c.e/c.u0)/c.u0)
+    +absf(a.drag-b.drag)/(1.0+absf(a.drag))+absf(a.phase-b.phase)/(1.0+absf(a.phase))+absf(a.node-b.node)/(1.0+absf(a.node))
+type Step={y:State,h:float}
+pure func retry(y:State,c:Context,h:float,tol:float,n:int)->Result[Step,string] =
+  if n==0 then Err("step_refinement") else match cashKarp(y,c,h) {
+    Err(_)=>retry(y,c,h/2.0,tol,n-1),Ok(p)=>{
+      let err=error(p.high,p.low,c);
+      if err>tol then retry(y,c,h*maxf(0.2,0.9*pow(tol/err,0.2)),tol,n-1)
+      else Ok({y:p.high,h:h*(if err==0.0 then 4.0 else minf(4.0,maxf(0.2,0.9*pow(tol/err,0.2))))})
+    }
+  }
+pure func finish(y:State,c:Context,phase:float,i:int,turns:int)->Result[LensTrace,string] {
+  let u=radius(y.x,c);let rp=radialPotential(u,c.l,c.e,c.s);
+  let tail=c.u0*u/sqrt(rp);let de=u*u-2.0*u+c.s*c.s;
+  let dragRate=(0.0-c.s*(2.0*u-c.s*c.l)/de)/c.u0;
+  let dv=axpy(y.a.v,dragRate,{x:0.0-y.a.m.y,y:y.a.m.x,z:0.0});
+  let v=axpy(y.a.m,tail,dv);let cp=cos(y.drag);let sp=sin(y.drag);
+  let inv=sphereInvariants(y.a,c.s/c.u0,c.l/c.u0,(c.e/c.u0)/c.u0);
+  if inv.sphere>1.0e-8 || inv.tangent>1.0e-8 || inv.angular>1.0e-8 || inv.lambda>1.0e-8 then Err("angular_conservation") else
+  match rates(y,c) {Err(m)=>Err(m),Ok(d)=>{
+    let nu=y.phase+tail*d.phase;let node=y.node+tail*d.node;
+    let cn=cos(node);let sn=sin(node);let x=cos(nu);let yy=c.ci*sin(nu);
+    let geometric=normalize({x:cn*x-sn*yy,y:sn*x+cn*yy,z:c.amp*sin(nu)});
+    let sky=normalize({x:cp*v.x-sp*v.y,y:sp*v.x+cp*v.y,z:v.z});
+    let diff=axpy(geometric,-1.0,sky);
+    if sqrt(diff.x*diff.x+diff.y*diff.y+diff.z*diff.z)>1.0e-8 then Err("lens_phase_conservation") else
+    Ok({ray:{sky:sky,phi:phase+y.drag,time:y.time,steps:i,turns:turns},phase:nu,node:node})
+  }}
+}
+pure func loop(y:State,c:Context,xf:float,h:float,cap:float,tol:float,phase:float,i:int,turns:int)->Result[LensTrace,string] =
+  if i>=20000 then Err("solver_steps") else
+  if absf(y.x-xf)<1.0e-15 || (c.rt>0.0 && y.x>=xf) || (c.rt==0.0 && y.x<=xf) then finish(y,c,phase,i,turns)
+  else match rates(y,c) {Err(m)=>Err(m),Ok(d)=>
+    match retry(y,c,minf(minf(h,cap),absf((xf-y.x)/d.x)),tol,40) {Err(m)=>Err(m),Ok(z)=>
+      loop(z.y,c,xf,z.h,cap,tol,phase+polePhase(y.a.m,z.y.a.m,c.l),i+1,
+        turns+(if y.x<0.0 && z.y.x>=0.0 && c.rt>0.0 then 1 else 0)+(if y.a.v.z*z.y.a.v.z<0.0 then 1 else 0))}
+  }
+-- Regular unwrapped action angles: q=amp*sin(nu),
+-- m=Rot_z(node)*(cos(nu), ci*sin(nu), amp*sin(nu)).
+-- nu'=sqrt(B+s²q²), node'=drag-lambda*s²/[C0(C0+nu')].
+-- Rationalizing the last difference removes its apparent polar pole.
+export pure func traceLens(u:float,s:float,n:Vec3,step:float)->Result[LensTrace,string]
+  requires {u>=4.0 && u<=2000000.0 && s>=0.0 && s<=0.998 && step>0.0 && step<=0.02}
+{
+  let norm=n.x*n.x+n.y*n.y+n.z*n.z;
+  if !(u>=4.0 && u<=2000000.0 && s>=0.0 && s<=0.998 && step>0.0 && step<=0.02 && absf(norm-1.0)<1.0e-12) then Err("invalid_ray") else {
+  let c=sourceConstants(u,s,n);
+  match classifyCapture(u,c.lambda,c.eta,s,n.x>=0.0) {
+    Captured=>Err("captured"),Critical=>Err("critical"),InvalidRay=>Err("invalid_ray"),Escaped=>{
+      let rt=if n.x==0.0 then u else match outerTurningRadius(u,c.lambda,c.eta,s) {Ok(r)=>r,Err(_)=>0.0};
+      let sb=s/u;let lb=c.lambda/u;let eb=(c.eta/u)/u;let aa=lb*lb+eb-sb*sb;
+      let disc=sqrt(aa*aa+4.0*sb*sb*eb);
+      let b=if c.eta==0.0 then 0.0 else if aa>=0.0 then (aa+disc)/2.0 else 2.0*sb*sb*eb/(disc-aa);
+      let ci=if c.eta==0.0 then (if lb>0.0 then -1.0 else if lb<0.0 then 1.0 else 0.0) else 0.0-lb/sqrt(b+sb*sb);
+      let amp=if c.eta==0.0 then 0.0 else sqrt(eb/b)*(if n.y>0.0 then -1.0 else 1.0);
+      let ctx={u0:u,s:s,l:c.lambda,e:c.eta,rt:rt,b:b,amp:amp,ci:ci};
+      let x=if rt>0.0 then (if n.x<0.0 then -1.0 else 1.0)*sqrt(1.0-rt/u) else 1.0;
+      let y={x:x,a:{m:{x:1.0,y:0.0,z:0.0},v:{x:0.0,y:0.0-c.lambda/u,z:0.0-n.y/c.energy}},drag:0.0,time:0.0,phase:0.0,node:0.0};
+      let far=maxf(u*1000.0,100000.0);let xf=if rt>0.0 then sqrt(1.0-rt/far) else u/far;
+      let k=(c.lambda/u)*(c.lambda/u)+(c.eta/u)/u+(s/u)*(s/u);
+      -- Embedded estimates below accumulated binary64 rounding are not useful
+      -- truncation estimates. The fixed 2e-14 floor is independently refined.
+      loop(y,ctx,xf,0.02,20.0*step/sqrt(maxf(k,1.0e-12)),maxf(2.0e-14,1.0e-13*pow(step/0.005,5.0)),0.0,0,0)
+    }
+  }
+  }
+}
+export pure func traceSky(u:float,s:float,n:Vec3,step:float)->Result[SkyTrace,string]
+  requires {u>=4.0 && u<=2000000.0 && s>=0.0 && s<=0.998 && step>0.0 && step<=0.02}
+{match traceLens(u,s,n,step) {Err(m)=>Err(m),Ok(r)=>Ok(r.ray)}}
+export type LensAngles={bend:float,twist:float}
+-- Remove the flat-space arc before F32 storage, retaining weak-field accuracy.
+export pure func lensAngles(ray:LensTrace,psi:float)->LensAngles
+  requires {psi>=0.0 && psi<=3.141592653589793}
+{ {bend:ray.phase+psi-3.141592653589793,twist:ray.node} }

@@ -1,0 +1,32 @@
+module sunholo/relativity/kerr_shadow_test
+import std/math (sqrt)
+import ./hyper (absf)
+import ./kerr (photonOrbitPro, photonOrbitRet)
+import ./kerr_shadow (shadowLambdaEta, shadowAlphaBeta, shadowCircle, shadowMean)
+pure func near(a: float,b: float) -> bool = absf(a-b) <= 1.0e-12*absf(b)
+test "RK-14 endpoints: alpha=-lambda, prograde is negative, beta-square tends to zero" {
+  let l = shadowAlphaBeta(2.0*photonOrbitPro(0.9),0.9,0.0);
+  let r = shadowAlphaBeta(2.0*photonOrbitRet(0.9),0.9,0.0);
+  near(l.alpha,-2.8444214034761693) && near(r.alpha,6.8323192304466666)
+  && absf(l.beta2)<1.0e-10 && absf(r.beta2)<1.0e-10
+}
+test "RK-15 equatorial top: eta(3)=27 and lambda(3)=-2s" {
+  let p = shadowLambdaEta(3.0,0.9);
+  near(p.lambda,-1.8) && near(p.eta,27.0) && near(sqrt(p.eta),5.1961524227066319)
+}
+test "RK-16 equal-u discrete mean, N200000, exact endpoints included" {
+  absf(shadowMean(0.9,200000)-5.0437368945142949)<1.0e-9
+  && absf(shadowMean(0.998,200000)-4.8770013845209779)<1.0e-9
+}
+test "RK-Q1 nonsingular zero-spin circle at multiple azimuths" {
+  let a=shadowCircle(0.0); let b=shadowCircle(1.3); let c=shadowCircle(3.141592653589793);
+  near(a.alpha*a.alpha+a.beta2,27.0) && near(b.alpha*b.alpha+b.beta2,27.0)
+  && near(c.alpha*c.alpha+c.beta2,27.0) && a.alpha<0.0 && c.alpha>0.0
+}
+test "RK-17 visible 45 degree arc endpoints/top (math only)" {
+  let c=sqrt(0.5); let l=shadowAlphaBeta(1.7314008858689569,0.9,c);
+  let r=shadowAlphaBeta(3.5194963858229091,0.9,c); let top=shadowAlphaBeta(2.8040576874557806,0.9,c);
+  near(l.alpha,-3.4170599872799702) && near(r.alpha,6.2964531467076725)
+  && absf(l.beta2)<1.0e-10 && absf(r.beta2)<1.0e-10 && near(sqrt(top.beta2),5.0696345295581239)
+  && shadowAlphaBeta(2.0*photonOrbitPro(0.9),0.9,c).beta2 < 0.0
+}

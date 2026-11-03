@@ -1,0 +1,21 @@
+module sunholo/relativity/kerr_domain_test
+import std/math (cos,sin)
+import std/result (Ok,Err)
+import ./kerr_trace (traceSky)
+import ./kerr_frame (sourceConstants)
+import ./kerr_events (outerTurningRadius,eventPatch)
+pure func escaped(chi:float)->bool {
+  let psi=0.23561944901923448;
+  match traceSky(2000000.0,0.9,{x:0.0-cos(psi),y:sin(psi)*sin(chi),z:sin(psi)*cos(chi)},0.005) {
+    Ok(_)=>true,Err(_)=>false
+  }
+}
+test "far-domain simple-root departure is representable in binary64" {escaped(0.0)}
+test "standalone BL event export also preserves a representable far-root departure" {
+  let c=sourceConstants(2000000.0,0.9,{x:-0.6,y:0.0,z:0.8});
+  match outerTurningRadius(2000000.0,c.lambda,c.eta,0.9) {Err(_)=>false,Ok(rt)=>
+    match eventPatch({u:rt,theta:1.5707963267948966,phi:0.0,time:0.0,sr:-1.0,st:1.0},0.9,c.lambda,c.eta,true,rt,true) {
+      Err(_)=>false,Ok(y)=>y.u>rt
+    }
+  }
+}

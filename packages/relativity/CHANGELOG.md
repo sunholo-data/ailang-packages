@@ -1,5 +1,43 @@
 # Changelog
 
+## 0.14.0
+
+Feature: package-first Kerr physics for Stapledon's Voyage R2-KERR.
+
+- `kerr`: horizons, static limit, dragging, lapse, static clocks, handed photon
+  orbits, ISCOs, circular clocks/frequencies and signed ZAMO velocities.
+- `kerr_shadow`: Bardeen critical curve at infinity, an explicit nonsingular
+  Schwarzschild circle and the prescribed N200000 equal-u diagnostic.
+- `kerr_geodesic`, `kerr_carter`, `kerr_events`, `kerr_trace`: independent
+  analytic capture, full four-coordinate Mino RK4, root events, unwrapped
+  regular Cartesian sphere chart (`kerr_sphere`), signed pole phase, adaptive
+  error control, and finite-observer outgoing directions. Exact tangential
+  rays depart their simple radial root; near-axis rays are never discarded.
+  Near-root radial evaluation uses `kerr_radial` compensated arithmetic.
+  The production trace uses a compact simple-root radial chart and adaptive
+  Cash–Karp 5(4), with regular unwrapped action angles exposed by `traceLens`
+  for table fitting. The standalone BL RK4/event exports remain available.
+- `kerr_frame`: source-directed photon projection, single pure ship boost,
+  non-collinear radial approach and ray-dependent frequency transport.
+- `kerr_tides`: full equatorial Weyl projection including spatial curvature,
+  verified against a separate metric-derivative Riemann oracle. Zero spin
+  dispatches exactly to existing stretch/transverse readout formulas.
+- `kerr_digest`, `_smoke.kerrDigest`: strict VM/interpreter byte parity,
+  independently checked scalar/frame/curvature/ray aggregate.
+
+Scalar reference accuracy is for represented binary64 spins through .998;
+above that cap scalar finiteness is distinct from reference accuracy. Kerr
+finite-observer rays and tides are equatorial, u >= 4 (r >= 2 r_s), and rays
+are offline tools. Infinity shadow coordinates are not finite-radius angles.
+The test suite includes 49 ordinary and 12 near-critical escaping directions
+(cutoff 1e-8), plus 80 full tidal tensors. These samples do not establish the
+convergence of a production lookup-table set; tables and rendered skies belong
+to the consumer. No charged holes, disks/jets, ergosphere entry or Kerr inverse
+star images. Additional tests pin 280 independent near-axis escapes across
+seven spins, both hemispheres and both azimuth senses. This candidate still
+awaits independent cross-family evaluation and Mark's publication; it is not
+published by committing this changelog.
+
 ## 0.13.0
 
 Fix: float64 domain bounds documented for the seven auto-generated property

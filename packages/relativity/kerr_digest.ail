@@ -1,0 +1,29 @@
+-- Deterministic package smoke digest; not a physical observable. Terms use
+-- their documented units. Ray direction has weight .001 so its independent
+-- angular error does not dominate the closed-form digest's 1e-9 budget.
+module sunholo/relativity/kerr_digest
+import std/math (intToFloat)
+import std/result (Ok,Err)
+import ./kerr (horizonR,horizonInnerR,staticLimitR,horizonOmega,photonOrbitPro,photonOrbitRet,iscoPro,iscoRet,zamoClockRate,staticClockRateKerr,frameDragOmega,orbitOmegaKerr,orbitClockRateKerr,orbitLocalSpeedKerr)
+import ./kerr_shadow (shadowLambdaEta)
+import ./kerr_frame (sourceConstants,frequencyRatio,staticVelocity,circularVelocity)
+import ./kerr_tides (tidalReadout,OrbitFrame)
+import ./kerr_trace (traceSky)
+pure func sum(xs:[float],acc:float)->float=match xs {[]=>acc,x::rest=>sum(rest,acc+x)}
+pure func row(i:int)->float {
+  let s=if i%3==0 then 0.0 else if i%3==1 then 0.9 else 0.998;
+  let u=6.0+intToFloat(i)/4.0;let n={x:0.6,y:0.0,z:0.8};
+  let c=sourceConstants(u,s,n);let tide=tidalReadout(u,s,OrbitFrame(1.0));
+  let shadow=if s==0.0 then {lambda:0.0,eta:27.0} else shadowLambdaEta(3.0,s);
+  let ray=match traceSky(u,s,n,0.005) {Err(_)=>0.0/0.0,Ok(r)=>0.001*(r.sky.x+2.0*r.sky.y+3.0*r.sky.z)};
+  sum([horizonR(s),horizonInnerR(s),staticLimitR(s,0.0),photonOrbitPro(s),photonOrbitRet(s),iscoPro(s),iscoRet(s),
+    horizonOmega(s),frameDragOmega(u,0.0,s),zamoClockRate(u,0.0,s),staticClockRateKerr(u,0.0,s),
+    orbitOmegaKerr(u,s,1.0),orbitOmegaKerr(u,s,-1.0),orbitClockRateKerr(u,s,1.0),orbitClockRateKerr(u,s,-1.0),
+    orbitLocalSpeedKerr(u,s,1.0),orbitLocalSpeedKerr(u,s,-1.0),shadow.lambda,shadow.eta,
+    frequencyRatio(u,s,n,staticVelocity(u,s)),frequencyRatio(u,s,n,circularVelocity(u,s,1.0)),
+    c.lambda,c.eta,tide.stretch,tide.transverse,tide.polar],0.0)+ray
+}
+pure func sweep(i:int,n:int,acc:float)->float=if i==n then acc else sweep(i+1,n,acc+row(i))
+export pure func kerrDigest(n:int)->float
+  requires { n>0 && n<=64 }
+{ sweep(0,n,0.0) }

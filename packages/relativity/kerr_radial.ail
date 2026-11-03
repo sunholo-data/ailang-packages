@@ -1,0 +1,32 @@
+-- Error-free binary64 transforms (Dekker splitting, Knuth two-sum) retain
+-- radial-potential signs next to double roots. Inputs are represented floats.
+-- No extra intended-decimal spin precision is assumed.
+module sunholo/relativity/kerr_radial
+export type DoubleDouble={hi:float,lo:float}
+pure func scalar(x:float)->DoubleDouble={hi:x,lo:0.0}
+pure func twoSum(a:float,b:float)->DoubleDouble {
+  let s=a+b;let v=s-a;{hi:s,lo:(a-(s-v))+(b-v)}
+}
+pure func twoProduct(a:float,b:float)->DoubleDouble {
+  let p=a*b;let ca=134217729.0*a;let cb=134217729.0*b;
+  let ah=ca-(ca-a);let al=a-ah;let bh=cb-(cb-b);let bl=b-bh;
+  {hi:p,lo:((ah*bh-p)+ah*bl+al*bh)+al*bl}
+}
+pure func plus(a:DoubleDouble,b:DoubleDouble)->DoubleDouble {
+  let p=twoSum(a.hi,b.hi);twoSum(p.hi,p.lo+a.lo+b.lo)
+}
+pure func neg(a:DoubleDouble)->DoubleDouble={hi:0.0-a.hi,lo:0.0-a.lo}
+pure func minus(a:DoubleDouble,b:DoubleDouble)->DoubleDouble=plus(a,neg(b))
+pure func times(a:DoubleDouble,b:DoubleDouble)->DoubleDouble {
+  let p=twoProduct(a.hi,b.hi);twoSum(p.hi,p.lo+a.hi*b.lo+a.lo*b.hi+a.lo*b.lo)
+}
+export pure func radialPotentialAccurate(u:float,l:float,e:float,s:float)->float
+  requires { u>=0.0 && u<=1.0e50 && l>=-1.0e50 && l<=1.0e50 && e>=0.0 && e<=1.0e100 && s>=0.0 && s<1.0 }
+{
+  let ud=scalar(u);let sd=scalar(s);let ld=scalar(l);
+  let u2=times(ud,ud);let s2=times(sd,sd);
+  let p=minus(plus(u2,s2),times(sd,ld));
+  let delta=plus(minus(u2,times(scalar(2.0),ud)),s2);
+  let q=minus(ld,sd);let r=minus(times(p,p),times(delta,plus(scalar(e),times(q,q))));
+  r.hi+r.lo
+}

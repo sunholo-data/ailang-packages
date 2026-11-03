@@ -1,0 +1,45 @@
+-- Analytic radial topology for photons launched from the equator (eta>=0).
+-- Carter/BPT72 eq 2.9: R=u^4+A u^2+B u-s^2 eta, no integration counters.
+module sunholo/relativity/kerr_geodesic
+import std/math (sqrt, cos, acos)
+import ./kerr_radial (radialPotentialAccurate)
+import ./hyper (absf)
+import ./kerr (validSpin, horizonR)
+export type Capture = Captured | Escaped | Critical | InvalidRay deriving (Eq)
+export pure func radialPotential(u: float,l: float,e: float,s: float) -> float {
+  let a=s*s-l*l-e; let b=2.0*(e+(l-s)*(l-s));
+  let r=u*u*(u*u+a)+b*u-s*s*e;
+  if absf(r)<1.0e-8*rScale(u,l,e,s) then radialPotentialAccurate(u,l,e,s) else r
+}
+pure func rScale(u: float,l: float,e: float,s: float) -> float =
+  u*u*(u*u+absf(s*s-l*l-e))+2.0*(e+(l-s)*(l-s))*u+s*s*e+1.0
+-- R' is a depressed cubic. For eta>=0 its linear coefficient B>=0.
+-- On the positive half-line there is either no minimum or one outer minimum.
+-- If present, that minimum alone separates the inner and outer allowed
+-- intervals. This is equivalent to classifying R's real-root intervals.
+export pure func radialMinimum(l: float,e: float,s: float) -> float {
+  let a=s*s-l*l-e; let b=2.0*(e+(l-s)*(l-s));
+  if a >= 0.0 then 0.0 else {
+    let t=sqrt((0.0-a)/6.0); let top=8.0*t*t*t;
+    if b >= top then 0.0 else 2.0*t*cos(acos(0.0-b/top)/3.0)
+  }
+}
+export pure func classifyCapture(u: float,l: float,e: float,s: float,outward: bool) -> Capture {
+  -- Comparisons reject NaN before any roots. Bounds keep quartics finite;
+  -- include the entire rendered equatorial domain and all possible constants.
+  if !(validSpin(s) && u > 2.0*horizonR(s) && u <= 2000000.0
+      && absf(l)<=1.0e50 && e>=0.0 && e<=1.0e100) then InvalidRay
+  else if radialPotential(u,l,e,s)<0.0-1.0e-13*rScale(u,l,e,s) then InvalidRay
+  else {
+    let m=radialMinimum(l,e,s); let h=2.0*horizonR(s);
+    if m <= h then (if outward then Escaped else Captured)
+    else {
+      let v=radialPotential(m,l,e,s); let tol=1.0e-13*rScale(m,l,e,s);
+      if v > tol then (if outward then Escaped else Captured)
+      else if v < 0.0-tol then (if u > m then Escaped else Captured)
+      else if absf(u-m)<1.0e-12*m then Critical
+      else if u > m then (if outward then Escaped else Critical)
+      else (if outward then Critical else Captured)
+    }
+  }
+}

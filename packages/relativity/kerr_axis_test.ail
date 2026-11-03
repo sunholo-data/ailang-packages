@@ -1,0 +1,37 @@
+module sunholo/relativity/kerr_axis_test
+import std/math (sqrt,sin,cos)
+import std/result (Ok,Err)
+import ./hyper (absf)
+import ./kerr_trace (traceSky)
+test "near-axis escaping ray preserves pole phase and independent sky" {
+  match traceSky(6.0,0.9,{x:-0.6,y:sqrt(0.64-1.0e-28),z:1.0e-14},0.005) {
+    Err(_)=>false,
+    Ok(r)=>absf(r.phi-2.8420527856877618)<1.2e-4
+      && absf(r.sky.x+0.8393869039609891)<1.2e-4
+      && absf(r.sky.y-0.2592296703620943)<1.2e-4
+      && absf(r.sky.z-0.47773382072315684)<1.2e-4
+  }
+}
+test "exact tangent near-axis ray leaves its simple radial root" {
+  match traceSky(4.0,0.998,{x:0.0,y:1.0,z:0.0},0.005) {Err(_)=>false,Ok(_)=>true}
+}
+test "opposite hemisphere and azimuth have a regular escaping chart" {
+  match traceSky(6.0,0.998,{x:-0.6,y:0.0-sqrt(0.64-1.0e-28),z:-1.0e-14},0.005) {Err(_)=>false,Ok(_)=>true}
+}
+test "far-radius near-axis returning rays retain their allowed radial chart" {
+  let n={x:-0.6,y:0.79999999375,z:-0.0001};
+  match traceSky(2000000.0,0.5,n,0.005) {Err(_)=>false,Ok(_)=>
+    match traceSky(2000000.0,0.75,n,0.005) {Err(_)=>false,Ok(_)=>true}}
+}
+test "invalid source directions are refused before metric roots and capture" {
+  match traceSky(6.0,0.9,{x:0.0,y:0.0,z:0.0},0.005) {Ok(_)=>false,Err(c)=>c=="invalid_ray"}
+    && match traceSky(6.0,0.9,{x:0.0,y:0.0,z:0.0/0.0},0.005) {Ok(_)=>false,Err(c)=>c=="invalid_ray"}
+}
+test "refined near-critical chart does not stall on accumulated-phase rounding" {
+  let psi=0.977920452141398*(1.0+1.0e-8);let chi=0.7;
+  let n={x:0.0-cos(psi),y:sin(psi)*sin(chi),z:sin(psi)*cos(chi)};
+  match traceSky(6.0,0.9,n,0.0025) {Err(_)=>false,Ok(r)=>
+    absf(r.sky.x+0.6063575941257582)<1.2e-4 && absf(r.sky.y+0.4931450632000425)<1.2e-4 && absf(r.sky.z+0.6238095981046209)<1.2e-4
+      && match traceSky(6.0,0.9,n,0.005) {Err(_)=>false,Ok(a)=>absf(a.sky.x-r.sky.x)+absf(a.sky.y-r.sky.y)+absf(a.sky.z-r.sky.z)<1.2e-4}
+  }
+}

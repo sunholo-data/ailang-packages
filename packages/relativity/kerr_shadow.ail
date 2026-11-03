@@ -1,0 +1,39 @@
+-- Bardeen 1973 critical curve at INFINITY (not a finite-radius sky).
+-- u, alpha, beta in GM/c^2; beta2 preserves invisible arcs without NaNs.
+module sunholo/relativity/kerr_shadow
+import std/math (sqrt, cos, sin, intToFloat)
+import ./kerr (validSpin, photonOrbitPro, photonOrbitRet)
+export type ShadowConstants = {lambda: float, eta: float}
+export type ShadowPoint = {alpha: float, beta2: float}
+export pure func shadowLambdaEta(u: float,s: float) -> ShadowConstants
+  requires { validSpin(s) && s > 0.0 && u > 1.0 && u <= 4.0 }
+{
+  let lambda = (0.0-u*u*u+3.0*u*u-s*s*u-s*s)/(s*(u-1.0));
+  -- Algebraic form of 4u²Delta/(u-1)²-(lambda-s)², less cancellation.
+  let eta = u*u*u*(4.0*s*s-u*(u-3.0)*(u-3.0))/(s*s*(u-1.0)*(u-1.0));
+  {lambda:lambda,eta:eta}
+}
+export pure func shadowAlphaBeta(u: float,s: float,c: float) -> ShadowPoint
+  requires { validSpin(s) && s > 0.0 && u > 1.0 && u <= 4.0 && c > -1.0 && c < 1.0 }
+{
+  let p = shadowLambdaEta(u,s); let sin2 = (1.0-c)*(1.0+c);
+  {alpha: (0.0-p.lambda)/sqrt(sin2), beta2:p.eta+s*s*c*c-p.lambda*p.lambda*c*c/sin2}
+}
+-- At s=0 the spherical-photon interval collapses to u=3. Parameterize the
+-- nonsingular circle by angle; a single u cannot parameterize that circle.
+export pure func shadowCircle(angle: float) -> ShadowPoint
+  requires { angle >= 0.0 && angle <= 6.283185307179586 }
+{
+  let radius = 3.0*sqrt(3.0); let beta = radius*sin(angle);
+  {alpha:0.0-radius*cos(angle), beta2:beta*beta}
+}
+pure func meanSum(s: float,n: int,i: int,lo: float,hi: float,acc: float) -> float =
+  if i == n then acc/intToFloat(n)
+  else {
+    let u = if i == n-1 then hi else lo+(hi-lo)*intToFloat(i)/intToFloat(n-1);
+    let p = shadowLambdaEta(u,s);
+    meanSum(s,n,i+1,lo,hi,acc+sqrt(p.lambda*p.lambda+p.eta))
+  }
+export pure func shadowMean(s: float,n: int) -> float
+  requires { validSpin(s) && s > 0.0 && n >= 2 && n <= 200000 }
+{ meanSum(s,n,0,2.0*photonOrbitPro(s),2.0*photonOrbitRet(s),0.0) }

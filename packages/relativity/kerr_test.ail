@@ -1,0 +1,75 @@
+module sunholo/relativity/kerr_test
+import ./kerr (orbitOmegaKerr, orbitClockRateKerr, orbitLocalSpeedKerr)
+import ./schwarzschild (circularOrbitClockRate, circularOrbitSpeed, orbitalAngularVelocity, rsPerSolarMassMetres)
+import ./kerr (validSpin, metricDelta)
+import std/math (sqrt)
+import ./hyper (absf)
+import ./kerr (horizonR, horizonInnerR, staticLimitR, horizonOmega, frameDragOmega, zamoClockRate, staticClockRateKerr)
+import ./schwarzschild (staticClockRate)
+import ./kerr (photonOrbitPro, photonOrbitRet, iscoPro, iscoRet)
+import ./schwarzschild (photonSphere, isco)
+pure func near(a: float, b: float) -> bool = absf(a-b) <= 1.0e-12 * absf(b)
+test "RK-1/2 horizons in r_s, all oracle spins" {
+  near(horizonR(0.5)*2.0, 1.8660254037844386) && near(horizonInnerR(0.5)*2.0, 0.13397459621556135)
+  && near(horizonR(0.9)*2.0, 1.4358898943540674) && near(horizonInnerR(0.9)*2.0, 0.56411010564593264)
+  && near(horizonR(0.998)*2.0, 1.0632139225171164) && near(horizonInnerR(0.998)*2.0, 0.93678607748288357)
+}
+test "RK-3/9/10/11 equatorial static limit, horizon frequency, ZAMO frame" {
+  staticLimitR(0.9, 0.0) == 1.0 && near(horizonOmega(0.9), 0.31339450313662925)
+  && near(frameDragOmega(2.0, 0.0, 0.9), 0.16014234875444840)
+  && near(zamoClockRate(2.0, 0.0, 0.9), 0.37964208654863802)
+}
+test "RK-13/Q1 exact zero-spin dispatch and equatorial operation order" {
+  horizonR(0.0) == 1.0 && horizonInnerR(0.0) == 0.0 && frameDragOmega(6.2, 0.3, 0.0) == 0.0
+  && staticClockRateKerr(6.2, 0.3, 0.0) == staticClockRate(3.1)
+  && zamoClockRate(6.2, 0.3, 0.0) == staticClockRate(3.1)
+  && staticClockRateKerr(6.2, 0.0, 0.9) == staticClockRate(3.1)
+}
+
+-- BPT72 photon-orbit/ISCO values, independent Decimal60 oracle (RK-4..7).
+test "RK-4/5 handed photon radii, units r_s" {
+  near(2.0*photonOrbitPro(0.9),1.5578546274233828) && near(2.0*photonOrbitRet(0.9),3.9102679391030367)
+  && near(2.0*photonOrbitPro(0.998),1.0739092576799517) && near(2.0*photonOrbitRet(0.998),3.9982218928479460)
+}
+test "RK-6/7 ISCO handedness, stable at r=3 only prograde at s=.9" {
+  near(2.0*iscoPro(0.5),4.2330025295308257) && near(2.0*iscoRet(0.5),7.5545847145123584)
+  && near(2.0*iscoPro(0.9),2.3208830417618872) && near(2.0*iscoRet(0.9),8.7173522796064893)
+  && iscoPro(0.9)<3.0 && iscoRet(0.9)>3.0
+}
+test "RK-Q1 exact nonrotating orbit radii" {
+  photonOrbitPro(0.0)==photonSphere() && photonOrbitRet(0.0)==photonSphere()
+  && iscoPro(0.0)==isco() && iscoRet(0.0)==isco()
+}
+test "RK-8/8b/12 ISCO clock and ZAMO local velocity" {
+  near(orbitClockRateKerr(2.0*iscoPro(0.9),0.9,1.0),0.37086794439864592)
+  && near(orbitClockRateKerr(2.0*iscoRet(0.9),0.9,-1.0),0.79319251811829484)
+  && near(orbitClockRateKerr(2.0*iscoPro(0.998),0.998,1.0),0.092670308365368573)
+  && near(orbitLocalSpeedKerr(2.0*iscoPro(0.9),0.9,1.0),0.62454869546086524)
+  && near(orbitLocalSpeedKerr(2.0*iscoPro(0.5),0.5,1.0),0.56164924228192780)
+}
+test "orbit handedness includes retrograde velocity sign" {
+  orbitOmegaKerr(6.0,0.9,1.0)>0.0 && orbitOmegaKerr(6.0,0.9,-1.0)<0.0
+  && orbitLocalSpeedKerr(6.0,0.9,-1.0)<0.0
+}
+test "RK-Q1 orbit clock, velocity and coordinate frequency dispatch exactly" {
+  orbitClockRateKerr(6.2,0.0,1.0)==circularOrbitClockRate(3.1)
+  && orbitLocalSpeedKerr(6.2,0.0,-1.0)==0.0-circularOrbitSpeed(3.1)
+  && orbitOmegaKerr(6.2,0.0,-1.0)==0.0-orbitalAngularVelocity(3.1)/2.0
+}
+test "RK-18 IAU nominal solar mass: prograde ISCO period milliseconds" {
+  near(6.283185307179586/orbitOmegaKerr(2.0*iscoPro(0.9),0.9,1.0)*10.0*rsPerSolarMassMetres()/2.0/299792458.0*1000.0,1.3727616115380832)
+}
+test "spin validation rejects nonfinite, negative and extremal inputs" {
+  validSpin(0.0) && validSpin(0.998) && validSpin(0.9999999999999999)
+  && !validSpin(-0.1) && !validSpin(1.0) && !validSpin(0.0/0.0) && !validSpin(1.0/0.0)
+}
+test "small-spin ISCO retains the linear splitting instead of sqrt roundoff" {
+  near(iscoPro(1.0e-9),3.0-1.632993161855452e-9)
+  && near(iscoRet(1.0e-9),3.0+1.632993161855452e-9)
+}
+test "factored Delta near the .998 horizon and finite near extremality" {
+  absf(metricDelta(1.0632139226171164,0.998)-1.2642782726410759e-11)<4.0e-18
+  && horizonR(0.9999999999999999)>0.5 && horizonInnerR(1.0e-9)>0.0
+  && zamoClockRate(4.0,0.0,0.9999999999999999)>0.0
+  && staticClockRateKerr(1.0e200,0.5,0.998)==1.0
+}

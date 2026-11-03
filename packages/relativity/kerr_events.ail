@@ -1,0 +1,44 @@
+-- Simple-root events for the full Carter state; critical roots never reflect.
+module sunholo/relativity/kerr_events
+import std/result (Result, Ok, Err)
+import std/math (sqrt, asin, sin, cos)
+import ./hyper (absf)
+import ./kerr_carter (CarterState, carterRates)
+import ./kerr_geodesic (radialPotential, radialMinimum)
+pure func bisectR(lo:float,hi:float,l:float,e:float,s:float,n:int)->float =
+  if n==0 then (lo+hi)/2.0 else {
+    let mid=(lo+hi)/2.0;
+    if radialPotential(mid,l,e,s)>0.0 then bisectR(lo,mid,l,e,s,n-1) else bisectR(mid,hi,l,e,s,n-1)
+  }
+export pure func outerTurningRadius(u:float,l:float,e:float,s:float)->Result[float,string] {
+  let m=radialMinimum(l,e,s);
+  if m<=0.0 || m>=u || radialPotential(m,l,e,s)>=0.0 then Err("no_simple_outer_root")
+  else Ok(bisectR(m,u,l,e,s,70))
+}
+export pure func polarTurningAngle(l:float,e:float,s:float)->float {
+  let b=e+l*l+s*s;
+  if l==0.0 then 0.0 else asin(sqrt(2.0*l*l/(b+sqrt(b*b-4.0*s*s*l*l))))
+}
+-- Once within the root-local region, the potential's simple zero gives
+-- coordinate-root = V'(root) h^2/4. Other coordinates keep their rates;
+-- the approximation requires measured step refinement before tables.
+export pure func eventPatch(y:CarterState,s:float,l:float,e:float,radial:bool,root:float,depart:bool)->Result[CarterState,string] {
+  let a=s*s-l*l-e; let b=2.0*(e+(l-s)*(l-s));
+  let sn=sin(root); let co=cos(root);
+  let derivative=if radial then 4.0*root*root*root+2.0*a*root+b
+    else 2.0*co*((l*l)/(sn*sn*sn)-s*s*sn);
+  let distance=absf((if radial then y.u else y.theta)-root);
+  if absf(derivative)<1.0e-12 || (!depart && distance>1.0e-7*(1.0+absf(root))) then Err("not_simple_local_root")
+  else match carterRates(y,s,l,e) {
+    Err(msg)=>Err(msg),
+    Ok(d)=>{
+      let h=if depart then (0.0-1.0e-5)*sqrt(if radial then 1.0+absf(root) else 1.0)/sqrt(absf(derivative)) else 0.0-2.0*sqrt(distance/absf(derivative));
+      let value=if depart then root+derivative*h*h/4.0 else root;
+      Ok({u:if radial then value else y.u+h*d.u,
+        theta:if radial then y.theta+h*d.theta else value,
+        phi:y.phi+h*d.phi,time:y.time+h*d.time,
+        sr:if radial && !depart then 0.0-y.sr else y.sr,
+        st:if !radial && !depart then 0.0-y.st else y.st})
+    }
+  }
+}

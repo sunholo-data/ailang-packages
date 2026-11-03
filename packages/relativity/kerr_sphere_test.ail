@@ -1,0 +1,25 @@
+module sunholo/relativity/kerr_sphere_test
+import std/math (sin,cos)
+import ./hyper (absf)
+import ./kerr_sphere (Sphere,sphereRates,sphereAdvance,sphereCombine,sphereError,polePhase,sphereInvariants)
+pure func march(y:Sphere,s:float,k:float,h:float,n:int)->Sphere =
+  if n==0 then y else {
+    let a=sphereRates(y,s,k);let b=sphereRates(sphereAdvance(y,a,h/2.0),s,k);
+    let c=sphereRates(sphereAdvance(y,b,h/2.0),s,k);let d=sphereRates(sphereAdvance(y,c,h),s,k);
+    march(sphereAdvance(y,sphereCombine(a,b,c,d),h),s,k,h,n-1)
+  }
+test "sphere crosses four poles with analytic Schwarzschild great circle" {
+  let y=march({m:{x:1.0,y:0.0,z:0.0},v:{x:0.0,y:0.0,z:2.0}},0.0,4.0,0.001,7000);
+  sphereError(y,{m:{x:cos(14.0),y:0.0,z:sin(14.0)},v:{x:0.0-2.0*sin(14.0),y:0.0,z:2.0*cos(14.0)}},4.0)<1.0e-10
+}
+test "regular angular constants conserved across near-pole turns" {
+  let y=march({m:{x:1.0,y:0.0,z:0.0},v:{x:0.0,y:-1.0e-14,z:2.0}},0.998,4.0,0.001,7000);
+  let v=sphereInvariants(y,0.998,1.0e-14,4.0);
+  v.sphere<1.0e-10 && v.tangent<1.0e-10 && v.angular<1.0e-10 && v.lambda<1.0e-20
+}
+test "polar chart transition retains signed pi for both lambda senses" {
+  let a={x:0.001,y:1.0e-20,z:0.9999995};let b={x:-0.001,y:1.0e-20,z:0.9999995};
+  absf(polePhase(a,b,-1.0e-14)-3.141592653589793)<1.0e-12
+    && absf(polePhase(a,b,1.0e-14)+3.141592653589793)<1.0e-12
+    && polePhase({x:1.0,y:0.0,z:0.0},{x:-1.0,y:0.0,z:0.0},0.0)==3.141592653589793
+}

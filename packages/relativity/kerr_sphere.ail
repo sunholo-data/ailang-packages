@@ -1,0 +1,41 @@
+-- Regular angular Carter chart. Remove radial dragging from the unit position
+-- m. In past Mino time m''=s² q ez-(K+2s²q²)m, K=lambda²+eta.
+-- Derived from q'²=eta+(s²-K)q²-s²q⁴ and (m x m')z=-lambda.
+-- No division by sin(theta); poles are ordinary points of this ODE.
+module sunholo/relativity/kerr_sphere
+import std/math (atan2,sqrt)
+import ./optics (Vec3,dot)
+import ./hyper (absf)
+export type Sphere={m:Vec3,v:Vec3}
+export pure func axpy(a:Vec3,h:float,b:Vec3)->Vec3 =
+  {x:a.x+h*b.x,y:a.y+h*b.y,z:a.z+h*b.z}
+export pure func sphereRates(y:Sphere,s:float,k:float)->Sphere
+  requires {s>=0.0 && s<=0.998 && k>=0.0}
+{
+  let f=0.0-k-2.0*s*s*y.m.z*y.m.z;
+  {m:y.v,v:{x:f*y.m.x,y:f*y.m.y,z:(f+s*s)*y.m.z}}
+}
+export pure func sphereAdvance(y:Sphere,d:Sphere,h:float)->Sphere =
+  {m:axpy(y.m,h,d.m),v:axpy(y.v,h,d.v)}
+export pure func sphereCombine(a:Sphere,b:Sphere,c:Sphere,d:Sphere)->Sphere =
+  {m:{x:(a.m.x+2.0*b.m.x+2.0*c.m.x+d.m.x)/6.0,y:(a.m.y+2.0*b.m.y+2.0*c.m.y+d.m.y)/6.0,z:(a.m.z+2.0*b.m.z+2.0*c.m.z+d.m.z)/6.0},
+   v:{x:(a.v.x+2.0*b.v.x+2.0*c.v.x+d.v.x)/6.0,y:(a.v.y+2.0*b.v.y+2.0*c.v.y+d.v.y)/6.0,z:(a.v.z+2.0*b.v.z+2.0*c.v.z+d.v.z)/6.0}}
+export pure func sphereError(a:Sphere,b:Sphere,k:float)->float
+  requires {k>=0.0}
+{
+  let dm=axpy(a.m,-1.0,b.m);let dv=axpy(a.v,-1.0,b.v);
+  sqrt(dot(dm,dm))+sqrt(dot(dv,dv)/(1.0+k))
+}
+-- Nonzero lambda has monotone projected phase, sign=-lambda. atan2(cross,dot)
+-- gives the signed pi jump for a step across an arbitrarily close pole.
+-- At lambda=0 choose positive-pi continuation; the Cartesian sky is unique.
+export pure func polePhase(a:Vec3,b:Vec3,l:float)->float {
+  let cross=a.x*b.y-a.y*b.x;let along=a.x*b.x+a.y*b.y;
+  let angle=atan2(absf(cross),along);
+  if l>0.0 then 0.0-angle else angle
+}
+export type SphereInvariants={sphere:float,tangent:float,angular:float,lambda:float}
+export pure func sphereInvariants(y:Sphere,s:float,l:float,e:float)->SphereInvariants =
+  {sphere:absf(dot(y.m,y.m)-1.0),tangent:absf(dot(y.m,y.v))/sqrt(1.0+l*l+e),
+   angular:absf(dot(y.v,y.v)-l*l-e-s*s*y.m.z*y.m.z)/(1.0+l*l+e),
+   lambda:absf(y.m.x*y.v.y-y.m.y*y.v.x+l)/(1.0+absf(l))}
