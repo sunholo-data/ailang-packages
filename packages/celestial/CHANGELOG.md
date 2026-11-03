@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.6.1
+
+Perf (patch fix): split the 508-row limb-darkening literal into private
+64-row batches. The public API, row ordering and numerical results are unchanged.
+Cold `ailang check` peak RSS falls from 296–302 MB to 100–106 MB on the
+measured v0.56.0 runs; all 508 rows and 1,400 interpolation samples matched
+byte for byte on the strict VM and interpreter. Release quality is rechecked
+on AILANG v0.56.1.
+
 ## 0.6.0
 
 Feature (minor bump): pure `habitability` module, seven functions and `HzFluxes`.

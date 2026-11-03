@@ -462,3 +462,17 @@ let inner = hzDistanceAu(1.0, h.runaway);  -- 0.950443 AU
 let outer = hzDistanceAu(1.0, h.maximum);  -- 1.676004 AU
 let earthTeq = equilibriumK(5772.0, 1.0, 1.0, 0.3); -- about 255 K
 ```
+
+## 0.6.1 validation (AILANG v0.56.1)
+
+The private limb-darkening literal split reduces cold-check peak RSS from
+296–302 MB to 100–106 MB in the recorded v0.56.0 measurements, preserving
+all 508 rows and numerical results. This patch changes no public API.
+`ailang pkg quality .` on released v0.56.1 reports: compile 22 files;
+2/42 contracts verified, 0 refuted, 90 uncontracted exports; 37 contracts
+skipped (not proved); 132/132 exported functions pure; effects max/rank IO;
+kind fix with a matching CHANGELOG section; AGENT.md/ai_summary present;
+156 passed, 0 failed, 0 skipped across 10 test files; smoke passed; no gates.
+The verifier uses Real/Int models, not an IEEE/machine-arithmetic proof.
+This version awaits Mark's attended publication; consumers stay on the
+registry's 0.6.0 until that release is published and explicitly pinned.
