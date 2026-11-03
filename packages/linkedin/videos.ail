@@ -28,6 +28,13 @@ import std/result (Result, Ok, Err)
 import pkg/sunholo/linkedin/posts (linkedinHeaders, linkedinEscapeLittleText, linkedinFindHeader, PostResult)
 
 export type VideoPart = { firstByte: int, lastByte: int, uploadUrl: string }
+
+-- One part's bytes, [firstByte..lastByte] inclusive. std/bytes `slice` is (bytes, offset, LENGTH), not an end:
+-- passing lastByte + 1 cut the first part right (offset 0) and every later part asked past the end (None), so
+-- any video over one 4 MB part failed to upload (3 Nov 2026, a 4,660,380-byte film).
+export func linkedinPartBytes(video: bytes, p: VideoPart) -> Option[bytes] {
+  slice(video, p.firstByte, p.lastByte - p.firstByte + 1)
+}
 export type VideoUpload = { videoUrn: string, uploadToken: string, parts: [VideoPart] }
 
 -- LinkedIn's part size.
@@ -164,7 +171,7 @@ export func linkedinUploadVideo(token: string, orgUrn: string, video: bytes)
       else {
         let sent = foldl(\st. \p.
           if st.err != "" then st
-          else match slice(video, p.firstByte, p.lastByte + 1) {
+          else match linkedinPartBytes(video, p) {
             None => {err: "could not cut bytes ${show(p.firstByte)}..${show(p.lastByte)}", etags: st.etags},
             Some(b) => match linkedinUploadVideoPart(p.uploadUrl, b) {
               Ok(etag) => {err: "", etags: st.etags ++ [etag]},

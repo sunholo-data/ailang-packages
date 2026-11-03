@@ -22,7 +22,9 @@ import std/io (println)
 import std/string (length, intToStr)
 import sunholo/linkedin/posts (linkedinEscapeLittleText)
 import sunholo/linkedin/comments (linkedinDerivePersona)
-import sunholo/linkedin/videos (linkedinVideoPartCount, linkedinVideoSizeOk, linkedinPartsCover, linkedinParseVideoInit)
+import sunholo/linkedin/videos (linkedinVideoPartCount, linkedinVideoSizeOk, linkedinPartsCover, linkedinParseVideoInit, linkedinPartBytes)
+import std/bytes (fromString, toString, length as bytesLength)
+import std/option (Some, None)
 import std/result (Ok, Err)
 
 func check(name: string, got: string, want: string) -> int ! {IO} {
@@ -98,8 +100,13 @@ export func main() -> () ! {IO} {
                   "urn:li:video:C5505AQH 0-4194303 https://www.linkedin.com/dms-uploads/x");
   let v11 = check("init with no URN is an error",     match linkedinParseVideoInit("{\"value\":{}}") { Ok(_) => "ok", Err(_) => "err" }, "err");
 
-  let total = e1 + e2 + e3 + e4 + e5 + e6 + pp1 + pp2 + pp3 + pp4 + pp5 + pp6 + v1 + v2 + v3 + v4 + v5 + v6 + v7 + v8 + v9 + v10 + v11;
-  let expected = 23;
+  let ten = fromString("abcdefghij");
+  let cut = \a. \z. match linkedinPartBytes(ten, {firstByte: a, lastByte: z, uploadUrl: "u"}) { Some(b) => toString(b), None => "None" };
+  let v12 = check("the first part is cut",            cut(0)(5), "abcdef");
+  let v13 = check("a later part is cut, to the end",  cut(6)(9), "ghij");
+  let v14 = check("a part past the end is refused",   cut(6)(10), "None");
+  let total = e1 + e2 + e3 + e4 + e5 + e6 + pp1 + pp2 + pp3 + pp4 + pp5 + pp6 + v1 + v2 + v3 + v4 + v5 + v6 + v7 + v8 + v9 + v10 + v11 + v12 + v13 + v14;
+  let expected = 26;
   println("");
   if total == expected then println("OK: ${intToStr(total)}/${intToStr(expected)} assertions passed")
   else println("FAIL: ${intToStr(total)}/${intToStr(expected)} assertions passed")
