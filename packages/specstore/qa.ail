@@ -12,13 +12,13 @@ module sunholo/specstore/qa
 
 import std/result (Result, Ok, Err)
 import std/option (Option, Some, None)
-import std/json (Json, JString, JNumber, JBool, JNull, encode, decode, get, js, ja, jo, kv)
+import std/json (Json, JString, JNumber, JBool, JNull, JArray, encode, decode, get, js, ja, jo, kv)
 import std/fs (readFile, writeFile)
 import std/io (println)
 import std/list (map, filter, length, any, flatMap, foldl)
-import std/string (split, join, trim, endsWith, substring, length as strLength)
+import std/string (split, join, trim, endsWith, substring, find, length as strLength)
 import ./rules (worstOutcome, visitOutcome)
-import ./model (Std, Event, Param, Spec, Round, str, arr, strs, obj, matches, dup)
+import ./model (Std, Event, Param, Spec, Round, str, arr, strs, obj, matches, dup, keyOf)
 
 export type Visit = { id: string, url: string, consent: string, expects: [string], forbids: [string], j: Json }
 export type Seen = { id: string, status: string, reason: string, pushes: [Json], hits: [string] }
@@ -96,19 +96,54 @@ export func valueText(j: Json) -> string =
 export func pathGet(j: Json, key: string) -> Option[Json] =
   if has(j, key) then get(j, key) else foldl(\acc. \seg. match acc { Some(x) => get(x, seg), None => None }, Some(j), split(key, "."))
 
+-- One value against the spec's expected value: fixed, or any non-empty value for a {{variable}}.
+func valueProblem(std: Std, label: string, expected: string, v: Json) -> [string] {
+  let t = valueText(v);
+  if matches(std.pVar, expected) then (if trim(t) == "" then ["${label} empty"] else [])
+  else if t == expected then []
+  else ["${label} is \"${t}\", the spec says \"${expected}\""]
+}
+
+-- A key with [] names every element of an array: ecommerce.items[].item_id is item_id in each
+-- item. An empty array fails, since the spec expects at least one; the first bad element is named.
+func arrayProblems(std: Std, key: string, expected: string, push: Json, at: int) -> [string] {
+  let before = substring(key, 0, at);
+  let rest = substring(key, at + 2, strLength(key));
+  let inner = if strLength(rest) > 0 && substring(rest, 0, 1) == "." then substring(rest, 1, strLength(rest)) else rest;
+  match pathGet(push, before) {
+    Some(JArray(items)) =>
+      if length(items) == 0 then ["${before} is empty"]
+      else {
+        let probs = foldl(\acc. \it. match acc {
+            (i, []) => (i + 1, match (if inner == "" then Some(it) else pathGet(it, inner)) {
+                None => ["${before}[${show(i)}].${inner} missing"],
+                Some(v) => valueProblem(std, "${before}[${show(i)}].${inner}", expected, v)
+              }),
+            done => done
+          }, (0, []), items);
+        match probs { (_, ps) => ps }
+      },
+    Some(_) => ["${before} is not a list"],
+    None => ["${before} missing"]
+  }
+}
+
 export func paramProblems(std: Std, e: Event, push: Json) -> [string] =
-  flatMap(\p. match pathGet(push, p.key) {
-      None => ["${p.key} missing"],
-      Some(v) => {
-        let t = valueText(v);
-        if matches(std.pVar, p.value) then (if trim(t) == "" then ["${p.key} empty"] else [])
-        else if t == p.value then []
-        else ["${p.key} is \"${t}\", the spec says \"${p.value}\""]
+  flatMap(\p. {
+      let at = find(p.key, "[]");
+      if at >= 0 then arrayProblems(std, p.key, p.value, push, at)
+      else match pathGet(push, p.key) {
+        None => ["${p.key} missing"],
+        Some(v) => valueProblem(std, p.key, p.value, v)
       }
     }, e.params)
 
 -- One event in one visit: (severity, note). Severity as in rules.visitOutcome.
-export func inVisit(std: Std, e: Event, s: Seen) -> (int, string) {
+export func inVisit(std: Std, e: Event, s: Seen) -> (int, string) = inVisitWith(std, true, e, s)
+
+-- ga4 false: the spec's site block checks the data layer only (checks: [datalayer]), so a missing
+-- GA4 hit is not a failure and a match says so.
+export func inVisitWith(std: Std, ga4: bool, e: Event, s: Seen) -> (int, string) {
   let blocked = s.status != "ok";
   let gaOnly = e.dlEvent == "none";
   let pushes = filter(\x. str(x, "event") == e.dlEvent, s.pushes);
@@ -119,12 +154,14 @@ export func inVisit(std: Std, e: Event, s: Seen) -> (int, string) {
   let fails = flatMap(\xs. xs, [
     if gaOnly || length(pushes) > 0 then [] else ["no dataLayer push with event \"${e.dlEvent}\""],
     if !gaOnly && paramFail then firstProbs else [],
-    if ga then [] else ["no GA4 hit with en=${e.eventName}"]
+    if ga || !ga4 then [] else ["no GA4 hit with en=${e.eventName}"]
   ]);
   let sev = visitOutcome(true, blocked, length(fails) > 0);
   let note = if blocked then "${s.id}: could not check (${s.status}: ${s.reason})"
     else if length(fails) > 0 then "${s.id}: ${join("; ", fails)}"
-    else if gaOnly then "${s.id}: GA4 hit matches the spec (no dataLayer push expected)" else "${s.id}: dataLayer push and GA4 hit match the spec";
+    else if gaOnly then "${s.id}: GA4 hit matches the spec (no dataLayer push expected)"
+    else if !ga4 then "${s.id}: dataLayer push matches the spec (data layer only; GA4 not checked)"
+    else "${s.id}: dataLayer push and GA4 hit match the spec";
   (sev, note)
 }
 
@@ -141,19 +178,31 @@ export func absentIn(e: Event, s: Seen) -> (int, string) {
   (sev, note)
 }
 
-export func outcomeFor(std: Std, vs: [Visit], seen: [Seen], e: Event) -> (int, string) {
+export func outcomeFor(std: Std, vs: [Visit], seen: [Seen], e: Event) -> (int, string) = outcomeWith(std, true, vs, seen, e)
+
+export func outcomeWith(std: Std, ga4: bool, vs: [Visit], seen: [Seen], e: Event) -> (int, string) {
   let run = \v. \f. match filter(\s. s.id == v.id, seen) {
       [s, ..._] => f(s),
       [] => (visitOutcome(false, false, false), "${v.id}: did not run")
     };
   let each = flatMap(\xs. xs, [
-    map(\v. run(v, \s. inVisit(std, e, s)), filter(\v. any(\i. i == e.id, v.expects), vs)),
+    map(\v. run(v, \s. inVisitWith(std, ga4, e, s)), filter(\v. any(\i. i == e.id, v.expects), vs)),
     map(\v. run(v, \s. absentIn(e, s)), filter(\v. any(\i. i == e.id, v.forbids), vs))
   ]);
   if length(each) == 0 then (-1, "no visit covers this event")
   else (foldl(\acc. \p. match p { (s, _) => worstOutcome(acc, s) }, 0, each),
         join(" | ", map(\p. match p { (_, n) => n }, each)))
 }
+
+-- An event whose last change is newer than the version the client has put live is not judged:
+-- a failure there would be the release not having happened yet, not a broken tag.
+export func waitingForRelease(e: Event) -> bool = e.live != "" && keyOf(e.live) >= 0 && keyOf(e.live) < keyOf(e.changed)
+
+-- site.checks lists what a run judges; without it, both the data layer and GA4.
+export func checksGa4(spec: Json) -> bool = match strs(obj(spec, "site"), "checks") {
+    [] => true,
+    cs => any(\c. c == "ga4", cs)
+  }
 
 export func stateOf(sev: int) -> string =
   if sev == 2 then "fail" else if sev == 1 then "blocked" else "not tested"
@@ -179,7 +228,9 @@ export func runCompare(std: Std, sp: Spec, obsPath: string, out: string) -> () !
       let observedFor = str(o, "spec_version");
       let n = 1 + foldl(\acc. \r. if r.n > acc then r.n else acc, 0, sp.rounds);
       let date = substring(str(o, "captured_at"), 0, 10);
-      let rows = map(\e. match outcomeFor(std, vs, seen, e) {
+      let ga4 = checksGa4(sp.j);
+      let rows = map(\e. if waitingForRelease(e) then (e.id, "not tested", "Waiting for release: changed in v${e.changed}, live is v${e.live}. Not checked until the client puts it live.")
+        else match outcomeWith(std, ga4, vs, seen, e) {
           (sev, note) => if sev < 0 then (e.id, "not tested", note) else (e.id, stateOf(sev), commentOf(sev, note))
         }, sp.events);
       writeFile(out, roundYaml(n, sp.version, date, rows));
