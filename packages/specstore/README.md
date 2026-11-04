@@ -51,3 +51,9 @@ run list; a browser script (Playwright, headless Chromium) visits each page and 
 as `{t, url, item}`) and `hits` (each GA4 hit as `{host, tid, en, params}`); `specstore compare`
 reads it against the spec and writes the next QA round. The browser half is not part of this
 package: it needs a browser, which AILANG does not drive. The comparison never records a pass.
+
+Parameters are compared one by one: a fixed value must match, a `{{variable}}` must be present and
+non-empty. A key with `[]` is checked in every element of the array (`ecommerce.items[].item_id`).
+`site.checks: [datalayer]` judges the data layer only; leave it out to judge GA4 hits as well. An
+event's `live` field, the version the client has released, holds back a changed event as
+"waiting for release" until `live` catches up with `changed`.

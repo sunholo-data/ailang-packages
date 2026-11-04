@@ -7,7 +7,7 @@ import std/json (Json, JNull)
 import std/list (map, length)
 import ./rules (worstOutcome, visitOutcome)
 import ./model (Std, Spec, toStd, toSpec)
-import ./qa (seenOf, outcomeFor, visitsOf, visitChecks)
+import ./qa (seenOf, outcomeFor, outcomeWith, visitsOf, visitChecks, waitingForRelease, checksGa4)
 
 func y(s: string) -> Json = match yamlDecode(s) { Ok(j) => j, Err(_) => JNull }
 
@@ -84,4 +84,39 @@ test "every high-priority event needs a visit" {
 
 test "a consent state the site block has no button for is refused" {
   length(visitChecks(spec("  - {id: V01, url: /, consent: reject, expects: [E01, E02]}"))) == 1
+}
+
+-- 0.3.0: arrays in parameter keys, the data-layer-only mode, waiting for release.
+func shop(extra: string) -> Spec = toSpec(y("spec: {client: C, project: P, owner: Ana, version: \"1.1\", standard: \"0.1\"}
+site: {base_url: \"https://example.com\"${extra}}
+events:
+  - {id: E01, eventName: view_item, priority: high, since: \"1.0\", changed: \"1.1\", live: \"1.1\", parameters: [{key: ecommerce.currency, value: EUR}, {key: \"ecommerce.items[].item_id\", value: \"{{itemId}}\"}]}
+  - {id: E02, eventName: login, priority: high, since: \"1.0\", changed: \"1.1\", live: \"1.0\"}
+visits:
+  - {id: V01, url: /, consent: none, expects: [E01]}"), [])
+
+func shopOutcome(ga4: bool, items: string, hits: string) -> int {
+  let sp = shop("");
+  match sp.events {
+    [e, ..._] => match outcomeWith(std(), ga4, visitsOf(sp), seenOf(seen("ok", "{item: {event: view_item, ecommerce: {currency: EUR, items: [${items}]}}}", hits)), e) { (sv, _) => sv },
+    [] => -9
+  }
+}
+
+test "every item in an array carries the key: matched" { shopOutcome(true, "{item_id: a}, {item_id: b}", "{en: view_item}") == 0 }
+
+test "one item without the key fails" { shopOutcome(true, "{item_id: a}, {name: b}", "{en: view_item}") == 2 }
+
+test "an empty array fails" { shopOutcome(true, "", "{en: view_item}") == 2 }
+
+test "data layer only: no GA4 hit is not a failure" {
+  shopOutcome(false, "{item_id: a}", "") == 0 && shopOutcome(true, "{item_id: a}", "") == 2
+}
+
+test "site.checks without ga4 turns GA4 off; no checks list keeps it on" {
+  !checksGa4(shop(", checks: [datalayer]").j) && checksGa4(shop("").j)
+}
+
+test "a change not yet live waits for release; a live one is checked" {
+  match shop("").events { [a, b] => !waitingForRelease(a) && waitingForRelease(b), _ => false }
 }

@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.3.0
+
+Three things a real flow needed. A parameter key may name every element of an array with `[]`:
+`ecommerce.items[].item_id` is checked in each item, an empty array fails, and the first bad
+element is named (`ecommerce.items[1].item_id missing`). A spec's `site` block may say
+`checks: [datalayer]` to judge the data layer only; without it both the data layer and GA4 are
+judged, as before. An event may record `live`, the version the client has put on the site: when
+its last change is newer, `compare` writes `not tested` with "waiting for release" instead of a
+failure that is really a release not yet made. Tests: `qa_test.ail` (20).
+
 ## 0.2.0
 
 Scheduled tag QA. A spec can now carry a `site` block (base URL, consent buttons) and a `visits`

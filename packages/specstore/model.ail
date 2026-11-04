@@ -22,7 +22,7 @@ export type Dev = { rule: string, instead: string, approvedBy: string }
 export type Param = { key: string, value: string }
 export type Event = { id: string, description: string, trigger: string, scope: string, eventName: string,
                priority: string, since: string, changed: string, note: string, params: [Param],
-               dlEvent: string }
+               dlEvent: string, live: string }
 export type Dict = { name: string, definition: string, typ: string, example: string, source: string, allowed: [string] }
 export type Hist = { version: string, date: string, author: string, what: string, reader: string, status: string }
 export type Res = { event: string, state: string, comment: string }
@@ -66,6 +66,7 @@ export func toSpec(j: Json, rounds: [Round]) -> Spec {
                       eventName: str(e, "eventName"), priority: str(e, "priority"), since: str(e, "since"),
                       changed: if str(e, "changed") == "" then str(e, "since") else str(e, "changed"), note: str(e, "note"),
                       dlEvent: if str(e, "datalayer_event") == "" then str(e, "eventName") else str(e, "datalayer_event"),
+                      live: str(e, "live"),
                       params: map(\p. { key: str(p, "key"), value: str(p, "value") }, arr(e, "parameters")) }, arr(j, "events")),
     dict: map(\d. { name: str(d, "name"), definition: str(d, "definition"), typ: str(d, "type"), example: str(d, "example"),
                     source: str(d, "source"), allowed: strs(d, "allowed") }, arr(j, "dictionary")),
