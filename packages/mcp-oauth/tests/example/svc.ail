@@ -1,6 +1,8 @@
 -- Integration fixture for sunholo/mcp_oauth: a listed MCP service with one
--- gated tool, the four OAuth endpoints, and SharedMem-backed hooks.
--- Pre-registered client (the CIMD fetch waits on ailang Net[scope=public]).
+-- gated tool, the OAuth endpoints, and SharedMem-backed hooks.
+-- The Claude CIMD client is pre-registered here (tests/e2e_flow.sh, the 0.1.2
+-- path); 0.2 adds a GE-shaped confidential client, DCR (/oauth/register) and
+-- RFC 7009 revocation (/oauth/revoke), driven by tests/e2e_client_models.sh.
 --
 --   OAUTH_ISSUER=http://localhost:PORT AILANG_TRACE_VALUES=off \
 --   ailang serve-api --mcp-http --port PORT --oauth-issuer http://localhost:PORT \
@@ -17,9 +19,11 @@ import std/sharedmem (get as smGet, put as smPut, delete as smDelete, has_key)
 import std/bytes (fromString, toString)
 import std/option (Option, Some, None)
 import std/result (Result, Ok, Err)
-import std/json (Json, decode, getString, js)
-import pkg/sunholo/mcp_oauth/core (asMetadata, formGet)
-import pkg/sunholo/mcp_oauth/flow (Hooks, beginAuthorize, completeLogin, exchangeCode, refreshTokens, oauthError)
+import std/json (Json, decode, encode, getString, js, jo, kv)
+import pkg/sunholo/mcp_oauth/core (ClientConfig, defaultClientConfig, asMetadataFor, formGet, clientKind)
+import pkg/sunholo/mcp_oauth/clients (trustedCallerIp)
+import pkg/sunholo/mcp_oauth/flow (Hooks, beginAuthorize, beginAuthorizeFor, completeLogin, tokenRequest, revokeRequest,
+  registerClientDcr, createClient, oauthError)
 
 -- ---------------- hooks ----------------
 func hAuth(idToken: string) -> Result[string, string] ! {IO, FS, Env, Net, Clock, SharedMem} =
@@ -43,6 +47,19 @@ func issuer() -> string ! {Env} = getEnvOr("OAUTH_ISSUER", "http://localhost:808
 func nowSec() -> int ! {Clock} = now() / 1000
 
 pure func client() -> string = "https://claude.ai/oauth/claude-code-client-metadata"
+
+-- 0.2: registered confidential clients, DCR (Claude/Google redirect hosts
+-- only) and revocation. Built from the default with a record update.
+pure func cfg() -> ClientConfig =
+  { defaultClientConfig() | confidential: true, dcr: true, revocation: true,
+    dcrRedirectHosts: ["claude.ai", ".googleusercontent.com", "vertexaisearch.cloud.google.com"] }
+
+-- A header value from @raw headers ("" when absent).
+pure func hdr(headers: Json, name: string) -> string = q(headers, name)
+
+pure func jsonResponse(st: int, body: string, www: string) -> {_body: string, _status: int, _headers: Json} =
+  {_body: body, _status: st, _headers: jo([kv("Content-Type", js("application/json")), kv("Cache-Control", js("no-store"))]
+                                          ++ (if www == "" then [] else [kv("WWW-Authenticate", js(www))]))}
 pure func registered() -> [string] = ["https://claude.ai/api/mcp/auth_callback", "http://localhost/callback"]
 
 pure func q(req: Json, k: string) -> string = match getString(req, k) { Some(s) => s, None => "" }
@@ -61,7 +78,7 @@ export func whoami() -> string = "signed in"
 @route("GET", "/.well-known/oauth-authorization-server")
 @nowrap
 @nomcp
-export func asMeta() -> string ! {Env} = asMetadata(issuer())
+export func asMeta() -> string ! {Env} = asMetadataFor(issuer(), cfg())
 
 pure func redirect(loc: string) -> {_body: string, _status: int, _headers: {location: string}} =
   {_body: "", _status: 302, _headers: {location: loc}}
@@ -74,7 +91,14 @@ pure func badRequest(body: string) -> {_body: string, _status: int, _headers: {l
 export func authorize(req: {body: string, headers: Json, method: string, path: string, query: Json})
   -> {_body: string, _status: int, _headers: {location: string}} ! {IO, FS, Env, Net, Clock, SharedMem, Rand[mode=crypto], Declassify} {
   let cid = q(req.query, "client_id");
-  if cid != client() then badRequest(oauthError("invalid_client", "unknown client_id"))
+  if clientKind(cid) == "registered" then
+    match beginAuthorizeFor(hooks(), cfg(), "${issuer()}/login", cid, q(req.query, "redirect_uri"),
+                            q(req.query, "response_type"), q(req.query, "code_challenge"),
+                            q(req.query, "code_challenge_method"), q(req.query, "state"), nowSec()) {
+      Ok(loc) => redirect(loc),
+      Err(e) => badRequest(e)
+    }
+  else if cid != client() then badRequest(oauthError("invalid_client", "unknown client_id"))
   else match beginAuthorize(hooks(), "${issuer()}/login", cid, registered(), q(req.query, "redirect_uri"),
                             q(req.query, "response_type"), q(req.query, "code_challenge"),
                             q(req.query, "code_challenge_method"), q(req.query, "state"), nowSec()) {
@@ -93,20 +117,52 @@ export func loginComplete(req: {body: string, headers: Json, method: string, pat
     Err(e) => badRequest(e)
   }
 
-pure func errJson(e: string) -> Json = match decode(e) { Ok(j) => j, Err(_) => js(e) }
-
+-- 0.2 token endpoint: every client model, client authenticated first.
 @route("POST", "/oauth/token")
 @raw
-@nowrap
 @nomcp
 export func token(req: {body: string, headers: Json, method: string, path: string, query: Json})
-  -> Result[string, Json] ! {IO, FS, Env, Net, Clock, SharedMem, Rand[mode=crypto], Declassify} {
-  let b = req.body;
-  let grant = formGet(b, "grant_type");
-  let res =
-    if grant == "authorization_code" then
-      exchangeCode(hooks(), formGet(b, "code"), formGet(b, "code_verifier"), formGet(b, "client_id"), formGet(b, "redirect_uri"), nowSec())
-    else if grant == "refresh_token" then refreshTokens(hooks(), formGet(b, "refresh_token"), formGet(b, "client_id"), nowSec())
-    else Err(oauthError("unsupported_grant_type", "grant_type must be authorization_code or refresh_token"));
-  match res { Ok(body) => Ok(body), Err(e) => Err(errJson(e)) }
+  -> {_body: string, _status: int, _headers: Json} ! {IO, FS, Env, Net, Clock, SharedMem, Rand[mode=crypto], Declassify} =
+  match tokenRequest(hooks(), cfg(), hdr(req.headers, "Authorization"), req.body, nowSec()) {
+    (st, body, www) => jsonResponse(st, body, www)
+  }
+
+-- RFC 7009 revocation (Google calls it on unlink).
+@route("POST", "/oauth/revoke")
+@raw
+@nomcp
+export func revoke(req: {body: string, headers: Json, method: string, path: string, query: Json})
+  -> {_body: string, _status: int, _headers: Json} ! {IO, FS, Env, Net, Clock, SharedMem, Declassify} =
+  match revokeRequest(hooks(), cfg(), hdr(req.headers, "Authorization"), req.body, nowSec()) {
+    (st, body, www) => jsonResponse(st, body, www)
+  }
+
+-- RFC 7591 registration. The caller key is the RIGHTMOST X-Forwarded-For
+-- entry (the one Google's front end appends), never the first.
+@route("POST", "/oauth/register")
+@raw
+@nomcp
+export func register(req: {body: string, headers: Json, method: string, path: string, query: Json})
+  -> {_body: string, _status: int, _headers: Json} ! {IO, FS, Env, Net, Clock, SharedMem, Rand[mode=crypto], Declassify} {
+  let caller = trustedCallerIp(hdr(req.headers, "X-Forwarded-For"), hdr(req.headers, "X-Real-Ip"));
+  match registerClientDcr(hooks(), cfg(), caller, req.body, nowSec()) {
+    Ok((st, body)) => jsonResponse(st, body, ""),
+    Err(e) => jsonResponse(500, e, "")
+  }
 }
+
+-- TEST FIXTURE ONLY: creates the GE-shaped client (client_secret_basic, the GE
+-- redirect) inside this process, because the SharedMem store is per process.
+-- A real deployment runs createClient from an operator script instead and
+-- mounts no such route. Off unless MCP_OAUTH_EXAMPLE_TEST_ROUTES=1.
+@route("POST", "/test/create-client")
+@raw
+@nomcp
+export func testCreateClient(req: {body: string, headers: Json, method: string, path: string, query: Json})
+  -> {_body: string, _status: int, _headers: Json} ! {IO, FS, Env, Net, Clock, SharedMem, Rand[mode=crypto], Declassify} =
+  if getEnvOr("MCP_OAUTH_EXAMPLE_TEST_ROUTES", "") != "1" then jsonResponse(404, oauthError("invalid_request", "not found"), "")
+  else match createClient(hooks(), cfg(), ["https://vertexaisearch.cloud.google.com/oauth-redirect"], formGet(req.body, "method"),
+                          formGet(req.body, "refresh_policy"), nowSec()) {
+    Ok((id, secret)) => jsonResponse(200, encode(jo([kv("client_id", js(id)), kv("client_secret", js(secret))])), ""),
+    Err(e) => jsonResponse(400, oauthError("invalid_request", e), "")
+  }

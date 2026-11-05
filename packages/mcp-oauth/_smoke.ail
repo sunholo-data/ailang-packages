@@ -5,7 +5,9 @@
 module _smoke
 
 import std/io (println)
-import pkg/sunholo/mcp_oauth/core (pkceOk, redirectOk, cimdUrlOk, challengeMethodOk, isExpired, codeExpiresAt)
+import pkg/sunholo/mcp_oauth/core (pkceOk, redirectOk, cimdUrlOk, challengeMethodOk, isExpired, codeExpiresAt, clientKind,
+  asMetadata, asMetadataFor, defaultClientConfig)
+import std/string (contains)
 
 func expect(name: string, ok: bool) -> () ! {IO} =
   if ok then println("OK: ${name}") else println("FAIL: ${name}")
@@ -16,5 +18,9 @@ export func main() -> () ! {IO} {
   expect("exact redirect only", redirectOk("https://claude.ai/api/mcp/auth_callback", ["https://claude.ai/api/mcp/auth_callback"])
     && redirectOk("https://claude.ai/api/mcp/auth_callback/x", ["https://claude.ai/api/mcp/auth_callback"]) == false);
   expect("cimd refuses metadata host", cimdUrlOk("https://metadata.google.internal/x") == false);
-  expect("code ttl", isExpired(codeExpiresAt(0), 60))
+  expect("code ttl", isExpired(codeExpiresAt(0), 60));
+  expect("client kinds disjoint", clientKind("mco_0123456789abcdef0123456789abcdef") == "registered"
+    && clientKind("https://claude.ai/oauth/claude-code-client-metadata") == "cimd");
+  expect("default metadata is 0.1.2", asMetadataFor("https://a.example", defaultClientConfig()) == asMetadata("https://a.example")
+    && contains(asMetadata("https://a.example"), "registration_endpoint") == false)
 }

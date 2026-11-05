@@ -1,25 +1,84 @@
 -- Route template for adopters: copy into YOUR service module (serve-api
--- serves only the service's own @route functions). Fill the four hooks
--- (see AGENT.md). Do NOT log request bodies or the strings these routes
--- return: they carry codes and tokens. Run serve-api with
+-- serves only the service's own @route functions). Fill the hooks (see
+-- AGENT.md). Do NOT log request bodies or the strings these routes return:
+-- they carry codes, tokens and client secrets. Run serve-api with
 -- AILANG_TRACE_VALUES=off (traces render arguments verbatim).
 --
 -- This file is documentation that compiles; it is not exported.
 module sunholo/mcp_oauth/routes_template
 
 import std/clock (now)
+import std/io (println)
+import std/json (Json, getString, jo, kv, js)
+import std/option (Some, None)
 import std/result (Ok, Err)
-import pkg/sunholo/mcp_oauth/core (asMetadata)
-import pkg/sunholo/mcp_oauth/flow (Hooks, oauthError)
+import pkg/sunholo/mcp_oauth/core (ClientConfig, defaultClientConfig, asMetadata, asMetadataFor)
+import pkg/sunholo/mcp_oauth/clients (trustedCallerIp)
+import pkg/sunholo/mcp_oauth/flow (Hooks, oauthError, createClient, tokenRequest, revokeRequest, registerClientDcr)
 
--- GET /.well-known/oauth-authorization-server
+-- GET /.well-known/oauth-authorization-server (0.1.2: CIMD only)
 export func metadata(issuer: string) -> string = asMetadata(issuer)
 
 -- Seconds since the epoch for the flow functions (std/clock is milliseconds).
 export func nowSec() -> int ! {Clock} = now() / 1000
 
--- The four flow routes map one-to-one onto flow.beginAuthorize (after the
+-- The 0.1.2 flow routes map one-to-one onto flow.beginAuthorize (after the
 -- cimd fetch), flow.completeLogin, flow.exchangeCode and flow.refreshTokens.
 -- Return their Ok value as the response (302 Location for the first two,
 -- 200 JSON for the token endpoint) and their Err value as a 400 JSON body.
 export pure func badRequest(desc: string) -> string = oauthError("invalid_request", desc)
+
+-- ---------------- 0.2 client models ----------------
+
+-- What this deployment accepts. Always a record update of the default, so a
+-- later field cannot break the build. Turn on only what you have measured
+-- against the real client (design §P0).
+export pure func config() -> ClientConfig =
+  { defaultClientConfig() | confidential: true, revocation: true }
+
+-- GET /.well-known/oauth-authorization-server (0.2): advertises only what
+-- config() turns on. With defaultClientConfig() it is 0.1.2's document.
+export func metadataFor(issuer: string) -> string = asMetadataFor(issuer, config())
+
+pure func header(headers: Json, name: string) -> string = match getString(headers, name) { Some(s) => s, None => "" }
+
+-- (status, body, WWW-Authenticate) -> a serve-api raw response.
+export pure func respond(st: int, body: string, www: string) -> {_body: string, _status: int, _headers: Json} =
+  {_body: body, _status: st, _headers: jo([kv("Content-Type", js("application/json")), kv("Cache-Control", js("no-store"))]
+                                          ++ (if www == "" then [] else [kv("WWW-Authenticate", js(www))]))}
+
+-- POST /oauth/token (0.2): every client model; the client is authenticated
+-- from the raw Authorization header and form body. Mount it with @raw.
+--   authorize: beginAuthorizeFor(h, config(), loginUrl, client_id, ...) does
+--   the CIMD fetch itself, or the store lookup for an mco_ client.
+export func tokenRoute(h: Hooks, req: {body: string, headers: Json, method: string, path: string, query: Json})
+  -> {_body: string, _status: int, _headers: Json} ! {IO, FS, Env, Net, Clock, SharedMem, Rand[mode=crypto], Declassify} =
+  match tokenRequest(h, config(), header(req.headers, "Authorization"), req.body, nowSec()) {
+    (st, body, www) => respond(st, body, www)
+  }
+
+-- POST /oauth/revoke (RFC 7009), when config().revocation.
+export func revokeRoute(h: Hooks, req: {body: string, headers: Json, method: string, path: string, query: Json})
+  -> {_body: string, _status: int, _headers: Json} ! {IO, FS, Env, Net, Clock, SharedMem, Declassify} =
+  match revokeRequest(h, config(), header(req.headers, "Authorization"), req.body, nowSec()) {
+    (st, body, www) => respond(st, body, www)
+  }
+
+-- POST /oauth/register (RFC 7591), when config().dcr. The caller key is the
+-- RIGHTMOST X-Forwarded-For entry; never pass the first one.
+export func registerRoute(h: Hooks, req: {body: string, headers: Json, method: string, path: string, query: Json})
+  -> {_body: string, _status: int, _headers: Json} ! {IO, FS, Env, Net, Clock, SharedMem, Rand[mode=crypto], Declassify} =
+  match registerClientDcr(h, config(), trustedCallerIp(header(req.headers, "X-Forwarded-For"), header(req.headers, "X-Real-Ip")), req.body, nowSec()) {
+    Ok((st, body)) => respond(st, body, ""),
+    Err(e) => respond(500, e, "")
+  }
+
+-- Operator script (NOT a route): create the Gemini Enterprise client once,
+-- with your store hooks, and copy the two values into the GE admin form. The
+-- secret is printed once and is not recoverable: the store holds its digest.
+--   ailang run --caps IO,FS,Env,Net,Clock,Rand --entry main your_operator_script.ail
+export func createGeClient(h: Hooks) -> () ! {IO, FS, Env, Net, Clock, SharedMem, Rand[mode=crypto], Declassify} =
+  match createClient(h, config(), ["https://vertexaisearch.cloud.google.com/oauth-redirect"], "client_secret_basic", "rotate", nowSec()) {
+    Ok((clientId, secret)) => { println("Client ID:     ${clientId}"); println("Client secret: ${secret}") },
+    Err(e) => println("could not create the client: ${e}")
+  }

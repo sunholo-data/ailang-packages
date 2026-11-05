@@ -161,7 +161,12 @@ pure func kindOf(rec: Json) -> string = if getStringOr(rec, "kind") == "" then "
 -- The authenticated client of one token-endpoint request. Internal: it is
 -- never a parameter or result of an exported function, so no caller can hand
 -- the flow a pre-authenticated value (quorum round 1).
-type ClientAuth = { clientId: string, kind: string, method: string, refreshPolicy: string }
+type ClientAuth = {
+  clientId: string,
+  kind: string,
+  method: string,
+  refreshPolicy: string
+}
 
 -- A registered client this deployment accepts: present, unexpired, and
 -- enabled by cfg (clients.clientAccepted).
