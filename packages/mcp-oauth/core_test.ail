@@ -141,3 +141,54 @@ test "stable idle deadline never passes the absolute one" {
 test "stable refresh dead at either deadline" {
   stableRefreshLive(10, 20, 30) && stableRefreshLive(20, 20, 30) == false && stableRefreshLive(30, 40, 30) == false
 }
+
+-- ---------------- 0.2: the one host parser (core.httpsHost) ----------------
+-- The host ends at the first "/", "?", "#" or "\\" and the port at ":".
+test "host ends at the query" {
+  httpsHost("https://localhost?.example.com/c") == "localhost" && cimdUrlOk("https://localhost?.example.com/c") == false
+    && cimdUrlOk("https://localhost?.claude.ai/oauth/client.json") == false
+}
+test "host ends at the fragment" { httpsHost("https://localhost#.example.com") == "localhost" }
+test "host ends at a backslash" {
+  httpsHost("https://localhost\\.example.com/c") == "localhost" && cimdUrlOk("https://localhost\\.example.com/c") == false
+    && cimdUrlOk("https://claude.ai\\@metadata.google.internal/c") == false
+}
+test "host refuses userinfo" {
+  httpsHost("https://u@claude.ai/c") == "" && httpsHost("https://claude.ai:443@localhost/c") == ""
+    && cimdUrlOk("https://claude.ai:443@localhost/c") == false
+}
+test "host is lowercased" {
+  httpsHost("https://Claude.AI/c") == "claude.ai" && cimdUrlOk("https://LOCALHOST/c") == false
+    && cimdUrlOk("https://Metadata.Google.Internal/computeMetadata/v1/") == false && cimdUrlOk("https://SVC.INTERNAL/c") == false
+}
+test "host refuses a trailing dot" {
+  httpsHost("https://localhost./c") == "" && cimdUrlOk("https://localhost./c") == false
+    && cimdUrlOk("https://metadata.google.internal./c") == false && cimdUrlOk("https://claude.ai./c") == false
+}
+test "host refuses ipv6 brackets" {
+  httpsHost("https://[::1]/c") == "" && cimdUrlOk("https://[::ffff:127.0.0.1]/c") == false && cimdUrlOk("https://[fe80::1%25en0]/c") == false
+}
+test "host refuses percent-encoding" {
+  httpsHost("https://local%68ost/c") == "" && cimdUrlOk("https://local%68ost/c") == false && cimdUrlOk("https://claude.ai%2F@evil.example/c") == false
+}
+test "host refuses numeric addresses" {
+  cimdUrlOk("https://127.1/c") == false && cimdUrlOk("https://2130706433/c") == false
+    && cimdUrlOk("https://0x7f.0.0.1/c") == false && cimdUrlOk("https://10.0.0.1:8443/c") == false
+}
+test "host refuses single labels and empty labels" {
+  cimdUrlOk("https://intranet/c") == false && httpsHost("https://claude..ai/c") == "" && httpsHost("https://.claude.ai/c") == ""
+    && httpsHost("https://-claude.ai/c") == "" && httpsHost("https://claude ai/c") == ""
+}
+test "host port must be digits" {
+  httpsHost("https://claude.ai:8443/c") == "claude.ai" && httpsHost("https://claude.ai:abc/c") == ""
+    && httpsHost("https://claude.ai:/c") == "" && httpsHost("http://claude.ai/c") == ""
+}
+test "real client metadata urls still accepted" {
+  cimdUrlOk("https://claude.ai/oauth/claude-code-client-metadata") && cimdUrlOk("https://chatgpt.com/oauth/client.json")
+    && cimdUrlOk("https://ailang.sunholo.com/mcp-check/client-metadata.json") && cimdUrlOk("https://Example.com:8443/c.json")
+}
+test "loopback refuses query fragment backslash and userinfo tricks" {
+  stripLoopbackPort("http://localhost?.evil.example/cb") == "" && stripLoopbackPort("http://localhost#x") == ""
+    && stripLoopbackPort("http://127.0.0.1@evil.example/cb") == "" && stripLoopbackPort("http://localhost\\@evil.example/cb") == ""
+    && stripLoopbackPort("http://localhost:80@evil.example/cb") == "" && stripLoopbackPort("http://localhost:8080?x") == ""
+}

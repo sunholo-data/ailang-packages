@@ -76,10 +76,10 @@ mutant M12 $K 'if startsWith(id, "mco_") && strContains(id, "://") == false && l
 mutant M13 $K '  else if startsWith(id, "https://") then "cimd"' '  else if startsWith(id, "mco_") || startsWith(id, "https://") then "cimd"' \
               verify core.ail clientKind "namespaces overlap: mco_ id read as CIMD (T14)"
 # ---- M1b: DCR (T12, T15)
-mutant M14 $C '  dcrRedirectOk(uri, dcrHostAllowed(redirectHost(uri), hosts), stripLoopbackPort(uri) != "")' '  dcrRedirectOk(uri, redirectHost(uri) != "", stripLoopbackPort(uri) != "")' \
+mutant M14 $C '  dcrRedirectOk(uri, dcrHostAllowed(httpsHost(uri), hosts), stripLoopbackPort(uri) != "")' '  dcrRedirectOk(uri, httpsHost(uri) != "", stripLoopbackPort(uri) != "")' \
               suite dcr "TestDcrRedirectAllowlist" "dcrRedirectHosts ignored"
-mutant M15 $C 'firstStop(rest, ["/", "?", "#", "\\"])' 'firstStop(rest, ["/"])' \
-              test - "redirect host stops at path query fragment and backslash" "host parser ignores ?/#/\\ (the charset check still refuses; caught by the unit test)"
+mutant M15 $K 'firstStop(rest, ["/", "?", "#", "\\"])' 'firstStop(rest, ["/"])' \
+              test - "host ends at the query" "host parser ignores ?/#/\\ (one parser: CIMD and DCR)"
 mutant M16 $C '    && (loopback || (startsWith(uri, "https://") && strContains(uri, "@") == false && hostAllowed))
 }' '    && (loopback || (startsWith(uri, "https://") && hostAllowed))
 }' verify clients.ail dcrRedirectOk "userinfo allowed in a DCR redirect"
@@ -130,6 +130,26 @@ mutant M37 $D 'Some(ms) => cimdAuthMethodsOk(ms, true) }' 'Some(ms) => true }' \
 # ---- M1e: metadata
 mutant M38 $K '  ] ++ (if cfg.dcr then [kv("registration_endpoint"' '  ] ++ (if true then [kv("registration_endpoint"' \
               test - "metadata golden: asMetadata is byte-identical to 0.1.2" "registration_endpoint always advertised"
+
+# ---- the one host parser (core.httpsHost) and the CIMD/DCR URL gates
+mutant M39 $K '    && startsWith(h, ".") == false && endsWith(h, ".") == false && strContains(h, "..") == false' '    && startsWith(h, ".") == false && strContains(h, "..") == false' \
+              test - "host refuses a trailing dot" "trailing-dot host accepted by the parser"
+mutant M40 $K $'    && endsWith(host, ".") == false && isInternalHost(host) == false)' $'    && isInternalHost(host) == false)' \
+              verify core.ail cimdUrlGate "CIMD gate accepts a trailing-dot host"
+mutant M41 $K '    let host = toLower(if colon < 0 then authority else substring(authority, 0, colon));' '    let host = (if colon < 0 then authority else substring(authority, 0, colon));' \
+              test - "host is lowercased" "host not lowercased (LOCALHOST passes the internal check)"
+mutant M42 $K '  match last(split(host, ".")) { Some(l) => digitsOnly(l), None => false }' '  false' \
+              test - "host refuses numeric addresses" "numeric (IP) hosts accepted"
+mutant M43 $K '  h != "" && not any(\c. find("abcdefghijklmnopqrstuvwxyz0123456789.-", c) < 0, chars(h))' '  h != ""' \
+              test - "host refuses percent-encoding" "host charset not checked (%, [, @, space)"
+mutant M44 $K $'    && strContains(url, "@") == false && strContains(url, "#") == false && strContains(url, "\\\\") == false\n    && endsWith' $'    && strContains(url, "@") == false && strContains(url, "#") == false\n    && endsWith' \
+              verify core.ail cimdUrlGate "CIMD gate accepts a backslash"
+mutant M45 $K '    let portOk = colon < 0 || digitsOnly(substring(authority, colon + 1, length(authority)));' '    let portOk = true;' \
+              test - "host port must be digits" "non-numeric port accepted"
+mutant M46 $K '  cimdUrlGate(url, host, strContains(host, ".") && ipLike(host) == false)' '  cimdUrlGate(url, host, ipLike(host) == false)' \
+              test - "host refuses single labels and empty labels" "single-label (intranet) CIMD host accepted"
+mutant M47 $C '  length(uri) <= 512 && strContains(uri, "#") == false && strContains(uri, "\\") == false' '  length(uri) <= 512 && strContains(uri, "#") == false' \
+              verify clients.ail dcrRedirectOk "DCR gate accepts a backslash"
 
 echo "mutants: $killed/$total killed"
 [ $killed -eq $total ] && [ $rc -eq 0 ] && echo "ok: every mutant killed"

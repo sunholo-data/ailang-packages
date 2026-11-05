@@ -63,6 +63,7 @@ pure func config() -> ClientConfig = { defaultClientConfig() | confidential: tru
 |---|---|---|
 | `core.asMetadata(issuer)` | 0.1 | 0.1.2's document, byte for byte (= `asMetadataFor(issuer, defaultClientConfig())`) |
 | `core.asMetadataFor(issuer, cfg)` | 0.2 | Adds only what `cfg` turns on. CIMD and `none` are always advertised, `none` first |
+| `core.httpsHost(url)` | 0.1 | 0.2: the package's ONE host parser (CIMD and DCR). Lowercase host, ending at the first `/` `?` `#` `\` and the port at `:`; `""` for userinfo, brackets, `%`, a trailing dot or any non-hostname character |
 | `core.clientKind(id)` | 0.2 | `"cimd"` (https URL) / `"registered"` (`mco_` + 32 hex) / `"unknown"`; Z3-proved disjoint |
 | `flow.beginAuthorize(h, loginUrl, clientId, registered, …)` | 0.1 | You fetch the CIMD document first. Refuses `mco_` ids |
 | `flow.beginAuthorizeFor(h, cfg, loginUrl, clientId, …)` | 0.2 | Fetches CIMD itself (`Net[scope=public]`) or looks up an `mco_` client; never fetches an `mco_` id |
@@ -132,7 +133,7 @@ message that says so. `exchangeCode`/`refreshTokens` now refuse a `client_id` th
 ## How the guarantees are checked
 | Check | What it shows |
 |---|---|
-| `ailang verify core.ail` / `ailang verify clients.ail` | Z3 proofs: redirects, PKCE length and method, CIMD https gate, code lifetime, **`clientKind`** (disjoint namespaces), **`authMethodOk`**, `cimdAuthMethodsOk`, `advertisedAuthMethods`, `refreshPolicyOk`, the stable lifetimes, **`dcrRedirectOk`**, `clientAccepted`, `clientLive`, the DCR windows |
+| `ailang verify core.ail` / `ailang verify clients.ail` | Z3 proofs: redirects, PKCE length and method, CIMD https gate and **`cimdUrlGate`** (no userinfo, fragment, backslash, trailing dot or internal host), code lifetime, **`clientKind`** (disjoint namespaces), **`authMethodOk`**, `cimdAuthMethodsOk`, `advertisedAuthMethods`, `refreshPolicyOk`, the stable lifetimes, **`dcrRedirectOk`**, `clientAccepted`, `clientLive`, the DCR windows |
 | `tests/broken_redirect.ail` | Must show a **VIOLATION**, which proves the redirect proof bites |
 | `ailang test --package .` | Pure tests, incl. the RFC 7636 App. B vector, the 0.1.2 metadata golden and ChatGPT's live CIMD document |
 | `tests/flow_check.sh` | 0.1.2 flow: single use, replay revocation, binding, expiry, rotation, family revocation |

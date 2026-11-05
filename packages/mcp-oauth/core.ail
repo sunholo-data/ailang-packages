@@ -16,7 +16,7 @@ module sunholo/mcp_oauth/core
 import std/crypto (sha256Hex, constantTimeEqual)
 import std/bytes (fromInts, toInts, fromString, toString, toBase64URL)
 import std/string (length, substring, find, startsWith, endsWith, contains as strContains, chars, toLower, split)
-import std/list (contains, any, map)
+import std/list (contains, any, map, last)
 import std/json (Json, encode, jo, kv, js, ja, jb)
 import std/net (urlEncode)
 
@@ -115,26 +115,56 @@ export pure func redirectOk(presented: string, registered: [string]) -> bool =
 -- CIMD client_id URL (T5, string layer; connect-time layer is S0)
 -- ============================================================
 
--- host part of an https:// URL ("" when malformed).
+-- The index of the first of `stops` in s, or length(s).
+pure func firstStop(s: string, stops: [string]) -> int =
+  match stops {
+    [] => length(s),
+    [c, ...rest] => {
+      let i = find(s, c);
+      let j = firstStop(s, rest);
+      if i >= 0 && i < j then i else j
+    }
+  }
+
+pure func digitsOnly(s: string) -> bool = length(s) > 0 && not any(\c. find("0123456789", c) < 0, chars(s))
+
+-- A lowercase DNS hostname: letters, digits, "-" and ".", no empty label, no
+-- leading or trailing dot ("localhost." is refused, not normalised), no
+-- leading "-". So userinfo ("@"), IPv6 brackets, percent-encoding, spaces and
+-- other characters a URL parser might decode differently are all refused.
+pure func hostSyntaxOk(h: string) -> bool =
+  h != "" && not any(\c. find("abcdefghijklmnopqrstuvwxyz0123456789.-", c) < 0, chars(h))
+    && startsWith(h, ".") == false && endsWith(h, ".") == false && strContains(h, "..") == false
+    && startsWith(h, "-") == false
+
+-- THE host parser of the package (CIMD client_id URLs and DCR redirect
+-- URIs): the lowercase host of an https:// URL, "" when malformed. The
+-- authority ends at the first "/", "?", "#" or "\" (browsers treat "\" as
+-- "/"), and the host at the first ":" (the port, which must be digits). So
+-- "https://localhost?.example.com" has host "localhost", never
+-- "localhost?.example.com".
 export pure func httpsHost(url: string) -> string {
   if startsWith(url, "https://") == false then ""
   else {
     let rest = substring(url, 8, length(url));
-    let slash = find(rest, "/");
-    let authority = if slash < 0 then rest else substring(rest, 0, slash);
+    let authority = substring(rest, 0, firstStop(rest, ["/", "?", "#", "\\"]));
     let colon = find(authority, ":");
-    if colon < 0 then authority else substring(authority, 0, colon)
+    let host = toLower(if colon < 0 then authority else substring(authority, 0, colon));
+    let portOk = colon < 0 || digitsOnly(substring(authority, colon + 1, length(authority)));
+    if portOk && hostSyntaxOk(host) then host else ""
   }
 }
 
-pure func isIpLiteral(host: string) -> bool =
-  startsWith(host, "[") || not any(\c. find("0123456789.", c) < 0, chars(host))
+-- An IP address written as a host (127.0.0.1, 127.1, 2130706433, 0x7f.0.0.1):
+-- its last label is all digits. No public DNS name has a numeric TLD.
+-- (IPv6 literals never get here: hostSyntaxOk refuses "[".)
+pure func ipLike(host: string) -> bool =
+  match last(split(host, ".")) { Some(l) => digitsOnly(l), None => false }
 
-pure func isInternalHost(host: string) -> bool {
-  let h = toLower(host);
+-- First-order (host is already lowercase), so Z3 can use it in cimdUrlGate.
+pure func isInternalHost(h: string) -> bool =
   h == "localhost" || endsWith(h, ".localhost") || endsWith(h, ".internal")
     || endsWith(h, ".local") || startsWith(h, "metadata")
-}
 
 -- The https-only invariant, proved by Z3. Kept separate from the shape
 -- checks below because those use higher-order helpers Z3 cannot encode;
@@ -145,17 +175,30 @@ export pure func cimdHttpsGate(url: string, shapeOk: bool) -> bool
   startsWith(url, "https://") && shapeOk
 }
 
-pure func cimdShapeOk(url: string) -> bool {
-  let host = httpsHost(url);
-  host != ""
-    && strContains(url, "@") == false
-    && strContains(url, "#") == false
-    && isIpLiteral(host) == false
-    && isInternalHost(host) == false
+-- The CIMD URL gate, proved by Z3 for any host the parser returns: an
+-- accepted URL is https, has no userinfo, fragment or backslash, and its host
+-- is non-empty, has no trailing dot, and is not a loopback, .internal, .local
+-- or metadata name. nameOk carries the higher-order checks (a dotted name, not
+-- an IP address).
+export pure func cimdUrlGate(url: string, host: string, nameOk: bool) -> bool
+  ensures {
+    result == false || startsWith(url, "https://"),
+    result == false || (strContains(url, "@") == false && strContains(url, "#") == false && strContains(url, "\\") == false),
+    result == false || (host != "" && endsWith(host, ".") == false),
+    result == false || (host != "localhost" && endsWith(host, ".localhost") == false && endsWith(host, ".internal") == false
+                        && endsWith(host, ".local") == false && startsWith(host, "metadata") == false)
+  }
+{
+  cimdHttpsGate(url, host != "" && nameOk
+    && strContains(url, "@") == false && strContains(url, "#") == false && strContains(url, "\\") == false
+    && endsWith(host, ".") == false && isInternalHost(host) == false)
 }
 
 -- A client_id document URL we are willing to fetch.
-export pure func cimdUrlOk(url: string) -> bool = cimdHttpsGate(url, cimdShapeOk(url))
+export pure func cimdUrlOk(url: string) -> bool {
+  let host = httpsHost(url);
+  cimdUrlGate(url, host, strContains(host, ".") && ipLike(host) == false)
+}
 
 -- ============================================================
 -- Code lifetime (T2/T8)

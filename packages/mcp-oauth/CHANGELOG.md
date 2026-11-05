@@ -38,11 +38,20 @@ and its CIMD clients behave exactly as before. Turn a model on only after measur
   `refreshTokens` refuse a `client_id` that is not an https URL (`invalid_client`), so a registered client
   cannot skip authentication through them; `beginAuthorize` refuses an `mco_` id; and a CIMD document whose
   plural method list lacks `none` is refused. Claude's and ChatGPT's documents are unaffected.
+- **One host parser, tightened (`core.httpsHost`).** The host now ends at the first `/`, `?`, `#` or `\`
+  and the port at `:` (digits only); it is lowercased; userinfo, IPv6 brackets, percent-encoding, a
+  trailing dot (`localhost.`), empty labels and any non-hostname character give `""`. In 0.1.2,
+  `https://localhost?.example.com` had host `localhost?.example.com` and passed `cimdUrlOk`'s string
+  layer (only `Net[scope=public]` refused it at connect time). `cimdUrlOk` now also refuses a backslash,
+  single-label hosts (`https://intranet/`) and numeric hosts (`127.1`, `2130706433`, `0x7f.0.0.1`), and its
+  shape rules are a new Z3-proved gate, `core.cimdUrlGate`. DCR redirect URIs use the same parser, and
+  `clients.dcrRedirectOk` also refuses a backslash. This changes `httpsHost`'s result for malformed URLs
+  only; every well-formed https URL gets the same host as before, lowercased.
 - New module `sunholo/mcp_oauth/clients` (the non-secret client logic). Requires ailang ≥ 0.57.0 (the
   version this release was built and tested on).
 - Tests: four new suites (`confidential`, `dcr`, `refresh_policy`, `revoke`), `e2e_client_models.sh`,
   `compat_012.sh` (the 0.1.2 suites and example, byte for byte), a live CIMD check, 6 new IFC leak fixtures (9 in all),
-  new lint rules, and `mutation_check.sh` (38 mutants, all killed).
+  new lint rules, and `mutation_check.sh` (47 mutants, all killed).
 
 ## 0.1.2 — 2026-10-14
 

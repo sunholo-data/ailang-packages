@@ -2,9 +2,9 @@
 -- rules, the trusted caller address, registered-client records).
 module sunholo/mcp_oauth/clients_test
 
-import ./clients (trustedCallerIp, trustedCallerIpHops, redirectHost, dcrHostAllowed, dcrRedirectUriOk, validateDcr,
+import ./clients (trustedCallerIp, trustedCallerIpHops, dcrHostAllowed, dcrRedirectUriOk, validateDcr,
   parseClientRecord, clientRecordJson, clientLive, clientAccepted, touchClient, ClientRecord, DcrRequest)
-import ./core (ClientConfig, defaultClientConfig)
+import ./core (ClientConfig, defaultClientConfig, httpsHost)
 import std/result (Ok, Err)
 import std/option (Some, None)
 import std/string (repeat, contains)
@@ -22,13 +22,13 @@ test "caller ip falls back to real ip then unknown" {
 test "caller ip skips trusted hops" {
   trustedCallerIpHops("1.1.1.1, 9.9.9.9, 10.0.0.2", "", 1) == "9.9.9.9" && trustedCallerIpHops("9.9.9.9", "", 2) == "unknown"
 }
-test "redirect host stops at path query fragment and backslash" {
-  redirectHost("https://Oauth-Redirect.GoogleUserContent.com/r/x") == "oauth-redirect.googleusercontent.com"
-    && redirectHost("https://evil.example?.googleusercontent.com") == "evil.example"
-    && redirectHost("https://evil.example#.googleusercontent.com") == "evil.example"
-    && redirectHost("https://evil.example\\.googleusercontent.com") == "evil.example"
-    && redirectHost("https://a.example:8443/cb") == "a.example"
-    && redirectHost("https://u@a.example/cb") == "" && redirectHost("http://a.example/cb") == ""
+test "dcr redirect host uses the one host parser" {
+  httpsHost("https://Oauth-Redirect.GoogleUserContent.com/r/x") == "oauth-redirect.googleusercontent.com"
+    && httpsHost("https://evil.example?.googleusercontent.com") == "evil.example"
+    && httpsHost("https://evil.example#.googleusercontent.com") == "evil.example"
+    && httpsHost("https://evil.example\\.googleusercontent.com") == "evil.example"
+    && httpsHost("https://a.example:8443/cb") == "a.example"
+    && httpsHost("https://u@a.example/cb") == "" && httpsHost("http://a.example/cb") == ""
 }
 test "dcr host allowlist exact and suffix" {
   dcrHostAllowed("claude.ai", ["claude.ai"]) && dcrHostAllowed("x.googleusercontent.com", [".googleusercontent.com"])
@@ -41,6 +41,8 @@ test "dcr redirect uri rules" {
   dcrRedirectUriOk("https://a.example/cb", []) && dcrRedirectUriOk("http://localhost/cb", ["claude.ai"])
     && dcrRedirectUriOk("https://a.example/cb#f", []) == false && dcrRedirectUriOk("http://a.example/cb", []) == false
     && dcrRedirectUriOk("https://u@a.example/cb", []) == false
+    && dcrRedirectUriOk("https://a.example\\@evil.example/cb", []) == false
+    && dcrRedirectUriOk("https://a.example\\cb", []) == false
     && dcrRedirectUriOk("https://a.example/${repeat("x", 600)}", []) == false
 }
 test "dcr defaults method none" {

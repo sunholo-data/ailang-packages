@@ -19,7 +19,7 @@ import std/option (Option, Some, None)
 import std/result (Result, Ok, Err)
 import std/math (intToFloat)
 import std/crypto (sha256Hex)
-import ./core (ClientConfig, stripLoopbackPort, authMethodOk, advertisedAuthMethods, isSecretMethod, isExpired)
+import ./core (ClientConfig, httpsHost, stripLoopbackPort, authMethodOk, advertisedAuthMethods, isSecretMethod, isExpired)
 
 -- ============================================================
 -- Registered-client records (store key client:<clientId>)
@@ -148,32 +148,6 @@ export pure func dcrMaxBodyBytes() -> int = 16384
 export pure func dcrMaxRedirectUris() -> int = 5
 export pure func dcrMaxUriLength() -> int = 512
 
--- The index of the first of `stops` in s, or length(s).
-pure func firstStop(s: string, stops: [string]) -> int =
-  match stops {
-    [] => length(s),
-    [c, ...rest] => {
-      let i = find(s, c);
-      let j = firstStop(s, rest);
-      if i >= 0 && i < j then i else j
-    }
-  }
-
--- The lowercase host of an https URI, "" when malformed. The authority ends
--- at the first "/", "?", "#" or "\" (browsers treat "\" as "/"), so
--- "https://evil.example?.googleusercontent.com" has host "evil.example".
--- Userinfo and non-hostname characters give "".
-export pure func redirectHost(uri: string) -> string {
-  if startsWith(uri, "https://") == false then ""
-  else {
-    let rest = substring(uri, 8, length(uri));
-    let authority = substring(rest, 0, firstStop(rest, ["/", "?", "#", "\\"]));
-    let colon = find(authority, ":");
-    let host = toLower(if colon < 0 then authority else substring(authority, 0, colon));
-    if host == "" || any(\c. find("abcdefghijklmnopqrstuvwxyz0123456789.-", c) < 0, chars(host)) then "" else host
-  }
-}
-
 pure func hostMatches(host: string, pattern: string) -> bool {
   let p = toLower(pattern);
   if startsWith(p, ".") then endsWith(host, p) && length(host) > length(p) else host == p
@@ -184,22 +158,23 @@ export pure func dcrHostAllowed(host: string, hosts: [string]) -> bool =
   host != "" && (listLength(hosts) == 0 || any(\p. hostMatches(host, p), hosts))
 
 -- The gate, proved by Z3: an accepted URI is at most 512 characters, has no
--- fragment, and is either an RFC 8252 loopback URI or an https URI without
--- userinfo whose host the allowlist accepts. hostAllowed and loopback carry
--- the higher-order checks (dcrHostAllowed, stripLoopbackPort).
+-- fragment or backslash, and is either an RFC 8252 loopback URI or an https
+-- URI without userinfo whose host (core.httpsHost, the package's one host
+-- parser) the allowlist accepts. hostAllowed and loopback carry the
+-- higher-order checks (dcrHostAllowed, stripLoopbackPort).
 export pure func dcrRedirectOk(uri: string, hostAllowed: bool, loopback: bool) -> bool
   ensures {
     result == false || length(uri) <= 512,
-    result == false || strContains(uri, "#") == false,
+    result == false || (strContains(uri, "#") == false && strContains(uri, "\\") == false),
     result == false || loopback || (startsWith(uri, "https://") && strContains(uri, "@") == false && hostAllowed)
   }
 {
-  length(uri) <= 512 && strContains(uri, "#") == false
+  length(uri) <= 512 && strContains(uri, "#") == false && strContains(uri, "\\") == false
     && (loopback || (startsWith(uri, "https://") && strContains(uri, "@") == false && hostAllowed))
 }
 
 export pure func dcrRedirectUriOk(uri: string, hosts: [string]) -> bool =
-  dcrRedirectOk(uri, dcrHostAllowed(redirectHost(uri), hosts), stripLoopbackPort(uri) != "")
+  dcrRedirectOk(uri, dcrHostAllowed(httpsHost(uri), hosts), stripLoopbackPort(uri) != "")
 
 -- ============================================================
 -- RFC 7591 request validation
