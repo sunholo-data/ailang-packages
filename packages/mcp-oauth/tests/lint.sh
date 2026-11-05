@@ -21,4 +21,13 @@ if grep -nE '(codeRaw|refreshRaw|handleRaw|verifier)\s*==|==\s*(codeRaw|refreshR
   echo "FAIL: == on a raw secret"; rc=1
 else echo "ok: no == on raw secrets"; fi
 grep -q 'constantTimeEqual' core.ail && echo "ok: PKCE uses constantTimeEqual" || { echo "FAIL: constantTimeEqual missing from core"; rc=1; }
+# 0.2 (design T11, §M1 "Secrets stay in flow"): clients.ail holds the
+# non-secret client logic and never sees a labelled value.
+if grep -nE '<secret>|string<|asSecret|digestOf' clients.ail; then echo "FAIL: clients.ail mentions a secret label or secret helper"; rc=1
+else echo "ok: clients.ail never mentions string<secret>"; fi
+# T11: a client secret is compared only as a digest, in constant time
+# (secretMatches); never with == on the secret or its digest.
+if grep -nE 'secretDigest\s*[!=]=\s*[^" ]|[!=]=\s*[a-zA-Z_.]*secretDigest|secret_digest.*==' flow.ail; then echo "FAIL: client secret digest compared with =="; rc=1
+elif grep -q 'constantTimeEqual(digestOf(presented), storedDigest)' flow.ail; then echo "ok: client secrets compared in constant time on digests"
+else echo "FAIL: secretMatches no longer uses constantTimeEqual on digests"; rc=1; fi
 exit $rc

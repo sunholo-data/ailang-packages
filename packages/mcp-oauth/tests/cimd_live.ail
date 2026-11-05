@@ -1,0 +1,21 @@
+-- Live CIMD documents through cimd.fetchClient (Net[scope=public]): ChatGPT's
+-- (singular private_key_jwt, plural ["none","private_key_jwt"]) and Claude
+-- Code's must both be ACCEPTED (M1d, design E17). tests/cimd_live_check.sh.
+module cimd_live
+
+import std/io (println)
+import std/string (contains)
+import std/list (length)
+import std/result (Ok, Err)
+import pkg/sunholo/mcp_oauth/cimd (fetchClient)
+
+func accepted(name: string, url: string, redirect: string) -> () ! {IO, Net} =
+  match fetchClient(url) {
+    Ok(uris) => if length(uris) > 0 && contains(show(uris), redirect) then println("PASS ${name}") else println("FAIL ${name}: redirect_uris ${show(uris)}"),
+    Err(e) => println("FAIL ${name}: ${e}")
+  }
+
+export func main() -> () ! {IO, Net} {
+  accepted("cimd accepts chatgpt live doc (network)", "https://chatgpt.com/oauth/client.json", "https://chatgpt.com/connector_platform_oauth_redirect");
+  accepted("cimd accepts claude live doc (network)", "https://claude.ai/oauth/claude-code-client-metadata", "http://localhost/callback")
+}

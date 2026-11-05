@@ -24,3 +24,23 @@ test "cimd doc too large rejected" {
   isOk(validateClientDoc(cid(), repeat("x", 65537))) == false
 }
 test "cimd doc not json rejected" { isOk(validateClientDoc(cid(), "not json")) == false }
+
+-- ---------------- 0.2: auth-method intersection (M1d) ----------------
+-- ChatGPT's live CIMD document, verbatim (https://chatgpt.com/oauth/client.json,
+-- fetched 2026-11-05; design E17). Singular private_key_jwt, plural
+-- ["none","private_key_jwt"]: accepted, because the singular is never binding
+-- and the plural contains none. tests/cimd_live_check.sh fetches it live.
+pure func chatgptDoc() -> string = "{\"client_id\":\"https://chatgpt.com/oauth/client.json\",\"client_uri\":\"https://chatgpt.com/\",\"redirect_uris\":[\"https://chatgpt.com/connector_platform_oauth_redirect\"],\"token_endpoint_auth_method\":\"private_key_jwt\",\"token_endpoint_auth_methods_supported\":[\"none\",\"private_key_jwt\"],\"grant_types\":[\"authorization_code\",\"refresh_token\"],\"response_types\":[\"code\"],\"client_name\":\"ChatGPT\",\"logo_uri\":\"https://persistent.oaistatic.com/sonic/misc/openai-logo.png\",\"token_endpoint_auth_signing_alg\":\"RS256\",\"jwks_uri\":\"https://chatgpt.com/oauth/jwks.json\"}"
+-- Claude Code's live document (no plural field), verbatim, same date.
+pure func claudeDoc() -> string = "{\"client_id\":\"https://claude.ai/oauth/claude-code-client-metadata\",\"client_name\":\"Claude Code\",\"client_uri\":\"https://claude.ai\",\"redirect_uris\":[\"http://localhost/callback\",\"http://127.0.0.1/callback\"],\"grant_types\":[\"authorization_code\",\"refresh_token\"],\"response_types\":[\"code\"],\"token_endpoint_auth_method\":\"none\"}"
+test "cimd accepts chatgpt live doc" { isOk(validateClientDoc("https://chatgpt.com/oauth/client.json", chatgptDoc())) }
+test "cimd accepts claude live doc" { isOk(validateClientDoc(cid(), claudeDoc())) }
+test "cimd refuses plural without none" {
+  isOk(validateClientDoc(cid(), "{\"client_id\":\"https://claude.ai/oauth/claude-code-client-metadata\",\"redirect_uris\":[\"https://claude.ai/api/mcp/auth_callback\"],\"token_endpoint_auth_method\":\"none\",\"token_endpoint_auth_methods_supported\":[\"private_key_jwt\"]}")) == false
+}
+test "cimd refuses a plural that is not a string array" {
+  isOk(validateClientDoc(cid(), "{\"client_id\":\"https://claude.ai/oauth/claude-code-client-metadata\",\"redirect_uris\":[\"https://claude.ai/api/mcp/auth_callback\"],\"token_endpoint_auth_methods_supported\":\"none\"}")) == false
+}
+test "cimd ignores the singular method" {
+  isOk(validateClientDoc(cid(), "{\"client_id\":\"https://claude.ai/oauth/claude-code-client-metadata\",\"redirect_uris\":[\"https://claude.ai/api/mcp/auth_callback\"],\"token_endpoint_auth_method\":\"private_key_jwt\"}"))
+}
