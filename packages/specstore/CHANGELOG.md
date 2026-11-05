@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.3.1
+
+Two fixes found in a live run. `check` now exits 1 when it reports problems (or when the
+standard or the spec fails to load), so scripts and CI can gate on it; it still prints the
+same ✗ lines. A parameter value written as an unquoted number (`value: 90`) is read as 90.0
+and never matched what the site pushes; parameter values are now normalised to their
+canonical string at load (90 → "90", 90.5 → "90.5"), and an unquoted boolean reads
+true/false, in step with what `compare` reads back from the run.
+
 ## 0.3.0
 
 Three things a real flow needed. A parameter key may name every element of an array with `[]`:

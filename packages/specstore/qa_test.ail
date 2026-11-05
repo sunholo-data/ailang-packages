@@ -120,3 +120,14 @@ test "site.checks without ga4 turns GA4 off; no checks list keeps it on" {
 test "a change not yet live waits for release; a live one is checked" {
   match shop("").events { [a, b] => !waitingForRelease(a) && waitingForRelease(b), _ => false }
 }
+
+-- 0.3.1: an unquoted numeric (or boolean) parameter value matches what the site pushes.
+func numSpec() -> Spec = toSpec(y("spec: {client: C, project: P, owner: Ana, version: \"1.0\", standard: \"0.1\"}\nsite: {base_url: \"https://example.com\"}\nevents:\n  - {id: E01, eventName: scroll, priority: high, parameters: [{key: gtm.scrollThreshold, value: 90}, {key: prefs.on, value: true}]}\nvisits:\n  - {id: V01, url: /, consent: accept, expects: [E01]}"), [])
+
+test "a numeric parameter value matches the number the site pushes" {
+  outcome(numSpec(), seen("ok", "{item: {event: scroll, gtm: {scrollThreshold: 90}, prefs: {on: true}}}", "{en: scroll}"), 1) == 0
+}
+
+test "a numeric parameter value still fails on a different number" {
+  outcome(numSpec(), seen("ok", "{item: {event: scroll, gtm: {scrollThreshold: 75}, prefs: {on: true}}}", "{en: scroll}"), 1) == 2
+}
