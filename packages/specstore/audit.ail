@@ -13,6 +13,7 @@ module sunholo/specstore/audit
 
 import std/json (Json, JString, decode, getString, getArray, getObject, getInt)
 import std/fs (readFile)
+import std/option (Option, Some, None)
 import std/io (println)
 import std/list (map, filter, length, nth, foldl, concat, take, drop, flatMap, any, sortBy, dedup, mapE, filterE, foldlE, range)
 import std/string (split, join, trim, contains, toLower, length as slen, substring, replace)
@@ -140,26 +141,80 @@ func headingsIn(blocks: [Json]) -> [string<client>] =
 
 func filled(cs: [Cell]) -> int ! {Declassify} = length(filterE(\c. present(c.text) == "x", cs))
 
--- The header is the first row with three or more short, non-empty cells.
-func pickHeader(t: Table) -> ([Cell], [[Cell]]) ! {Declassify} {
+-- Every cell is declassified once, into its shape, before anything is chosen. The header row, the
+-- body and the columns are then picked from shapes alone, so no row picked by a declassified
+-- result is ever handed back to a declassifier (ailang v0.57.1 rejects that: the picked row is
+-- <client> ⊔ <structure>, and present takes <client>).
+type Shape = { on: string<structure>, long: string<structure>, casing: string<structure>, notation: string<structure>, fill: string<structure> }
+
+pure func shapeOf(c: Cell) -> Shape ! {Declassify} {
+  let on = present(c.text);
+  { on: on, long: if on == "x" && shortEnough(c.text) == "" then "x" else "", casing: casingOf(c.text),
+    notation: notationOf(c.text), fill: colourOf(c) }
+}
+
+func onCount(r: [Shape]) -> int = length(filter(\x. x.on == "x", r))
+
+func longCount(r: [Shape]) -> int = length(filter(\x. x.long == "x", r))
+
+-- Column names for a header row, declassified.
+func namesOf(r: [Cell], names: [string]) -> [string<structure>] ! {Declassify} =
+  match r { [c, ...rest] => concat([headerOf(c.text, names)], namesOf(rest, names)), [] => [] }
+
+func onesOf(rows: [[Cell]], names: [string]) -> [[string<structure>]] ! {Declassify} =
+  match rows { [r, ...rest] => concat([namesOf(r, names)], onesOf(rest, names)), [] => [] }
+
+func twosOf(all: [[Cell]], k: int, upto: int, names: [string]) -> [[string<structure>]] ! {Declassify} =
+  if k >= upto then [] else concat([twoNames(all, k, names)], twosOf(all, k + 1, upto, names))
+
+-- A table with every cell declassified: its rows as shapes, and the column names each of the
+-- first nine rows would give as a header, alone (ones) or combined with the row under it (twos).
+-- The only place in the audit where client text is read; everything after works on this.
+type Shaped = { sheet: string<structure>, rows: [[Shape]], ones: [[string<structure>]], twos: [[string<structure>]] }
+
+func shapeTable(t: Table, names: [string]) -> Shaped ! {Declassify} {
   let all = concat([t.header], t.rows);
   let cands = take(9, all);
-  let ok = \r. filled(r) >= 3 && length(filterE(\c. present(c.text) == "x" && shortEnough(c.text) == "", r)) == 0;
-  match filterE(\p. match p { (_, r) => ok(r) }, zipIdx(cands)) {
-    [(i, h), ..._] => match nth(cands, i + 1) {
-      Some(r2) => if filled(r2) > filled(h) && length(filterE(\c. present(c.text) == "x" && shortEnough(c.text) == "", r2)) == 0
-                  then (combine(h, r2), drop(i + 2, all)) else (h, drop(i + 1, all)),
-      None => (h, drop(i + 1, all))
-    },
-    [] => (t.header, t.rows)
-  }
+  let rows = mapE(shapeRow, all);
+  let ones = onesOf(cands, names);
+  let twos = twosOf(all, 0, length(cands), names);
+  { sheet: headerOf(t.sheet, names), rows: rows, ones: ones, twos: twos }
 }
+
+-- The header is the first row with three or more short, non-empty cells; a better-filled row
+-- under it with no long cells is a second header row. Returns the column names and the body.
+-- Works on shapes only, and walks the lists rather than indexing them: ailang v0.57.1 reports a
+-- false information-flow violation for nth with an index counted from declassified data.
+func pickHeader(st: Shaped) -> ([string<structure>], [[Shape]]) =
+  match chooseHeader(st.rows, st.ones, st.twos) {
+    Some(hb) => hb,
+    None => (match st.ones { [o, ..._] => o, [] => [] }, drop(1, st.rows))
+  }
+
+func chooseHeader(rows: [[Shape]], ones: [[string<structure>]], twos: [[string<structure>]]) -> Option[([string<structure>], [[Shape]])] =
+  match (rows, ones, twos) {
+    ([h, ...rest], [o, ...os], [t2, ...ts]) =>
+      if onCount(h) >= 3 && longCount(h) == 0 then
+        match rest {
+          [nx, ...rest2] => if onCount(nx) > onCount(h) && longCount(nx) == 0 then Some((t2, rest2)) else Some((o, rest)),
+          [] => Some((o, rest))
+        }
+      else chooseHeader(rest, os, ts),
+    _ => None
+  }
+
+func shapeRow(r: [Cell]) -> [Shape] ! {Declassify} = mapE(shapeOf, r)
+
+func twoNames(all: [[Cell]], k: int, names: [string]) -> [string<structure>] ! {Declassify} =
+  namesOf(combine(rowAt(all, k), rowAt(all, k + 1)), names)
+
+func rowAt(xs: [[Cell]], k: int) -> [Cell] = match nth(xs, k) { Some(r) => r, None => [] }
 
 -- A two-row header: the group name carried right across its merged cells, then the sub-key.
 func combine(top: [Cell], sub: [Cell]) -> [Cell] {
   let carried = foldl(\acc. \c. match acc { (out, last) => if trim(c.text) == "" then (concat(out, [last]), last) else (concat(out, [c.text]), c.text) }, ([], ""), top);
   match carried { (tops, _) =>
-    map(\p. match p { (t, c) => { text: if trim(c.text) == "" then t else if trim(t) == "" then c.text else "${trim(t)} ${trim(c.text)}", fill: c.fill } },
+    map(\p. match p { (t, c) => { text: if trim(c.text) == "" then t else if trim(t) == "" then c.text else join(" ", [trim(t), trim(c.text)]), fill: c.fill } },
         zipPad(tops, sub)) }
 }
 
@@ -190,25 +245,39 @@ func isFill(f: string<structure>) -> bool =
   f != "" && toLower(f) != "ffffff" && toLower(f) != "#ffffff" && toLower(f) != "ffffffff" && toLower(f) != "none"
 
 func describeTable(code: string, names: [string], t: Table) -> () ! {IO, Declassify} {
-  let hr = pickHeader(t);
-  match hr {
+  let st = shapeTable(t, names);
+  match pickHeader(st) {
     (h, body) => {
-      let rows = filterE(\r. filled(r) > 0, body);
+      let rows = filter(\r. onCount(r) > 0, body);
       let n = length(rows);
-      let allCells = flatMap(\r. r, rows);
-      let fills = filter(isFill, mapE(colourOf, allCells));
-      report("  [${code}] tab \"${headerOf(t.sheet, names)}\": ${show(countOf(n))} rows × ${show(countOf(length(h)))} cols; coloured cells ${show(countOf(length(fills)))} in ${show(countOf(length(dedup(fills))))} colours");
-      foldlE(\u. \i. {
-          let vs = col(rows, i);
-          let fillPct = if countOf(n) == 0 then 0 else (countOf(filled(vs)) * 100) / countOf(n);
-          let cas = casingsOf(vs);
-          let nots = notationsOf(vs);
-          let name = if countOf(length(h)) < 3 then "(cell)" else headerAt(h, i, names);
-          if name == "" && countOf(filled(vs)) == 0 then ()
-          else report("      ${if name == "" then "(no header)" else name} · ${show(fillPct)}% filled${if cas == "" then "" else " · ${cas}"}${if nots == "" then "" else " · notation ${nots}"}")
-        }, (), range(0, countOf(length(h))))
+      let fills = filter(isFill, flatMap(\r. map(\x. x.fill, r), rows));
+      report("  [${code}] tab \"${st.sheet}\": ${show(n)} rows × ${show(length(h))} cols; coloured cells ${show(length(fills))} in ${show(length(dedup(fills)))} colours");
+      describeColumns(rows, h, length(h) < 3, n)
     }
   }
+}
+
+-- One column at a time, taking the first cell of every row and recursing on the rest.
+func describeColumns(rows: [[Shape]], h: [string<structure>], narrow: bool, n: int) -> () ! {IO} =
+  match h {
+    [nm, ...more] => {
+      describeColumn(firsts(rows), if narrow then "(cell)" else nm, n);
+      describeColumns(rests(rows), more, narrow, n)
+    },
+    [] => ()
+  }
+
+func firsts(rows: [[Shape]]) -> [Shape] = flatMap(\r. match r { [x, ..._] => [x], [] => [] }, rows)
+
+func rests(rows: [[Shape]]) -> [[Shape]] = map(\r. match r { [_, ...t] => t, [] => [] }, rows)
+
+func describeColumn(vs: [Shape], name: string<structure>, n: int) -> () ! {IO} {
+  let on = onCount(vs);
+  let fillPct = if n == 0 then 0 else (on * 100) / n;
+  let cas = tally(map(\x. x.casing, vs));
+  let nots = tally(map(\x. x.notation, vs));
+  if name == "" && on == 0 then ()
+  else report("      ${if name == "" then "(no header)" else name} · ${show(fillPct)}% filled${if cas == "" then "" else " · ${cas}"}${if nots == "" then "" else " · notation ${nots}"}")
 }
 
 -- ── main ────────────────────────────────────────────────────────────────────
