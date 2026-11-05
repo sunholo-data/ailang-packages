@@ -16,7 +16,7 @@ module sunholo/billing_service_api/webhook_handler
 import std/json (encode, jo, js, kv, getString)
 import std/result (Ok, Err)
 import std/option (getOrElse)
-import std/string (split, find, substring, length as strLength)
+import std/string (split, find, substring, length)
 import pkg/sunholo/config/loader (optionalEnv)
 import pkg/sunholo/billing_stripe/stripe_webhook (verifyWebhook)
 import pkg/sunholo/billing_stripe/stripe_event_mapper (mapEventToStateChange)
@@ -42,7 +42,7 @@ func webhookFindInMap(entries: [string], priceId: string) -> string =
       in if idx < 0 then webhookFindInMap(rest, priceId)
       else
         let key = substring(entry, 0, idx)
-        in let value = substring(entry, idx + 1, strLength(entry))
+        in let value = substring(entry, idx + 1, length(entry))
         in if key == priceId then value
         else webhookFindInMap(rest, priceId)
   }
