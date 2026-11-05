@@ -11,7 +11,7 @@ module sunholo/billing_service_api/proposal_handler
 import std/json (decode, get, asString, encode, jo, js, kv)
 import std/result (Ok, Err)
 import std/option (getOrElse)
-import std/string (split, find, substring, length as strLength)
+import std/string (split, find, substring, length)
 import pkg/sunholo/config/loader (optionalEnv)
 import pkg/sunholo/billing_proposals/proposal (
   createProposal, canCreateApprovalLink, markAwaitingPayment,
@@ -146,7 +146,7 @@ func proposalReverseFindInMap(entries: [string], planKey: string) -> string =
       in if idx < 0 then proposalReverseFindInMap(rest, planKey)
       else
         let priceId = substring(entry, 0, idx)
-        in let key = substring(entry, idx + 1, strLength(entry))
+        in let key = substring(entry, idx + 1, length(entry))
         in if key == planKey then priceId
         else proposalReverseFindInMap(rest, planKey)
   }
