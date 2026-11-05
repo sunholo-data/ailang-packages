@@ -1,0 +1,242 @@
+-- sunholo/mcp_oauth/clients: the non-secret logic of the 0.2 client models
+-- (ailang design_docs/planned/v0_57_2/m-mcp-oauth-client-models.md §M1):
+-- registered-client records, RFC 7591 request validation, DCR redirect rules,
+-- the DCR rate-limit keys and the trusted caller address.
+--
+-- This module never sees a secret: client secrets are minted, classified,
+-- digested and compared only in flow.ail (0.1.0 D4, T7). A record holds the
+-- secret's sha256Hex digest, never the secret. tests/lint.sh refuses a
+-- labelled string anywhere in this file.
+--
+-- Everything here is pure.
+
+module sunholo/mcp_oauth/clients
+
+import std/string (length, substring, find, startsWith, endsWith, contains as strContains, chars, toLower, split, trim)
+import std/list (contains, any, map, nth, length as listLength)
+import std/json (Json, encode, decode, jo, kv, js, ja, jb, jnum, get, getString, getInt, getBool, asString, asArray, allStrings, getStringArrayOrEmpty)
+import std/option (Option, Some, None)
+import std/result (Result, Ok, Err)
+import std/math (intToFloat)
+import std/crypto (sha256Hex)
+import ./core (ClientConfig, httpsHost, stripLoopbackPort, authMethodOk, advertisedAuthMethods, isSecretMethod, isExpired)
+
+-- ============================================================
+-- Registered-client records (store key client:<clientId>)
+-- ============================================================
+
+-- origin: "operator" (flow.createClient) or "dcr" (flow.registerClientDcr).
+-- expiresAt 0 = never (operator clients). secretDigest "" for method "none".
+export type ClientRecord = {
+  clientId: string,
+  method: string,
+  secretDigest: string,
+  redirectUris: [string],
+  refreshPolicy: string,
+  origin: string,
+  createdAt: int,
+  lastUsedAt: int,
+  expiresAt: int
+}
+
+export pure func clientKey(clientId: string) -> string = "client:${clientId}"
+
+export pure func clientRecordJson(r: ClientRecord) -> string =
+  encode(jo([kv("kind", js("registered")), kv("method", js(r.method)), kv("secret_digest", js(r.secretDigest)),
+             kv("redirect_uris", ja(map(js, r.redirectUris))), kv("refresh_policy", js(r.refreshPolicy)),
+             kv("pkce_required", jb(true)), kv("registered", js(r.origin)),
+             kv("created_at", jnum(intToFloat(r.createdAt))), kv("last_used_at", jnum(intToFloat(r.lastUsedAt))),
+             kv("expires_at", jnum(intToFloat(r.expiresAt)))]))
+
+pure func str(j: Json, k: string) -> string = match getString(j, k) { Some(s) => s, None => "" }
+pure func num(j: Json, k: string) -> int = match getInt(j, k) { Some(n) => n, None => 0 }
+
+export pure func parseClientRecord(clientId: string, raw: string) -> Option[ClientRecord] =
+  match decode(raw) {
+    Err(_) => None,
+    Ok(j) =>
+      if str(j, "kind") != "registered" then None
+      else Some({ clientId: clientId, method: str(j, "method"), secretDigest: str(j, "secret_digest"),
+                  redirectUris: getStringArrayOrEmpty(j, "redirect_uris"), refreshPolicy: str(j, "refresh_policy"),
+                  origin: str(j, "registered"), createdAt: num(j, "created_at"), lastUsedAt: num(j, "last_used_at"),
+                  expiresAt: num(j, "expires_at") })
+  }
+
+-- An unused DCR registration lives 24 hours. After a successful token
+-- request it slides to 90 days idle (T12). Operator clients never expire.
+export pure func dcrUnusedTtlSec() -> int = 86400
+export pure func dcrIdleTtlSec() -> int = 7776000
+
+export pure func clientLive(r: ClientRecord, nowSec: int) -> bool
+  ensures { result == (r.expiresAt == 0 || nowSec < r.expiresAt) }
+{
+  r.expiresAt == 0 || isExpired(nowSec, r.expiresAt) == false
+}
+
+-- Does this deployment accept the client at all? Operator clients need
+-- cfg.confidential; DCR clients need cfg.dcr; a secret method needs
+-- cfg.confidential either way (it is what advertises the secret methods).
+export pure func clientAccepted(r: ClientRecord, cfg: ClientConfig) -> bool
+  ensures {
+    result == false || (r.origin == "operator" && cfg.confidential) || (r.origin == "dcr" && cfg.dcr),
+    result == false || cfg.confidential || (r.method != "client_secret_basic" && r.method != "client_secret_post")
+  }
+{
+  ((r.origin == "operator" && cfg.confidential) || (r.origin == "dcr" && cfg.dcr))
+    && (isSecretMethod(r.method) == false || cfg.confidential)
+}
+
+-- The record after a successful token request.
+export pure func touchClient(r: ClientRecord, nowSec: int) -> ClientRecord =
+  if r.origin == "dcr" then { r | lastUsedAt: nowSec, expiresAt: nowSec + dcrIdleTtlSec() }
+  else { r | lastUsedAt: nowSec }
+
+-- The store expiry to pass to hooks.put for a record (operator: ~100 years).
+export pure func clientStoreExpiry(r: ClientRecord, nowSec: int) -> int =
+  if r.expiresAt == 0 then nowSec + 3153600000 else r.expiresAt
+
+-- ============================================================
+-- The caller key for DCR rate limits (rightmost X-Forwarded-For)
+-- ============================================================
+
+-- Mirrors serve-api's clientIPFromHeader: Google's front end APPENDS the real
+-- source address, so the rightmost X-Forwarded-For entry is the trusted one
+-- and everything before it is client-supplied. Falls back to realIp, then to
+-- "unknown" (one shared bucket). trustedHops = proxies of your own that also
+-- append (0 behind Cloud Run alone).
+export pure func trustedCallerIpHops(xff: string, realIp: string, trustedHops: int) -> string {
+  let parts = map(trim, split(xff, ","));
+  if trim(xff) == "" then (if trim(realIp) == "" then "unknown" else trim(realIp))
+  else match nth(parts, listLength(parts) - 1 - trustedHops) {
+    Some(p) => if p == "" then "unknown" else p,
+    None => "unknown"
+  }
+}
+
+export pure func trustedCallerIp(xff: string, realIp: string) -> string = trustedCallerIpHops(xff, realIp, 0)
+
+-- Window counters. The store hook has no compare-and-set, so a limit is soft
+-- by up to the number of concurrent registrations (T12).
+export pure func dcrCallerWindowKey(callerIp: string, nowSec: int) -> string = "dcr:caller:${sha256Hex(callerIp)}:${show(nowSec / 3600)}"
+export pure func dcrGlobalWindowKey(nowSec: int) -> string = "dcr:global:${show(nowSec / 86400)}"
+export pure func dcrCallerWindowEnd(nowSec: int) -> int
+  requires { nowSec >= 0 }
+  ensures { result > nowSec, result <= nowSec + 3600 }
+{
+  (nowSec / 3600 + 1) * 3600
+}
+
+export pure func dcrGlobalWindowEnd(nowSec: int) -> int
+  requires { nowSec >= 0 }
+  ensures { result > nowSec, result <= nowSec + 86400 }
+{
+  (nowSec / 86400 + 1) * 86400
+}
+
+-- A limit refuses once the count already in the window reaches it.
+export pure func underLimit(count: int, limit: int) -> bool
+  ensures { result == (count < limit) }
+{
+  count < limit
+}
+
+-- ============================================================
+-- DCR redirect URIs (T12, T15)
+-- ============================================================
+
+export pure func dcrMaxBodyBytes() -> int = 16384
+export pure func dcrMaxRedirectUris() -> int = 5
+export pure func dcrMaxUriLength() -> int = 512
+
+pure func hostMatches(host: string, pattern: string) -> bool {
+  let p = toLower(pattern);
+  if startsWith(p, ".") then endsWith(host, p) && length(host) > length(p) else host == p
+}
+
+-- dcrRedirectHosts: [] = any host; else an exact host or a ".suffix".
+export pure func dcrHostAllowed(host: string, hosts: [string]) -> bool =
+  host != "" && (listLength(hosts) == 0 || any(\p. hostMatches(host, p), hosts))
+
+-- The gate, proved by Z3: an accepted URI is at most 512 characters, has no
+-- fragment or backslash, and is either an RFC 8252 loopback URI or an https
+-- URI without userinfo whose host (core.httpsHost, the package's one host
+-- parser) the allowlist accepts. hostAllowed and loopback carry the
+-- higher-order checks (dcrHostAllowed, stripLoopbackPort).
+export pure func dcrRedirectOk(uri: string, hostAllowed: bool, loopback: bool) -> bool
+  ensures {
+    result == false || length(uri) <= 512,
+    result == false || (strContains(uri, "#") == false && strContains(uri, "\\") == false),
+    result == false || loopback || (startsWith(uri, "https://") && strContains(uri, "@") == false && hostAllowed)
+  }
+{
+  length(uri) <= 512 && strContains(uri, "#") == false && strContains(uri, "\\") == false
+    && (loopback || (startsWith(uri, "https://") && strContains(uri, "@") == false && hostAllowed))
+}
+
+export pure func dcrRedirectUriOk(uri: string, hosts: [string]) -> bool =
+  dcrRedirectOk(uri, dcrHostAllowed(httpsHost(uri), hosts), stripLoopbackPort(uri) != "")
+
+-- ============================================================
+-- RFC 7591 request validation
+-- ============================================================
+
+-- What a registration accepted. Display metadata (client_name, logo_uri,
+-- client_uri, ...) is never kept: DCR is open registration, so a
+-- client-supplied name is not trusted, and logo_uri is never fetched (T15).
+export type DcrRequest = {
+  redirectUris: [string],
+  method: string,
+  grantTypes: [string],
+  responseTypes: [string]
+}
+
+-- RFC 7591 §3.2.2 error body.
+export pure func dcrError(code: string, desc: string) -> string =
+  encode(jo([kv("error", js(code)), kv("error_description", js(desc))]))
+
+pure func badMeta(desc: string) -> Result[DcrRequest, string] = Err(dcrError("invalid_client_metadata", desc))
+
+-- An optional string array: absent -> Some(dflt); present and all strings ->
+-- Some(it); anything else -> None.
+pure func stringsOr(doc: Json, k: string, dflt: [string]) -> Option[[string]] =
+  match get(doc, k) {
+    None => Some(dflt),
+    Some(v) => match asArray(v) { None => None, Some(xs) => allStrings(xs) }
+  }
+
+pure func subsetOf(xs: [string], allowed: [string]) -> bool = not any(\x. contains(allowed, x) == false, xs)
+
+pure func methodOf(doc: Json) -> Option[string] =
+  match get(doc, "token_endpoint_auth_method") {
+    None => Some("none"),  -- not RFC 7591's client_secret_basic: an unauthenticated registration is public
+    Some(v) => asString(v)
+  }
+
+export pure func validateDcr(cfg: ClientConfig, body: string) -> Result[DcrRequest, string] =
+  if length(body) > dcrMaxBodyBytes() then badMeta("registration request is larger than ${show(dcrMaxBodyBytes())} bytes")
+  else match decode(body) {
+    Err(_) => badMeta("registration request is not JSON"),
+    Ok(doc) => match stringsOr(doc, "redirect_uris", []) {
+      None => Err(dcrError("invalid_redirect_uri", "redirect_uris must be an array of strings")),
+      Some(uris) =>
+        if listLength(uris) == 0 || listLength(uris) > dcrMaxRedirectUris() then
+          Err(dcrError("invalid_redirect_uri", "redirect_uris must list 1 to ${show(dcrMaxRedirectUris())} URIs"))
+        else if any(\u. dcrRedirectUriOk(u, cfg.dcrRedirectHosts) == false, uris) then
+          Err(dcrError("invalid_redirect_uri", "each redirect_uri must be https (no fragment or userinfo, at most 512 characters, on an allowed host) or an RFC 8252 loopback URI"))
+        else match (stringsOr(doc, "grant_types", ["authorization_code"]), stringsOr(doc, "response_types", ["code"]), methodOf(doc)) {
+          (Some(grants), Some(responses), Some(method)) =>
+            if subsetOf(grants, ["authorization_code", "refresh_token"]) == false then badMeta("grant_types must be a subset of authorization_code, refresh_token")
+            else if subsetOf(responses, ["code"]) == false then badMeta("response_types must be a subset of code")
+            else if authMethodOk(method, advertisedAuthMethods(cfg)) == false then badMeta("token_endpoint_auth_method ${method} is not supported by this server")
+            else Ok({ redirectUris: uris, method: method, grantTypes: grants, responseTypes: responses }),
+          _ => badMeta("grant_types, response_types and token_endpoint_auth_method must be strings or string arrays")
+        }
+    }
+  }
+
+-- The non-secret part of the 201 response; flow appends client_secret and
+-- client_secret_expires_at for a secret method.
+export pure func dcrResponseFields(clientId: string, issuedAt: int, req: DcrRequest) -> [{key: string, value: Json}] =
+  [kv("client_id", js(clientId)), kv("client_id_issued_at", jnum(intToFloat(issuedAt))),
+   kv("redirect_uris", ja(map(js, req.redirectUris))), kv("grant_types", ja(map(js, req.grantTypes))),
+   kv("response_types", ja(map(js, req.responseTypes))), kv("token_endpoint_auth_method", js(req.method))]

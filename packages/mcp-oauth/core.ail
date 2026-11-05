@@ -8,15 +8,16 @@
 --
 -- Usage:
 --   import pkg/sunholo/mcp_oauth/core (pkceOk, verifierOk, redirectAllowed,
---     loopbackRedirectOk, cimdUrlOk, codeExpiresAt, isExpired, asMetadata)
+--     loopbackRedirectOk, cimdUrlOk, codeExpiresAt, isExpired, asMetadata,
+--     ClientConfig, defaultClientConfig, clientKind, authMethodOk, asMetadataFor)
 
 module sunholo/mcp_oauth/core
 
 import std/crypto (sha256Hex, constantTimeEqual)
 import std/bytes (fromInts, toInts, fromString, toString, toBase64URL)
 import std/string (length, substring, find, startsWith, endsWith, contains as strContains, chars, toLower, split)
-import std/list (contains, any)
-import std/json (encode, jo, kv, js, ja, jb)
+import std/list (contains, any, map, last)
+import std/json (Json, encode, jo, kv, js, ja, jb)
 import std/net (urlEncode)
 
 -- ============================================================
@@ -114,26 +115,56 @@ export pure func redirectOk(presented: string, registered: [string]) -> bool =
 -- CIMD client_id URL (T5, string layer; connect-time layer is S0)
 -- ============================================================
 
--- host part of an https:// URL ("" when malformed).
+-- The index of the first of `stops` in s, or length(s).
+pure func firstStop(s: string, stops: [string]) -> int =
+  match stops {
+    [] => length(s),
+    [c, ...rest] => {
+      let i = find(s, c);
+      let j = firstStop(s, rest);
+      if i >= 0 && i < j then i else j
+    }
+  }
+
+pure func digitsOnly(s: string) -> bool = length(s) > 0 && not any(\c. find("0123456789", c) < 0, chars(s))
+
+-- A lowercase DNS hostname: letters, digits, "-" and ".", no empty label, no
+-- leading or trailing dot ("localhost." is refused, not normalised), no
+-- leading "-". So userinfo ("@"), IPv6 brackets, percent-encoding, spaces and
+-- other characters a URL parser might decode differently are all refused.
+pure func hostSyntaxOk(h: string) -> bool =
+  h != "" && not any(\c. find("abcdefghijklmnopqrstuvwxyz0123456789.-", c) < 0, chars(h))
+    && startsWith(h, ".") == false && endsWith(h, ".") == false && strContains(h, "..") == false
+    && startsWith(h, "-") == false
+
+-- THE host parser of the package (CIMD client_id URLs and DCR redirect
+-- URIs): the lowercase host of an https:// URL, "" when malformed. The
+-- authority ends at the first "/", "?", "#" or "\" (browsers treat "\" as
+-- "/"), and the host at the first ":" (the port, which must be digits). So
+-- "https://localhost?.example.com" has host "localhost", never
+-- "localhost?.example.com".
 export pure func httpsHost(url: string) -> string {
   if startsWith(url, "https://") == false then ""
   else {
     let rest = substring(url, 8, length(url));
-    let slash = find(rest, "/");
-    let authority = if slash < 0 then rest else substring(rest, 0, slash);
+    let authority = substring(rest, 0, firstStop(rest, ["/", "?", "#", "\\"]));
     let colon = find(authority, ":");
-    if colon < 0 then authority else substring(authority, 0, colon)
+    let host = toLower(if colon < 0 then authority else substring(authority, 0, colon));
+    let portOk = colon < 0 || digitsOnly(substring(authority, colon + 1, length(authority)));
+    if portOk && hostSyntaxOk(host) then host else ""
   }
 }
 
-pure func isIpLiteral(host: string) -> bool =
-  startsWith(host, "[") || not any(\c. find("0123456789.", c) < 0, chars(host))
+-- An IP address written as a host (127.0.0.1, 127.1, 2130706433, 0x7f.0.0.1):
+-- its last label is all digits. No public DNS name has a numeric TLD.
+-- (IPv6 literals never get here: hostSyntaxOk refuses "[".)
+pure func ipLike(host: string) -> bool =
+  match last(split(host, ".")) { Some(l) => digitsOnly(l), None => false }
 
-pure func isInternalHost(host: string) -> bool {
-  let h = toLower(host);
+-- First-order (host is already lowercase), so Z3 can use it in cimdUrlGate.
+pure func isInternalHost(h: string) -> bool =
   h == "localhost" || endsWith(h, ".localhost") || endsWith(h, ".internal")
     || endsWith(h, ".local") || startsWith(h, "metadata")
-}
 
 -- The https-only invariant, proved by Z3. Kept separate from the shape
 -- checks below because those use higher-order helpers Z3 cannot encode;
@@ -144,17 +175,30 @@ export pure func cimdHttpsGate(url: string, shapeOk: bool) -> bool
   startsWith(url, "https://") && shapeOk
 }
 
-pure func cimdShapeOk(url: string) -> bool {
-  let host = httpsHost(url);
-  host != ""
-    && strContains(url, "@") == false
-    && strContains(url, "#") == false
-    && isIpLiteral(host) == false
-    && isInternalHost(host) == false
+-- The CIMD URL gate, proved by Z3 for any host the parser returns: an
+-- accepted URL is https, has no userinfo, fragment or backslash, and its host
+-- is non-empty, has no trailing dot, and is not a loopback, .internal, .local
+-- or metadata name. nameOk carries the higher-order checks (a dotted name, not
+-- an IP address).
+export pure func cimdUrlGate(url: string, host: string, nameOk: bool) -> bool
+  ensures {
+    result == false || startsWith(url, "https://"),
+    result == false || (strContains(url, "@") == false && strContains(url, "#") == false && strContains(url, "\\") == false),
+    result == false || (host != "" && endsWith(host, ".") == false),
+    result == false || (host != "localhost" && endsWith(host, ".localhost") == false && endsWith(host, ".internal") == false
+                        && endsWith(host, ".local") == false && startsWith(host, "metadata") == false)
+  }
+{
+  cimdHttpsGate(url, host != "" && nameOk
+    && strContains(url, "@") == false && strContains(url, "#") == false && strContains(url, "\\") == false
+    && endsWith(host, ".") == false && isInternalHost(host) == false)
 }
 
 -- A client_id document URL we are willing to fetch.
-export pure func cimdUrlOk(url: string) -> bool = cimdHttpsGate(url, cimdShapeOk(url))
+export pure func cimdUrlOk(url: string) -> bool {
+  let host = httpsHost(url);
+  cimdUrlGate(url, host, strContains(host, ".") && ipLike(host) == false)
+}
 
 -- ============================================================
 -- Code lifetime (T2/T8)
@@ -175,6 +219,123 @@ export pure func isExpired(nowSec: int, expiresAt: int) -> bool
 }
 
 -- ============================================================
+-- Client models (0.2.0, ailang design_docs/planned/v0_57_2/
+-- m-mcp-oauth-client-models.md §M1)
+-- ============================================================
+
+-- What a deployment accepts. Build it from defaultClientConfig() with a record
+-- update ({defaultClientConfig() | confidential: true}), never as a full
+-- literal: a later minor release may add a field, and an update keeps compiling.
+--   confidential         accept operator-created mco_ clients, and advertise
+--                        client_secret_basic / client_secret_post (M1a)
+--   dcr                  serve RFC 7591 registration (M1b)
+--   dcrRedirectHosts     [] = any https host; else exact host or ".suffix"
+--   dcrPerCallerPerHour  registrations per caller per hour
+--   dcrGlobalPerDay      registrations per day, all callers
+--   revocation           advertise and serve RFC 7009 /oauth/revoke (M1c)
+export type ClientConfig = {
+  confidential: bool,
+  dcr: bool,
+  dcrRedirectHosts: [string],
+  dcrPerCallerPerHour: int,
+  dcrGlobalPerDay: int,
+  revocation: bool
+}
+
+-- 0.1.2 behaviour: CIMD clients only, no DCR, no revocation endpoint.
+export pure func defaultClientConfig() -> ClientConfig =
+  { confidential: false, dcr: false, dcrRedirectHosts: [], dcrPerCallerPerHour: 10, dcrGlobalPerDay: 500, revocation: false }
+
+-- One lowercase hex character at index i. Non-recursive and first-order, so
+-- Z3 can reason about lowerHex32 (a chars/any version would be skipped).
+pure func hexAt(s: string, i: int) -> bool = find("0123456789abcdef", substring(s, i, i + 1)) >= 0
+
+pure func lowerHex32(s: string) -> bool =
+  length(s) == 32
+    && hexAt(s, 0) && hexAt(s, 1) && hexAt(s, 2) && hexAt(s, 3) && hexAt(s, 4) && hexAt(s, 5) && hexAt(s, 6) && hexAt(s, 7)
+    && hexAt(s, 8) && hexAt(s, 9) && hexAt(s, 10) && hexAt(s, 11) && hexAt(s, 12) && hexAt(s, 13) && hexAt(s, 14) && hexAt(s, 15)
+    && hexAt(s, 16) && hexAt(s, 17) && hexAt(s, 18) && hexAt(s, 19) && hexAt(s, 20) && hexAt(s, 21) && hexAt(s, 22) && hexAt(s, 23)
+    && hexAt(s, 24) && hexAt(s, 25) && hexAt(s, 26) && hexAt(s, 27) && hexAt(s, 28) && hexAt(s, 29) && hexAt(s, 30) && hexAt(s, 31)
+
+-- T14: the two client_id namespaces are disjoint, and Z3 proves it. A
+-- registered id is "mco_" plus 32 lowercase hex characters and never contains
+-- "://", so it is never fetched; a CIMD id starts with https://. Nothing that
+-- starts with https:// is ever "registered", and nothing that starts with mco_
+-- is ever "cimd". ("cimd" names the namespace; a CIMD id must still pass
+-- cimdUrlOk wherever it is accepted, which cimd.fetchClient and the flow do.)
+export pure func clientKind(id: string) -> string
+  ensures {
+    result == "cimd" || result == "registered" || result == "unknown",
+    startsWith(id, "https://") == false || result != "registered",
+    startsWith(id, "mco_") == false || result != "cimd",
+    result != "registered" || (startsWith(id, "mco_") && length(id) == 36 && strContains(id, "://") == false),
+    result != "cimd" || startsWith(id, "https://")
+  }
+{
+  if startsWith(id, "mco_") && strContains(id, "://") == false && lowerHex32(substring(id, 4, length(id))) then "registered"
+  else if startsWith(id, "https://") then "cimd"
+  else "unknown"
+}
+
+-- Token-endpoint auth methods (M1d, D1). The intersection rule: a method is
+-- usable only when we advertise it.
+export pure func authMethodOk(method: string, advertised: [string]) -> bool
+  ensures { result == contains(advertised, method) }
+{
+  contains(advertised, method)
+}
+
+-- A CIMD client always authenticates with "none" here. Its document's plural
+-- token_endpoint_auth_methods_supported, when present, must contain "none";
+-- the singular token_endpoint_auth_method is informational and never read.
+export pure func cimdAuthMethodsOk(plural: [string], present: bool) -> bool
+  ensures { result == (present == false || contains(plural, "none")) }
+{
+  present == false || authMethodOk("none", plural)
+}
+
+-- The methods this server advertises and accepts. "none" is always present
+-- and first (Claude picks CIMD only when it sees it); private_key_jwt is never
+-- advertised in 0.2.
+export pure func advertisedAuthMethods(cfg: ClientConfig) -> [string]
+  ensures { contains(result, "none"), contains(result, "private_key_jwt") == false }
+{
+  if cfg.confidential then ["none", "client_secret_basic", "client_secret_post"] else ["none"]
+}
+
+export pure func isSecretMethod(method: string) -> bool
+  ensures { result == (method == "client_secret_basic" || method == "client_secret_post") }
+{
+  method == "client_secret_basic" || method == "client_secret_post"
+}
+
+-- Refresh policy (M1c, D3): "stable" only for a secret-holding client; every
+-- other client rotates.
+export pure func refreshPolicyOk(policy: string, method: string) -> bool
+  ensures { result == (policy == "rotate" || (policy == "stable" && (method == "client_secret_basic" || method == "client_secret_post"))) }
+{
+  policy == "rotate" || (policy == "stable" && isSecretMethod(method))
+}
+
+export pure func stableIdleSec() -> int = 2592000       -- 30 days, sliding
+export pure func stableAbsoluteSec() -> int = 15552000  -- 180 days from first issue
+
+-- The next idle deadline of a stable refresh token: 30 days from now, never
+-- past its absolute lifetime.
+export pure func stableIdleExpiresAt(nowSec: int, absoluteExpiresAt: int) -> int
+  ensures { result <= absoluteExpiresAt, result <= nowSec + 2592000 }
+{
+  if nowSec + 2592000 < absoluteExpiresAt then nowSec + 2592000 else absoluteExpiresAt
+}
+
+-- A stable refresh token is usable while neither deadline has passed.
+export pure func stableRefreshLive(nowSec: int, idleExpiresAt: int, absoluteExpiresAt: int) -> bool
+  ensures { result == (nowSec < idleExpiresAt && nowSec < absoluteExpiresAt) }
+{
+  isExpired(nowSec, idleExpiresAt) == false && isExpired(nowSec, absoluteExpiresAt) == false
+}
+
+-- ============================================================
 -- RFC 8414 authorization-server metadata
 -- ============================================================
 
@@ -189,15 +350,29 @@ export pure func authResponseUrl(redirectUri: string, code: string, state: strin
   "${redirectUri}${sep}code=${code}&state=${state}&iss=${urlEncode(issuer)}"
 }
 
-export pure func asMetadata(issuer: string) -> string =
+-- 0.1.2's document, unchanged: asMetadataFor with the default config, which
+-- the "metadata golden" test pins byte for byte.
+export pure func asMetadata(issuer: string) -> string = asMetadataFor(issuer, defaultClientConfig())
+
+pure func methodsJson(cfg: ClientConfig) -> Json = ja(map(js, advertisedAuthMethods(cfg)))
+
+-- The metadata for a configuration. Keys appear only when their feature is on:
+-- registration_endpoint (cfg.dcr), revocation_endpoint (cfg.revocation), and
+-- the secret methods (cfg.confidential). CIMD with "none" is always advertised,
+-- so Claude keeps choosing CIMD and ChatGPT keeps preferring it.
+export pure func asMetadataFor(issuer: string, cfg: ClientConfig) -> string =
   encode(jo([
     kv("issuer", js(issuer)),
     kv("authorization_endpoint", js("${issuer}/oauth/authorize")),
-    kv("token_endpoint", js("${issuer}/oauth/token")),
+    kv("token_endpoint", js("${issuer}/oauth/token"))
+  ] ++ (if cfg.dcr then [kv("registration_endpoint", js("${issuer}/oauth/register"))] else [])
+    ++ (if cfg.revocation then [kv("revocation_endpoint", js("${issuer}/oauth/revoke")),
+                                 kv("revocation_endpoint_auth_methods_supported", methodsJson(cfg))] else [])
+    ++ [
     kv("response_types_supported", ja([js("code")])),
     kv("grant_types_supported", ja([js("authorization_code"), js("refresh_token")])),
     kv("code_challenge_methods_supported", ja([js("S256")])),
-    kv("token_endpoint_auth_methods_supported", ja([js("none")])),
+    kv("token_endpoint_auth_methods_supported", methodsJson(cfg)),
     kv("client_id_metadata_document_supported", jb(true)),
     kv("authorization_response_iss_parameter_supported", jb(true))
   ]))

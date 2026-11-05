@@ -30,4 +30,12 @@ leak() {
 leak "log-classified-token" 'func leakToken(raw: string) -> unit ! {IO} = audit("t=${asSecret(raw)}")'
 leak "log-minted-code"      'func leakCode() -> unit ! {IO, Rand[mode=crypto]} = audit("c=${newSecret()}")'
 leak "log-token-body"       'func leakBody(a: string, b: string) -> unit ! {IO} = audit(tokenBody(asSecret(a), asSecret(b), 3600))'
+# 0.2 client secrets (T11): minted, returned by createClient, and carried in
+# the DCR registration response.
+leak "log-client-secret"    'func leakClientSecret() -> unit ! {IO, Rand[mode=crypto]} = audit("s=${newClientSecret()}")'
+leak "log-created-client"   'func leakCreated(h: Hooks, cfg: ClientConfig) -> unit ! {IO, FS, Env, Net, Clock, SharedMem, Rand[mode=crypto], Declassify} = match createClient(h, cfg, ["https://a.example/cb"], "client_secret_basic", "rotate", 0) { Ok((id, s)) => audit("created ${id} ${s}"), Err(e) => audit(e) }'
+leak "log-dcr-response"     'func leakDcr(h: Hooks, cfg: ClientConfig) -> unit ! {IO, FS, Env, Net, Clock, SharedMem, Rand[mode=crypto], Declassify} = match registerClientDcr(h, cfg, "ip", "{}", 0) { Ok((st, b)) => audit(b), Err(e) => audit(e) }'
+leak "log-token-request"    'func leakTokenRequest(h: Hooks, cfg: ClientConfig) -> unit ! {IO, FS, Env, Net, Clock, SharedMem, Rand[mode=crypto], Declassify} = match tokenRequest(h, cfg, "", "", 0) { (st, b, w) => audit(b) }'
+leak "log-login-handle"     'func leakHandle(h: Hooks, cfg: ClientConfig) -> unit ! {IO, FS, Env, Net, Clock, SharedMem, Rand[mode=crypto], Declassify} = match beginAuthorizeFor(h, cfg, "https://l.example", "mco_0123456789abcdef0123456789abcdef", "https://a.example/cb", "code", "c", "S256", "s", 0) { Ok(u) => audit(u), Err(e) => audit(e) }'
+leak "log-presented-secret" 'func leakPresented(b: string) -> unit ! {IO} = audit("p=${asSecret(formGet(b, "client_secret"))}")'
 exit $rc

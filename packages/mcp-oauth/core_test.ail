@@ -5,7 +5,9 @@ module sunholo/mcp_oauth/core_test
 
 import ./core (authResponseUrl, formGet, formUnescape, s256, pkceOk, verifierOk, verifierLengthOk, challengeMethodOk,
   redirectAllowed, loopbackRedirectOk, redirectOk, stripLoopbackPort, cimdUrlOk,
-  httpsHost, codeExpiresAt, isExpired, asMetadata)
+  httpsHost, codeExpiresAt, isExpired, asMetadata,
+  ClientConfig, defaultClientConfig, asMetadataFor, clientKind, authMethodOk, cimdAuthMethodsOk, advertisedAuthMethods,
+  refreshPolicyOk, stableIdleExpiresAt, stableRefreshLive, stableAbsoluteSec)
 import std/string (repeat, contains)
 
 -- RFC 7636 Appendix B
@@ -82,3 +84,111 @@ test "metadata advertises iss support" {
   contains(asMetadata("https://a.example"), "\"authorization_response_iss_parameter_supported\":true")
 }
 
+
+-- ---------------- 0.2: metadata (M1e) ----------------
+-- Byte for byte what 0.1.2's asMetadata returned for this issuer (captured
+-- from the 0.1.2 release, ailang-packages 1c70be9).
+pure func golden012() -> string = "{\"issuer\":\"https://auth.example.com\",\"authorization_endpoint\":\"https://auth.example.com/oauth/authorize\",\"token_endpoint\":\"https://auth.example.com/oauth/token\",\"response_types_supported\":[\"code\"],\"grant_types_supported\":[\"authorization_code\",\"refresh_token\"],\"code_challenge_methods_supported\":[\"S256\"],\"token_endpoint_auth_methods_supported\":[\"none\"],\"client_id_metadata_document_supported\":true,\"authorization_response_iss_parameter_supported\":true}"
+test "metadata golden: asMetadata is byte-identical to 0.1.2" { asMetadata("https://auth.example.com") == golden012() }
+test "metadata golden: default config is 0.1.2" { asMetadataFor("https://auth.example.com", defaultClientConfig()) == golden012() }
+pure func cfgOn() -> ClientConfig = { defaultClientConfig() | confidential: true, dcr: true, revocation: true }
+test "metadata advertises registration only with dcr" {
+  contains(asMetadataFor("https://a.example", { defaultClientConfig() | dcr: true }), "\"registration_endpoint\":\"https://a.example/oauth/register\"")
+    && contains(asMetadataFor("https://a.example", { defaultClientConfig() | confidential: true, revocation: true }), "registration_endpoint") == false
+}
+test "metadata advertises revocation only when on" {
+  contains(asMetadataFor("https://a.example", { defaultClientConfig() | revocation: true }), "\"revocation_endpoint\":\"https://a.example/oauth/revoke\"")
+    && contains(asMetadataFor("https://a.example", { defaultClientConfig() | dcr: true }), "revocation_endpoint") == false
+}
+test "metadata secret methods only with confidential, none first" {
+  contains(asMetadataFor("https://a.example", cfgOn()), "\"token_endpoint_auth_methods_supported\":[\"none\",\"client_secret_basic\",\"client_secret_post\"]")
+    && contains(asMetadataFor("https://a.example", cfgOn()), "client_id_metadata_document_supported\":true")
+    && contains(asMetadataFor("https://a.example", cfgOn()), "private_key_jwt") == false
+}
+
+-- ---------------- 0.2: client kinds (T14) ----------------
+test "client kind registered id" { clientKind("mco_0123456789abcdef0123456789abcdef") == "registered" }
+test "client kind cimd url" { clientKind("https://claude.ai/oauth/claude-code-client-metadata") == "cimd" }
+test "client kind rejects near misses" {
+  clientKind("mco_0123456789abcdef0123456789abcde") == "unknown"
+    && clientKind("mco_0123456789abcdef0123456789abcdef0") == "unknown"
+    && clientKind("mco_0123456789ABCDEF0123456789abcdef") == "unknown"
+    && clientKind("mco_https://evil.example/aaaaaaaaaaaa") == "unknown"
+    && clientKind("mco_0123456789abcdef0123456789abcd/x") == "unknown"
+    && clientKind("http://claude.ai/c") == "unknown" && clientKind("client-a") == "unknown" && clientKind("") == "unknown"
+}
+
+-- ---------------- 0.2: auth methods (M1d) ----------------
+test "auth method intersection" {
+  authMethodOk("none", advertisedAuthMethods(defaultClientConfig()))
+    && authMethodOk("client_secret_basic", advertisedAuthMethods(defaultClientConfig())) == false
+    && authMethodOk("client_secret_post", advertisedAuthMethods(cfgOn()))
+    && authMethodOk("private_key_jwt", advertisedAuthMethods(cfgOn())) == false
+}
+test "cimd plural must contain none" {
+  cimdAuthMethodsOk(["none", "private_key_jwt"], true) && cimdAuthMethodsOk([], false)
+    && cimdAuthMethodsOk(["private_key_jwt"], true) == false && cimdAuthMethodsOk([], true) == false
+}
+
+-- ---------------- 0.2: refresh policy (M1c, D3) ----------------
+test "stable refresh needs a secret method" {
+  refreshPolicyOk("stable", "client_secret_basic") && refreshPolicyOk("stable", "client_secret_post")
+    && refreshPolicyOk("stable", "none") == false && refreshPolicyOk("rotate", "none") && refreshPolicyOk("sticky", "client_secret_basic") == false
+}
+test "stable idle deadline never passes the absolute one" {
+  stableIdleExpiresAt(1000, 1000 + stableAbsoluteSec()) == 1000 + 2592000 && stableIdleExpiresAt(5000, 6000) == 6000
+}
+test "stable refresh dead at either deadline" {
+  stableRefreshLive(10, 20, 30) && stableRefreshLive(20, 20, 30) == false && stableRefreshLive(30, 40, 30) == false
+}
+
+-- ---------------- 0.2: the one host parser (core.httpsHost) ----------------
+-- The host ends at the first "/", "?", "#" or "\\" and the port at ":".
+test "host ends at the query" {
+  httpsHost("https://localhost?.example.com/c") == "localhost" && cimdUrlOk("https://localhost?.example.com/c") == false
+    && cimdUrlOk("https://localhost?.claude.ai/oauth/client.json") == false
+}
+test "host ends at the fragment" { httpsHost("https://localhost#.example.com") == "localhost" }
+test "host ends at a backslash" {
+  httpsHost("https://localhost\\.example.com/c") == "localhost" && cimdUrlOk("https://localhost\\.example.com/c") == false
+    && cimdUrlOk("https://claude.ai\\@metadata.google.internal/c") == false
+}
+test "host refuses userinfo" {
+  httpsHost("https://u@claude.ai/c") == "" && httpsHost("https://claude.ai:443@localhost/c") == ""
+    && cimdUrlOk("https://claude.ai:443@localhost/c") == false
+}
+test "host is lowercased" {
+  httpsHost("https://Claude.AI/c") == "claude.ai" && cimdUrlOk("https://LOCALHOST/c") == false
+    && cimdUrlOk("https://Metadata.Google.Internal/computeMetadata/v1/") == false && cimdUrlOk("https://SVC.INTERNAL/c") == false
+}
+test "host refuses a trailing dot" {
+  httpsHost("https://localhost./c") == "" && cimdUrlOk("https://localhost./c") == false
+    && cimdUrlOk("https://metadata.google.internal./c") == false && cimdUrlOk("https://claude.ai./c") == false
+}
+test "host refuses ipv6 brackets" {
+  httpsHost("https://[::1]/c") == "" && cimdUrlOk("https://[::ffff:127.0.0.1]/c") == false && cimdUrlOk("https://[fe80::1%25en0]/c") == false
+}
+test "host refuses percent-encoding" {
+  httpsHost("https://local%68ost/c") == "" && cimdUrlOk("https://local%68ost/c") == false && cimdUrlOk("https://claude.ai%2F@evil.example/c") == false
+}
+test "host refuses numeric addresses" {
+  cimdUrlOk("https://127.1/c") == false && cimdUrlOk("https://2130706433/c") == false
+    && cimdUrlOk("https://0x7f.0.0.1/c") == false && cimdUrlOk("https://10.0.0.1:8443/c") == false
+}
+test "host refuses single labels and empty labels" {
+  cimdUrlOk("https://intranet/c") == false && httpsHost("https://claude..ai/c") == "" && httpsHost("https://.claude.ai/c") == ""
+    && httpsHost("https://-claude.ai/c") == "" && httpsHost("https://claude ai/c") == ""
+}
+test "host port must be digits" {
+  httpsHost("https://claude.ai:8443/c") == "claude.ai" && httpsHost("https://claude.ai:abc/c") == ""
+    && httpsHost("https://claude.ai:/c") == "" && httpsHost("http://claude.ai/c") == ""
+}
+test "real client metadata urls still accepted" {
+  cimdUrlOk("https://claude.ai/oauth/claude-code-client-metadata") && cimdUrlOk("https://chatgpt.com/oauth/client.json")
+    && cimdUrlOk("https://ailang.sunholo.com/mcp-check/client-metadata.json") && cimdUrlOk("https://Example.com:8443/c.json")
+}
+test "loopback refuses query fragment backslash and userinfo tricks" {
+  stripLoopbackPort("http://localhost?.evil.example/cb") == "" && stripLoopbackPort("http://localhost#x") == ""
+    && stripLoopbackPort("http://127.0.0.1@evil.example/cb") == "" && stripLoopbackPort("http://localhost\\@evil.example/cb") == ""
+    && stripLoopbackPort("http://localhost:80@evil.example/cb") == "" && stripLoopbackPort("http://localhost:8080?x") == ""
+}

@@ -1,31 +1,48 @@
 -- sunholo/mcp_oauth/flow: the authorization-server flow, and the ONLY
 -- module that holds secrets (design D4, ailang design_docs/planned/v0_52_0/
--- m-mcp-oauth-package.md §"T7 in detail").
+-- m-mcp-oauth-package.md §"T7 in detail"; 0.2 client models:
+-- design_docs/planned/v0_57_2/m-mcp-oauth-client-models.md §M1).
 --
 -- Secret handling rules this module follows (and tests/lint.sh enforces):
---   * every code, handle, access token and refresh token is string<secret>:
---     minted under Rand[mode=crypto], or classified on receipt (asSecret);
+--   * every code, handle, access token, refresh token and client secret is
+--     string<secret>: minted under Rand[mode=crypto], or classified on
+--     receipt (asSecret);
 --   * the only label-lowering function is digestOf (! {Declassify});
 --     storage, logs and comparisons see digests only;
 --   * no declared record type holds a <secret> (#1523: declared-record
 --     fields lose the label);
 --   * audit() refuses <secret> at compile time;
 --   * secrets leave only in the return value the caller writes to the
---     HTTP response (redirect Location / token JSON). The label propagates
+--     HTTP response (redirect Location / token JSON / registration JSON) or,
+--     for createClient, prints once for the operator. The label propagates
 --     there; the caller must not log it (AGENT.md checklist).
+--
+-- Client models (0.2): CIMD clients (https client_id, auth "none", always
+-- rotate) work exactly as in 0.1.2. Registered clients ("mco_" ids, created by
+-- createClient or registerClientDcr) carry their auth method and refresh
+-- policy in a store record; the new entry points (beginAuthorizeFor,
+-- tokenRequest, revokeRequest) take a ClientConfig and authenticate the
+-- client from the raw request. The 0.1.2 functions keep their signatures and
+-- serve CIMD clients only.
 
 module sunholo/mcp_oauth/flow
 
-import std/crypto (sha256Hex)
+import std/crypto (sha256Hex, constantTimeEqual)
 import std/rand (uuid4)
-import std/string (replace, contains as strContains, length)
-import std/json (encode, decode, jo, kv, js, jb, jnum, ja, getString, getBool, getInt, getStringArrayOrEmpty)
+import std/string (replace, contains as strContains, length, substring, find, trim, toLower, startsWith)
+import std/json (Json, encode, decode, jo, kv, js, jb, jnum, ja, getString, getBool, getInt, getArray, asNumber, getStringArrayOrEmpty)
 import std/option (Option, Some, None)
 import std/result (Result, Ok, Err)
-import std/list (map, length as listLen)
+import std/list (map, filter, zip, length as listLen, contains)
+import std/bytes (fromBase64, toString)
 import std/io (println)
-import std/math (intToFloat)
-import ./core (challengeMethodOk, pkceOk, redirectOk, codeExpiresAt, isExpired, verifierCharsOk, authResponseUrl)
+import std/math (intToFloat, floatToInt)
+import ./core (ClientConfig, challengeMethodOk, pkceOk, redirectOk, codeExpiresAt, isExpired, verifierCharsOk, authResponseUrl,
+  clientKind, cimdUrlOk, formGet, formUnescape, isSecretMethod, refreshPolicyOk, stableIdleExpiresAt, stableRefreshLive, stableAbsoluteSec)
+import ./clients (ClientRecord, DcrRequest, clientKey, clientRecordJson, parseClientRecord, clientLive, clientAccepted, touchClient,
+  clientStoreExpiry, dcrUnusedTtlSec, dcrRedirectUriOk, validateDcr, dcrError, dcrResponseFields, dcrCallerWindowKey,
+  dcrGlobalWindowKey, dcrCallerWindowEnd, dcrGlobalWindowEnd, underLimit)
+import ./cimd (fetchClient)
 
 -- ============================================================
 -- Service hooks (design D3). One effect row for every hook.
@@ -50,6 +67,8 @@ import ./core (challengeMethodOk, pkceOk, redirectOk, codeExpiresAt, isExpired, 
 --                                   `iss` in the authorization response (RFC 9207)
 -- mint may use Declassify (e.g. to hash the key it stores); it must still return
 -- the raw token only as its result, never log or persist it unhashed.
+-- Hooks is unchanged in 0.2 (a closed record: a new field would break every
+-- adopter's literal). New behaviour is configured by core.ClientConfig.
 export type Hooks = {
   authenticate: (string) -> Result[string, string] ! {IO, FS, Env, Net, Clock, SharedMem},
   mint: (string, string) -> Result[string, string] ! {IO, FS, Env, Net, Clock, SharedMem, Rand[mode=crypto], Declassify},
@@ -73,11 +92,28 @@ func newSecret() -> string<secret> ! {Rand[mode=crypto]} {
   "${a}${b}"
 }
 
+-- A client secret (T11): 366 bits from three crypto UUIDv4s. The "mcs_"
+-- prefix lets secret scanners recognise a leaked one.
+func newClientSecret() -> string<secret> ! {Rand[mode=crypto]} {
+  let a = replace(uuid4(), "-", "");
+  let b = replace(uuid4(), "-", "");
+  let c = replace(uuid4(), "-", "");
+  "mcs_${a}${b}${c}"
+}
+
+-- A registered client id: "mco_" + 32 hex (core.clientKind's namespace). Not a secret.
+func newClientId() -> string ! {Rand[mode=crypto]} = "mco_${replace(uuid4(), "-", "")}"
+
 -- Classify a value that arrives unlabelled (hook result, request param).
 pure func asSecret(raw: string) -> string<secret> = raw
 
 -- The ONE label-lowering function: secrets are stored and compared as digests.
 func digestOf(s: string<secret>) -> string ! {Declassify} = sha256Hex(s)
+
+-- A presented client secret against the stored digest, in constant time.
+-- A fast hash is enough: the secret is 366 random bits, not a password (V6).
+func secretMatches(presented: string<secret>, storedDigest: string) -> bool ! {Declassify} =
+  storedDigest != "" && constantTimeEqual(digestOf(presented), storedDigest)
 
 -- Audit log: refuses secrets at compile time.
 func audit(event: string{not secret}) -> unit ! {IO} = println("[mcp_oauth] ${event}")
@@ -91,18 +127,201 @@ export pure func oauthError(code: string, desc: string) -> string =
 
 pure func invalidGrant(desc: string) -> string = oauthError("invalid_grant", desc)
 
+pure func invalidClient(desc: string) -> string = oauthError("invalid_client", desc)
+
+-- RFC 6749 §5.2: invalid_client is a 401 with a Basic challenge.
+pure func basicChallenge() -> string = "Basic realm=\"oauth\""
+
+pure func statusOf(errJson: string) -> int =
+  if strContains(errJson, "\"error\":\"invalid_client\"") then 401
+  else if strContains(errJson, "\"error\":\"server_error\"") then 500
+  else 400
+
+-- (status, body, WWW-Authenticate) for an error JSON.
+pure func errorResponse(errJson: string) -> (int, string, string) =
+  if statusOf(errJson) == 401 then (401, errJson, basicChallenge()) else (statusOf(errJson), errJson, "")
+
 -- state is echoed into the redirect URL unencoded, so only unreserved
 -- characters are accepted (RFC 3986 §2.3), max 512.
 pure func stateOk(state: string) -> bool = length(state) <= 512 && verifierCharsOk(state)
 
+pure func getStringOr(j: Json, k: string) -> string = match getString(j, k) { Some(s) => s, None => "" }
+
+pure func getBoolOr(j: Json, k: string) -> bool = match getBool(j, k) { Some(b) => b, None => false }
+
+pure func getIntOr(j: Json, k: string) -> int = match getInt(j, k) { Some(n) => n, None => 0 }
+
+-- A record's client kind; "" (written by 0.1.x) means a CIMD client.
+pure func kindOf(rec: Json) -> string = if getStringOr(rec, "kind") == "" then "cimd" else getStringOr(rec, "kind")
+
 -- ============================================================
--- 1. /oauth/authorize (validated client document already fetched by cimd)
+-- Registered clients (M1a): operator-created, never an HTTP endpoint
 -- ============================================================
 
--- Returns Ok(login page URL carrying the request handle) or Err(error JSON).
-export func beginAuthorize(h: Hooks, loginUrl: string, clientId: string, registered: [string],
-    redirectUri: string, responseType: string, challenge: string, method: string,
-    state: string, nowSec: int)
+-- The authenticated client of one token-endpoint request. Internal: it is
+-- never a parameter or result of an exported function, so no caller can hand
+-- the flow a pre-authenticated value (quorum round 1).
+type ClientAuth = {
+  clientId: string,
+  kind: string,
+  method: string,
+  refreshPolicy: string
+}
+
+-- A registered client this deployment accepts: present, unexpired, and
+-- enabled by cfg (clients.clientAccepted).
+func loadClient(h: Hooks, cfg: ClientConfig, clientId: string, nowSec: int) -> Option[ClientRecord] ! {IO, FS, Env, Net, Clock, SharedMem} =
+  match h.get(clientKey(clientId)) {
+    None => None,
+    Some(raw) => match parseClientRecord(clientId, raw) {
+      None => None,
+      Some(r) => if clientLive(r, nowSec) && clientAccepted(r, cfg) then Some(r) else None
+    }
+  }
+
+func storeClient(h: Hooks, r: ClientRecord, nowSec: int) -> bool ! {IO, FS, Env, Net, Clock, SharedMem} =
+  h.put(clientKey(r.clientId), clientRecordJson(r), clientStoreExpiry(r, nowSec))
+
+pure func redirectListOk(uris: [string]) -> bool =
+  listLen(uris) > 0 && listLen(filter(\u. dcrRedirectUriOk(u, []) == false, uris)) == 0
+
+-- Create a pre-registered client (the GE custom MCP data store shape). Call it
+-- from an operator script (`ailang run` with your store hooks), never from a
+-- route. Returns Ok((clientId, secret)); the secret is "" for method "none".
+-- Show the secret once (the GE admin form) and never log or store it: the
+-- store holds only its digest.
+--   method:        "client_secret_basic" | "client_secret_post" | "none"
+--   refreshPolicy: "rotate" | "stable" (stable needs a secret method, D3)
+-- redirectUris are matched exactly (core.redirectOk), with no wildcards.
+export func createClient(h: Hooks, cfg: ClientConfig, redirectUris: [string], method: string, refreshPolicy: string, nowSec: int)
+  -> Result[(string, string<secret>), string] ! {IO, FS, Env, Net, Clock, SharedMem, Rand[mode=crypto], Declassify} {
+  if cfg.confidential == false then Err("registered clients need ClientConfig.confidential = true")
+  else if method != "none" && isSecretMethod(method) == false then Err("method must be client_secret_basic, client_secret_post or none")
+  else if refreshPolicyOk(refreshPolicy, method) == false then Err("refresh policy must be rotate, or stable for a client with a secret (D3)")
+  else if redirectListOk(redirectUris) == false then Err("redirect URIs must be https (no fragment or userinfo, at most 512 characters) or RFC 8252 loopback")
+  else {
+    let clientId = newClientId();
+    let secret = if isSecretMethod(method) then newClientSecret() else asSecret("");
+    let digest = if isSecretMethod(method) then digestOf(secret) else "";
+    let r = { clientId: clientId, method: method, secretDigest: digest, redirectUris: redirectUris, refreshPolicy: refreshPolicy,
+              origin: "operator", createdAt: nowSec, lastUsedAt: 0, expiresAt: 0 };
+    if storeClient(h, r, nowSec) then {
+      audit("client created id=${clientId} method=${method} refresh=${refreshPolicy}");
+      Ok((clientId, secret))
+    } else Err("could not store the client")
+  }
+}
+
+-- Replace a registered client's secret. The old secret stops working at once.
+export func rotateClientSecret(h: Hooks, clientId: string, nowSec: int)
+  -> Result[string<secret>, string] ! {IO, FS, Env, Net, Clock, SharedMem, Rand[mode=crypto], Declassify} =
+  match h.get(clientKey(clientId)) {
+    None => Err("unknown client"),
+    Some(raw) => match parseClientRecord(clientId, raw) {
+      None => Err("unknown client"),
+      Some(r) =>
+        if isSecretMethod(r.method) == false then Err("client ${clientId} has no secret (method ${r.method})")
+        else {
+          let secret = newClientSecret();
+          if storeClient(h, { r | secretDigest: digestOf(secret) }, nowSec) then {
+            audit("client secret rotated id=${clientId}");
+            Ok(secret)
+          } else Err("could not store the client")
+        }
+    }
+  }
+
+-- Remove a registered client. Its refresh tokens stop working at the next
+-- refresh (the client can no longer authenticate); issued access tokens live
+-- until they expire.
+export func deleteClient(h: Hooks, clientId: string) -> bool ! {IO, FS, Env, Net, Clock, SharedMem} {
+  audit("client deleted id=${clientId}");
+  h.del(clientKey(clientId))
+}
+
+-- ------------------------------------------------------------
+-- Client authentication at the token and revocation endpoints (T16)
+-- ------------------------------------------------------------
+
+-- RFC 6749 §2.3.1: "Basic " base64(form-escaped id ":" form-escaped secret).
+-- Returns the raw (id, secret) parts, or None when malformed. The secret part
+-- is classified by the caller at once.
+pure func basicParts(header: string) -> Option[(string, string)] {
+  let h = trim(header);
+  if length(h) < 6 || toLower(substring(h, 0, 6)) != "basic " then None
+  else match fromBase64(trim(substring(h, 6, length(h)))) {
+    None => None,
+    Some(b) => {
+      let s = toString(b);
+      let colon = find(s, ":");
+      if colon < 1 then None else Some((formUnescape(substring(s, 0, colon)), formUnescape(substring(s, colon + 1, length(s)))))
+    }
+  }
+}
+
+-- Authenticate client `cid`, which presented `presented` ("none",
+-- "client_secret_basic" or "client_secret_post") with `secret`. The method
+-- that counts is the one in the CLIENT RECORD, never the request's (T16).
+func authenticateAs(h: Hooks, cfg: ClientConfig, cid: string, presented: string, secret: string<secret>, nowSec: int)
+  -> Result[ClientAuth, string] ! {IO, FS, Env, Net, Clock, SharedMem, Declassify} {
+  let kind = clientKind(cid);
+  if kind == "cimd" then
+    if cimdUrlOk(cid) == false then Err(invalidClient("unknown client"))
+    else if presented != "none" then Err(invalidClient("a client metadata document client authenticates with none and sends no client secret"))
+    else Ok({ clientId: cid, kind: "cimd", method: "none", refreshPolicy: "rotate" })
+  else if kind == "registered" then match loadClient(h, cfg, cid, nowSec) {
+    None => Err(invalidClient("unknown client")),
+    Some(r) =>
+      if r.method != presented then Err(invalidClient("this client authenticates with ${r.method}"))
+      else if presented == "none" then Ok({ clientId: cid, kind: "registered", method: r.method, refreshPolicy: r.refreshPolicy })
+      else if secretMatches(secret, r.secretDigest) then Ok({ clientId: cid, kind: "registered", method: r.method, refreshPolicy: r.refreshPolicy })
+      else Err(invalidClient("client authentication failed"))
+  }
+  else Err(invalidClient("unknown client"))
+}
+
+-- Authenticate the client of a token or revocation request from its raw
+-- parts: the Authorization header value ("" when absent) and the form body.
+func authenticateClient(h: Hooks, cfg: ClientConfig, authorization: string, formBody: string, nowSec: int)
+  -> Result[ClientAuth, string] ! {IO, FS, Env, Net, Clock, SharedMem, Declassify} {
+  let formId = formGet(formBody, "client_id");
+  let formSecret = formGet(formBody, "client_secret");
+  let hasHeader = trim(authorization) != "";
+  if hasHeader && formSecret != "" then Err(oauthError("invalid_request", "use one client authentication method, not two"))
+  else if hasHeader == false then authenticateAs(h, cfg, formId, if formSecret == "" then "none" else "client_secret_post", asSecret(formSecret), nowSec)
+  else match basicParts(authorization) {
+    None => Err(invalidClient("the Authorization header must carry Basic client credentials")),
+    Some((cid, raw)) =>
+      if formId != "" && formId != cid then Err(invalidClient("client_id does not match the Basic credentials"))
+      else authenticateAs(h, cfg, cid, "client_secret_basic", asSecret(raw), nowSec)
+  }
+}
+
+-- The CIMD client of a 0.1.2 call (exchangeCode / refreshTokens), which pass
+-- a bare client_id. Only ever built after clientKind(clientId) == "cimd".
+pure func legacyCimdAuth(clientId: string) -> ClientAuth = { clientId: clientId, kind: "cimd", method: "none", refreshPolicy: "rotate" }
+
+-- After a successful token request: last_used_at, and a DCR client's TTL
+-- slides to 90 days idle (T12).
+func touchRegistered(h: Hooks, auth: ClientAuth, nowSec: int) -> bool ! {IO, FS, Env, Net, Clock, SharedMem} =
+  if auth.kind != "registered" then true
+  else match h.get(clientKey(auth.clientId)) {
+    None => false,
+    Some(raw) => match parseClientRecord(auth.clientId, raw) {
+      None => false,
+      Some(r) => storeClient(h, touchClient(r, nowSec), nowSec)
+    }
+  }
+
+-- ============================================================
+-- 1. /oauth/authorize
+-- ============================================================
+
+-- The checks and the pending-request record shared by beginAuthorize and
+-- beginAuthorizeFor. kind and origin ("" | "operator" | "dcr") ride on the
+-- request so the code and describeRequest know the client model.
+func authorizeChecked(h: Hooks, loginUrl: string, clientId: string, kind: string, origin: string, registered: [string],
+    redirectUri: string, responseType: string, challenge: string, method: string, state: string, nowSec: int)
   -> Result[string, string] ! {IO, FS, Env, Net, Clock, SharedMem, Rand[mode=crypto], Declassify} {
   if responseType != "code" then Err(oauthError("unsupported_response_type", "response_type must be code"))
   else if challengeMethodOk(method) == false then Err(oauthError("invalid_request", "code_challenge_method must be S256"))
@@ -112,7 +331,7 @@ export func beginAuthorize(h: Hooks, loginUrl: string, clientId: string, registe
   else {
     let handle = newSecret();
     let rec = encode(jo([kv("client_id", js(clientId)), kv("redirect_uri", js(redirectUri)),
-                         kv("challenge", js(challenge)), kv("state", js(state))]));
+                         kv("challenge", js(challenge)), kv("state", js(state)), kv("kind", js(kind)), kv("registered", js(origin))]));
     let exp = codeExpiresAt(nowSec) + 540;  -- 10 minutes to sign in
     if h.put("req:${digestOf(handle)}", rec, exp) then {
       audit("authorize client=${clientId}");
@@ -121,9 +340,41 @@ export func beginAuthorize(h: Hooks, loginUrl: string, clientId: string, registe
   }
 }
 
+-- 0.1.2: the caller fetched the CIMD document (cimd.fetchClient) and passes
+-- its redirect_uris. A registered (mco_) client must use beginAuthorizeFor.
+-- Returns Ok(login page URL carrying the request handle) or Err(error JSON).
+export func beginAuthorize(h: Hooks, loginUrl: string, clientId: string, registered: [string],
+    redirectUri: string, responseType: string, challenge: string, method: string,
+    state: string, nowSec: int)
+  -> Result[string, string] ! {IO, FS, Env, Net, Clock, SharedMem, Rand[mode=crypto], Declassify} =
+  if clientKind(clientId) == "registered" then Err(oauthError("invalid_client", "a registered client authorizes through beginAuthorizeFor"))
+  else authorizeChecked(h, loginUrl, clientId, "cimd", "", registered, redirectUri, responseType, challenge, method, state, nowSec)
+
+-- 0.2: dispatches on core.clientKind (T14). An https client_id is fetched as
+-- a CIMD document (cimd.fetchClient, Net[scope=public]), exactly as an
+-- adopter of 0.1.2 does by hand; an mco_ id is looked up in the store and is
+-- never fetched. Either way the redirect must equal a registered one exactly.
+export func beginAuthorizeFor(h: Hooks, cfg: ClientConfig, loginUrl: string, clientId: string,
+    redirectUri: string, responseType: string, challenge: string, method: string,
+    state: string, nowSec: int)
+  -> Result[string<secret>, string] ! {IO, FS, Env, Net, Clock, SharedMem, Rand[mode=crypto], Declassify} {
+  let kind = clientKind(clientId);
+  if kind == "registered" then match loadClient(h, cfg, clientId, nowSec) {
+    None => Err(oauthError("invalid_client", "unknown client_id")),
+    Some(r) => authorizeChecked(h, loginUrl, clientId, "registered", r.origin, r.redirectUris, redirectUri, responseType, challenge, method, state, nowSec)
+  }
+  else if kind == "cimd" then match fetchClient(clientId) {
+    Err(e) => Err(oauthError("invalid_client", e)),
+    Ok(uris) => authorizeChecked(h, loginUrl, clientId, "cimd", "", uris, redirectUri, responseType, challenge, method, state, nowSec)
+  }
+  else Err(oauthError("invalid_client", "client_id is neither an https client metadata URL nor a registered client id"))
+}
+
 -- The pending request behind a sign-in handle, for the service's consent
 -- screen: Ok({"client_id","redirect_uri"} JSON) or Err(error JSON). Read-only;
--- the handle stays valid for completeLogin.
+-- the handle stays valid for completeLogin. A registered client adds
+-- "registered": "operator" | "dcr"; mark a "dcr" client unverified, since
+-- anyone can register one (T15). No client_name is kept or shown.
 export func describeRequest(h: Hooks, handleRaw: string)
   -> Result[string, string] ! {IO, FS, Env, Net, Clock, SharedMem, Declassify} =
   match h.get("req:${digestOf(asSecret(handleRaw))}") {
@@ -131,7 +382,8 @@ export func describeRequest(h: Hooks, handleRaw: string)
     Some(raw) => match decode(raw) {
       Err(_) => Err(oauthError("server_error", "corrupt sign-in request")),
       Ok(req) => Ok(encode(jo([kv("client_id", js(getStringOr(req, "client_id"))),
-                               kv("redirect_uri", js(getStringOr(req, "redirect_uri")))])))
+                               kv("redirect_uri", js(getStringOr(req, "redirect_uri")))]
+                              ++ (if getStringOr(req, "registered") == "" then [] else [kv("registered", js(getStringOr(req, "registered")))]))))
     }
   }
 
@@ -157,7 +409,7 @@ export func completeLogin(h: Hooks, handleRaw: string, idToken: string, nowSec: 
           let rec = encode(jo([kv("client_id", js(clientId)), kv("redirect_uri", js(redirectUri)),
                                kv("challenge", js(getStringOr(req, "challenge"))), kv("account", js(account)),
                                kv("expires_at", jnum(intToFloat(codeExpiresAt(nowSec)))), kv("redeemed", jb(false)),
-                               kv("token_digest", js("")), kv("family", js(""))]));
+                               kv("token_digest", js("")), kv("family", js("")), kv("kind", js(kindOf(req)))]));
           if h.put("code:${digestOf(code)}", rec, codeExpiresAt(nowSec) + 3600) then {
             audit("code issued client=${clientId}");
             Ok(authResponseUrl(redirectUri, code, getStringOr(req, "state"), h.issuer))
@@ -168,14 +420,11 @@ export func completeLogin(h: Hooks, handleRaw: string, idToken: string, nowSec: 
   }
 }
 
-pure func getStringOr(j: Json, k: string) -> string = match getString(j, k) { Some(s) => s, None => "" }
-
-
 -- ============================================================
--- 3. /oauth/token (authorization_code)
+-- 3. tokens, refresh families
 -- ============================================================
 
-pure func refreshTtlSec() -> int = 2592000  -- 30 days
+pure func refreshTtlSec() -> int = 2592000  -- 30 days (rotating tokens)
 
 -- The token response (RFC 6749 §5.1). Built from <secret> values; the
 -- label propagates into the returned string (the caller writes it as the
@@ -184,14 +433,38 @@ func tokenBody(access: string<secret>, refreshTok: string<secret>, ttlSec: int) 
   encode(jo([kv("access_token", js(access)), kv("token_type", js("Bearer")),
              kv("expires_in", jnum(intToFloat(ttlSec))), kv("refresh_token", js(refreshTok))]))
 
+-- A stable refresh (RFC 6749 §6 without rotation): no refresh_token, so the
+-- client keeps the one it has. The server cannot echo it: it stores digests.
+func accessBody(access: string<secret>, ttlSec: int) -> string =
+  encode(jo([kv("access_token", js(access)), kv("token_type", js("Bearer")), kv("expires_in", jnum(intToFloat(ttlSec)))]))
+
 -- Revoke each digest in order. Not mapE(\d. h.revoke(d), ds): calling a hook
 -- field inside a lambda passed to mapE fails to compile on ailang >= 0.53.1
--- (ailang #1826). A family holds one digest per refresh, so the list is short.
+-- (ailang #1826). A family holds one digest per live access token.
 func revokeEach(h: Hooks, ds: [string]) -> bool ! {IO, FS, Env, Net, Clock, SharedMem} =
   match ds {
     [] => true,
     [d, ...rest] => { let _ = h.revoke(d); revokeEach(h, rest) }
   }
+
+-- A family record: {"tokens": [access digests], "exps": [their expiry], "closed"}.
+-- "exps" is new in 0.2; a family written by 0.1.x has none (-1 = unknown, kept).
+pure func famExps(fam: Json, n: int) -> [int] {
+  let xs = match getArray(fam, "exps") {
+    Some(arr) => map(\j. match asNumber(j) { Some(f) => floatToInt(f), None => 0 - 1 }, arr),
+    None => []
+  };
+  if listLen(xs) == n then xs else map(\_. 0 - 1, getStringArrayOrEmpty(fam, "tokens"))
+}
+
+-- T8 (amended): keep only digests whose access token has not expired. An
+-- expired token needs no revocation, and a stable family refreshes for months.
+pure func pruneFamily(tokens: [string], exps: [int], nowSec: int) -> [(string, int)] =
+  filter(\p. match p { (_, e) => e < 0 || isExpired(nowSec, e) == false }, zip(tokens, exps))
+
+pure func familyJson(live: [(string, int)], closed: bool) -> string =
+  encode(jo([kv("tokens", ja(map(\p. match p { (d, _) => js(d) }, live))),
+             kv("exps", ja(map(\p. match p { (_, e) => jnum(intToFloat(e)) }, live))), kv("closed", jb(closed))]))
 
 -- Revoke every access token issued in a refresh family and close it.
 export func revokeFamily(h: Hooks, family: string, nowSec: int) -> bool ! {IO, FS, Env, Net, Clock, SharedMem} =
@@ -203,34 +476,53 @@ export func revokeFamily(h: Hooks, family: string, nowSec: int) -> bool ! {IO, F
         let digests = getStringArrayOrEmpty(fam, "tokens");
         let _ = revokeEach(h, digests);
         audit("revoked family=${family} tokens=${show(listLen(digests))}");
-        h.put("fam:${family}", encode(jo([kv("tokens", ja(map(js, digests))), kv("closed", jb(true))])), nowSec + refreshTtlSec())
+        h.put("fam:${family}", familyJson(zip(digests, famExps(fam, listLen(digests))), true), nowSec + stableAbsoluteSec())
       }
     }
   }
 
--- Issue an access token + refresh token for (account, client) in `family`
--- (a new family when family == ""). Returns Ok((body, tokenDigest, family)).
-func issueTokens(h: Hooks, account: string, clientId: string, family: string, priorDigests: [string], nowSec: int)
+-- The refresh-token record. policy "rotate": single use, reuse revokes the
+-- family. policy "stable": reusable until idle_expires_at (sliding) or
+-- absolute_expires_at, whichever comes first (D3).
+pure func refreshRecord(fam: string, account: string, clientId: string, kind: string, policy: string,
+    used: bool, idleExp: int, absExp: int) -> string =
+  encode(jo([kv("family", js(fam)), kv("account", js(account)), kv("client_id", js(clientId)), kv("used", jb(used)),
+             kv("kind", js(kind)), kv("policy", js(policy)),
+             kv("idle_expires_at", jnum(intToFloat(idleExp))), kv("absolute_expires_at", jnum(intToFloat(absExp)))]))
+
+-- Issue an access token for (account, client) in `family` (a new family when
+-- family == "") and, unless accessOnly, a refresh token under auth's policy.
+-- prior = the family's live digests. Returns Ok((body, tokenDigest, family)).
+func issueTokens(h: Hooks, auth: ClientAuth, account: string, family: string, prior: [(string, int)], accessOnly: bool, nowSec: int)
   -> Result[(string, string, string), string] ! {IO, FS, Env, Net, Clock, SharedMem, Rand[mode=crypto], Declassify} =
-  match h.mint(account, clientId) {
+  match h.mint(account, auth.clientId) {
     Err(e) => Err(oauthError("server_error", "could not mint an access token: ${e}")),
     Ok(minted) => {
       let access = asSecret(minted);
       let tokD = digestOf(access);
-      let rt = newSecret();
       let fam = if family == "" then replace(uuid4(), "-", "") else family;
-      let famRec = encode(jo([kv("tokens", ja(map(js, priorDigests ++ [tokD]))), kv("closed", jb(false))]));
-      let rtRec = encode(jo([kv("family", js(fam)), kv("account", js(account)), kv("client_id", js(clientId)), kv("used", jb(false))]));
-      if h.put("fam:${fam}", famRec, nowSec + refreshTtlSec()) && h.put("rt:${digestOf(rt)}", rtRec, nowSec + refreshTtlSec())
-      then Ok((tokenBody(access, rt, h.accessTtlSec), tokD, fam))
-      else Err(oauthError("server_error", "could not store the token family"))
+      let stable = auth.refreshPolicy == "stable";
+      let famTtl = if stable then stableAbsoluteSec() else refreshTtlSec();
+      let famOk = h.put("fam:${fam}", familyJson(prior ++ [(tokD, nowSec + h.accessTtlSec)], false), nowSec + famTtl);
+      if famOk == false then Err(oauthError("server_error", "could not store the token family"))
+      else if accessOnly then Ok((accessBody(access, h.accessTtlSec), tokD, fam))
+      else {
+        let rt = newSecret();
+        let absExp = nowSec + stableAbsoluteSec();
+        let rtRec = if stable then refreshRecord(fam, account, auth.clientId, auth.kind, "stable", false, stableIdleExpiresAt(nowSec, absExp), absExp)
+                    else refreshRecord(fam, account, auth.clientId, auth.kind, "rotate", false, 0, 0);
+        if h.put("rt:${digestOf(rt)}", rtRec, nowSec + famTtl) then Ok((tokenBody(access, rt, h.accessTtlSec), tokD, fam))
+        else Err(oauthError("server_error", "could not store the refresh token"))
+      }
     }
   }
 
--- authorization_code grant. A replayed code (already redeemed) revokes the
--- tokens its first redemption issued (OAuth 2.1 §4.1.3).
-export func exchangeCode(h: Hooks, codeRaw: string, verifier: string, clientId: string, redirectUri: string, nowSec: int)
+-- authorization_code grant for an authenticated client. A replayed code
+-- (already redeemed) revokes the tokens its first redemption issued (OAuth 2.1
+-- §4.1.3). PKCE is required for every client, confidential included (D4).
+func redeemCode(h: Hooks, auth: ClientAuth, codeRaw: string, verifier: string, redirectUri: string, nowSec: int)
   -> Result[string, string] ! {IO, FS, Env, Net, Clock, SharedMem, Rand[mode=crypto], Declassify} {
+  let clientId = auth.clientId;
   let codeKey = "code:${digestOf(asSecret(codeRaw))}";
   match h.get(codeKey) {
     None => Err(invalidGrant("unknown authorization code")),
@@ -245,15 +537,16 @@ export func exchangeCode(h: Hooks, codeRaw: string, verifier: string, clientId: 
         }
         else if isExpired(nowSec, getIntOr(rec, "expires_at")) then Err(invalidGrant("authorization code expired"))
         else if getStringOr(rec, "client_id") != clientId then Err(invalidGrant("client_id does not match the code"))
+        else if kindOf(rec) != auth.kind then Err(invalidGrant("the client kind does not match the code"))
         else if getStringOr(rec, "redirect_uri") != redirectUri then Err(invalidGrant("redirect_uri does not match the code"))
         else if pkceOk(verifier, getStringOr(rec, "challenge")) == false then Err(invalidGrant("PKCE verification failed"))
-        else match issueTokens(h, getStringOr(rec, "account"), clientId, "", [], nowSec) {
+        else match issueTokens(h, auth, getStringOr(rec, "account"), "", [], false, nowSec) {
           Err(e) => Err(e),
           Ok((body, tokD, fam)) => {
             let redeemed = encode(jo([kv("client_id", js(clientId)), kv("redirect_uri", js(redirectUri)),
                                       kv("challenge", js(getStringOr(rec, "challenge"))), kv("account", js(getStringOr(rec, "account"))),
                                       kv("expires_at", jnum(intToFloat(getIntOr(rec, "expires_at")))), kv("redeemed", jb(true)),
-                                      kv("token_digest", js(tokD)), kv("family", js(fam))]));
+                                      kv("token_digest", js(tokD)), kv("family", js(fam)), kv("kind", js(kindOf(rec)))]));
             let _ = h.put(codeKey, redeemed, nowSec + 3600);
             audit("token issued client=${clientId}");
             Ok(body)
@@ -263,12 +556,13 @@ export func exchangeCode(h: Hooks, codeRaw: string, verifier: string, clientId: 
   }
 }
 
--- ============================================================
--- 4. /oauth/token (refresh_token): rotate; reuse revokes the family
--- ============================================================
-
-export func refreshTokens(h: Hooks, refreshRaw: string, clientId: string, nowSec: int)
+-- refresh_token grant for an authenticated client. "rotate": mark the token
+-- used, issue a new one in the family, and revoke the family on reuse.
+-- "stable": issue a new access token only, keep the refresh token unused, and
+-- slide its idle deadline (T13: reuse detection is impossible by construction).
+func redeemRefresh(h: Hooks, auth: ClientAuth, refreshRaw: string, nowSec: int)
   -> Result[string, string] ! {IO, FS, Env, Net, Clock, SharedMem, Rand[mode=crypto], Declassify} {
+  let clientId = auth.clientId;
   let rtKey = "rt:${digestOf(asSecret(refreshRaw))}";
   match h.get(rtKey) {
     None => Err(invalidGrant("unknown refresh token")),
@@ -276,12 +570,16 @@ export func refreshTokens(h: Hooks, refreshRaw: string, clientId: string, nowSec
       Err(_) => Err(oauthError("server_error", "corrupt refresh token record")),
       Ok(rec) => {
         let fam = getStringOr(rec, "family");
-        if getBoolOr(rec, "used") then {
+        let stable = getStringOr(rec, "policy") == "stable";
+        if getBoolOr(rec, "used") then {  -- a stable token is never marked used
           let _ = revokeFamily(h, fam, nowSec);
           audit("refresh reuse: revoked family=${fam}");
           Err(invalidGrant("refresh token already used"))
         }
         else if getStringOr(rec, "client_id") != clientId then Err(invalidGrant("client_id does not match the refresh token"))
+        else if kindOf(rec) != auth.kind then Err(invalidGrant("the client kind does not match the refresh token"))
+        else if stable && stableRefreshLive(nowSec, getIntOr(rec, "idle_expires_at"), getIntOr(rec, "absolute_expires_at")) == false then
+          Err(invalidGrant("refresh token expired"))
         else match h.get("fam:${fam}") {
           None => Err(invalidGrant("refresh family not found")),
           Some(famRaw) => match decode(famRaw) {
@@ -289,9 +587,14 @@ export func refreshTokens(h: Hooks, refreshRaw: string, clientId: string, nowSec
             Ok(famRec) =>
               if getBoolOr(famRec, "closed") then Err(invalidGrant("refresh family revoked"))
               else {
-                let _ = h.put(rtKey, encode(jo([kv("family", js(fam)), kv("account", js(getStringOr(rec, "account"))),
-                                                 kv("client_id", js(clientId)), kv("used", jb(true))])), nowSec + refreshTtlSec());
-                match issueTokens(h, getStringOr(rec, "account"), clientId, fam, getStringArrayOrEmpty(famRec, "tokens"), nowSec) {
+                let account = getStringOr(rec, "account");
+                let absExp = getIntOr(rec, "absolute_expires_at");
+                let next = if stable then refreshRecord(fam, account, clientId, kindOf(rec), "stable", false, stableIdleExpiresAt(nowSec, absExp), absExp)
+                           else refreshRecord(fam, account, clientId, kindOf(rec), "rotate", true, 0, 0);
+                let _ = h.put(rtKey, next, if stable then absExp else nowSec + refreshTtlSec());
+                let digests = getStringArrayOrEmpty(famRec, "tokens");
+                let live = pruneFamily(digests, famExps(famRec, listLen(digests)), nowSec);
+                match issueTokens(h, { auth | refreshPolicy: if stable then "stable" else "rotate" }, account, fam, live, stable, nowSec) {
                   Err(e) => Err(e),
                   Ok((body, _, _)) => Ok(body)
                 }
@@ -303,5 +606,120 @@ export func refreshTokens(h: Hooks, refreshRaw: string, clientId: string, nowSec
   }
 }
 
-pure func getBoolOr(j: Json, k: string) -> bool = match getBool(j, k) { Some(b) => b, None => false }
-pure func getIntOr(j: Json, k: string) -> int = match getInt(j, k) { Some(n) => n, None => 0 }
+-- 0.1.2 authorization_code grant: a bare client_id, CIMD clients only. Any
+-- other client_id is invalid_client, so a registered client cannot skip
+-- authentication by coming in here (quorum round 1).
+export func exchangeCode(h: Hooks, codeRaw: string, verifier: string, clientId: string, redirectUri: string, nowSec: int)
+  -> Result[string, string] ! {IO, FS, Env, Net, Clock, SharedMem, Rand[mode=crypto], Declassify} =
+  if clientKind(clientId) != "cimd" then Err(invalidClient("exchangeCode serves client metadata document clients only; use tokenRequest"))
+  else redeemCode(h, legacyCimdAuth(clientId), codeRaw, verifier, redirectUri, nowSec)
+
+-- 0.1.2 refresh_token grant (rotate; reuse revokes the family), CIMD only.
+export func refreshTokens(h: Hooks, refreshRaw: string, clientId: string, nowSec: int)
+  -> Result[string, string] ! {IO, FS, Env, Net, Clock, SharedMem, Rand[mode=crypto], Declassify} =
+  if clientKind(clientId) != "cimd" then Err(invalidClient("refreshTokens serves client metadata document clients only; use tokenRequest"))
+  else redeemRefresh(h, legacyCimdAuth(clientId), refreshRaw, nowSec)
+
+-- 0.2 token endpoint: both grants, any client model. Pass the raw
+-- Authorization header value ("" when absent) and the form body; the client
+-- is authenticated first, on every call. Returns (status, body,
+-- WWW-Authenticate): 200 + token JSON, 400/500 + error JSON, or 401 +
+-- invalid_client + `Basic realm="oauth"` (RFC 6749 §5.2). Send the third
+-- value as WWW-Authenticate when it is not "", and Cache-Control: no-store.
+export func tokenRequest(h: Hooks, cfg: ClientConfig, authorizationHeader: string, formBody: string, nowSec: int)
+  -> (int, string<secret>, string) ! {IO, FS, Env, Net, Clock, SharedMem, Rand[mode=crypto], Declassify} =
+  match authenticateClient(h, cfg, authorizationHeader, formBody, nowSec) {
+    Err(e) => errorResponse(e),
+    Ok(auth) => {
+      let grant = formGet(formBody, "grant_type");
+      let res =
+        if grant == "authorization_code" then
+          redeemCode(h, auth, formGet(formBody, "code"), formGet(formBody, "code_verifier"), formGet(formBody, "redirect_uri"), nowSec)
+        else if grant == "refresh_token" then redeemRefresh(h, auth, formGet(formBody, "refresh_token"), nowSec)
+        else Err(oauthError("unsupported_grant_type", "grant_type must be authorization_code or refresh_token"));
+      match res {
+        Ok(body) => { let _ = touchRegistered(h, auth, nowSec); (200, body, "") },
+        Err(e) => errorResponse(e)
+      }
+    }
+  }
+
+-- ============================================================
+-- 4. RFC 7009 revocation (M1c), mounted as POST /oauth/revoke
+-- ============================================================
+
+-- A refresh token revokes its whole family (Google calls this on unlink); an
+-- access token goes to hooks.revoke. A token of another client, or an unknown
+-- one, changes nothing. The answer is 200 either way (RFC 7009 §2.2), so it
+-- reveals nothing; a client that fails authentication gets 401.
+export func revokeRequest(h: Hooks, cfg: ClientConfig, authorizationHeader: string, formBody: string, nowSec: int)
+  -> (int, string, string) ! {IO, FS, Env, Net, Clock, SharedMem, Declassify} =
+  if cfg.revocation == false then (404, oauthError("invalid_request", "token revocation is not enabled"), "")
+  else match authenticateClient(h, cfg, authorizationHeader, formBody, nowSec) {
+    Err(e) => errorResponse(e),
+    Ok(auth) => {
+      let tok = formGet(formBody, "token");
+      if tok == "" then (400, oauthError("invalid_request", "token is required"), "")
+      else {
+        let d = digestOf(asSecret(tok));
+        let _ = match h.get("rt:${d}") {
+          Some(raw) => match decode(raw) {
+            Ok(rec) => if getStringOr(rec, "client_id") == auth.clientId then revokeFamily(h, getStringOr(rec, "family"), nowSec) else false,
+            Err(_) => false
+          },
+          None => h.revoke(d)
+        };
+        (200, "{}", "")
+      }
+    }
+  }
+
+-- ============================================================
+-- 5. RFC 7591 dynamic client registration (M1b), POST /oauth/register
+-- ============================================================
+
+func windowCount(h: Hooks, key: string) -> int ! {IO, FS, Env, Net, Clock, SharedMem} =
+  match h.get(key) {
+    None => 0,
+    Some(raw) => match decode(raw) { Ok(j) => getIntOr(j, "n"), Err(_) => 0 }
+  }
+
+func bump(h: Hooks, key: string, n: int, exp: int) -> bool ! {IO, FS, Env, Net, Clock, SharedMem} =
+  h.put(key, encode(jo([kv("n", jnum(intToFloat(n + 1)))])), exp)
+
+-- callerKey: clients.trustedCallerIp(X-Forwarded-For, X-Real-Ip), never the
+-- first X-Forwarded-For entry (client-controlled). Returns Ok((status, JSON)):
+-- 201 + the registration (with client_secret, shown once, for a secret
+-- method), 400 + an RFC 7591 error, 429 over a limit, 404 when cfg.dcr is off.
+-- Err(JSON) only when the store fails. DCR clients always rotate refresh
+-- tokens; a registration never used expires after 24 hours.
+export func registerClientDcr(h: Hooks, cfg: ClientConfig, callerKey: string, body: string, nowSec: int)
+  -> Result[(int, string<secret>), string] ! {IO, FS, Env, Net, Clock, SharedMem, Rand[mode=crypto], Declassify} =
+  if cfg.dcr == false then Ok((404, dcrError("invalid_request", "dynamic client registration is not enabled")))
+  else match validateDcr(cfg, body) {
+    Err(e) => Ok((400, e)),
+    Ok(req) => {
+      let callerKeyName = dcrCallerWindowKey(callerKey, nowSec);
+      let globalKeyName = dcrGlobalWindowKey(nowSec);
+      let nCaller = windowCount(h, callerKeyName);
+      let nGlobal = windowCount(h, globalKeyName);
+      if underLimit(nCaller, cfg.dcrPerCallerPerHour) == false then Ok((429, dcrError("invalid_request", "too many registrations from this caller; try again later")))
+      else if underLimit(nGlobal, cfg.dcrGlobalPerDay) == false then Ok((429, dcrError("invalid_request", "too many registrations today; try again later")))
+      else {
+        let clientId = newClientId();
+        let secretMethod = isSecretMethod(req.method);
+        let secret = if secretMethod then newClientSecret() else asSecret("");
+        let r = { clientId: clientId, method: req.method, secretDigest: if secretMethod then digestOf(secret) else "",
+                  redirectUris: req.redirectUris, refreshPolicy: "rotate", origin: "dcr", createdAt: nowSec, lastUsedAt: 0,
+                  expiresAt: nowSec + dcrUnusedTtlSec() };
+        if storeClient(h, r, nowSec) == false then Err(dcrError("server_error", "could not store the registration"))
+        else {
+          let _ = bump(h, callerKeyName, nCaller, dcrCallerWindowEnd(nowSec));
+          let _ = bump(h, globalKeyName, nGlobal, dcrGlobalWindowEnd(nowSec));
+          audit("client registered (dcr) id=${clientId} method=${req.method}");
+          let fields = dcrResponseFields(clientId, nowSec, req);
+          Ok((201, encode(jo(if secretMethod then fields ++ [kv("client_secret", js(secret)), kv("client_secret_expires_at", jnum(0.0))] else fields))))
+        }
+      }
+    }
+  }

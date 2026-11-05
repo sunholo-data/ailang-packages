@@ -12,16 +12,30 @@
 module sunholo/mcp_oauth/cimd
 
 import std/net (httpRequest)
-import std/json (decode, getString, getStringArrayOrEmpty)
+import std/json (Json, decode, get, asArray, allStrings, getString, getStringArrayOrEmpty)
 import std/string (length, startsWith)
 import std/list (length as listLen, any)
 import std/result (Result, Ok, Err)
-import ./core (cimdUrlOk, stripLoopbackPort)
+import ./core (cimdUrlOk, stripLoopbackPort, cimdAuthMethodsOk)
 
 export pure func maxClientDocBytes() -> int = 65536
 
 -- A registered redirect must be https, or an RFC 8252 loopback http URI.
 pure func redirectShapeOk(u: string) -> bool = startsWith(u, "https://") || stripLoopbackPort(u) != ""
+
+-- The plural token_endpoint_auth_methods_supported (0.2, M1d): absent is
+-- fine; present must be a string array containing "none", because a CIMD
+-- client always authenticates with "none" at our token endpoint. The singular
+-- token_endpoint_auth_method is never read: ChatGPT's live document says
+-- private_key_jwt there and ["none","private_key_jwt"] in the plural.
+pure func pluralAuthMethodsOk(doc: Json) -> bool =
+  match get(doc, "token_endpoint_auth_methods_supported") {
+    None => cimdAuthMethodsOk([], false),
+    Some(v) => match asArray(v) {
+      None => false,
+      Some(xs) => match allStrings(xs) { None => false, Some(ms) => cimdAuthMethodsOk(ms, true) }
+    }
+  }
 
 -- Validate a fetched document against the URL it was fetched from.
 export pure func validateClientDoc(clientId: string, body: string) -> Result[[string], string] =
@@ -34,6 +48,7 @@ export pure func validateClientDoc(clientId: string, body: string) -> Result[[st
       if declared != clientId then Err("client_id in the document does not equal the URL it was fetched from")
       else if listLen(uris) == 0 then Err("client metadata document lists no redirect_uris")
       else if any(\u. redirectShapeOk(u) == false, uris) then Err("a redirect_uri is neither https nor loopback http")
+      else if pluralAuthMethodsOk(doc) == false then Err("token_endpoint_auth_methods_supported does not include none, the only method a CIMD client may use with this server")
       else Ok(uris)
     }
   }

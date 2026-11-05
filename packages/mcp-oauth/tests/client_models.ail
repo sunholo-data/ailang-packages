@@ -1,0 +1,535 @@
+-- Integration suites for the sunholo/mcp_oauth 0.2 client models (design:
+-- ailang design_docs/planned/v0_57_2/m-mcp-oauth-client-models.md). Effectful,
+-- so they run under `ailang run`, one suite per process (a fresh store):
+--
+--   ailang run --caps IO,SharedMem,Rand,Clock,Env --entry main tests/client_models.ail -- <suite>
+--
+-- suite = confidential | dcr | refresh_policy | revoke. Each case prints
+-- "PASS <name>" or "FAIL <name>: <why>"; tests/<suite>_check.sh asserts the
+-- named cases. The confidential suite is run WITHOUT the Net capability.
+-- One file, because a package module cannot import a sibling it does not
+-- export, and the fixture below is not package API.
+module sunholo/mcp_oauth/tests/client_models
+
+import std/io (println)
+import std/env (getArgs)
+import std/sharedmem (get as smGet, put as smPut, delete as smDelete, has_key, keys as smKeys)
+import std/bytes (fromString, toString, toBase64)
+import std/option (Option, Some, None)
+import std/result (Result, Ok, Err)
+import std/json (decode, getString, getArray)
+import std/string (find, substring, length, contains, join, startsWith, repeat)
+import std/list (map, mapE, length as listLen)
+import std/crypto (sha256Hex)
+import std/net (urlEncode)
+import pkg/sunholo/mcp_oauth/core (ClientConfig, defaultClientConfig, clientKind)
+import pkg/sunholo/mcp_oauth/clients (trustedCallerIp, trustedCallerIpHops)
+import pkg/sunholo/mcp_oauth/flow (Hooks, createClient, rotateClientSecret, deleteClient, beginAuthorize, beginAuthorizeFor,
+  completeLogin, describeRequest, tokenRequest, exchangeCode, refreshTokens, revokeRequest, registerClientDcr)
+
+-- ================= fixture: SharedMem store, stub IdP =================
+
+func tAuthenticate(idToken: string) -> Result[string, string] ! {IO, FS, Env, Net, Clock, SharedMem} =
+  if idToken == "good-id-token" then Ok("acct-1") else Err("bad id token")
+
+-- a counter so every minted token differs
+func smCount() -> string ! {SharedMem} {
+  let prev = match smGet("t:counter") { Some(b) => toString(b), None => "" };
+  let next = "${prev}x";
+  smPut("t:counter", fromString(next));
+  show(length(next))
+}
+
+func tMint(account: string, clientId: string) -> Result[string, string] ! {IO, FS, Env, Net, Clock, SharedMem, Rand[mode=crypto], Declassify} =
+  Ok("dp_${account}_${smCount()}")
+
+func tPut(k: string, v: string, exp: int) -> bool ! {IO, FS, Env, Net, Clock, SharedMem} {
+  smPut("s:${k}", fromString(v));
+  true
+}
+
+func tGet(k: string) -> Option[string] ! {IO, FS, Env, Net, Clock, SharedMem} = match smGet("s:${k}") {
+  Some(b) => Some(toString(b)),
+  None => None
+}
+
+func tDel(k: string) -> bool ! {IO, FS, Env, Net, Clock, SharedMem} {
+  smDelete("s:${k}");
+  true
+}
+
+func tRevoke(d: string) -> bool ! {IO, FS, Env, Net, Clock, SharedMem} {
+  smPut("revoked:${d}", fromString("1"));
+  true
+}
+
+func hooks() -> Hooks = { authenticate: tAuthenticate, mint: tMint, put: tPut, get: tGet, del: tDel, revoke: tRevoke, accessTtlSec: 3600, issuer: "https://svc.example" }
+
+-- Confidential clients, DCR and revocation all on.
+pure func cfgAll() -> ClientConfig = { defaultClientConfig() | confidential: true, dcr: true, revocation: true }
+
+pure func cimdClient() -> string = "https://claude.ai/oauth/claude-code-client-metadata"
+pure func cimdCb() -> string = "https://claude.ai/api/mcp/auth_callback"
+pure func geCb() -> string = "https://vertexaisearch.cloud.google.com/oauth-redirect"
+pure func verifier() -> string = "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"
+pure func challenge() -> string = "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM"
+pure func now() -> int = 1000000
+pure func day() -> int = 86400
+
+func check(name: string, ok: bool, why: string) -> unit ! {IO} =
+  if ok then println("PASS ${name}") else println("FAIL ${name}: ${why}")
+
+-- value of `key=` in a URL query ("" if absent)
+pure func param(url: string, key: string) -> string {
+  let i = find(url, "${key}=");
+  if i < 0 then "" else {
+    let rest = substring(url, i + length(key) + 1, length(url));
+    let amp = find(rest, "&");
+    if amp < 0 then rest else substring(rest, 0, amp)
+  }
+}
+
+pure func field(body: string, k: string) -> string = match decode(body) {
+  Ok(j) => match getString(j, k) { Some(s) => s, None => "" },
+  Err(_) => ""
+}
+
+func revoked(token: string) -> bool ! {SharedMem} = has_key("revoked:${sha256Hex(token)}")
+
+-- An application/x-www-form-urlencoded body.
+pure func form(pairs: [(string, string)]) -> string =
+  join("&", map(\p. match p { (k, v) => "${urlEncode(k)}=${urlEncode(v)}" }, pairs))
+
+-- Authorization: Basic for (id, secret), form-escaped per RFC 6749 §2.3.1.
+pure func basic(id: string, secret: string) -> string = "Basic ${toBase64(fromString("${urlEncode(id)}:${urlEncode(secret)}"))}"
+
+pure func codeForm(code: string, cb: string) -> [(string, string)] =
+  [("grant_type", "authorization_code"), ("code", code), ("code_verifier", verifier()), ("redirect_uri", cb)]
+
+pure func refreshForm(rt: string) -> [(string, string)] = [("grant_type", "refresh_token"), ("refresh_token", rt)]
+
+-- authorize (0.2 entry point) + login -> code, or "" on failure
+func codeFor(cfg: ClientConfig, clientId: string, cb: string, state: string, t: int) -> string ! {IO, FS, Env, Net, Clock, SharedMem, Rand[mode=crypto], Declassify} =
+  match beginAuthorizeFor(hooks(), cfg, "https://svc.example/login", clientId, cb, "code", challenge(), "S256", state, t) {
+    Err(_) => "",
+    Ok(loginUrl) => match completeLogin(hooks(), param(loginUrl, "handle"), "good-id-token", t) {
+      Err(_) => "",
+      Ok(loc) => param(loc, "code")
+    }
+  }
+
+-- (clientId, secret) of a new operator client, ("", "") on failure
+func newClient(method: string, policy: string, cb: string) -> (string, string) ! {IO, FS, Env, Net, Clock, SharedMem, Rand[mode=crypto], Declassify} =
+  match createClient(hooks(), cfgAll(), [cb], method, policy, now()) {
+    Ok(pair) => pair,
+    Err(_) => ("", "")
+  }
+
+-- Every store key and value, for "no secret is stored" checks.
+func storeDump() -> string ! {SharedMem} =
+  join("\n", mapE(\k. "${k}=${match smGet(k) { Some(b) => toString(b), None => "" }}", smKeys(())))
+
+func smPutRaw(k: string, v: string) -> unit ! {SharedMem} = smPut("s:${k}", fromString(v))
+
+func smGetRaw(k: string) -> string ! {SharedMem} = match smGet("s:${k}") { Some(b) => toString(b), None => "" }
+
+pure func status(r: (int, string, string)) -> int = match r { (s, _, _) => s }
+pure func body(r: (int, string, string)) -> string = match r { (_, b, _) => b }
+pure func challengeOf(r: (int, string, string)) -> string = match r { (_, _, w) => w }
+
+pure func isInvalidClient401(r: (int, string, string)) -> bool =
+  status(r) == 401 && contains(body(r), "\"error\":\"invalid_client\"") && startsWith(challengeOf(r), "Basic")
+
+pure func errHas(r: Result[string, string], needle: string) -> bool = match r { Err(e) => contains(e, needle), Ok(_) => false }
+
+pure func errText(r: Result[string, string]) -> string = match r { Err(e) => e, Ok(_) => "Ok" }
+
+-- ================= M1a: confidential clients =================
+
+func suiteConfidential() -> unit ! {IO, FS, Env, Net, Clock, SharedMem, Rand[mode=crypto], Declassify} {
+  let h = hooks();
+  let cfg = cfgAll();
+  -- GE-shaped happy path: client_secret_basic, the GE redirect, tokens; refresh rotates
+  let ge = newClient("client_secret_basic", "rotate", geCb());
+  let geId = match ge { (i, _) => i };
+  let geSecret = match ge { (_, s) => s };
+  let code1 = codeFor(cfg, geId, geCb(), "ge1", now());
+  let tok1 = tokenRequest(h, cfg, basic(geId, geSecret), form(codeForm(code1, geCb())), now() + 5);
+  let rt1 = field(body(tok1), "refresh_token");
+  let ref1 = tokenRequest(h, cfg, basic(geId, geSecret), form([("grant_type", "refresh_token"), ("refresh_token", rt1)]), now() + 10);
+  check("GE-shaped happy path", startsWith(geId, "mco_") && length(geId) == 36 && startsWith(geSecret, "mcs_") && code1 != ""
+    && status(tok1) == 200 && field(body(tok1), "access_token") != "" && rt1 != ""
+    && status(ref1) == 200 && field(body(ref1), "refresh_token") != "" && field(body(ref1), "refresh_token") != rt1,
+    "id=${geId} code=${show(code1 != "")} tok=${show(status(tok1))} ${body(tok1)} refresh=${show(status(ref1))}");
+  -- TestWrongSecretInvalidClient: 401 + WWW-Authenticate: Basic
+  let code2 = codeFor(cfg, geId, geCb(), "ge2", now());
+  let wrong = tokenRequest(h, cfg, basic(geId, "mcs_wrong"), form(codeForm(code2, geCb())), now() + 5);
+  check("TestWrongSecretInvalidClient", isInvalidClient401(wrong), "status=${show(status(wrong))} ${body(wrong)} www=${challengeOf(wrong)}");
+  -- TestConfidentialWithoutSecret: the record says client_secret_basic, the request says none (T16)
+  let noSecret = tokenRequest(h, cfg, "", form(codeForm(code2, geCb()) ++ [("client_id", geId)]), now() + 5);
+  let postInstead = tokenRequest(h, cfg, "", form(codeForm(code2, geCb()) ++ [("client_id", geId), ("client_secret", geSecret)]), now() + 5);
+  check("TestConfidentialWithoutSecret", isInvalidClient401(noSecret) && isInvalidClient401(postInstead),
+    "none=${show(status(noSecret))} ${body(noSecret)} post=${show(status(postInstead))}");
+  -- the code survived the refused attempts: authentication runs before redemption
+  let late = tokenRequest(h, cfg, basic(geId, geSecret), form(codeForm(code2, geCb())), now() + 6);
+  check("refused client auth does not consume the code", status(late) == 200, "${show(status(late))} ${body(late)}");
+  -- client_secret_post client
+  let post = newClient("client_secret_post", "rotate", geCb());
+  let postId = match post { (i, _) => i };
+  let postSecret = match post { (_, s) => s };
+  let code3 = codeFor(cfg, postId, geCb(), "p1", now());
+  let viaBasic = tokenRequest(h, cfg, basic(postId, postSecret), form(codeForm(code3, geCb())), now() + 5);
+  let viaPost = tokenRequest(h, cfg, "", form(codeForm(code3, geCb()) ++ [("client_id", postId), ("client_secret", postSecret)]), now() + 5);
+  check("client_secret_post client authenticates in the form only", isInvalidClient401(viaBasic) && status(viaPost) == 200,
+    "basic=${show(status(viaBasic))} post=${show(status(viaPost))} ${body(viaPost)}");
+  -- TestCimdWithSecretRefused: a CIMD client authenticates with none, never a secret
+  let cimdPost = tokenRequest(h, cfg, "", form(codeForm("x", cimdCb()) ++ [("client_id", cimdClient()), ("client_secret", "s")]), now());
+  let cimdBasic = tokenRequest(h, cfg, basic(cimdClient(), "s"), form(codeForm("x", cimdCb())), now());
+  check("TestCimdWithSecretRefused", isInvalidClient401(cimdPost) && isInvalidClient401(cimdBasic),
+    "post=${show(status(cimdPost))} ${body(cimdPost)} basic=${show(status(cimdBasic))}");
+  -- TestLegacyExchangeRefusesRegisteredId: exchangeCode (0.1.2) serves CIMD only
+  let code4 = codeFor(cfg, geId, geCb(), "ge4", now());
+  let legacyEx = exchangeCode(h, code4, verifier(), geId, geCb(), now() + 5);
+  let stillGood = tokenRequest(h, cfg, basic(geId, geSecret), form(codeForm(code4, geCb())), now() + 6);
+  check("TestLegacyExchangeRefusesRegisteredId", errHas(legacyEx, "invalid_client") && status(stillGood) == 200,
+    "legacy=${match legacyEx { Ok(_) => "Ok", Err(e) => e }} after=${show(status(stillGood))}");
+  -- TestLegacyRefreshRefusesRegisteredId
+  let rt4 = field(body(stillGood), "refresh_token");
+  let legacyRef = refreshTokens(h, rt4, geId, now() + 10);
+  let refAfter = tokenRequest(h, cfg, basic(geId, geSecret), form([("grant_type", "refresh_token"), ("refresh_token", rt4)]), now() + 11);
+  check("TestLegacyRefreshRefusesRegisteredId", errHas(legacyRef, "invalid_client") && status(refAfter) == 200,
+    "legacy=${match legacyRef { Ok(_) => "Ok", Err(e) => e }} after=${show(status(refAfter))}");
+  -- TestKindMismatchRefused: a code / refresh record whose kind differs from the
+  -- authenticated client's is refused, even with a matching client_id (T16)
+  smPutRaw("code:${sha256Hex("forged-code")}", "{\"client_id\":\"${cimdClient()}\",\"redirect_uri\":\"${cimdCb()}\",\"challenge\":\"${challenge()}\",\"account\":\"acct-1\",\"expires_at\":${show(now() + 60)},\"redeemed\":false,\"token_digest\":\"\",\"family\":\"\",\"kind\":\"registered\"}");
+  let forgedCode = exchangeCode(h, "forged-code", verifier(), cimdClient(), cimdCb(), now() + 5);
+  smPutRaw("fam:forgedfam", "{\"tokens\":[],\"exps\":[],\"closed\":false}");
+  smPutRaw("rt:${sha256Hex("forged-rt")}", "{\"family\":\"forgedfam\",\"account\":\"acct-1\",\"client_id\":\"${cimdClient()}\",\"used\":false,\"kind\":\"registered\",\"policy\":\"rotate\"}");
+  let forgedRt = refreshTokens(h, "forged-rt", cimdClient(), now() + 5);
+  check("TestKindMismatchRefused", errHas(forgedCode, "client kind") && errHas(forgedRt, "client kind"),
+    "code=${match forgedCode { Ok(_) => "Ok", Err(e) => e }} rt=${match forgedRt { Ok(_) => "Ok", Err(e) => e }}");
+  -- TestSecretNeverStored: no store key or value holds a client secret; the digest is there
+  let dump = storeDump();
+  check("TestSecretNeverStored", geSecret != "" && postSecret != "" && contains(dump, geSecret) == false
+    && contains(dump, postSecret) == false && contains(dump, sha256Hex(geSecret)),
+    "secret or digest check failed (store has ${show(length(dump))} bytes)");
+  -- TestRegisteredIdNeverFetched: mco_ ids resolve in the store (this run has no
+  -- Net), an unknown one is "unknown", and a URL-shaped mco_ id is never registered
+  let unknownReg = beginAuthorizeFor(h, cfg, "https://svc.example/login", "mco_0123456789abcdef0123456789abcdef", geCb(), "code", challenge(), "S256", "u", now());
+  check("TestRegisteredIdNeverFetched", code1 != "" && errHas(unknownReg, "unknown client_id")
+    && clientKind("mco_0123456789abcdef0123456789abcdef") == "registered" && clientKind("mco_https://evil.example/aaaaaaaaaaaaaaaa") == "unknown"
+    && clientKind("mco_0123456789ABCDEF0123456789abcdef") == "unknown" && clientKind(cimdClient()) == "cimd",
+    "unknown=${match unknownReg { Ok(_) => "Ok", Err(e) => e }}");
+  -- TestRegisteredRedirectExact: the record's list, exact match, no prefix or query
+  let pre = beginAuthorizeFor(h, cfg, "https://svc.example/login", geId, "${geCb()}/x", "code", challenge(), "S256", "r", now());
+  let qry = beginAuthorizeFor(h, cfg, "https://svc.example/login", geId, "${geCb()}?x=1", "code", challenge(), "S256", "r", now());
+  let other = beginAuthorizeFor(h, cfg, "https://svc.example/login", geId, cimdCb(), "code", challenge(), "S256", "r", now());
+  check("TestRegisteredRedirectExact", errHas(pre, "redirect_uri") && errHas(qry, "redirect_uri") && errHas(other, "redirect_uri"), "a non-registered redirect was accepted");
+  -- PKCE stays required for a confidential client (D4)
+  let code5 = codeFor(cfg, geId, geCb(), "ge5", now());
+  let badPkce = tokenRequest(h, cfg, basic(geId, geSecret), form([("grant_type", "authorization_code"), ("code", code5), ("code_verifier", "x${verifier()}"), ("redirect_uri", geCb())]), now() + 5);
+  check("confidential client still needs PKCE", status(badPkce) == 400 && contains(body(badPkce), "PKCE"), "${show(status(badPkce))} ${body(badPkce)}");
+  -- rotateClientSecret: the old secret stops working at once
+  let rotated = match rotateClientSecret(h, geId, now()) { Ok(s) => s, Err(_) => "" };
+  let code6 = codeFor(cfg, geId, geCb(), "ge6", now());
+  let oldSecret = tokenRequest(h, cfg, basic(geId, geSecret), form(codeForm(code6, geCb())), now() + 5);
+  let newSecret = tokenRequest(h, cfg, basic(geId, rotated), form(codeForm(code6, geCb())), now() + 6);
+  check("rotated secret replaces the old one", rotated != "" && rotated != geSecret && isInvalidClient401(oldSecret) && status(newSecret) == 200,
+    "old=${show(status(oldSecret))} new=${show(status(newSecret))}");
+  -- ClientConfig gates: confidential off -> no registered client is accepted or created
+  let off = defaultClientConfig();
+  let created = match createClient(h, off, [geCb()], "client_secret_basic", "rotate", now()) { Ok(_) => true, Err(_) => false };
+  let offAuth = beginAuthorizeFor(h, off, "https://svc.example/login", geId, geCb(), "code", challenge(), "S256", "o", now());
+  let pubOp = newClient("none", "rotate", geCb());
+  let pubOpId = match pubOp { (i, _) => i };
+  let pubOn = beginAuthorizeFor(h, cfg, "https://svc.example/login", pubOpId, geCb(), "code", challenge(), "S256", "o", now());
+  let pubOff = beginAuthorizeFor(h, off, "https://svc.example/login", pubOpId, geCb(), "code", challenge(), "S256", "o", now());
+  check("registered clients need cfg.confidential", created == false && errHas(offAuth, "unknown client_id")
+    && (match pubOn { Ok(_) => true, Err(_) => false }) && errHas(pubOff, "unknown client_id"), "accepted with confidential off");
+  -- deleteClient: the client can no longer authenticate
+  let code7 = codeFor(cfg, postId, geCb(), "p7", now());
+  let _ = deleteClient(h, postId);
+  let afterDelete = tokenRequest(h, cfg, "", form(codeForm(code7, geCb()) ++ [("client_id", postId), ("client_secret", postSecret)]), now() + 5);
+  check("deleted client is unknown", code7 != "" && isInvalidClient401(afterDelete), "${show(status(afterDelete))}")
+}
+
+-- ================= M1b: dynamic client registration =================
+
+pure func dcrBody(uris: [string], extra: string) -> string =
+  "{\"redirect_uris\":[${join(",", map(\u. "\"${u}\"", uris))}]${extra}}"
+
+pure func dstatus(r: Result[(int, string), string]) -> int = match r { Ok((s, _)) => s, Err(_) => 0 - 1 }
+pure func dbody(r: Result[(int, string), string]) -> string = match r { Ok((_, b)) => b, Err(e) => e }
+
+func register(cfg: ClientConfig, caller: string, b: string, t: int) -> Result[(int, string), string] ! {IO, FS, Env, Net, Clock, SharedMem, Rand[mode=crypto], Declassify} =
+  registerClientDcr(hooks(), cfg, caller, b, t)
+
+-- n registrations from one caller; how many got 201
+func registerN(cfg: ClientConfig, caller: string, n: int, t: int) -> int ! {IO, FS, Env, Net, Clock, SharedMem, Rand[mode=crypto], Declassify} =
+  if n <= 0 then 0
+  else (if dstatus(register(cfg, caller, dcrBody([geCb()], ""), t)) == 201 then 1 else 0) + registerN(cfg, caller, n - 1, t)
+
+func suiteDcr() -> unit ! {IO, FS, Env, Net, Clock, SharedMem, Rand[mode=crypto], Declassify} {
+  let h = hooks();
+  let cfg = cfgAll();
+  -- DCR is off by default (D2)
+  let off = register(defaultClientConfig(), "203.0.113.1", dcrBody([geCb()], ""), now());
+  check("dcr off by default", dstatus(off) == 404, "${show(dstatus(off))} ${dbody(off)}");
+  -- a public registration: method defaults to none, display metadata dropped (T15)
+  let pub = register(cfg, "203.0.113.2", dcrBody([cimdCb()], ",\"client_name\":\"Google (official)\",\"logo_uri\":\"https://evil.example/logo.png\""), now());
+  let pubId = field(dbody(pub), "client_id");
+  check("dcr public registration", dstatus(pub) == 201 && clientKind(pubId) == "registered"
+    && field(dbody(pub), "token_endpoint_auth_method") == "none" && contains(dbody(pub), "client_secret") == false,
+    "${show(dstatus(pub))} ${dbody(pub)}");
+  -- TestDescribeRequestOmitsClientName: nothing keeps or shows the client-supplied name
+  let pubLogin = beginAuthorizeFor(h, cfg, "https://svc.example/login", pubId, cimdCb(), "code", challenge(), "S256", "d1", now());
+  let desc = match pubLogin { Ok(u) => match describeRequest(h, param(u, "handle")) { Ok(b) => b, Err(e) => e }, Err(e) => e };
+  let dump = storeDump();
+  check("TestDescribeRequestOmitsClientName", contains(desc, "\"registered\":\"dcr\"") && contains(desc, "Google") == false
+    && contains(dbody(pub), "Google") == false && contains(dbody(pub), "logo") == false
+    && contains(dump, "Google (official)") == false && contains(dump, "evil.example/logo") == false,
+    "desc=${desc}");
+  -- the public DCR client completes a code flow with none (client_id in the form)
+  let pubCode = match pubLogin { Ok(u) => match completeLogin(h, param(u, "handle"), "good-id-token", now()) { Ok(loc) => param(loc, "code"), Err(_) => "" }, Err(_) => "" };
+  let pubTok = tokenRequest(h, cfg, "", form(codeForm(pubCode, cimdCb()) ++ [("client_id", pubId)]), now() + 5);
+  check("dcr public client gets tokens", status(pubTok) == 200 && field(body(pubTok), "refresh_token") != "", "${show(status(pubTok))} ${body(pubTok)}");
+  -- a confidential registration returns its secret once; Basic then works
+  let conf = register(cfg, "203.0.113.3", dcrBody([geCb()], ",\"token_endpoint_auth_method\":\"client_secret_basic\""), now());
+  let confId = field(dbody(conf), "client_id");
+  let confSecret = field(dbody(conf), "client_secret");
+  let confCode = codeFor(cfg, confId, geCb(), "c1", now());
+  let confTok = tokenRequest(h, cfg, basic(confId, confSecret), form(codeForm(confCode, geCb())), now() + 5);
+  check("dcr confidential registration", dstatus(conf) == 201 && startsWith(confSecret, "mcs_") && contains(dbody(conf), "\"client_secret_expires_at\":0")
+    && status(confTok) == 200 && contains(storeDump(), confSecret) == false, "${show(dstatus(conf))} tok=${show(status(confTok))}");
+  let confOff = register({ cfg | confidential: false }, "203.0.113.4", dcrBody([geCb()], ",\"token_endpoint_auth_method\":\"client_secret_basic\""), now());
+  check("dcr secret method needs cfg.confidential", dstatus(confOff) == 400 && contains(dbody(confOff), "invalid_client_metadata"), dbody(confOff));
+  -- request validation (RFC 7591 §3.2.2)
+  let six = register(cfg, "203.0.113.5", dcrBody(["https://a.example/1", "https://a.example/2", "https://a.example/3", "https://a.example/4", "https://a.example/5", "https://a.example/6"], ""), now());
+  let none = register(cfg, "203.0.113.5", "{\"client_name\":\"x\"}", now());
+  let cc = register(cfg, "203.0.113.5", dcrBody([geCb()], ",\"grant_types\":[\"client_credentials\"]"), now());
+  let tok = register(cfg, "203.0.113.5", dcrBody([geCb()], ",\"response_types\":[\"token\"]"), now());
+  let jwt = register(cfg, "203.0.113.5", dcrBody([geCb()], ",\"token_endpoint_auth_method\":\"private_key_jwt\""), now());
+  let frag = register(cfg, "203.0.113.5", dcrBody(["https://a.example/cb#x"], ""), now());
+  let plain = register(cfg, "203.0.113.5", dcrBody(["http://a.example/cb"], ""), now());
+  let notJson = register(cfg, "203.0.113.5", "redirect_uris=x", now());
+  check("dcr request validation", dstatus(six) == 400 && contains(dbody(six), "invalid_redirect_uri")
+    && dstatus(none) == 400 && contains(dbody(none), "invalid_redirect_uri")
+    && dstatus(cc) == 400 && contains(dbody(cc), "invalid_client_metadata")
+    && dstatus(tok) == 400 && dstatus(jwt) == 400 && dstatus(frag) == 400 && dstatus(plain) == 400 && dstatus(notJson) == 400,
+    "six=${show(dstatus(six))} none=${show(dstatus(none))} cc=${show(dstatus(cc))} tok=${show(dstatus(tok))} jwt=${show(dstatus(jwt))} frag=${show(dstatus(frag))} plain=${show(dstatus(plain))}");
+  -- TestDcrRedirectAllowlist: dcrRedirectHosts = exact host or ".suffix"
+  let al = { cfg | dcrRedirectHosts: [".googleusercontent.com", "claude.ai"] };
+  let okSuffix = register(al, "203.0.113.6", dcrBody(["https://oauth-redirect.googleusercontent.com/r/abc"], ""), now());
+  let okExact = register(al, "203.0.113.6", dcrBody([cimdCb()], ""), now());
+  let okLoop = register(al, "203.0.113.6", dcrBody(["http://127.0.0.1/callback"], ""), now());
+  let badHost = register(al, "203.0.113.6", dcrBody(["https://evil.example/cb"], ""), now());
+  let badGlue = register(al, "203.0.113.6", dcrBody(["https://evilgoogleusercontent.com/cb"], ""), now());
+  let badQuery = register(al, "203.0.113.6", dcrBody(["https://evil.example?.googleusercontent.com"], ""), now());
+  let badUser = register(al, "203.0.113.6", dcrBody(["https://evil.example@oauth-redirect.googleusercontent.com/cb"], ""), now());
+  let badSub = register(al, "203.0.113.6", dcrBody(["https://claude.ai.evil.example/cb"], ""), now());
+  let badMix = register(al, "203.0.113.7", dcrBody([cimdCb(), "https://evil.example/cb"], ""), now());
+  let isBadUri = \r. dstatus(r) == 400 && contains(dbody(r), "invalid_redirect_uri");
+  check("TestDcrRedirectAllowlist", dstatus(okSuffix) == 201 && dstatus(okExact) == 201 && dstatus(okLoop) == 201
+    && isBadUri(badHost) && isBadUri(badGlue) && isBadUri(badQuery) && isBadUri(badUser) && isBadUri(badSub) && isBadUri(badMix),
+    "suffix=${show(dstatus(okSuffix))} exact=${show(dstatus(okExact))} loop=${show(dstatus(okLoop))} host=${show(dstatus(badHost))} glue=${show(dstatus(badGlue))} query=${show(dstatus(badQuery))} user=${show(dstatus(badUser))} sub=${show(dstatus(badSub))} mix=${show(dstatus(badMix))}");
+  -- TestDcrRateLimitPerCaller: the 11th registration in the hour is refused;
+  -- another caller is not affected; the next hour starts again
+  let t1 = now() + 2 * day();
+  let first10 = registerN(cfg, "198.51.100.7", 10, t1);
+  let eleventh = register(cfg, "198.51.100.7", dcrBody([geCb()], ""), t1 + 60);
+  let otherCaller = register(cfg, "198.51.100.8", dcrBody([geCb()], ""), t1 + 60);
+  let nextHour = register(cfg, "198.51.100.7", dcrBody([geCb()], ""), t1 + 3600);
+  check("TestDcrRateLimitPerCaller", first10 == 10 && dstatus(eleventh) == 429 && dstatus(otherCaller) == 201 && dstatus(nextHour) == 201,
+    "first10=${show(first10)} 11th=${show(dstatus(eleventh))} other=${show(dstatus(otherCaller))} next=${show(dstatus(nextHour))}");
+  -- TestTrustedCallerIpIgnoresForgedPrefix: the rightmost X-Forwarded-For entry is the key
+  let k1 = trustedCallerIp("1.2.3.4, 9.9.9.9", "");
+  let k2 = trustedCallerIp("5.6.7.8, 9.9.9.9", "10.0.0.1");
+  let t2 = now() + 4 * day();
+  let forged10 = registerN(cfg, trustedCallerIp("1.2.3.4, 9.9.9.9", ""), 10, t2);
+  let forgedNew = register(cfg, trustedCallerIp("8.8.8.8, 9.9.9.9", ""), dcrBody([geCb()], ""), t2 + 1);
+  check("TestTrustedCallerIpIgnoresForgedPrefix", k1 == "9.9.9.9" && k2 == "9.9.9.9" && trustedCallerIp("9.9.9.9", "") == "9.9.9.9"
+    && trustedCallerIp("", "10.0.0.1") == "10.0.0.1" && trustedCallerIp(" ", "") == "unknown"
+    && trustedCallerIpHops("1.1.1.1, 9.9.9.9, 10.0.0.2", "", 1) == "9.9.9.9" && trustedCallerIpHops("9.9.9.9", "", 1) == "unknown"
+    && forged10 == 10 && dstatus(forgedNew) == 429,
+    "k1=${k1} k2=${k2} forged10=${show(forged10)} forgedNew=${show(dstatus(forgedNew))}");
+  -- TestDcrGlobalCap: the daily cap holds across callers
+  let capCfg = { cfg | dcrGlobalPerDay: 3, dcrPerCallerPerHour: 100 };
+  let t3 = now() + 6 * day();
+  let g1 = register(capCfg, "192.0.2.1", dcrBody([geCb()], ""), t3);
+  let g2 = register(capCfg, "192.0.2.2", dcrBody([geCb()], ""), t3);
+  let g3 = register(capCfg, "192.0.2.3", dcrBody([geCb()], ""), t3);
+  let g4 = register(capCfg, "192.0.2.4", dcrBody([geCb()], ""), t3);
+  let gNext = register(capCfg, "192.0.2.4", dcrBody([geCb()], ""), t3 + day());
+  check("TestDcrGlobalCap", dstatus(g1) == 201 && dstatus(g2) == 201 && dstatus(g3) == 201 && dstatus(g4) == 429 && dstatus(gNext) == 201,
+    "${show(dstatus(g1))} ${show(dstatus(g2))} ${show(dstatus(g3))} ${show(dstatus(g4))} next=${show(dstatus(gNext))}");
+  -- TestDcrUnusedExpires: unknown after 24 h if never used; a used one slides to 90 days idle
+  let t4 = now() + 8 * day();
+  let unused = field(dbody(register(cfg, "192.0.2.10", dcrBody([geCb()], ""), t4)), "client_id");
+  let before = beginAuthorizeFor(h, cfg, "https://svc.example/login", unused, geCb(), "code", challenge(), "S256", "e1", t4 + day() - 1);
+  let after = beginAuthorizeFor(h, cfg, "https://svc.example/login", unused, geCb(), "code", challenge(), "S256", "e2", t4 + day());
+  check("TestDcrUnusedExpires", unused != "" && (match before { Ok(_) => true, Err(_) => false }) && errHas(after, "unknown client_id"),
+    "before=${errText(before)} after=${errText(after)}");
+  let used = field(dbody(register(cfg, "192.0.2.11", dcrBody([geCb()], ""), t4)), "client_id");
+  let usedCode = codeFor(cfg, used, geCb(), "e3", t4 + 100);
+  let usedTok = tokenRequest(h, cfg, "", form(codeForm(usedCode, geCb()) ++ [("client_id", used)]), t4 + 105);
+  let later = beginAuthorizeFor(h, cfg, "https://svc.example/login", used, geCb(), "code", challenge(), "S256", "e4", t4 + 30 * day());
+  let idle = beginAuthorizeFor(h, cfg, "https://svc.example/login", used, geCb(), "code", challenge(), "S256", "e5", t4 + 105 + 90 * day());
+  check("TestDcrUsedRegistrationSlides", status(usedTok) == 200 && (match later { Ok(_) => true, Err(_) => false }) && errHas(idle, "unknown client_id"),
+    "tok=${show(status(usedTok))} later=${errText(later)} idle=${errText(idle)}");
+  -- TestDcrBodyCap: 16 KB
+  let pad = \n. dcrBody([geCb()], ",\"software_id\":\"${repeat("a", n)}\"");
+  let atCap = register(cfg, "192.0.2.20", pad(16384 - length(pad(0))), now());
+  let overCap = register(cfg, "192.0.2.20", pad(16385 - length(pad(0))), now());
+  check("TestDcrBodyCap", dstatus(atCap) == 201 && dstatus(overCap) == 400 && contains(dbody(overCap), "larger than 16384"),
+    "at=${show(dstatus(atCap))} over=${show(dstatus(overCap))} ${dbody(overCap)}")
+}
+
+-- ================= M1c: refresh policy =================
+
+-- the family record behind a refresh token
+func familyOf(rt: string) -> string ! {SharedMem} = smGetRaw("fam:${field(smGetRaw("rt:${sha256Hex(rt)}"), "family")}")
+
+func familySize(rt: string) -> int ! {SharedMem} = match decode(familyOf(rt)) {
+  Ok(j) => match getArray(j, "tokens") { Some(xs) => listLen(xs), None => 0 - 1 },
+  Err(_) => 0 - 1
+}
+
+-- refresh every `step` seconds from t until `until`; true when all succeed
+func refreshEvery(cfg: ClientConfig, id: string, secret: string, rt: string, t: int, step: int, until: int) -> bool ! {IO, FS, Env, Net, Clock, SharedMem, Rand[mode=crypto], Declassify} =
+  if t > until then true
+  else status(tokenRequest(hooks(), cfg, basic(id, secret), form(refreshForm(rt)), t)) == 200 && refreshEvery(cfg, id, secret, rt, t + step, step, until)
+
+func suiteRefreshPolicy() -> unit ! {IO, FS, Env, Net, Clock, SharedMem, Rand[mode=crypto], Declassify} {
+  let h = hooks();
+  let cfg = cfgAll();
+  let st = newClient("client_secret_basic", "stable", geCb());
+  let stId = match st { (i, _) => i };
+  let stSecret = match st { (_, s) => s };
+  let t0 = now();
+  let code = codeFor(cfg, stId, geCb(), "s1", t0);
+  let issued = tokenRequest(h, cfg, basic(stId, stSecret), form(codeForm(code, geCb())), t0 + 5);
+  let rt = field(body(issued), "refresh_token");
+  let at0 = field(body(issued), "access_token");
+  -- TestStableRefreshNoRotation: no refresh_token in the response; the old one still works
+  let r1 = tokenRequest(h, cfg, basic(stId, stSecret), form(refreshForm(rt)), t0 + 10);
+  let r2 = tokenRequest(h, cfg, basic(stId, stSecret), form(refreshForm(rt)), t0 + 20);
+  check("TestStableRefreshNoRotation", status(issued) == 200 && rt != "" && status(r1) == 200 && contains(body(r1), "refresh_token") == false
+    && field(body(r1), "access_token") != "" && field(body(r1), "access_token") != at0
+    && status(r2) == 200 && field(body(r2), "access_token") != field(body(r1), "access_token") && revoked(at0) == false,
+    "issued=${show(status(issued))} r1=${show(status(r1))} ${body(r1)} r2=${show(status(r2))} ${body(r2)}");
+  -- TestStableRefreshNeedsClientAuth: the token alone is useless (T13)
+  let bare = tokenRequest(h, cfg, "", form(refreshForm(rt) ++ [("client_id", stId)]), t0 + 30);
+  let wrong = tokenRequest(h, cfg, basic(stId, "mcs_nope"), form(refreshForm(rt)), t0 + 30);
+  let legacy = refreshTokens(h, rt, stId, t0 + 30);
+  check("TestStableRefreshNeedsClientAuth", isInvalidClient401(bare) && isInvalidClient401(wrong) && errHas(legacy, "invalid_client"),
+    "bare=${show(status(bare))} wrong=${show(status(wrong))} legacy=${errText(legacy)}");
+  -- TestStableRefreshAbsoluteExpiry: refreshing every 20 days keeps it alive to day 179; day 180 is the end
+  let alive = refreshEvery(cfg, stId, stSecret, rt, t0 + 20 * day(), 20 * day(), t0 + 179 * day());
+  let atEnd = tokenRequest(h, cfg, basic(stId, stSecret), form(refreshForm(rt)), t0 + 5 + 180 * day());
+  check("TestStableRefreshAbsoluteExpiry", alive && status(atEnd) == 400 && contains(body(atEnd), "expired"),
+    "alive=${show(alive)} end=${show(status(atEnd))} ${body(atEnd)}");
+  -- TestFamilyDigestsPruned: months of refreshes, but the family keeps only unexpired tokens (T8)
+  check("TestFamilyDigestsPruned", familySize(rt) == 1, "family=${familyOf(rt)}");
+  -- TestStableRefreshIdleExpiry: 30 days without a refresh ends it
+  let code2 = codeFor(cfg, stId, geCb(), "s2", t0);
+  let rtIdle = field(body(tokenRequest(h, cfg, basic(stId, stSecret), form(codeForm(code2, geCb())), t0 + 5)), "refresh_token");
+  let in29 = tokenRequest(h, cfg, basic(stId, stSecret), form(refreshForm(rtIdle)), t0 + 5 + 29 * day());
+  let gap = tokenRequest(h, cfg, basic(stId, stSecret), form(refreshForm(rtIdle)), t0 + 5 + 29 * day() + 30 * day());
+  check("TestStableRefreshIdleExpiry", status(in29) == 200 && status(gap) == 400 && contains(body(gap), "expired"),
+    "in29=${show(status(in29))} gap=${show(status(gap))} ${body(gap)}");
+  -- TestStableRefusedForPublicClient (D3): stable needs a client secret
+  let pubStable = match createClient(h, cfg, [geCb()], "none", "stable", t0) { Ok(_) => true, Err(e) => false };
+  let pubRotate = match createClient(h, cfg, [geCb()], "none", "rotate", t0) { Ok(_) => true, Err(e) => false };
+  let bogus = match createClient(h, cfg, [geCb()], "client_secret_basic", "forever", t0) { Ok(_) => true, Err(e) => false };
+  check("TestStableRefusedForPublicClient", pubStable == false && pubRotate && bogus == false,
+    "stable=${show(pubStable)} rotate=${show(pubRotate)} bogus=${show(bogus)}");
+  -- rotate stays the default: a rotating registered client's old refresh token is single use
+  let rot = newClient("client_secret_basic", "rotate", geCb());
+  let rotId = match rot { (i, _) => i };
+  let rotSecret = match rot { (_, s) => s };
+  let rcode = codeFor(cfg, rotId, geCb(), "r1", t0);
+  let rrt = field(body(tokenRequest(h, cfg, basic(rotId, rotSecret), form(codeForm(rcode, geCb())), t0 + 5)), "refresh_token");
+  let rr1 = tokenRequest(h, cfg, basic(rotId, rotSecret), form(refreshForm(rrt)), t0 + 10);
+  let rr2 = tokenRequest(h, cfg, basic(rotId, rotSecret), form(refreshForm(rrt)), t0 + 20);
+  check("rotate client refresh is single use", status(rr1) == 200 && field(body(rr1), "refresh_token") != "" && status(rr2) == 400 && contains(body(rr2), "already used"),
+    "rr1=${show(status(rr1))} rr2=${show(status(rr2))} ${body(rr2)}")
+}
+
+-- ================= M1c: RFC 7009 revocation =================
+
+func revoke(cfg: ClientConfig, auth: string, pairs: [(string, string)], t: int) -> (int, string, string) ! {IO, FS, Env, Net, Clock, SharedMem, Declassify} =
+  revokeRequest(hooks(), cfg, auth, form(pairs), t)
+
+func suiteRevoke() -> unit ! {IO, FS, Env, Net, Clock, SharedMem, Rand[mode=crypto], Declassify} {
+  let h = hooks();
+  let cfg = cfgAll();
+  let ge = newClient("client_secret_basic", "rotate", geCb());
+  let id = match ge { (i, _) => i };
+  let secret = match ge { (_, s) => s };
+  let t0 = now();
+  let code = codeFor(cfg, id, geCb(), "v1", t0);
+  let tok = tokenRequest(h, cfg, basic(id, secret), form(codeForm(code, geCb())), t0 + 5);
+  let at1 = field(body(tok), "access_token");
+  let rt1 = field(body(tok), "refresh_token");
+  let ref = tokenRequest(h, cfg, basic(id, secret), form(refreshForm(rt1)), t0 + 10);
+  let at2 = field(body(ref), "access_token");
+  let rt2 = field(body(ref), "refresh_token");
+  -- unexpired digests stay in the family (pruning drops only expired ones)
+  check("family keeps unexpired tokens", familySize(rt2) == 2, "family=${familyOf(rt2)}");
+  -- TestRevokeEndpointKillsFamily: revoking the refresh token revokes every access token in its family
+  let rv = revoke(cfg, basic(id, secret), [("token", rt2), ("token_type_hint", "refresh_token")], t0 + 20);
+  let after = tokenRequest(h, cfg, basic(id, secret), form(refreshForm(rt2)), t0 + 30);
+  check("TestRevokeEndpointKillsFamily", status(tok) == 200 && status(ref) == 200 && status(rv) == 200 && revoked(at1) && revoked(at2)
+    && status(after) == 400 && contains(body(after), "invalid_grant"),
+    "rv=${show(status(rv))} at1=${show(revoked(at1))} at2=${show(revoked(at2))} after=${show(status(after))} ${body(after)}");
+  -- a stable family dies the same way (Google calls /revoke on unlink, E8)
+  let st = newClient("client_secret_basic", "stable", geCb());
+  let sid = match st { (i, _) => i };
+  let ssec = match st { (_, s) => s };
+  let scode = codeFor(cfg, sid, geCb(), "v2", t0);
+  let srt = field(body(tokenRequest(h, cfg, basic(sid, ssec), form(codeForm(scode, geCb())), t0 + 5)), "refresh_token");
+  let srv = revoke(cfg, basic(sid, ssec), [("token", srt)], t0 + 10);
+  let safter = tokenRequest(h, cfg, basic(sid, ssec), form(refreshForm(srt)), t0 + 20);
+  check("revoke ends a stable refresh token", status(srv) == 200 && status(safter) == 400 && contains(body(safter), "revoked"),
+    "srv=${show(status(srv))} after=${show(status(safter))} ${body(safter)}");
+  -- TestRevokeAlways200: unknown token, another client's token, an access token: 200, and nothing leaks
+  let unknown = revoke(cfg, basic(id, secret), [("token", "no-such-token")], t0 + 40);
+  let other = newClient("client_secret_basic", "rotate", geCb());
+  let oid = match other { (i, _) => i };
+  let osec = match other { (_, s) => s };
+  let ocode = codeFor(cfg, oid, geCb(), "v3", t0);
+  let otok = tokenRequest(h, cfg, basic(oid, osec), form(codeForm(ocode, geCb())), t0 + 5);
+  let ort = field(body(otok), "refresh_token");
+  let oat = field(body(otok), "access_token");
+  let cross = revoke(cfg, basic(id, secret), [("token", ort)], t0 + 41);
+  let stillWorks = tokenRequest(h, cfg, basic(oid, osec), form(refreshForm(ort)), t0 + 42);
+  let atRv = revoke(cfg, basic(oid, osec), [("token", oat), ("token_type_hint", "access_token")], t0 + 43);
+  check("TestRevokeAlways200", status(unknown) == 200 && status(cross) == 200 && status(stillWorks) == 200 && revoked(oat) && status(atRv) == 200
+    && body(unknown) == body(cross),
+    "unknown=${show(status(unknown))} cross=${show(status(cross))} still=${show(status(stillWorks))} at=${show(status(atRv))} oat=${show(revoked(oat))}");
+  -- the client must authenticate; the endpoint is off unless configured; token is required
+  let bad = revoke(cfg, basic(id, "mcs_nope"), [("token", rt1)], t0 + 50);
+  let offRv = revoke(defaultClientConfig(), basic(id, secret), [("token", rt1)], t0 + 50);
+  let noTok = revoke(cfg, basic(id, secret), [], t0 + 50);
+  check("revocation needs client auth, cfg.revocation and a token", isInvalidClient401(bad) && status(offRv) == 404 && status(noTok) == 400,
+    "bad=${show(status(bad))} off=${show(status(offRv))} noTok=${show(status(noTok))}");
+  -- a CIMD (public) client revokes with its client_id, as Claude would
+  let cl = beginAuthorize(h, "https://svc.example/login", cimdClient(), [cimdCb()], cimdCb(), "code", challenge(), "S256", "v4", t0);
+  let ccode = match cl { Ok(u) => match completeLogin(h, param(u, "handle"), "good-id-token", t0) { Ok(loc) => param(loc, "code"), Err(_) => "" }, Err(_) => "" };
+  let ctok = match exchangeCode(h, ccode, verifier(), cimdClient(), cimdCb(), t0 + 5) { Ok(b) => b, Err(e) => e };
+  let crv = revoke(cfg, "", [("token", field(ctok, "refresh_token")), ("client_id", cimdClient())], t0 + 10);
+  let cafter = refreshTokens(h, field(ctok, "refresh_token"), cimdClient(), t0 + 20);
+  check("CIMD client revokes its refresh token", status(crv) == 200 && revoked(field(ctok, "access_token")) && errHas(cafter, "invalid_grant"),
+    "crv=${show(status(crv))} after=${errText(cafter)}")
+}
+
+-- ================= entry =================
+
+export func main() -> unit ! {IO, FS, Env, Net, Clock, SharedMem, Rand[mode=crypto], Declassify} =
+  match getArgs() {
+    ["confidential", ..._] => suiteConfidential(),
+    ["dcr", ..._] => suiteDcr(),
+    ["refresh_policy", ..._] => suiteRefreshPolicy(),
+    ["revoke", ..._] => suiteRevoke(),
+    _ => println("FAIL usage: pass one of confidential | dcr | refresh_policy | revoke")
+  }

@@ -1,9 +1,9 @@
 [package]
 name = "sunholo/mcp_oauth"
-version = "0.1.2"
+version = "0.2.0"
 edition = "1"
-ailang = ">=0.52.0"
-description = "OAuth 2.1 authorization server for MCP services: PKCE S256, CIMD clients, single-use codes, refresh rotation"
+ailang = ">=0.57.0"
+description = "OAuth 2.1 authorization server for MCP services: PKCE S256, CIMD, pre-registered confidential and DCR clients, rotating or stable refresh, RFC 7009 revocation"
 license = "Apache-2.0"
 
 [release]
@@ -13,7 +13,8 @@ kind = "feature"
 modules = [
   "sunholo/mcp_oauth/core",
   "sunholo/mcp_oauth/flow",
-  "sunholo/mcp_oauth/cimd"
+  "sunholo/mcp_oauth/cimd",
+  "sunholo/mcp_oauth/clients"
 ]
 
 # Ceiling for the whole package. core is pure; flow/cimd (P2) need these.
@@ -21,8 +22,8 @@ modules = [
 max = ["Net", "Clock", "Rand", "IO", "FS", "Env", "Declassify", "SharedMem"]
 
 [metadata]
-tags = ["oauth", "mcp", "security", "pkce", "authorization-server"]
-ai_summary = "OAuth 2.1 authorization server for MCP services (Claude/ChatGPT directory listings): PKCE S256 only, CIMD client documents, exact redirect matching, single-use digest-stored codes with replay revocation, rotating refresh families. Service plugs in authenticate/mint/store/revoke."
+tags = ["oauth", "mcp", "security", "pkce", "authorization-server", "dcr", "gemini-enterprise"]
+ai_summary = "OAuth 2.1 authorization server for MCP services (Claude, ChatGPT, Gemini Enterprise, Google Connected Apps): PKCE S256 only, CIMD client documents, operator-created confidential clients (client_secret_basic/post, hashed secrets), RFC 7591 DCR with abuse limits (off by default), per-client rotate or stable refresh, RFC 7009 revocation, exact redirect matching, single-use digest-stored codes with replay revocation. Service plugs in authenticate/mint/store/revoke; ClientConfig turns features on."
 repository = "https://github.com/sunholo-data/ailang-packages/tree/main/packages/mcp-oauth"
 homepage = "https://ailang.sunholo.com/docs/packages/sunholo/mcp_oauth"
 license_url = "https://github.com/sunholo-data/ailang-packages/blob/main/LICENSE"

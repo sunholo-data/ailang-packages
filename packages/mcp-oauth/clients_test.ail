@@ -1,0 +1,84 @@
+-- Pure tests for sunholo/mcp_oauth/clients (0.2: DCR validation, redirect
+-- rules, the trusted caller address, registered-client records).
+module sunholo/mcp_oauth/clients_test
+
+import ./clients (trustedCallerIp, trustedCallerIpHops, dcrHostAllowed, dcrRedirectUriOk, validateDcr,
+  parseClientRecord, clientRecordJson, clientLive, clientAccepted, touchClient, ClientRecord, DcrRequest)
+import ./core (ClientConfig, defaultClientConfig, httpsHost)
+import std/result (Ok, Err)
+import std/option (Some, None)
+import std/string (repeat, contains)
+
+pure func on() -> ClientConfig = { defaultClientConfig() | confidential: true, dcr: true }
+pure func isOk(r: Result[DcrRequest, string]) -> bool = match r { Ok(_) => true, Err(_) => false }
+pure func errHas(r: Result[DcrRequest, string], s: string) -> bool = match r { Ok(_) => false, Err(e) => contains(e, s) }
+
+test "caller ip is the rightmost forwarded entry" {
+  trustedCallerIp("1.2.3.4, 9.9.9.9", "") == "9.9.9.9" && trustedCallerIp("1.2.3.4,9.9.9.9", "7.7.7.7") == "9.9.9.9"
+}
+test "caller ip falls back to real ip then unknown" {
+  trustedCallerIp("", " 10.0.0.1 ") == "10.0.0.1" && trustedCallerIp("", "") == "unknown" && trustedCallerIp("a, ", "") == "unknown"
+}
+test "caller ip skips trusted hops" {
+  trustedCallerIpHops("1.1.1.1, 9.9.9.9, 10.0.0.2", "", 1) == "9.9.9.9" && trustedCallerIpHops("9.9.9.9", "", 2) == "unknown"
+}
+test "dcr redirect host uses the one host parser" {
+  httpsHost("https://Oauth-Redirect.GoogleUserContent.com/r/x") == "oauth-redirect.googleusercontent.com"
+    && httpsHost("https://evil.example?.googleusercontent.com") == "evil.example"
+    && httpsHost("https://evil.example#.googleusercontent.com") == "evil.example"
+    && httpsHost("https://evil.example\\.googleusercontent.com") == "evil.example"
+    && httpsHost("https://a.example:8443/cb") == "a.example"
+    && httpsHost("https://u@a.example/cb") == "" && httpsHost("http://a.example/cb") == ""
+}
+test "dcr host allowlist exact and suffix" {
+  dcrHostAllowed("claude.ai", ["claude.ai"]) && dcrHostAllowed("x.googleusercontent.com", [".googleusercontent.com"])
+    && dcrHostAllowed("googleusercontent.com", [".googleusercontent.com"]) == false
+    && dcrHostAllowed("evilgoogleusercontent.com", [".googleusercontent.com"]) == false
+    && dcrHostAllowed("claude.ai.evil.example", ["claude.ai"]) == false
+    && dcrHostAllowed("anything.example", []) && dcrHostAllowed("", []) == false
+}
+test "dcr redirect uri rules" {
+  dcrRedirectUriOk("https://a.example/cb", []) && dcrRedirectUriOk("http://localhost/cb", ["claude.ai"])
+    && dcrRedirectUriOk("https://a.example/cb#f", []) == false && dcrRedirectUriOk("http://a.example/cb", []) == false
+    && dcrRedirectUriOk("https://u@a.example/cb", []) == false
+    && dcrRedirectUriOk("https://a.example\\@evil.example/cb", []) == false
+    && dcrRedirectUriOk("https://a.example\\cb", []) == false
+    && dcrRedirectUriOk("https://a.example/${repeat("x", 600)}", []) == false
+}
+test "dcr defaults method none" {
+  match validateDcr(on(), "{\"redirect_uris\":[\"https://a.example/cb\"]}") { Ok(r) => r.method == "none" && r.grantTypes == ["authorization_code"], Err(_) => false }
+}
+test "dcr secret method needs confidential" {
+  isOk(validateDcr(on(), "{\"redirect_uris\":[\"https://a.example/cb\"],\"token_endpoint_auth_method\":\"client_secret_post\"}"))
+    && errHas(validateDcr({ on() | confidential: false }, "{\"redirect_uris\":[\"https://a.example/cb\"],\"token_endpoint_auth_method\":\"client_secret_post\"}"), "invalid_client_metadata")
+}
+test "dcr rejects bad grant and response types" {
+  errHas(validateDcr(on(), "{\"redirect_uris\":[\"https://a.example/cb\"],\"grant_types\":[\"implicit\"]}"), "invalid_client_metadata")
+    && errHas(validateDcr(on(), "{\"redirect_uris\":[\"https://a.example/cb\"],\"response_types\":[\"token\"]}"), "invalid_client_metadata")
+    && errHas(validateDcr(on(), "{\"redirect_uris\":\"https://a.example/cb\"}"), "invalid_redirect_uri")
+}
+test "dcr body cap" {
+  errHas(validateDcr(on(), "{\"redirect_uris\":[\"https://a.example/cb\"],\"x\":\"${repeat("a", 16384)}\"}"), "larger than 16384")
+}
+
+pure func rec() -> ClientRecord = { clientId: "mco_0123456789abcdef0123456789abcdef", method: "client_secret_basic", secretDigest: "d",
+  redirectUris: ["https://a.example/cb"], refreshPolicy: "rotate", origin: "dcr", createdAt: 10, lastUsedAt: 0, expiresAt: 100 }
+test "client record round trips" {
+  match parseClientRecord(rec().clientId, clientRecordJson(rec())) {
+    Some(r) => r.clientId == rec().clientId && r.method == "client_secret_basic" && r.secretDigest == "d"
+      && r.redirectUris == ["https://a.example/cb"] && r.refreshPolicy == "rotate" && r.origin == "dcr"
+      && r.createdAt == 10 && r.lastUsedAt == 0 && r.expiresAt == 100,
+    None => false
+  }
+}
+test "client record json holds no client name" { contains(clientRecordJson(rec()), "client_name") == false }
+test "client expiry and slide" {
+  clientLive(rec(), 99) && clientLive(rec(), 100) == false && clientLive({ rec() | expiresAt: 0 }, 99999999)
+    && touchClient(rec(), 50).expiresAt == 50 + 7776000 && touchClient({ rec() | origin: "operator", expiresAt: 0 }, 50).expiresAt == 0
+}
+test "client acceptance follows config" {
+  clientAccepted(rec(), on()) && clientAccepted(rec(), { on() | dcr: false }) == false
+    && clientAccepted(rec(), { on() | confidential: false }) == false
+    && clientAccepted({ rec() | method: "none" }, { on() | confidential: false })
+    && clientAccepted({ rec() | origin: "operator" }, { on() | dcr: false })
+}
