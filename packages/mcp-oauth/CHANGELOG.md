@@ -41,7 +41,7 @@ and its CIMD clients behave exactly as before. Turn a model on only after measur
 - New module `sunholo/mcp_oauth/clients` (the non-secret client logic). Requires ailang ≥ 0.57.0 (the
   version this release was built and tested on).
 - Tests: four new suites (`confidential`, `dcr`, `refresh_policy`, `revoke`), `e2e_client_models.sh`,
-  `compat_012.sh` (the 0.1.2 suites and example, byte for byte), a live CIMD check, 10 IFC leak fixtures,
+  `compat_012.sh` (the 0.1.2 suites and example, byte for byte), a live CIMD check, 6 new IFC leak fixtures (9 in all),
   new lint rules, and `mutation_check.sh` (38 mutants, all killed).
 
 ## 0.1.2 — 2026-10-14
