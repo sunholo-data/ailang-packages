@@ -101,7 +101,13 @@ CHECK=$(ailang mcp check "$BASE/mcp/connect/" --target both 2>&1); CHECK_RC=$?
 NPASS=$(grep -c "^  PASS" <<<"$CHECK"); NFAIL=$(grep -c "^  FAIL" <<<"$CHECK")
 FRAMING=$(grep -E "authorization-framing" <<<"$CHECK" | head -1 | sed 's/^ *//')
 if [ $CHECK_RC -eq 0 ] && [ "$NFAIL" -eq 0 ] && [ "$NPASS" -ge 5 ]; then pass "mcp check $NPASS/$NPASS"; else fail "mcp check" "rc=$CHECK_RC pass=$NPASS fail=$NFAIL"; fi
-echo "info: $FRAMING"
+# The consent-page framing probe presents a real CIMD client only from ailang
+# with M3c (`mcp check --probe-client-id`); there it must PASS (fetch the
+# probe's CIMD document, 302 to /login, which refuses framing). Older
+# toolchains send a dummy client_id and WARN; that is reported, not failed.
+if ailang mcp check --help 2>&1 | grep -q -- '-probe-client-id'; then
+  [[ "$FRAMING" == PASS* ]] && pass "authorization-framing PASS (CIMD probe)" || fail "authorization-framing PASS (CIMD probe)" "$FRAMING"
+else echo "info: this ailang predates the CIMD framing probe (M3c): $FRAMING"; fi
 grep -E "  WARN|  ERROR" "$LOG" | grep -v MOD010 && fail "server log clean" "warnings above" || pass "server log clean"
 if grep -qF "$SECRET" "$LOG" || grep -qF "$ACCESS" "$LOG" || grep -qF "$REFRESH" "$LOG" || grep -qF "$CODE" "$LOG"; then
   fail "log never holds a secret, code or token" "leaked"

@@ -98,7 +98,15 @@ export func authorize(req: {body: string, headers: Json, method: string, path: s
       Ok(loc) => redirect(loc),
       Err(e) => badRequest(e)
     }
-  else if cid != client() then badRequest(oauthError("invalid_client", "unknown client_id"))
+  else if cid != client() then
+    -- any other https client_id: beginAuthorizeFor fetches its CIMD document
+    -- (Net[scope=public]); this is the path `ailang mcp check`'s probe takes
+    match beginAuthorizeFor(hooks(), cfg(), "${issuer()}/login", cid, q(req.query, "redirect_uri"),
+                            q(req.query, "response_type"), q(req.query, "code_challenge"),
+                            q(req.query, "code_challenge_method"), q(req.query, "state"), nowSec()) {
+      Ok(loc) => redirect(loc),
+      Err(e) => badRequest(e)
+    }
   else match beginAuthorize(hooks(), "${issuer()}/login", cid, registered(), q(req.query, "redirect_uri"),
                             q(req.query, "response_type"), q(req.query, "code_challenge"),
                             q(req.query, "code_challenge_method"), q(req.query, "state"), nowSec()) {
@@ -106,6 +114,17 @@ export func authorize(req: {body: string, headers: Json, method: string, path: s
     Err(e) => badRequest(e)
   }
 }
+
+-- The sign-in page the authorize redirect lands on. It refuses to be framed
+-- (clickjacking, RFC 9700 §4.16), which `ailang mcp check` probes.
+@route("GET", "/login")
+@raw
+@nomcp
+export pure func loginPage(req: {body: string, headers: Json, method: string, path: string, query: Json})
+  -> {_body: string, _status: int, _headers: Json} =
+  {_body: "<!doctype html><title>Sign in</title><p>Sign in to the example service.</p>", _status: 200,
+   _headers: jo([kv("Content-Type", js("text/html; charset=utf-8")), kv("X-Frame-Options", js("DENY")),
+                 kv("Content-Security-Policy", js("frame-ancestors 'none'"))])}
 
 @route("POST", "/oauth/login/complete")
 @raw
