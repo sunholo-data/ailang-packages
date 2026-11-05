@@ -5,7 +5,8 @@ module sunholo/specstore/model
 import std/result (Result, Ok, Err)
 import std/option (Option, Some, None)
 import std/yaml (decode as yamlDecode)
-import std/json (Json, JString, JArray, JNull, get, getString, getArray, getInt, getObject)
+import std/json (Json, JString, JArray, JNull, JNumber, JBool, get, getString, getArray, getInt, getObject)
+import std/math (floor, floatToInt)
 import std/fs (readFile, listDir, fileExists)
 import std/list (map, mapE, filter, length, nth, last, sortBy, flatMap, dedup)
 import std/string (split, replace, startsWith, endsWith, stringToInt, trim)
@@ -38,6 +39,17 @@ export func str(j: Json, k: string) -> string =
     None => ""
   }
 
+-- A parameter value as text, normalised. YAML reads an unquoted numeric value as a number
+-- (value: 90 becomes 90.0), which never matched what the site pushes; a number gets its
+-- canonical string (90 → "90", 90.5 → "90.5") and a boolean reads true/false, so the spec
+-- text is what the tag sends. Everything else is the plain field text.
+export func valStr(j: Json, k: string) -> string =
+  match get(j, k) {
+    Some(JNumber(n)) => if n == floor(n) then show(floatToInt(n)) else show(n),
+    Some(JBool(b)) => if b then "true" else "false",
+    _ => str(j, k)
+  }
+
 export func arr(j: Json, k: string) -> [Json] = match getArray(j, k) { Some(xs) => xs, None => [] }
 
 export func strs(j: Json, k: string) -> [string] = map(\x. match x { JString(s) => s, _ => "" }, arr(j, k))
@@ -67,7 +79,7 @@ export func toSpec(j: Json, rounds: [Round]) -> Spec {
                       changed: if str(e, "changed") == "" then str(e, "since") else str(e, "changed"), note: str(e, "note"),
                       dlEvent: if str(e, "datalayer_event") == "" then str(e, "eventName") else str(e, "datalayer_event"),
                       live: str(e, "live"),
-                      params: map(\p. { key: str(p, "key"), value: str(p, "value") }, arr(e, "parameters")) }, arr(j, "events")),
+                      params: map(\p. { key: str(p, "key"), value: valStr(p, "value") }, arr(e, "parameters")) }, arr(j, "events")),
     dict: map(\d. { name: str(d, "name"), definition: str(d, "definition"), typ: str(d, "type"), example: str(d, "example"),
                     source: str(d, "source"), allowed: strs(d, "allowed") }, arr(j, "dictionary")),
     hist: map(\h. { version: str(h, "version"), date: str(h, "date"), author: str(h, "author"), what: str(h, "what"),

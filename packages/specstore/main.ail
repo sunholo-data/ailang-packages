@@ -13,7 +13,7 @@ import std/result (Result, Ok, Err)
 import std/option (Option, Some, None)
 import std/fs (writeFile, readFile)
 import std/env (getArgs)
-import std/io (println)
+import std/io (println, exit)
 import std/list (length, foldl)
 import std/zip (createArchive)
 import ./model (Field, Rule, Std, Dev, Param, Event, Dict, Hist, Res, Round, Spec, str, arr, strs, obj, loadYaml, toStd, toSpec, toRound, loadSpec, matches, varsIn, parseVersion, keyOf, present, fieldsOf, missingIn, dup)
@@ -27,10 +27,14 @@ import std/package (assetPath)
 
 export func main() -> () ! {IO, FS, Env, Declassify} {
   match getArgs(()) {
-    ["check", stdPath, dir] => withStd(stdPath, \std. match loadSpec(dir) {
-        Err(es) => foldl(\u. \e. println("✗ ${e}"), (), es),
-        Ok(sp) => { let _ = runCheck(std, sp); () }
-      }),
+    ["check", stdPath, dir] =>
+      match loadYaml(stdPath) {
+        Err(e) => { println("✗ ${e}"); exit(1) },
+        Ok(j) => match loadSpec(dir) {
+          Err(es) => { foldl(\u. \e. println("✗ ${e}"), (), es); exit(1) },
+          Ok(sp) => if runCheck(toStd(j), sp) then () else exit(1)
+        }
+      },
     ["guide", stdPath, out] => withStd(stdPath, \std. { writeFile(out, guide(std)); println("✓ wrote ${out}: ${show(length(std.rules))} rules") }),
     ["view", stdPath, dir, out] => withStd(stdPath, \std. match loadSpec(dir) {
         Err(es) => foldl(\u. \e. println("✗ ${e}"), (), es),

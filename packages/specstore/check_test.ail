@@ -89,3 +89,14 @@ test "a deviation approved by someone else is itself a finding" {
   any(\r. r == "owner", ids(findings(std(""), spec("pageView", "{{pageType}}", "Internal", "person", "pass",
                                                    "{rule: casing, instead: camel, approved_by: Ben}"))))
 }
+
+-- 0.3.1: an unquoted numeric parameter value reads as its canonical string, not 90.0.
+test "an unquoted numeric parameter value reads as its canonical string" {
+  match toSpec(y("spec: {client: C, project: P, owner: Ana, version: \"1.1\", standard: \"0.1\"}\nevents:\n  - {id: E01, eventName: page_view, priority: high, parameters: [{key: gtm.scrollThreshold, value: 90}, {key: gtm.ratio, value: 0.75}, {key: gtm.on, value: true}, {key: page.type, value: detail}]}\ndictionary: []"), []).events {
+    [e, ..._] => match e.params {
+      [a, b, c, d] => a.value == "90" && b.value == "0.75" && c.value == "true" && d.value == "detail",
+      _ => false
+    },
+    _ => false
+  }
+}
