@@ -7,7 +7,7 @@ import std/option (Option, Some, None)
 import std/yaml (decode as yamlDecode)
 import std/json (Json, JString, JArray, JNull, get, getString, getArray, getInt, getObject)
 import std/fs (readFile, listDir, fileExists)
-import std/list (map, filter, length, nth, last, sortBy, flatMap, dedup)
+import std/list (map, mapE, filter, length, nth, last, sortBy, flatMap, dedup)
 import std/string (split, replace, startsWith, endsWith, stringToInt, trim)
 import std/regex (compile, isMatch, findAll)
 import ./rules (versionKey)
@@ -88,7 +88,7 @@ export func loadSpec(dir: string) -> Result[Spec, [string]] ! {FS} =
           sortBy(\a. \b. if a < b then -1 else if a > b then 1 else 0,
                  filter(\f. startsWith(f, "round-") && endsWith(f, ".yaml"), listDir("${dir}/qa")))
         else [];
-      let loaded = map(\f. loadYaml("${dir}/qa/${f}"), files);
+      let loaded = mapE(\f. loadYaml("${dir}/qa/${f}"), files);
       let errs = flatMap(\r. match r { Err(e) => [e], Ok(_) => [] }, loaded);
       if length(errs) > 0 then Err(errs)
       else Ok(toSpec(j, flatMap(\r. match r { Ok(x) => [toRound(x)], Err(_) => [] }, loaded)))
