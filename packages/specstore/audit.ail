@@ -57,36 +57,36 @@ func casingOf(raw: string) -> string
 }
 
 -- The cell's fill colour: a formatting code, not content.
-pure func colourOf(c: Cell) -> string<structure> ! {Declassify}
+func colourOf(c: Cell) -> string<structure> ! {Declassify}
 { toLower(c.fill) }
 
 -- How many: a count says nothing about what was counted.
-pure func countOf(n: int<client>) -> int<structure> ! {Declassify}
+func countOf(n: int<client>) -> int<structure> ! {Declassify}
 { n }
 
 -- The header of column i, as headerOf gives it.
-pure func headerAt(h: [Cell], i: int, names: [string]) -> string<structure> ! {Declassify}
+func headerAt(h: [Cell], i: int, names: [string]) -> string<structure> ! {Declassify}
 { match nth(h, i) { Some(c) => headerOf(c.text, names), None => "" } }
 
 -- A column's shape: the three commonest casing classes and notations, with counts.
-pure func casingsOf(vs: [Cell]) -> string<structure> ! {Declassify}
+func casingsOf(vs: [Cell]) -> string<structure> ! {Declassify}
 { tally(map(\x. casingOf(x.text), vs)) }
 
-pure func notationsOf(vs: [Cell]) -> string<structure> ! {Declassify}
+func notationsOf(vs: [Cell]) -> string<structure> ! {Declassify}
 { tally(map(\x. notationOf(x.text), vs)) }
 
 -- Up to 30 headings, each through headerOf, joined.
-pure func headingsLine(hs: [string<client>], names: [string]) -> string<structure> ! {Declassify}
+func headingsLine(hs: [string<client>], names: [string]) -> string<structure> ! {Declassify}
 { join(" | ", take(30, mapE(\x. headerOf(x, names), hs))) }
 
-pure func present(raw: string<client>) -> string<structure> ! {Declassify}
+func present(raw: string<client>) -> string<structure> ! {Declassify}
 { if trim(raw) == "" then "" else "x" }
 
-pure func shortEnough(raw: string<client>) -> string<structure> ! {Declassify}
+func shortEnough(raw: string<client>) -> string<structure> ! {Declassify}
 { if slen(trim(raw)) <= 45 then "x" else "" }
 
 -- A header or sheet name: client names replaced, numbers kept, cut to 45 characters.
-pure func headerOf(raw: string<client>, names: [string]) -> string<structure> ! {Declassify}
+func headerOf(raw: string<client>, names: [string]) -> string<structure> ! {Declassify}
 {
   if slen(trim(raw)) > 40 || contains(raw, "<") || contains(raw, "{") then "(long text)" else {
   let s0 = foldl(\acc. \n. subst("(?i)(^|[^A-Za-z])${quoteMeta(n)}([^A-Za-z]|$)", acc, "$1‹client›$2"), trim(raw), names);
@@ -147,7 +147,7 @@ func filled(cs: [Cell]) -> int ! {Declassify} = length(filterE(\c. present(c.tex
 -- <client> ⊔ <structure>, and present takes <client>).
 type Shape = { on: string<structure>, long: string<structure>, casing: string<structure>, notation: string<structure>, fill: string<structure> }
 
-pure func shapeOf(c: Cell) -> Shape ! {Declassify} {
+func shapeOf(c: Cell) -> Shape ! {Declassify} {
   let on = present(c.text);
   { on: on, long: if on == "x" && shortEnough(c.text) == "" then "x" else "", casing: casingOf(c.text),
     notation: notationOf(c.text), fill: colourOf(c) }

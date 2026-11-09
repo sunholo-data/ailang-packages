@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.3.1
+
+Builds on the AILANG compiler that ships #1443 (sunholo-data/ailang#2184): a `pure func` must
+have an empty effect row. Ten declassifiers in `audit` were declared `pure ... ! {Declassify}`,
+which that compiler rejects, so `audit` and `main` failed to check. They drop `pure` and keep
+the row. Signatures, labels, proofs and behaviour are unchanged; the package still checks on
+AILANG v0.57.4.
+
 ## 0.3.0
 
 Three things a real flow needed. A parameter key may name every element of an array with `[]`:
