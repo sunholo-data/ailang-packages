@@ -5,7 +5,7 @@ module sunholo/specstore/model
 import std/result (Result, Ok, Err)
 import std/option (Option, Some, None)
 import std/yaml (decode as yamlDecode)
-import std/json (Json, JString, JArray, JNull, get, getString, getArray, getInt, getObject)
+import std/json (Json, JString, JArray, JNull, get, getString, getArray, getInt, getObject, asNumber)
 import std/fs (readFile, listDir, fileExists)
 import std/list (map, mapE, filter, length, nth, last, sortBy, flatMap, dedup)
 import std/string (split, replace, startsWith, endsWith, stringToInt, trim)
@@ -34,7 +34,11 @@ export func str(j: Json, k: string) -> string =
   match get(j, k) {
     Some(JString(s)) => s,
     Some(JNull) => "",
-    Some(v) => match v { JArray(_) => "", _ => trim(replace(replace(show(v), "JNumber(", ""), ")", "")) },
+    -- A number reads as show(float) whether decode gave it as JInt or JNumber.
+    Some(v) => match asNumber(v) {
+      Some(n) => show(n),
+      None => match v { JArray(_) => "", _ => trim(replace(replace(show(v), "JNumber(", ""), ")", "")) }
+    },
     None => ""
   }
 

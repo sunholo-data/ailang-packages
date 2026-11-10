@@ -1,7 +1,7 @@
 module sunholo/maintenance_bench/codec_test
 import ./codec (countValue, requiredText)
 import ./strict_json (decodeCountDocument)
-import std/json (JNumber, JString, JObject, JBool, kv)
+import std/json (JNumber, JString, JObject, JBool, kv, decode)
 import std/result (Ok, Err)
 import ./codec (decodeSnapshot, encodeSnapshot, decodeAnnotations, decodeManifest, optionalCount, optionalBool)
 import ./observation (observed, snapshot)
@@ -33,3 +33,9 @@ test "rounded fractional raw lexeme is rejected before JSON float conversion" { 
 test "fraction too small for float precision is still rejected" { match decodeCountDocument("{\"tokens\":1.0000000000000001}") {Err(_)=>true,_=>false} }
 test "ambiguous duplicate completeness is rejected" { match decodeCountDocument("{\"complete\":true,\"complete\":false}") {Err(_)=>true,_=>false} }
 test "numeric punctuation in quoted evidence is not a count" { match decodeCountDocument("{\"text\":\"1.2e-3\"}") {Ok(_)=>true,_=>false} }
+-- Integer literals decode as JInt on newer compilers and as JNumber on older ones; countValue reads both alike.
+test "decoded integer count preserved" { match decode("60") { Ok(j) => (match countValue(j) { Ok(n) => n == 60, Err(_) => false }), Err(_) => false } }
+test "decoded integral float count preserved" { match decode("60.0") { Ok(j) => (match countValue(j) { Ok(n) => n == 60, Err(_) => false }), Err(_) => false } }
+test "decoded fractional count refused" { match decode("1.5") { Ok(j) => (match countValue(j) { Err(_) => true, Ok(_) => false }), Err(_) => false } }
+test "decoded negative integer count refused" { match decode("-1") { Ok(j) => (match countValue(j) { Err(_) => true, Ok(_) => false }), Err(_) => false } }
+test "decoded integer above 2^53-1 refused" { match decode("9007199254740993") { Ok(j) => (match countValue(j) { Err(_) => true, Ok(_) => false }), Err(_) => false } }

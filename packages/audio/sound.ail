@@ -17,7 +17,7 @@ import std/option (Option, Some, None)
 import std/result (Result, Ok, Err)
 import std/string (join, length as textLength)
 import std/bytes (fromString, length as byteLength)
-import std/json (Json, decode, get, getString, getNumber, getInt, getBool, getArray, getObject, keys, JNull, JBool, JNumber, JString, JArray, JObject)
+import std/json (Json, decode, get, getString, getNumber, getInt, getBool, getArray, getObject, keys, asNumber, JNull, JBool, JNumber, JString, JArray, JObject)
 import ./recipe (Recipe, Layer, Env, frames, layerSamples, envAt, beatAt, render, finish, loopErrors, validateRecipe, recipeOfJson, layerOfJson, recipeSchema, renderChecked)
 import ./dsp (twoPi, absF, onePole, lowpass, sweepLowpass)
 import ./noise (white, rampNoise, pinkOf, brownOf)
@@ -303,9 +303,10 @@ pure func keyFits(kind: string, k: string) -> bool =
   else if member(k, ["glide_to", "glide_from_s", "glide_until_s", "vib_hz", "vib_cents"]) then kind != "pluck"
   else true
 
-pure func typeOk(v: Json, t: string) -> bool = match v {
-  JNumber(x) => if t == "integer" then inRange(x, -2147483647.0, 2147483647.0) && x == floor(x) else t == "number",
-  JString(_) => t == "string", JBool(_) => t == "boolean", JObject(_) => t == "object", JArray(_) => t == "array", JNull => false
+-- asNumber reads both number shapes (decode gives integer literals as JInt on newer compilers).
+pure func typeOk(v: Json, t: string) -> bool = match asNumber(v) {
+  Some(x) => if t == "integer" then inRange(x, -2147483647.0, 2147483647.0) && x == floor(x) else t == "number",
+  None => match v { JString(_) => t == "string", JBool(_) => t == "boolean", JObject(_) => t == "object", JArray(_) => t == "array", _ => false }
 }
 pure func typed(j: Json, k: string, t: string) -> [string] = match get(j, k) { None => [], Some(v) => if typeOk(v, t) then [] else ["${k}: expected ${t}"] }
 pure func numbers(j: Json, ks: [string]) -> [string] = flatMap(\k. typed(j, k, "number"), ks)
@@ -366,7 +367,7 @@ pure func voiceOf(j: Json) -> Voice = {seconds: num(j, "seconds", 0.0), fadeMs: 
 pure func partOf(j: Json) -> Part =
   if str(j, "kind") == "events" then {
     let times = match getArray(j, "times") {
-      Some(ts) => Fixed(map(\t. match t { JNumber(x) => x, _ => 0.0 }, ts)),
+      Some(ts) => Fixed(map(\t. match asNumber(t) { Some(x) => x, None => 0.0 }, ts)),
       None => match getObject(j, "scatter") { Some(o) => Scatter({count: match getInt(o, "count") { Some(c) => c, None => 0 }, spread: num(o, "spread", 1.0), minGap: num(o, "min_gap_s", 0.0)}), None => Fixed([]) }
     };
     let vary = match getObject(j, "vary") { Some(o) => {ampDb: num(o, "amp_db", 0.0), cents: num(o, "cents", 0.0), cycle: match getBool(o, "cycle") { Some(b) => b, None => false }}, None => {ampDb: 0.0, cents: 0.0, cycle: false} };

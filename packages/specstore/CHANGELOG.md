@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.3.2
+
+Fix: numbers in specs and pushes. AILANG's `std/json` now decodes an integer literal such as `60` as `JInt(60)`; only fractional and
+exponent literals stay `JNumber`. Older compilers give `JNumber(60.0)` for both.
+`model.str` rendered a number by stripping `JNumber(` from `show`, so an integer spec field such as
+`version: 2` read as `JInt(2` on such a compiler; `qa.valueText` matched only `JNumber`. Both now read
+numbers with `asNumber` and give exactly the 0.3.1 text on every compiler (`2.0`, and `60` for a pushed
+value). Signatures are unchanged.
+
 ## 0.3.1
 
 Builds on the AILANG compiler that ships #1443 (sunholo-data/ailang#2184): a `pure func` must

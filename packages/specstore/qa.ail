@@ -12,7 +12,7 @@ module sunholo/specstore/qa
 
 import std/result (Result, Ok, Err)
 import std/option (Option, Some, None)
-import std/json (Json, JString, JNumber, JBool, JNull, JArray, encode, decode, get, js, ja, jo, kv)
+import std/json (Json, JString, JBool, JNull, JArray, encode, decode, get, js, ja, jo, kv, asNumber)
 import std/fs (readFile, writeFile)
 import std/io (println)
 import std/list (map, filter, length, any, flatMap, foldl)
@@ -82,13 +82,17 @@ export func seenOf(o: Json) -> [Seen] =
 export func numText(s: string) -> string =
   if endsWith(s, ".0") then substring(s, 0, strLength(s) - 2) else s
 
+-- asNumber reads both number shapes: decode gives an integer literal as JInt on
+-- newer compilers and as JNumber on older ones.
 export func valueText(j: Json) -> string =
-  match j {
-    JString(s) => s,
-    JNumber(n) => numText(show(n)),
-    JBool(b) => if b then "true" else "false",
-    JNull => "",
-    _ => encode(j)
+  match asNumber(j) {
+    Some(n) => numText(show(n)),
+    None => match j {
+      JString(s) => s,
+      JBool(b) => if b then "true" else "false",
+      JNull => "",
+      _ => encode(j)
+    }
   }
 
 -- A key as written (GTM's own keys contain dots: gtm.scrollThreshold), else as a path:
