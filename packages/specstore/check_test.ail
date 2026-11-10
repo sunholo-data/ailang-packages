@@ -4,6 +4,7 @@ module sunholo/specstore/check_test
 import std/yaml (decode as yamlDecode)
 import std/json (Json, JNull)
 import std/list (map, length, any)
+import std/string (find)
 import ./rules (statusFitsVersion, passAllowed, needsRetest, versionKey)
 import ./model (Std, Spec, toStd, toSpec, toRound)
 import ./check (findings)
@@ -28,13 +29,16 @@ patterns:
 fields: {}"))
 
 func spec(eventName: string, value: string, status11: string, by: string, state: string, devs: string) -> Spec =
+  specK("page.type", eventName, value, status11, by, state, devs)
+
+func specK(key: string, eventName: string, value: string, status11: string, by: string, state: string, devs: string) -> Spec =
   toSpec(y("spec: {client: C, project: P, owner: Ana, version: \"1.1\", standard: \"0.1\", deviations: [${devs}]}
 history:
   - {version: \"1.0\", date: d, author: Ana, what: w, status: Sent to client}
   - {version: \"1.1\", date: d, author: Ana, what: w, status: ${status11}}
 events:
   - {id: E01, description: d, trigger: t, scope: s, eventName: ${eventName}, priority: high, since: \"1.0\",
-     parameters: [{key: page.type, value: \"${value}\"}]}
+     parameters: [{key: \"${key}\", value: \"${value}\"}]}
 dictionary:
   - {name: pageType, definition: d, type: text, example: e, source: s}"),
     [toRound(y("{round: 1, version: \"1.0\", date: d, tester: t, by: ${by}, results: [{event: E01, state: ${state}, comment: \"\"}]}"))])
@@ -88,4 +92,25 @@ test "a deviation approved by the owner waives its rule" {
 test "a deviation approved by someone else is itself a finding" {
   any(\r. r == "owner", ids(findings(std(""), spec("pageView", "{{pageType}}", "Internal", "person", "pass",
                                                    "{rule: casing, instead: camel, approved_by: Ben}"))))
+}
+
+func withRule(id: string, check: string) -> Std = std("  - {id: ${id}, status: decided, source: t, text: t, check: ${check}}")
+
+test "{{snake_case}} is refused under notation, not compared as text" {
+  ids(findings(withRule("notation", "notation"), spec("page_view", "{{page_type}}", "Internal", "person", "pass", ""))) == ["notation"]
+}
+
+test "{{camelCase}} and fixed values pass notation" {
+  length(findings(withRule("notation", "notation"), clean())) == 0 &&
+  length(findings(withRule("notation", "notation"), spec("page_view", "home", "Internal", "person", "pass", ""))) == 0
+}
+
+test "a key through ecommerce.items without [] is refused under arrays (not casing, so a casing deviation does not waive it)" {
+  any(\f. match f { (r, _, m) => r == "keys" && find(m, "which is a list") >= 0 },
+      findings(withRule("keys", "arrays"), specK("ecommerce.items.item_id", "page_view", "{{pageType}}", "Internal", "person", "pass", "")))
+}
+
+test "ecommerce.items[] keys pass arrays" {
+  !any(\f. match f { (_, _, m) => find(m, "which is a list") >= 0 },
+       findings(withRule("keys", "arrays"), specK("ecommerce.items[].item_id", "page_view", "{{pageType}}", "Internal", "person", "pass", "")))
 }
