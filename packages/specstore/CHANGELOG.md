@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.3.2
+
+Two ways a spec could pass `check` and then fail every run. A `{{…}}` the standard's variable
+pattern does not accept (`{{page_type}}` against camelCase) was compared as literal text, so each
+such parameter failed on every page; `check` now refuses it under `notation`. A key through
+`ecommerce.items` without `[]` (`ecommerce.items.item_id`) asked the list itself for the field and
+always reported it missing; `check` now refuses it under a new check key, `arrays`, kept apart from
+`key-casing` so a casing deviation does not waive it. The template standard gains an `arrays`
+rule; an existing standard enables it by adding `check: arrays` to its rule on parameters. Found on
+the first scheduled round against a real site. Tests: `check_test.ail` (16).
+
 ## 0.3.1
 
 Builds on the AILANG compiler that ships #1443 (sunholo-data/ailang#2184): a `pure func` must
