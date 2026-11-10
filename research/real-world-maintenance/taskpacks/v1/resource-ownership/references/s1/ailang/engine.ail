@@ -1,7 +1,7 @@
 module study/resource_ownership/engine
 import std/result (Result, Ok, Err, flatMap)
 import std/option (Some, None)
-import std/json (Json, JString, JNumber, JArray, JBool, JNull, decode, get, kv, jo)
+import std/json (Json, JString, JArray, JBool, JNull, decode, get, kv, jo, getNumber)
 import std/list (map, filter, foldl, length, contains)
 import std/bytes as B
 import std/fs (writeFileBytesResult, readFileRaw, removeFileResult)
@@ -29,9 +29,9 @@ func array(j: Json, key: string) -> Result[[Json], string] = match get(j, key) {
   _ => Err("expected array ${key}")
 }
 
-func cap(j: Json) -> Result[int, string] = match get(j, "cap") {
-  Some(JNumber(n)) => if n >= 0.0 && n <= 1.6777216e+07 && floor(n) == n then Ok(floatToInt(n)) else Err("invalid cap"),
-  _ => Err("expected cap")
+func cap(j: Json) -> Result[int, string] = match getNumber(j, "cap") {
+  Some(n) => if n >= 0.0 && n <= 1.6777216e+07 && floor(n) == n then Ok(floatToInt(n)) else Err("invalid cap"),
+  None => Err("expected cap")
 }
 
 func bytesText(j: Json) -> Result[string, string] = match get(j, "bytes") {
