@@ -4,7 +4,7 @@ import std/option (Option, Some, None)
 import std/list as L
 import std/bytes as B
 import std/json as J
-import std/json (Json, JNumber, JArray, JString)
+import std/json (Json, JArray, JString)
 import std/math (intToFloat)
 import ./events (Event, KeyCode, Input, Sized, Finished, Cancelled, NoInput, Character, Previous, Next, MoveLeft, MoveRight, Accept, Cancel, Erase, FocusNext, First, Last, PriorPage, FollowingPage, Remove)
 import ./widgets (Menu, menu, updateMenu, viewport, frame)
@@ -94,16 +94,18 @@ ensures { match result {
   }
 }
 
--- getInt deliberately truncates; require exact agreement with the JSON number.
-pure func integer(value: Json) -> Option[int] = match value {
-  JNumber(number) => {
+-- getInt truncates on older compilers; require exact agreement with the JSON number.
+-- asNumber reads both number shapes: decode gives an integer literal as JInt on
+-- newer compilers and as JNumber on older ones.
+pure func integer(value: Json) -> Option[int] = match J.asNumber(value) {
+  Some(number) => {
     let wrapped = J.jo([J.kv("n", value)])
     match J.getInt(wrapped, "n") {
       Some(n) => if intToFloat(n) == number then Some(n) else None,
       None => None
     }
   },
-  _ => None
+  None => None
 }
 
 pure func fieldInt(value: Json, key: string) -> Option[int] = match J.get(value, key) {

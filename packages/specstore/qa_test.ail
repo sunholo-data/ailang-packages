@@ -3,11 +3,11 @@
 module sunholo/specstore/qa_test
 
 import std/yaml (decode as yamlDecode)
-import std/json (Json, JNull)
+import std/json (Json, JNull, decode)
 import std/list (map, length)
 import ./rules (worstOutcome, visitOutcome)
-import ./model (Std, Spec, toStd, toSpec)
-import ./qa (seenOf, outcomeFor, outcomeWith, visitsOf, visitChecks, waitingForRelease, checksGa4)
+import ./model (Std, Spec, toStd, toSpec, str)
+import ./qa (seenOf, outcomeFor, outcomeWith, visitsOf, visitChecks, waitingForRelease, checksGa4, valueText)
 
 func y(s: string) -> Json = match yamlDecode(s) { Ok(j) => j, Err(_) => JNull }
 
@@ -119,4 +119,17 @@ test "site.checks without ga4 turns GA4 off; no checks list keeps it on" {
 
 test "a change not yet live waits for release; a live one is checked" {
   match shop("").events { [a, b] => !waitingForRelease(a) && waitingForRelease(b), _ => false }
+}
+
+-- Integer literals decode as JInt on newer compilers and as JNumber on older ones; both read the same.
+func dj(s: string) -> Json = match decode(s) { Ok(j) => j, Err(_) => JNull }
+
+test "a pushed number reads the same whether it decodes as an integer or a float" {
+  valueText(dj("60")) == "60" && valueText(dj("-3")) == "-3" && valueText(dj("60.0")) == "60"
+    && valueText(dj("2.5")) == "2.5" && valueText(dj("10000000000000000")) == "10000000000000000"
+}
+
+test "a numeric spec field reads as its float text, integer or not" {
+  let j = y("version: 2\nrate: 2.5\nname: shop\n");
+  str(j, "version") == "2.0" && str(j, "rate") == "2.5" && str(j, "name") == "shop"
 }

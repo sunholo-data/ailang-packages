@@ -1,5 +1,5 @@
 module sunholo/crew_lab/claims
-import std/json (Json, JNumber, decode, get, getString, getNumber, getArray, keys)
+import std/json (Json, decode, get, getString, getNumber, getArray, keys, asNumber)
 import std/list (map, filter, foldl, length, any, contains, nth, sortBy, dedup)
 import std/string (split, join, length as size, startsWith)
 import std/option (Option, Some, None)
@@ -95,7 +95,7 @@ ensures { match result {Err(_) => true, Ok(cs) => length(cs) >= 1 && length(cs) 
 -- A measure in one crew_sim/1 line. Count maps omit zero entries, so an absent
 -- key under a validated path is 0.
 pure func walk(j:Json, parts:[string]) -> float = match parts {
- [] => match j {JNumber(n) => n, _ => 0.0},
+ [] => match asNumber(j) {Some(n) => n, None => 0.0},
  p :: rest => match get(j, p) {Some(x) => walk(x, rest), None => 0.0}
 }
 

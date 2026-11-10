@@ -3,16 +3,18 @@ import ./strict_json (decodeCountDocument)
 import ./types (Episode, Snapshot, Manifest, Annotation, Evidence, FileChange)
 import std/result (Result, Ok, Err, flatMap, unwrap)
 import std/option (Option, Some, None)
-import std/json (Json, JNull, JNumber, JString, JBool, JArray, JObject, decode, encode, get, kv)
+import std/json (Json, JNull, JNumber, JString, JBool, JArray, JObject, decode, encode, get, kv, asNumber)
 import std/crypto (sha256Hex)
 import std/math (floor, floatToInt, intToFloat)
 import std/list (map, foldl, length as size, contains)
 import std/map as M
 
 -- Exact JSON counts are bounded by IEEE-754 integer precision, never truncated.
-export pure func countValue(j: Json) -> Result[int, string] = match j {
-  JNumber(n) => if n >= 0.0 && n <= 9.007199254740991e+15 && floor(n) == n then Ok(floatToInt(n)) else Err("count must be a nonnegative exact integer <= 2^53-1"),
-  _ => Err("expected count number")
+-- asNumber reads both number shapes: decode gives an integer literal as JInt on
+-- newer compilers and as JNumber on older ones.
+export pure func countValue(j: Json) -> Result[int, string] = match asNumber(j) {
+  Some(n) => if n >= 0.0 && n <= 9.007199254740991e+15 && floor(n) == n then Ok(floatToInt(n)) else Err("count must be a nonnegative exact integer <= 2^53-1"),
+  None => Err("expected count number")
 }
 
 export pure func requiredText(j: Json, key: string) -> Result[string, string] = match get(j, key) {
