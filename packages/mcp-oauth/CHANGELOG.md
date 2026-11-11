@@ -1,5 +1,19 @@
 # Changelog — sunholo/mcp_oauth
 
+
+## 0.2.1 — 2026-11-11
+
+### Fixed
+- **`state` accepts any RFC 6749 VSCHAR (`%x20-7E`), up to 2048 characters**, and the
+  authorization response percent-encodes it. 0.2.0 and earlier allowed unreserved characters only,
+  at most 512, which refused Gemini Enterprise's web-app sign-in: its `state` is a 768-character
+  base64 string with `=` padding (`invalid_request: state must be unreserved characters, at most
+  512`, measured 2026-11-11 against a dev deploy). The console's "Verify Auth" sends a short state,
+  so it passed and hid the problem. `core.stateCharsOk` / `core.stateMaxLen` are new; seven new
+  tests in `core_test.ail` (99 total) fail against either half of the old behaviour (mutation-checked
+  by hand); every existing suite still passes (flow, e2e, client models, 0.1.2 compat,
+  confidential, lint, 47/47 mutants, 15 Z3 contracts in `core.ail`).
+
 ## 0.2.0 — 2026-11-05
 
 **Client models for Gemini Enterprise and Google Connected Apps.** Design: ailang

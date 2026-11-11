@@ -53,6 +53,21 @@ pure func unreserved(c: string) -> bool =
 export pure func verifierCharsOk(verifier: string) -> bool =
   not any(\c. not unreserved(c), chars(verifier))
 
+-- VSCHAR = %x20-7E (RFC 6749 Appendix A.5, the grammar of `state`): every
+-- printable ASCII character, space included. Gemini Enterprise's web app sends
+-- a 768-character base64 state with "=" padding (measured 2026-11-11, ailang
+-- m-mcp-oauth-client-models P0-2), which the 0.1/0.2.0 unreserved-only rule
+-- refused.
+pure func vschar(c: string) -> bool =
+  find(" !\"#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`abcdefghijklmnopqrstuvwxyz{|}~", c) >= 0
+
+-- An OAuth `state`: VSCHAR only, at most stateMaxLen(). The redirect carries
+-- it percent-encoded (authResponseUrl), so any VSCHAR is safe there.
+export pure func stateMaxLen() -> int = 2048
+
+export pure func stateCharsOk(state: string) -> bool =
+  length(state) <= stateMaxLen() && not any(\c. not vschar(c), chars(state))
+
 export pure func verifierOk(verifier: string) -> bool =
   verifierLengthOk(verifier) && verifierCharsOk(verifier)
 
@@ -343,11 +358,11 @@ export pure func stableRefreshLive(nowSec: int, idleExpiresAt: int, absoluteExpi
 -- code, state and the issuer identifier `iss`, so a client talking to more
 -- than one authorization server can reject a response from the wrong one
 -- (mix-up attacks). Appends with & when the redirect URI already has a query.
--- code is hex and state is checked to unreserved characters (stateOk), so
--- only iss needs percent-encoding.
+-- code is hex; state (any VSCHAR, stateCharsOk) and iss are percent-encoded,
+-- so a "&", "=" or "#" in a client's state cannot break the query.
 export pure func authResponseUrl(redirectUri: string, code: string, state: string, issuer: string) -> string {
   let sep = if strContains(redirectUri, "?") then "&" else "?";
-  "${redirectUri}${sep}code=${code}&state=${state}&iss=${urlEncode(issuer)}"
+  "${redirectUri}${sep}code=${code}&state=${urlEncode(state)}&iss=${urlEncode(issuer)}"
 }
 
 -- 0.1.2's document, unchanged: asMetadataFor with the default config, which
