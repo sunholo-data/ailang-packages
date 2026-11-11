@@ -3,7 +3,7 @@
 
 module sunholo/mcp_oauth/core_test
 
-import ./core (authResponseUrl, formGet, formUnescape, s256, pkceOk, verifierOk, verifierLengthOk, challengeMethodOk,
+import ./core (authResponseUrl, stateCharsOk, stateMaxLen, formGet, formUnescape, s256, pkceOk, verifierOk, verifierLengthOk, challengeMethodOk,
   redirectAllowed, loopbackRedirectOk, redirectOk, stripLoopbackPort, cimdUrlOk,
   httpsHost, codeExpiresAt, isExpired, asMetadata,
   ClientConfig, defaultClientConfig, asMetadataFor, clientKind, authMethodOk, cimdAuthMethodsOk, advertisedAuthMethods,
@@ -80,6 +80,16 @@ test "auth response appends to an existing query" {
   authResponseUrl("http://127.0.0.1:5000/cb?x=1", "c", "s", "https://a.example")
     == "http://127.0.0.1:5000/cb?x=1&code=c&state=s&iss=https%3A%2F%2Fa.example"
 }
+test "auth response percent-encodes state" {
+  authResponseUrl("https://vertexaisearch.cloud.google.com/oauth-redirect", "c", "eyJh+b/c=&x#y", "https://a.example")
+    == "https://vertexaisearch.cloud.google.com/oauth-redirect?code=c&state=eyJh%2Bb%2Fc%3D%26x%23y&iss=https%3A%2F%2Fa.example"
+}
+test "state: gemini enterprise base64 with padding accepted" { stateCharsOk("${repeat("A", 766)}==") }
+test "state: every vschar accepted" { stateCharsOk(" !\"#$%&'()*+,-./09:;<=>?@AZ[\\]^_`az{|}~") }
+test "state: max length inclusive" { stateCharsOk(repeat("a", stateMaxLen())) && stateCharsOk(repeat("a", stateMaxLen() + 1)) == false }
+test "state: control characters refused" { stateCharsOk("a\nb") == false && stateCharsOk("a\tb") == false }
+test "state: non-ascii refused" { stateCharsOk("caf\u00e9") == false }
+test "state: empty accepted" { stateCharsOk("") }
 test "metadata advertises iss support" {
   contains(asMetadata("https://a.example"), "\"authorization_response_iss_parameter_supported\":true")
 }
