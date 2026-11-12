@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.3.6
+
+Every line describes itself, in every export. Each visit in a round carries its own comment, and the
+sheet's Summary shows it on that visit's line: a consent-reject visit reads "correctly absent", not the
+whole event's comment with every other visit in it. The event's full comment stays in the round and on
+the Spec tab. A variable the dictionary types as `number` is compared as a number (3.00 is 3); a value
+that is not a number is a gap of its own; text is still compared exactly. Observed values are not
+written beside every parameter, since a logged-in visit can push personal data; a value appears only
+where it differs from a fixed or allowed one. Rounds from earlier versions load as before.
+Tests: `qa_test.ail` (38), `view_test.ail` (10).
+
 ## 0.3.5
 
 A line says only what was checked. A `{{variable}}` whose dictionary entry lists allowed values is now

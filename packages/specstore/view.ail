@@ -36,28 +36,30 @@ export func countsText(c: Option[Check]) -> string = match c { Some(k) => params
 
 -- The first tab: one written line per event and visit, so what went right shows as a line of its own
 -- (a consent-reject visit that found nothing, say), then the totals and what they were built from.
--- A round written before 0.3.4 has no visits: its event gets one line.
+-- A round written before 0.3.4 has no visits: its event gets one line. Each line carries its own visit's
+-- comment; a round from before 0.3.6 has none per visit, so the event's comment sits on its first line.
 export func summaryRows(sp: Spec) -> [[(string, int)]] {
   let lines = flatMap(\e. {
       let c = latestCheckFor(e.id, sp.rounds);
       let result = match latestFor(e.id, sp.rounds) { Some(l) => l.state, None => "not tested" };
       let comment = match c { Some(k) => k.comment, None => "" };
-      let row = \visit. \ck. \counts. \first. [(e.id, 0), (e.eventName, 0), (e.priority, 0), (visit, 0), (ck, 0), (counts, 0),
+      let row = \visit. \ck. \counts. \first. \note. [(e.id, 0), (e.eventName, 0), (e.priority, 0), (visit, 0), (ck, 0), (counts, 0),
                                                (if first then result else "", if first then stateStyle(result) else 0),
-                                               (if first then comment else "", 0)];
+                                               (note, 0)];
       match c {
         Some(k) => match k.visits {
-          [] => [(k.check, row("", k.check, paramsText(k.matched, k.expected), true))],
-          vs => map(\p. match p { (n, v) => (v.check, row(v.visit, v.check, paramsText(v.matched, v.expected), n == 0)) },
+          [] => [(k.check, row("", k.check, paramsText(k.matched, k.expected), true, comment))],
+          vs => map(\p. match p { (n, v) => (v.check, row(v.visit, v.check, paramsText(v.matched, v.expected), n == 0,
+                                                       if v.comment != "" then v.comment else if n == 0 then comment else "")) },
                     zip(range(0, length(vs)), vs))
         },
-        None => [("", row("", "", "", true))]
+        None => [("", row("", "", "", true, ""))]
       }
     }, sp.events);
   let count = \k. length(filter(\l. match l { (ck, _) => ck == k }, lines));
   let tot = foldl(\acc. \e. match latestCheckFor(e.id, sp.rounds) {
       Some(k) => foldl(\a. \v. match a { (m, t) => if v.matched >= 0 && v.expected > 0 then (m + v.matched, t + v.expected) else (m, t) },
-                       acc, match k.visits { [] => [{ visit: "", check: k.check, matched: k.matched, expected: k.expected, params: [] }], vs => vs }),
+                       acc, match k.visits { [] => [{ visit: "", check: k.check, matched: k.matched, expected: k.expected, comment: "", params: [] }], vs => vs }),
       None => acc }, (0, 0), sp.events);
   let pct = match tot { (m, t) => if t > 0 then "${show(m)} of ${show(t)} (${show((100 * m) / t)}%)" else "" };
   let last = foldl(\acc. \r. if r.n > acc.n then { n: r.n, date: r.date, by: r.by } else acc, { n: 0, date: "", by: "" }, sp.rounds);

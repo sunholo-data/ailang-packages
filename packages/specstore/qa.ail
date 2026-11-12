@@ -16,7 +16,7 @@ import std/json (Json, JString, JNumber, JBool, JNull, JArray, encode, decode, g
 import std/fs (readFile, writeFile)
 import std/io (println)
 import std/list (map, filter, length, any, flatMap, foldl, concat)
-import std/string (split, join, trim, endsWith, substring, find, length as strLength)
+import std/string (split, join, trim, endsWith, startsWith, substring, find, stringToFloat, length as strLength)
 import ./rules (worstOutcome, visitOutcome)
 import ./model (Std, Event, Param, Spec, Round, ParamRes, VisitRes, str, arr, strs, obj, matches, dup, keyOf)
 
@@ -98,11 +98,22 @@ export func pathGet(j: Json, key: string) -> Option[Json] =
 
 -- One value against the spec's expected value: fixed; or, for a {{variable}}, non-empty and, where the
 -- dictionary lists allowed values, one of them.
-func valueProblem(std: Std, label: string, expected: string, allowed: [string], v: Json) -> [string] {
+-- Two values the same: as numbers when the dictionary says the variable is a number (3.00 is 3), else exactly.
+export func sameValue(typ: string, a: string, b: string) -> bool =
+  if typ == "number" then match stringToFloat(trim(a)) {
+      Some(x) => match stringToFloat(trim(b)) { Some(y) => x == y, None => false },
+      None => a == b
+    }
+  else a == b
+
+export func isNumber(t: string) -> bool = match stringToFloat(trim(t)) { Some(_) => true, None => false }
+
+func valueProblem(std: Std, label: string, expected: string, allowed: [string], typ: string, v: Json) -> [string] {
   let t = valueText(v);
   if matches(std.pVar, expected) then (
     if trim(t) == "" then ["${label} empty"]
-    else if length(allowed) > 0 && !any(\a. a == t, allowed) then ["${label} is \"${t}\", not one of the allowed values of ${expected}"]
+    else if typ == "number" && !isNumber(t) then ["${label} is \"${t}\", not a number"]
+    else if length(allowed) > 0 && !any(\a. sameValue(typ, a, t), allowed) then ["${label} is \"${t}\", not one of the allowed values of ${expected}"]
     else [])
   else if t == expected then []
   else ["${label} is \"${t}\", the spec says \"${expected}\""]
@@ -110,7 +121,7 @@ func valueProblem(std: Std, label: string, expected: string, allowed: [string], 
 
 -- A key with [] names every element of an array: ecommerce.items[].item_id is item_id in each
 -- item. An empty array fails, since the spec expects at least one; the first bad element is named.
-func arrayProblems(std: Std, key: string, expected: string, allowed: [string], push: Json, at: int) -> [string] {
+func arrayProblems(std: Std, key: string, expected: string, allowed: [string], typ: string, push: Json, at: int) -> [string] {
   let before = substring(key, 0, at);
   let rest = substring(key, at + 2, strLength(key));
   let inner = if strLength(rest) > 0 && substring(rest, 0, 1) == "." then substring(rest, 1, strLength(rest)) else rest;
@@ -121,7 +132,7 @@ func arrayProblems(std: Std, key: string, expected: string, allowed: [string], p
         let probs = foldl(\acc. \it. match acc {
             (i, []) => (i + 1, match (if inner == "" then Some(it) else pathGet(it, inner)) {
                 None => ["${before}[${show(i)}].${inner} missing"],
-                Some(v) => valueProblem(std, "${before}[${show(i)}].${inner}", expected, allowed, v)
+                Some(v) => valueProblem(std, "${before}[${show(i)}].${inner}", expected, allowed, typ, v)
               }),
             done => done
           }, (0, []), items);
@@ -135,10 +146,10 @@ func arrayProblems(std: Std, key: string, expected: string, allowed: [string], p
 -- One parameter against one push: its problems, none when it is as the spec says.
 func oneParam(std: Std, p: Param, push: Json) -> [string] {
   let at = find(p.key, "[]");
-  if at >= 0 then arrayProblems(std, p.key, p.value, p.allowed, push, at)
+  if at >= 0 then arrayProblems(std, p.key, p.value, p.allowed, p.typ, push, at)
   else match pathGet(push, p.key) {
     None => ["${p.key} missing"],
-    Some(v) => valueProblem(std, p.key, p.value, p.allowed, v)
+    Some(v) => valueProblem(std, p.key, p.value, p.allowed, p.typ, v)
   }
 }
 
@@ -257,24 +268,30 @@ export func paramResults(std: Std, e: Event, s: Seen) -> [ParamRes] =
     [] => map(\p. { key: p.key, status: "not pushed" }, e.params)
   }
 
-func noCounts(v: string, ck: string) -> VisitRes = { visit: v, check: ck, matched: -1, expected: -1, params: [] }
+func noCounts(v: string, ck: string, c: string) -> VisitRes = { visit: v, check: ck, matched: -1, expected: -1, comment: c, params: [] }
+
+-- A visit's own note, without the "V01: " the event's comment needs to tell its visits apart.
+export func ownNote(v: string, note: string) -> string =
+  if startsWith(note, "${v}: ") then substring(note, strLength(v) + 2, strLength(note)) else note
 
 -- The event on every visit that expects or forbids it, so a visit that went right shows as its own line.
 export func visitResults(std: Std, ga4: bool, vs: [Visit], seen: [Seen], e: Event) -> [VisitRes] {
   let expecting = map(\v. match filter(\s. s.id == v.id, seen) {
-      [] => noCounts(v.id, "did not run"),
-      [s, ..._] => if s.status != "ok" then noCounts(v.id, "could not check") else {
-        let sev = match inVisitWith(std, ga4, e, s) { (x, _) => x };
+      [] => noCounts(v.id, "did not run", "did not run"),
+      [s, ..._] => if s.status != "ok" then noCounts(v.id, "could not check", "could not check (${s.status}: ${s.reason})") else {
+        let res = inVisitWith(std, ga4, e, s);
+        let sev = match res { (x, _) => x };
+        let note = match res { (_, n) => ownNote(v.id, n) };
         let ps = paramResults(std, e, s);
         let ok = length(filter(\p. p.status == "as the spec says" || p.status == "present", ps));
         { visit: v.id, check: if sev == 0 then "matched" else "gaps found",
-          matched: if length(ps) == 0 then -1 else ok, expected: if length(ps) == 0 then -1 else length(ps), params: ps }
+          matched: if length(ps) == 0 then -1 else ok, expected: if length(ps) == 0 then -1 else length(ps), comment: note, params: ps }
       }
     }, filter(\v. any(\i. i == e.id, v.expects), vs));
   let forbidding = map(\v. match filter(\s. s.id == v.id, seen) {
-      [] => noCounts(v.id, "did not run"),
+      [] => noCounts(v.id, "did not run", "did not run"),
       [s, ..._] => match absentIn(e, s) {
-        (sev, _) => noCounts(v.id, if sev == 0 then "correctly absent" else if sev == 1 then "could not check" else "sent although forbidden")
+        (sev, n) => noCounts(v.id, if sev == 0 then "correctly absent" else if sev == 1 then "could not check" else "sent although forbidden", ownNote(v.id, n))
       }
     }, filter(\v. any(\i. i == e.id, v.forbids), vs));
   concat(expecting, forbidding)
@@ -296,6 +313,7 @@ func countLines(ind: string, m: int, t: int) -> [string] =
 
 func visitLines(v: VisitRes) -> [string] = flatMap(\xs. xs, [
     ["      - visit: ${v.visit}", "        check: ${encode(js(v.check))}"],
+    if v.comment == "" then [] else ["        comment: ${encode(js(v.comment))}"],
     countLines("        ", v.matched, v.expected),
     if length(v.params) == 0 then []
     else concat(["        params:"], map(\p. "          - {key: ${encode(js(p.key))}, status: ${encode(js(p.status))}}", v.params))

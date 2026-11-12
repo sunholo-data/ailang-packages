@@ -16,8 +16,8 @@ events:
   - {id: E02, eventName: page_view, priority: high, parameters: [{key: a, value: x}]}"),
   [toRound(y("{round: 1, version: \"1.1\", date: \"2026-11-12\", tester: t, by: automated, results: [
      {event: E01, state: not tested, check: matched, matched: 2, expected: 2, comment: ok,
-      visits: [{visit: V01, check: matched, matched: 2, expected: 2, params: [{key: a, status: as the spec says}, {key: b, status: as the spec says}]},
-               {visit: V03, check: correctly absent}]},
+      visits: [{visit: V01, check: matched, matched: 2, expected: 2, comment: \"all 2 match\", params: [{key: a, status: as the spec says}, {key: b, status: as the spec says}]},
+               {visit: V03, check: correctly absent, comment: \"correctly absent\"}]},
      {event: E02, state: fail, check: gaps found, matched: 0, expected: 1, comment: missing,
       visits: [{visit: V01, check: gaps found, matched: 0, expected: 1, params: [{key: a, status: missing}]}]}]}"))])
 
@@ -56,7 +56,11 @@ test "the event's result sits on its first row only, so a good visit does not re
 }
 
 test "the expected value in words: fixed as it is, a variable as what can be confirmed" {
-  expectedText({ key: "k", value: "list", variable: "", allowed: [] }) == "list" &&
-  expectedText({ key: "k", value: "{{userId}}", variable: "userId", allowed: [] }) == "any value (userId)" &&
-  expectedText({ key: "k", value: "{{lang}}", variable: "lang", allowed: ["fr", "nl"] }) == "one of: fr, nl"
+  expectedText({ key: "k", value: "list", variable: "", allowed: [], typ: "text" }) == "list" &&
+  expectedText({ key: "k", value: "{{userId}}", variable: "userId", allowed: [], typ: "text" }) == "any value (userId)" &&
+  expectedText({ key: "k", value: "{{lang}}", variable: "lang", allowed: ["fr", "nl"], typ: "text" }) == "one of: fr, nl"
+}
+
+test "each summary line carries its own visit's comment, not the whole event's" {
+  cell(summaryRows(sp()), 0, 7) == "all 2 match" && cell(summaryRows(sp()), 1, 7) == "correctly absent"
 }
