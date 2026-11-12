@@ -38,10 +38,18 @@ export pure func wasteHeatExcess(gamma: float, lambdaM: float, starTempK: float,
   gamma / (1.0 - gamma) * wasteHeatFactor(lambdaM, starTempK, wasteTempK)
 }
 
+-- The largest excess wasteHeatFractionFor accepts, in units of K(lambda).
+-- gamma = r / (1 + r) with r = E / K is below 1 over the reals, but in
+-- float64 it rounds to exactly 1 once r passes about 1e16. 1e12 keeps
+-- 1 - gamma resolved to four digits; beyond it the star is hidden to within
+-- one part in 1e12 and the question has no finite answer.
+export pure func maxExcessRatio() -> float = 1000000000000.0
+
 -- The smallest gamma whose excess at lambda reaches E: with r = E / K,
--- gamma = r / (1 + r).
+-- gamma = r / (1 + r). The domain is E <= maxExcessRatio() x K (1e12 K).
 export pure func wasteHeatFractionFor(excess: float, lambdaM: float, starTempK: float, wasteTempK: float) -> float
-  requires { excess >= 0.0, lambdaM > 0.0, lambdaM * starTempK >= 0.000021, lambdaM * wasteTempK >= 0.000021 }
+  requires { excess >= 0.0, lambdaM > 0.0, lambdaM * starTempK >= 0.000021, lambdaM * wasteTempK >= 0.000021,
+             excess <= 1000000000000.0 * wasteHeatFactor(lambdaM, starTempK, wasteTempK) }
   ensures { result >= 0.0, result < 1.0 }
 {
   let r = excess / wasteHeatFactor(lambdaM, starTempK, wasteTempK);
