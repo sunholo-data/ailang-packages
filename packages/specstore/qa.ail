@@ -96,17 +96,21 @@ export func valueText(j: Json) -> string =
 export func pathGet(j: Json, key: string) -> Option[Json] =
   if has(j, key) then get(j, key) else foldl(\acc. \seg. match acc { Some(x) => get(x, seg), None => None }, Some(j), split(key, "."))
 
--- One value against the spec's expected value: fixed, or any non-empty value for a {{variable}}.
-func valueProblem(std: Std, label: string, expected: string, v: Json) -> [string] {
+-- One value against the spec's expected value: fixed; or, for a {{variable}}, non-empty and, where the
+-- dictionary lists allowed values, one of them.
+func valueProblem(std: Std, label: string, expected: string, allowed: [string], v: Json) -> [string] {
   let t = valueText(v);
-  if matches(std.pVar, expected) then (if trim(t) == "" then ["${label} empty"] else [])
+  if matches(std.pVar, expected) then (
+    if trim(t) == "" then ["${label} empty"]
+    else if length(allowed) > 0 && !any(\a. a == t, allowed) then ["${label} is \"${t}\", not one of the allowed values of ${expected}"]
+    else [])
   else if t == expected then []
   else ["${label} is \"${t}\", the spec says \"${expected}\""]
 }
 
 -- A key with [] names every element of an array: ecommerce.items[].item_id is item_id in each
 -- item. An empty array fails, since the spec expects at least one; the first bad element is named.
-func arrayProblems(std: Std, key: string, expected: string, push: Json, at: int) -> [string] {
+func arrayProblems(std: Std, key: string, expected: string, allowed: [string], push: Json, at: int) -> [string] {
   let before = substring(key, 0, at);
   let rest = substring(key, at + 2, strLength(key));
   let inner = if strLength(rest) > 0 && substring(rest, 0, 1) == "." then substring(rest, 1, strLength(rest)) else rest;
@@ -117,7 +121,7 @@ func arrayProblems(std: Std, key: string, expected: string, push: Json, at: int)
         let probs = foldl(\acc. \it. match acc {
             (i, []) => (i + 1, match (if inner == "" then Some(it) else pathGet(it, inner)) {
                 None => ["${before}[${show(i)}].${inner} missing"],
-                Some(v) => valueProblem(std, "${before}[${show(i)}].${inner}", expected, v)
+                Some(v) => valueProblem(std, "${before}[${show(i)}].${inner}", expected, allowed, v)
               }),
             done => done
           }, (0, []), items);
@@ -131,10 +135,10 @@ func arrayProblems(std: Std, key: string, expected: string, push: Json, at: int)
 -- One parameter against one push: its problems, none when it is as the spec says.
 func oneParam(std: Std, p: Param, push: Json) -> [string] {
   let at = find(p.key, "[]");
-  if at >= 0 then arrayProblems(std, p.key, p.value, push, at)
+  if at >= 0 then arrayProblems(std, p.key, p.value, p.allowed, push, at)
   else match pathGet(push, p.key) {
     None => ["${p.key} missing"],
-    Some(v) => valueProblem(std, p.key, p.value, v)
+    Some(v) => valueProblem(std, p.key, p.value, p.allowed, v)
   }
 }
 
@@ -236,14 +240,20 @@ export func statusOf(problems: [string]) -> string = match problems {
     [] => "as the spec says",
     _ => if any(\m. find(m, " missing") >= 0 || find(m, " is empty") >= 0, problems) then "missing"
          else if any(\m. endsWith(m, " empty"), problems) then "empty"
+         else if any(\m. find(m, "not one of the allowed values") >= 0, problems) then "not an allowed value"
          else "differs"
   }
+
+-- What a parameter without problems confirms: the value itself (a fixed one, or one of a variable's
+-- allowed values), or only that it is set (a variable the dictionary gives no allowed values for).
+export func paramStatus(p: Param, problems: [string]) -> string =
+  match problems { [] => if p.variable != "" && length(p.allowed) == 0 then "present" else "as the spec says", _ => statusOf(problems) }
 
 -- Every parameter of an event on one visit that ran: from its first dataLayer push, or "not pushed".
 export func paramResults(std: Std, e: Event, s: Seen) -> [ParamRes] =
   if e.dlEvent == "none" then []
   else match filter(\x. str(x, "event") == e.dlEvent, s.pushes) {
-    [x, ..._] => map(\p. { key: p.key, status: statusOf(oneParam(std, p, x)) }, e.params),
+    [x, ..._] => map(\p. { key: p.key, status: paramStatus(p, oneParam(std, p, x)) }, e.params),
     [] => map(\p. { key: p.key, status: "not pushed" }, e.params)
   }
 
@@ -256,7 +266,7 @@ export func visitResults(std: Std, ga4: bool, vs: [Visit], seen: [Seen], e: Even
       [s, ..._] => if s.status != "ok" then noCounts(v.id, "could not check") else {
         let sev = match inVisitWith(std, ga4, e, s) { (x, _) => x };
         let ps = paramResults(std, e, s);
-        let ok = length(filter(\p. p.status == "as the spec says", ps));
+        let ok = length(filter(\p. p.status == "as the spec says" || p.status == "present", ps));
         { visit: v.id, check: if sev == 0 then "matched" else "gaps found",
           matched: if length(ps) == 0 then -1 else ok, expected: if length(ps) == 0 then -1 else length(ps), params: ps }
       }
@@ -330,7 +340,7 @@ export func runCompare(std: Std, sp: Spec, obsPath: string, out: string) -> () !
       let matchedCount = length(filter(\r. match r { (_, _, ck, _, _, _) => ck == "matched" }, rows));
       if observedFor != sp.version then println("  ~ the run was planned from v${observedFor}; the spec is now v${sp.version}") else ();
       foldl(\u. \r. match r { (i, st, _, _, _, c) => println("  ${if st == "fail" then "✗" else if st == "blocked" then "!" else "·"} ${i}  ${st}  ${c}") }, (), rows);
-      let paramLine = match totals { (m, t) => if t > 0 then "; ${show(m)} of ${show(t)} parameters as the spec says" else "" };
+      let paramLine = match totals { (m, t) => if t > 0 then "; ${show(m)} of ${show(t)} parameters without a gap" else "" };
       println("✓ wrote ${out}: QA round ${show(n)} of v${sp.version}, ${show(count("fail"))} failed, ${show(count("blocked"))} could not be checked, ${show(length(rows) - count("fail") - count("blocked"))} not failed (a person sets the pass), ${show(matchedCount)} matched${paramLine}")
     }
   }

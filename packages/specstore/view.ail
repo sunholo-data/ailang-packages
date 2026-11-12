@@ -3,7 +3,7 @@ module sunholo/specstore/view
 -- Every result is a written value; colour sits beside a state, never instead of it.
 
 import std/option (Option, Some, None)
-import std/list (map, filter, length, foldl, concat, sortBy, dedup, flatMap, zip, range)
+import std/list (map, filter, length, foldl, concat, sortBy, dedup, flatMap, zip, range, take)
 import std/string (join)
 import ./rules (needsRetest)
 import ./model (Field, Rule, Std, Dev, Param, Event, Dict, Hist, Res, Round, VisitRes, ParamRes, Spec, str, arr, strs, obj, loadYaml, toStd, toSpec, toRound, loadSpec, matches, varsIn, parseVersion, keyOf, present, fieldsOf, missingIn, dup)
@@ -67,12 +67,21 @@ export func summaryRows(sp: Spec) -> [[(string, int)]] {
       (pct, 0), ("", 0), ("spec v${sp.version} · round ${show(last.n)} · ${last.date} · ${last.by}", 0)]])
 }
 
--- One written line per parameter on the visit that checked it: the 208 that arrive as the spec says as
--- well as the ones to decide, so a reader can see the check working, not only failing.
+-- What the spec expects, in words: a fixed value as it is; a variable as "one of: …" when the dictionary
+-- lists its allowed values, else "any value (name)", which is all a run can confirm for it.
+export func expectedText(p: Param) -> string =
+  if p.variable == "" then p.value
+  else match p.allowed {
+    [] => "any value (${p.variable})",
+    xs => "one of: ${join(", ", take(6, xs))}${if length(xs) > 6 then ", …" else ""}"
+  }
+
+-- One written line per parameter on the visit that checked it, the ones that are right as well as the
+-- ones to decide, so a reader can see the check working, not only failing.
 export func parameterRows(sp: Spec) -> [[(string, int)]] =
   flatMap(\e. match latestCheckFor(e.id, sp.rounds) {
       Some(k) => flatMap(\v. map(\p. [(e.id, 0), (e.eventName, 0), (v.visit, 0), (p.key, 0),
-                                        (match filter(\q. q.key == p.key, e.params) { [q, ..._] => q.value, [] => "" }, 0),
+                                        (match filter(\q. q.key == p.key, e.params) { [q, ..._] => expectedText(q), [] => "" }, 0),
                                         (p.status, 0)], v.params), k.visits),
       None => []
     }, sp.events)

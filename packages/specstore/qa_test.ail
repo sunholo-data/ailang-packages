@@ -180,7 +180,7 @@ test "a visit that forbids the event and finds nothing is a line of its own: cor
 test "every parameter gets a written status, the good ones included" {
   let sp = spec(both());
   match visitResults(std(), true, visitsOf(sp), seenOf(seen2("{item: {event: cta_click, cta: {label: Apply}}}")), firstEvent(sp)) {
-    [a, _] => a.check == "gaps found" && map(\p. p.status, a.params) == ["as the spec says", "missing"],
+    [a, _] => a.check == "gaps found" && map(\p. p.status, a.params) == ["present", "missing"],
     _ => false
   }
 }
@@ -188,4 +188,30 @@ test "every parameter gets a written status, the good ones included" {
 test "written statuses: as the spec says, missing, empty, differs" {
   statusOf([]) == "as the spec says" && statusOf(["a missing"]) == "missing" && statusOf(["a empty"]) == "empty" &&
   statusOf(["a is \"x\", the spec says \"y\""]) == "differs"
+}
+
+func dictSpec(allowed: string) -> Spec = toSpec(y("spec: {client: C, project: P, owner: Ana, version: \"1.0\", standard: \"0.1\"}
+site: {base_url: \"https://example.com\", consent: {accept: \"#ok\"}}
+events:
+  - {id: E01, eventName: cta_click, priority: high, parameters: [{key: cta.label, value: \"{{ctaLabel}}\"}, {key: cta.type, value: primary}]}
+dictionary:
+  - {name: ctaLabel, definition: d, type: text, example: Apply, source: s, allowed: [${allowed}]}
+visits:
+  - {id: V01, url: /, consent: accept, expects: [E01]}"), [])
+
+func statuses(sp: Spec, label: string) -> [string] =
+  match visitResults(std(), true, visitsOf(sp), seenOf(seen("ok", "{item: {event: cta_click, cta: {label: ${label}, type: primary}}}", "{en: cta_click}")), firstEvent(sp)) {
+    [a, ..._] => map(\p. p.status, a.params),
+    [] => []
+  }
+
+test "an allowed value is as the spec says; a fixed value too" { statuses(dictSpec("Apply, Buy"), "Apply") == ["as the spec says", "as the spec says"] }
+
+test "a value outside the allowed list is a gap" { statuses(dictSpec("Apply, Buy"), "Other") == ["not an allowed value", "as the spec says"] }
+
+test "a variable without allowed values can only be confirmed present" { statuses(dictSpec(""), "Anything") == ["present", "as the spec says"] }
+
+test "an outside value fails the visit, a present one does not" {
+  let sp = dictSpec("Apply, Buy");
+  match outcomeFor(std(), visitsOf(sp), seenOf(seen("ok", "{item: {event: cta_click, cta: {label: Other, type: primary}}}", "{en: cta_click}")), firstEvent(sp)) { (sev, _) => sev == 2 }
 }
