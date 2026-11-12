@@ -168,7 +168,7 @@ runtime assertions, not proofs. Celestial has no further dependencies.
   `Result[_, SelectionError]`; an `Err` names why nothing was computed
   (`BadUniforms | BadBaseline | UnsupportedPrior | BadParams | NotADial |
   BadSetting | BadGrid | BadWidths | BadThreshold | ZeroProduct |
-  ZeroProbability | NotConverged`). Never use a number you did not get from an
+  ZeroProbability | NotConverged | EndedOutsideWindow`). Never use a number you did not get from an
   `Ok`.
   - **What a draw is.** `drawParams(baseline, [uLife, uMinds, uTech,
     uLifetime])` returns the `Params` whose four dialled values are the prior
@@ -198,6 +198,25 @@ runtime assertions, not proofs. Celestial has no further dependencies.
     `disc.aliveWithin` times the share), `ended = hzWorlds·fLife·fMinds·fTech·
     endedYr/W` and `late = found·min(1, gapYr/L)`. `accepts` is true when each
     is inside its band.
+  - **`endedYr` is held to the window.** `ended` counts lineages that ended
+    within the last `endedYr` years, that is onsets between L + endedYr and L
+    years ago. Onsets begin W/2 ago, so only W/2 − L of that time exists.
+    `statisticsOf` and `accepts` return `Err(EndedOutsideWindow)` when
+    `endedYr > W/2 − L`, and `acceptanceProbability` when `endedYr > W/2 −`
+    the longest lifetime the prior can draw (2.4e9 yr at the baseline). It is
+    refused, not clipped: without the bound the formula has no ceiling (1e12
+    years gave 1,000 ended worlds where 5 can exist). Inside the bound
+    `ended` is at most half of hzWorlds·fLife·fMinds·fTech. To fold an ending
+    share in (0.75 of lineages collapse), multiply the time by it before
+    passing it, as `epoch_statistics.traceCappedMean` times the share.
+  - **Reach shares must lie in (0, 1].** The share is interpolated in its
+    logarithm, so a share of exactly 0 ("no reach at all below some lifetime")
+    cannot be written and is `Err(BadSetting)`. Write it as a small positive
+    share instead (1e-9 makes `found` a billionth of the living count, far
+    below any band), and put two knots close together where the reach turns
+    on: the share is then a steep ramp between them, an approximation of a
+    step whose width you chose and can state. If no civilisation is ever in
+    reach the test has nothing to say; do not call it.
   - **What the test does and does not guarantee.** It reads the four
     parameters only, never a seed. The three numbers are expected counts over
     all the places things could fall. Passing guarantees that those
@@ -210,9 +229,16 @@ runtime assertions, not proofs. Celestial has no further dependencies.
     the probability, over the baseline's priors, that a draw is accepted.
     `grid` (1 to 16) is the number of Gauss-Legendre panels per smooth piece;
     1 is enough. The result is `{p, error}`: `p` at twice the grid, and `error`
-    the change from `grid` to twice `grid`. `error` is a measured change, not a
-    bound, and it says nothing about how well the priors are known. A change
-    above 1e-6 of `p` is `Err(NotConverged)`. It needs the published prior
+    the absolute change in `p` from `grid` to twice `grid`. **`error` is the
+    change on doubling, not a bound**, and it says nothing about how well the
+    priors are known. `error: 0.0` means "doubling the grid changed no bit of
+    the double", not "exact": the panel ends already sit on every kink, so the
+    rule is at rounding level at grid 1. The measured accuracy is the
+    comparison with the independent oracle: at 12 regions the largest
+    difference is 9.6e-12 of the value (the oracle itself is good to about
+    2e-11), and a reviewer's separate routes agreed to 1e-11. Quote p to no
+    more than ten significant figures. A change above 1e-6 of `p` is
+    `Err(NotConverged)`. It needs the published prior
     shapes (the rate model for life; log-uniform minds, tech and lifetime;
     lifetime never above half the window) and returns `Err(UnsupportedPrior)`
     for any other baseline. A region no universe can reach is `Ok({p: 0,
@@ -287,13 +313,13 @@ that involve transcendental functions are runtime assertions, not claimed
 SMT proofs. Packages remain unpublished until the attended release handoff.
 
 Validation of 0.3.0 on AILANG v0.56.1 (`05c860a`), 2026-11-12: check 24 files;
-native 125 passed, 0 failed, 0 skipped; strict-VM suite 125 passed with 122
+native 129 passed, 0 failed, 0 skipped; strict-VM suite 129 passed with 126
 named-test bodies on the VM and none falling back. `acceptanceProbability`
 agrees with the independent reference table at 12 regions to 1e-11 (tolerance
 1e-8) and with a 1e7-draw Monte Carlo within 1.4 standard errors, on both; four
 probes and the smoke program byte-identical on VM and interpreter; a
-311,423-byte probe of every 0.2.0 export byte-identical to 0.2.0; 28 deliberate
-faults all killed. `ailang pkg quality .`: no gates (contracts 1/19 verified, 0
+311,423-byte probe of every 0.2.0 export byte-identical to 0.2.0 and 0.2.1; 31
+deliberate faults all killed. `ailang pkg quality .`: no gates (contracts 1/19 verified, 0
 refuted). `tools/selection_validation.md` has the detail. Not published.
 
 Validation of 0.2.0 on AILANG v0.56.1 (`05c860a`), 2026-11-12: check 19 files;
@@ -345,6 +371,16 @@ interpreter workaround is present in package logic.
   times fLife·fMinds·fTech. It is a mean-field statement, not a Poisson
   process and not a generator; `historyOf` still draws at most one lineage.
   More lineages than fit end to end are `Err(LineagesOverlap)`.
+  **Lifetimes above half the window are treated differently here and in
+  `selection`, on purpose.** `endedShares` (like `historyProbabilities`) is an
+  exact marginal of `history`'s finite window and clips at its edge, so it
+  answers for any lifetime: with L ≥ W/2 nothing has ended yet and all three
+  bins are 0, which is true of that model. `lineageShares` has no window edge
+  at all (its lineages repeat) and accepts any L up to the spacing.
+  `selection.statisticsOf` instead refuses L > W/2 (`BadParams`), because its
+  `found` is `disc.aliveWithin`'s unclipped L/W and would overstate the living
+  count there. So a universe with L > W/2 can be given ended bins but cannot
+  be scored by the acceptance test.
 
 Validation caveat on AILANG v0.56.0 (reported as
 `inbox_1793648615351_707bec99`): `--verify-contracts` rejects invalid `requires`

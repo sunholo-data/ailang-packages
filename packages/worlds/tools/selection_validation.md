@@ -68,12 +68,17 @@ The oracle now integrates every cell from two different starting grids and
 states their difference; the package was not changed. The oracle's other
 first-run values moved by at most 4.5e-10.
 
-**The draw, the test and the probability are one model.** Seeded uniforms
-(Park-Miller, seed 20261112) go through `drawParams` and `accepts`; the
+**A gross-error check on the draw and the test.** Seeded uniforms (four
+Park-Miller streams, one per factor) go through `drawParams` and `accepts`; the
 frequency is within 4 binomial standard errors of `acceptanceProbability` for
 the three-band region (20,000 draws) and for a lower bound, an upper bound and
-a late band (8,000 each). 8,000 draws give the share that `dialOf` refuses
-within 4 standard errors of Φ((−100 + log10 0.632)/50) = 2.25 %.
+a late band (8,000 each). This is not the validation of p. Four standard
+errors at 20,000 draws is about ±20 % of p for the 0.0196 region: the check
+catches a swapped slot, a missing log or a wrong factor between
+`statisticsOf` (linear) and `acceptanceProbability` (logarithmic), and nothing
+finer. The validation is the oracle's table above. 8,000 draws give the share
+that `dialOf` refuses within 4 standard errors of
+Φ((−100 + log10 0.632)/50) = 2.25 %.
 
 **Where the grid matters.** With the fixed panel ends through the bend of
 log10 fLife removed (an experiment on a scratch copy, not a shipped state),
@@ -172,32 +177,38 @@ fail.
 | 2 | life prior width 50 -> 49 dex | killed | selection 1, selection_reference 14 |
 | 3 | draw: minds and tech read each other's uniform | killed | selection 5 |
 | 4 | draw: complex-life clamp at 1 dropped | killed | selection 4 |
-| 5 | dialOf: round-trip check dropped | killed | selection 1 |
-| 6 | luck over the mean uses the median lifetime | killed | selection 1 |
-| 7 | Gauss-Legendre: one weight 0.1 % high | killed | selection 6, selection_reference 14 |
-| 8 | Normal density constant 0.1 % high | killed | selection 1, selection_reference 14 |
-| 9 | mass at fLife = 1 dropped | killed | selection 7, selection_reference 14 |
-| 10 | mass below the lowest kink dropped | killed | selection 2, selection_reference 2 |
-| 11 | sum of uniforms: a subset sign not flipped | killed | selection 7, selection_reference 8 |
-| 12 | survival taken as 1 - cdf in the upper tail | killed | selection 1, selection_reference 1 |
-| 13 | band: lower edge exclusive | killed | selection 1 |
-| 14 | band: upper edge exclusive | killed | selection 1 |
-| 15 | statistics: late share not capped at 1 | killed | selection 2 |
-| 16 | probability: late line not capped at the gap | killed | selection 1, selection_reference 2 |
-| 17 | probability: band edge enters without its log | killed | selection 5, selection_reference 10 |
-| 18 | probability: found line loses the lifetime | killed | selection 5, selection_reference 10 |
-| 19 | probability: hzWorlds/window inverted | killed | selection 5, selection_reference 10 |
-| 20 | probability: reach knots not used as panel ends | killed | selection 3, selection_reference 3 |
-| 21 | probability: line crossings not used as panel ends | killed | selection 6, selection_reference 11 |
-| 22 | convergence rule 1e-6 -> 1e-3 | killed | selection 1 |
-| 23 | expectedDraws of an empty region returns a number | killed | selection 1 |
-| 24 | ended bins: ecocide given the transcendence share | killed | epoch_closed_forms 3 |
-| 25 | ended bins: window edge ignored | killed | epoch_closed_forms 3 |
-| 26 | late share: cap at 1 dropped | killed | epoch_closed_forms 2 |
-| 27 | lineages: traces capped at the spacing, not the quiet gap | killed | epoch_closed_forms 1 |
-| 28 | lineages: overlap not refused | killed | epoch_closed_forms 1 |
+| 5 | dialOf: round-trip check dropped | killed | selection 2 |
+| 6 | dialOf: round-trip tolerance 1e-12 -> 1e-3 | killed | selection 1 |
+| 7 | statistics: ended-sign time not held to the window | killed | selection 2 |
+| 8 | probability: ended-sign time not held to the window | killed | selection 1 |
+| 9 | luck over the mean uses the median lifetime | killed | selection 1 |
+| 10 | Gauss-Legendre: one weight 0.1 % high | killed | selection 6, selection_reference 14 |
+| 11 | Normal density constant 0.1 % high | killed | selection 1, selection_reference 14 |
+| 12 | mass at fLife = 1 dropped | killed | selection 7, selection_reference 14 |
+| 13 | mass below the lowest kink dropped | killed | selection 2, selection_reference 2 |
+| 14 | sum of uniforms: a subset sign not flipped | killed | selection 8, selection_reference 8 |
+| 15 | survival taken as 1 - cdf in the upper tail | killed | selection 1, selection_reference 1 |
+| 16 | band: lower edge exclusive | killed | selection 1 |
+| 17 | band: upper edge exclusive | killed | selection 1 |
+| 18 | statistics: late share not capped at 1 | killed | selection 2 |
+| 19 | probability: late line not capped at the gap | killed | selection 1, selection_reference 2 |
+| 20 | probability: band edge enters without its log | killed | selection 5, selection_reference 10 |
+| 21 | probability: found line loses the lifetime | killed | selection 5, selection_reference 10 |
+| 22 | probability: hzWorlds/window inverted | killed | selection 5, selection_reference 10 |
+| 23 | probability: reach knots not used as panel ends | killed | selection 3, selection_reference 3 |
+| 24 | probability: line crossings not used as panel ends | killed | selection 6, selection_reference 11 |
+| 25 | convergence rule 1e-6 -> 1e-3 | killed | selection 1 |
+| 26 | expectedDraws of an empty region returns a number | killed | selection 1 |
+| 27 | ended bins: ecocide given the transcendence share | killed | epoch_closed_forms 3 |
+| 28 | ended bins: window edge ignored | killed | epoch_closed_forms 3 |
+| 29 | late share: cap at 1 dropped | killed | epoch_closed_forms 2 |
+| 30 | lineages: traces capped at the spacing, not the quiet gap | killed | epoch_closed_forms 1 |
+| 31 | lineages: overlap not refused | killed | epoch_closed_forms 1 |
 
-28 faults, 28 killed, none survived; the control passes. Run time 3 min 37 s.
+31 faults, 31 killed, none survived; the control passes. Run time 3 min 41 s.
+Three were added after review: the round-trip tolerance loosened to 1e-3 (it
+survived the first 125 tests), and the ended-sign bound removed from
+`statisticsOf` and from `acceptanceProbability`.
 
 ## 5. Existing outputs
 
@@ -207,10 +218,12 @@ dials, the disc counts at 12 radii, 3,000 histories from `historyOf` with
 their states at three epochs and their `epochs`, both propagators and the
 kernel at 24 (state, interval) pairs, `historyProbabilities` at 40 dials, the
 occurrence and planet-model functions. It was run in the untouched 0.2.0 tree
-(`origin/main` at `88f8079`, before any edit) and in this tree:
+(`origin/main` at `88f8079`, before any edit, celestial 0.6.0), in a checkout
+of 0.2.1 (`6b0f2d1`, celestial 0.7.0) and in this tree:
 
 ```text
-311423 bytes, sha256 554f3108f369bee9…, identical: 0.2.0 on the VM, 0.3.0 on the VM, 0.3.0 on the interpreter
+311423 bytes, sha256 554f3108f369bee9c031e2748bdbace0d7a699e3cab091f788fd12cd46a23c91
+identical: 0.2.0 on the VM, 0.2.1 on the VM, 0.3.0 on the VM, 0.3.0 on the interpreter
 ```
 
 `_smoke.ail` prints its first 11 lines unchanged, then three new lines and a
@@ -223,13 +236,13 @@ new files.
 $ ailang check --package .
 ✓ 24 files checked, all passed!
 $ ailang test --package .
-125 tests: 125 passed, 0 failed, 0 skipped (5m36s)
+129 tests: 129 passed, 0 failed, 0 skipped (6m12s)
 $ ailang test --strict-bytecode --package .
-→ bytecode: 122 named-test bodies ran on the VM, 0 fell back to the evaluator; inline tests and properties run on the evaluator
-125 tests: 125 passed, 0 failed, 0 skipped (19.2s)
+→ bytecode: 126 named-test bodies ran on the VM, 0 fell back to the evaluator; inline tests and properties run on the evaluator
+129 tests: 129 passed, 0 failed, 0 skipped (19.2s)
 ```
 
-0.2.0 had 65 tests; the 60 new ones are `selection_test` (33),
+0.2.0 and 0.2.1 had 65 tests; the 64 new ones are `selection_test` (37),
 `selection_reference_test` (16), `epoch_closed_forms_test` (10) and the probe's
 one. Four probes and the smoke program are byte-identical between `ailang run`
 and `ailang run --strict-bytecode` (compared with `cmp`): `referenceProbe`
@@ -238,7 +251,7 @@ and `ailang run --strict-bytecode` (compared with `cmp`): `referenceProbe`
 
 Cost: the 12 reference regions take 1.2 s on the VM (about 0.1 s a call at
 grid 1) and about 9 s a call on the interpreter, which is why the interpreter
-suite takes five and a half minutes.
+suite takes about six minutes.
 
 Two toolchain problems were met and reported, neither worked around in package
 logic: the effect checker's "internal invariant: missing callback row" for a

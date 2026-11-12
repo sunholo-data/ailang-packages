@@ -35,7 +35,14 @@ New module `selection`:
 - `sumUniformCdf`, `sumUniformSurvival`: a sum of one, two or three uniforms of
   given widths, with full relative accuracy in both tails.
 - Every function returns a `Result`; nothing returns a default in place of an
-  answer. `SelectionError` names the twelve reasons.
+  answer. `SelectionError` names the thirteen reasons.
+- The ended-sign time is held to the window: `endedYr` above W/2 − L
+  (`statisticsOf`, `accepts`) or above W/2 − the longest prior lifetime
+  (`acceptanceProbability`) is `Err(EndedOutsideWindow)`. Without the bound the
+  count had no ceiling (found in review: 1e12 years gave 1,000 ended worlds
+  where 5 can exist).
+- Reach shares must lie in (0, 1]; AGENT.md says how to write "no reach below
+  some lifetime".
 
 Values computed here, with the change on doubling the grid (all run, none
 tuned):
@@ -74,7 +81,7 @@ Evidence: `selection_reference_test.ail` holds `acceptanceProbability` and
 clipped areas inside adaptive Gauss-Kronrod, and a 1e7-draw Monte Carlo of the
 priors) at 12 regions with p from 0.98 down to 2.2e-6, to 1e-8 of the value
 and within 3 Monte Carlo standard errors; the largest measured gap is 1e-11.
-`tools/selection_mutants.sh` applies 28 deliberate faults; every one fails a
+`tools/selection_mutants.sh` applies 31 deliberate faults; every one fails a
 test. `tools/selection_validation.md` has the tables and commands.
 
 ## 0.2.1 — 2026-11-12
