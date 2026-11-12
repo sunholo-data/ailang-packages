@@ -55,8 +55,12 @@ func webhookFindInMap(entries: [string], priceId: string) -> string =
 export func handleStripeWebhook(
   request: {body: string, headers: Json, method: string, path: string}
 ) -> Result[string, string] ! {Net, FS, Env}
-  requires { strLength(request.body) > 0 }
 =
+  -- Total function: an empty body is handled gracefully — it fails
+  -- signature verification below and returns Err. No requires clause:
+  -- the @raw request record contains a Json-typed headers field for
+  -- which the property-test runner has no generator, so a requires
+  -- here would derive a property that can never run.
   let rawBody = request.body
   in let signatureHeader = getOrElse(getString(request.headers, "Stripe-Signature"), "")
   in if signatureHeader == "" then Err("Missing Stripe-Signature header")
