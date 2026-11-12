@@ -1,0 +1,322 @@
+module sunholo/worlds/selection_test
+import ./selection (SelectionError,BadUniforms,BadBaseline,UnsupportedPrior,BadParams,NotADial,BadSetting,BadGrid,BadWidths,BadThreshold,ZeroProduct,ZeroProbability,NotConverged,Band,Between,AtLeast,AtMost,AnyCount,Setting,Statistics,Probability,PriorMeans,drawParams,dialOf,productOf,priorMeans,luckOverMedianDex,luckOverMeanDex,luckProbability,productTail,sumUniformCdf,sumUniformSurvival,statisticsOf,accepts,acceptanceProbability,expectedDraws)
+import ./baseline (Factor,Prior,LogUniform,Fixed,AbiogenesisRate,baseline,quantileOf,medianOf,abiogenesisSigmaDex)
+import ./dial (Dial,Params,applyDial,zeroDial,luckDex)
+import ./disc (starsWithin)
+import std/result (Result,Ok,Err)
+import std/math (abs_Float,intToFloat,log10,sqrt)
+import std/list (map,foldl,range,filter,length,nth_or)
+
+pure func near(a:float,b:float,tol:float) -> bool = abs_Float(a-b)<=tol
+pure func rel(a:float,b:float,tol:float) -> bool = abs_Float(a-b)<=tol*abs_Float(b)
+pure func all[a](f:a -> bool,xs:[a]) -> bool = foldl(\acc x. acc && f(x),true,xs)
+pure func nowhere() -> Params = {fLife:-1.0,fComplex:-1.0,fMinds:-1.0,fTech:-1.0,lifetimeYr:-1.0,windowYr:-1.0,remnantLoYr:-1.0,remnantHiYr:-1.0}
+pure func drawn(u:[float]) -> Params = match drawParams(baseline(),u) {Ok(p) => p, Err(e) => nowhere()}
+pure func numberOf(r:Result[float,SelectionError]) -> float = match r {Ok(v) => v, Err(e) => -999.0}
+pure func pOf(r:Result[Probability,SelectionError]) -> float = match r {Ok(v) => v.p, Err(e) => -999.0}
+pure func errOf(r:Result[Probability,SelectionError]) -> float = match r {Ok(v) => v.error, Err(e) => 999.0}
+
+-- ---- UL2a1: the draw ---------------------------------------------------------
+-- Nine fixed uniforms; each factor reads its own slot (life, minds, tech,
+-- lifetime), so the vectors below rotate the nine values across the slots.
+pure func nine() -> [float] = [0.0,0.001,0.1,0.25,0.5,0.75,0.9,0.999,1.0]
+pure func at(i:int) -> float = nth_or(nine(),i%9,-1.0)
+pure func vector(i:int) -> [float] = [at(i),at(i+2),at(i+4),at(i+7)]
+pure func drawIsQuantiles(i:int) -> bool {
+ let p=drawn(vector(i));
+ p.fLife==quantileOf(AbiogenesisRate,at(i)) && p.fMinds==quantileOf(LogUniform(0.001,1.0),at(i+2))
+ && p.fTech==quantileOf(LogUniform(0.01,1.0),at(i+4)) && p.lifetimeYr==quantileOf(LogUniform(100.0,1e8),at(i+7))
+ && p.windowYr==5e9 && p.remnantLoYr==1e3 && p.remnantHiYr==1e7
+ && p.fComplex>=p.fMinds && p.fComplex<=1.0
+}
+test "a draw is the four prior quantiles at its uniforms, exactly, at nine fixed uniforms in every slot" {
+ length(nine())==9 && all(drawIsQuantiles,range(0,9))
+}
+test "the draw at four halves is the zero dial's universe, field for field" {
+ let p=drawn([0.5,0.5,0.5,0.5]);
+ let z=applyDial(baseline(),zeroDial());
+ p.fLife==z.fLife && p.fMinds==z.fMinds && p.fComplex==z.fComplex && p.fTech==z.fTech
+ && p.lifetimeYr==z.lifetimeYr && p.windowYr==z.windowYr && p.remnantLoYr==z.remnantLoYr && p.remnantHiYr==z.remnantHiYr
+}
+test "complex life follows minds and saturates at 1, as the dial's does" {
+ drawn([0.5,1.0,0.5,0.5]).fComplex==1.0 && drawn([0.5,1.0,0.5,0.5]).fMinds==1.0
+ && rel(drawn([0.5,0.0,0.5,0.5]).fComplex,0.01,1e-12)
+ && rel(drawn([0.5,0.9,0.5,0.5]).fComplex,1.0,1e-12) && rel(drawn([0.5,0.6,0.5,0.5]).fComplex,0.6309573444801932,1e-12)
+}
+test "a draw that was not made is an error, never a default universe" {
+ drawParams(baseline(),[0.5,0.5,0.5])==Err(BadUniforms)
+ && drawParams(baseline(),[0.5,0.5,0.5,0.5,0.5])==Err(BadUniforms)
+ && drawParams(baseline(),[0.5,0.5,1.5,0.5])==Err(BadUniforms)
+ && drawParams(baseline(),[-0.1,0.5,0.5,0.5])==Err(BadUniforms)
+ && drawParams(baseline(),[0.5,0.5,0.5,0.0/0.0])==Err(BadUniforms)
+ && drawParams([],[0.5,0.5,0.5,0.5])==Err(BadBaseline)
+ && drawParams(filter(\f. f.key!="window",baseline()),[0.5,0.5,0.5,0.5])==Err(BadBaseline)
+}
+test "the life prior's width is the baseline's: quantile at Phi(-0.1) is 10^(-sigma/10)" {
+ abiogenesisSigmaDex()==50.0
+ && near(log10(quantileOf(AbiogenesisRate,0.460172162722971)),0.0-abiogenesisSigmaDex()/10.0,1e-6)
+}
+
+-- ---- UL2a1: a drawn parameter set as a dial ----------------------------------
+pure func closeP(a:Params,b:Params) -> bool =
+ rel(a.fLife,b.fLife,1e-12) && rel(a.fMinds,b.fMinds,1e-12) && rel(a.fComplex,b.fComplex,1e-12) && rel(a.fTech,b.fTech,1e-12)
+ && rel(a.lifetimeYr,b.lifetimeYr,1e-12) && a.windowYr==b.windowYr && a.remnantLoYr==b.remnantLoYr && a.remnantHiYr==b.remnantHiYr
+pure func roundTrips(u:[float]) -> bool {
+ let p=drawn(u);
+ match dialOf(baseline(),p) {Ok(d) => closeP(applyDial(baseline(),d),p), Err(e) => false}
+}
+-- Life uniforms from 0.03 up: below about 0.0228 the drawn fLife is under
+-- 1e-100 of its median and outside applyDial's [-100,100] dex domain.
+test "applyDial(dialOf(theta)) returns theta to 1e-12 at 180 draws, saturated fractions included" {
+ all(\i. roundTrips([0.03+0.97*intToFloat(i%10)/9.0,intToFloat(i%6)/5.0,intToFloat(i%3)/2.0,intToFloat(i%7)/6.0]),range(0,180))
+}
+test "dialOf inverts applyDial where nothing saturates, and returns the smallest dial where something does" {
+ let d={life:-1.5,minds:0.75,tech:0.25,lifetime:-2.0};
+ let back=match dialOf(baseline(),applyDial(baseline(),d)) {Ok(x) => x, Err(e) => zeroDial()};
+ let sat=match dialOf(baseline(),applyDial(baseline(),{life:2.0,minds:3.0,tech:3.0,lifetime:2.5})) {Ok(x) => x, Err(e) => zeroDial()};
+ near(back.life,-1.5,1e-12) && near(back.minds,0.75,1e-12) && near(back.tech,0.25,1e-12) && near(back.lifetime,-2.0,1e-12)
+ && near(sat.life,0.0-log10(medianOf(AbiogenesisRate)),1e-12) && near(sat.minds,1.5,1e-12) && near(sat.tech,1.0,1e-12) && near(sat.lifetime,2.5,1e-12)
+ && near(luckDex(baseline(),sat),luckDex(baseline(),{life:2.0,minds:3.0,tech:3.0,lifetime:2.5}),1e-12)
+}
+test "a parameter set that is not a dial is refused: zero or sub-1e-100 life, foreign constants, broken complex share" {
+ let z=applyDial(baseline(),zeroDial());
+ dialOf(baseline(),drawn([0.0,0.5,0.5,0.5]))==Err(NotADial)
+ && dialOf(baseline(),drawn([0.02,0.5,0.5,0.5]))==Err(NotADial)
+ && drawn([0.02,0.5,0.5,0.5]).fLife>0.0 && drawn([0.02,0.5,0.5,0.5]).fLife<1e-100
+ && dialOf(baseline(),{z|windowYr:4e9})==Err(NotADial)
+ && dialOf(baseline(),{z|fComplex:0.9})==Err(NotADial)
+ && dialOf(baseline(),{z|lifetimeYr:0.0})==Err(NotADial)
+ && dialOf([],z)==Err(BadBaseline)
+}
+
+-- ---- UL2a1: prior means and the two luck statements ---------------------------
+pure func means() -> PriorMeans = match priorMeans(baseline()) {Ok(m) => m, Err(e) => {life:-1.0,minds:-1.0,tech:-1.0,lifetimeYr:-1.0,product:-1.0}}
+pure func calibrated() -> Params = applyDial(baseline(),{life:3.0,minds:3.0,tech:3.0,lifetime:log10(320.0)})
+test "LW-46p, LW-47p, LW-48p: prior means of lifetime, minds and technology at printed figures" {
+ let m=means();
+ near(m.lifetimeYr,7.238e6,0.0005e6) && near(m.minds,0.1446,0.00005) && near(m.tech,0.2150,0.00005)
+ && rel(m.lifetimeYr,(1e8-1e2)/(6.0*2.302585092994046),1e-13) && rel(m.minds,0.999/(3.0*2.302585092994046),1e-13)
+ && rel(m.tech,0.99/(2.0*2.302585092994046),1e-13)
+}
+test "the life prior's mean is about a half, and the mean product is the product of the means" {
+ let m=means();
+ m.life>0.5019 && m.life<0.5021 && rel(m.product,m.life*m.minds*m.tech*m.lifetimeYr,1e-15)
+ && near(m.product,1.13e5,0.005e5)
+}
+test "luck over the median is luckDex for a dial, and 5.2 dex for the calibrated universe" {
+ let c=calibrated();
+ c.fLife==1.0 && c.fMinds==1.0 && c.fTech==1.0 && rel(c.lifetimeYr,3.2e7,1e-12)
+ && near(numberOf(luckOverMedianDex(baseline(),c)),luckDex(baseline(),{life:3.0,minds:3.0,tech:3.0,lifetime:log10(320.0)}),1e-12)
+ && near(numberOf(luckOverMedianDex(baseline(),c)),5.2,0.05)
+ && numberOf(luckOverMedianDex(baseline(),applyDial(baseline(),zeroDial())))==0.0
+ && near(numberOf(luckOverMedianDex(baseline(),drawn([0.5,0.75,0.25,0.9]))),0.75-0.5+2.4,1e-12)
+}
+test "luck over the prior mean: the mean sits 2.75 dex above the median; the calibrated universe about 2.5 above the mean" {
+ near(numberOf(luckOverMeanDex(baseline(),applyDial(baseline(),zeroDial()))),-2.75,0.005)
+ && near(numberOf(luckOverMeanDex(baseline(),calibrated())),2.45,0.005)
+ && near(numberOf(luckOverMedianDex(baseline(),calibrated()))-numberOf(luckOverMeanDex(baseline(),calibrated())),log10(means().product/productOf(applyDial(baseline(),zeroDial()))),1e-12)
+}
+test "a universe with no life has no luck in dex: an error, not minus infinity or zero" {
+ luckOverMedianDex(baseline(),drawn([0.0,0.5,0.5,0.5]))==Err(ZeroProduct)
+ && luckOverMeanDex(baseline(),drawn([0.0,0.5,0.5,0.5]))==Err(ZeroProduct)
+ && luckOverMedianDex(baseline(),nowhere())==Err(BadParams)
+ && productOf(drawn([0.0,0.5,0.5,0.5]))==0.0
+ && rel(productOf(calibrated()),3.2e7,1e-12)
+}
+
+-- ---- UL2a2: the distribution of a sum of uniforms -----------------------------
+-- Closed forms at 12 points. Two uniforms of widths 3 and 2 (a trapezoid
+-- density): x^2/12 up to 2, (x-1)/3 up to 3, 1-(5-x)^2/12 up to 5. Three of
+-- widths 3, 2 and 6: x^3/216 up to 2; by symmetry 1-(11-x)^3/216 from 9; a
+-- half at 5.5; (x^3-(x-2)^3-(x-3)^3)/216 between 3 and 5. Irwin-Hall, three
+-- unit widths: 1/48 at 0.5, 1/6 at 1, 5/6 at 2.
+pure func cdf(w:[float],x:float) -> float = numberOf(sumUniformCdf(w,x))
+pure func tail(w:[float],x:float) -> float = numberOf(sumUniformSurvival(w,x))
+test "sum of two and three uniforms against closed forms at 12 points" {
+ near(cdf([3.0,2.0],1.0),1.0/12.0,1e-15) && near(cdf([3.0,2.0],2.0),1.0/3.0,1e-15)
+ && near(cdf([3.0,2.0],2.5),0.5,1e-15) && near(cdf([3.0,2.0],3.0),2.0/3.0,1e-15)
+ && near(cdf([3.0,2.0],4.0),11.0/12.0,1e-15)
+ && near(cdf([3.0,2.0,6.0],1.5),3.375/216.0,1e-16) && near(cdf([3.0,2.0,6.0],5.5),0.5,1e-15)
+ && near(cdf([3.0,2.0,6.0],4.0),(64.0-8.0-1.0)/216.0,1e-15)
+ && near(cdf([3.0,2.0,6.0],10.0),1.0-1.0/216.0,1e-15)
+ && near(cdf([1.0,1.0,1.0],0.5),1.0/48.0,1e-16) && near(cdf([1.0,1.0,1.0],1.0),1.0/6.0,1e-15)
+ && near(cdf([1.0,1.0,1.0],2.0),5.0/6.0,1e-15)
+}
+test "the upper tail keeps its relative accuracy: survival is computed from the far end, not as 1 - cdf" {
+ rel(tail([3.0,2.0,6.0],11.0-1e-3),1e-9/216.0,1e-9) && rel(tail([3.0,2.0,6.0],11.0-1e-5),1e-15/216.0,1e-7)
+ && rel(tail([3.0,2.0],5.0-1e-6),1e-12/12.0,1e-8)
+ && near(tail([3.0,2.0],2.5),0.5,1e-15) && near(cdf([3.0,2.0],0.7)+tail([3.0,2.0],0.7),1.0,1e-15)
+}
+test "outside the support the distribution is 0 or 1; one width is a plain uniform; other shapes are refused" {
+ cdf([3.0,2.0],-1.0)==0.0 && cdf([3.0,2.0],0.0)==0.0 && cdf([3.0,2.0],5.0)==1.0 && cdf([3.0,2.0],9.0)==1.0
+ && tail([3.0,2.0,6.0],-2.0)==1.0 && tail([3.0,2.0,6.0],11.0)==0.0 && tail([3.0,2.0,6.0],12.0)==0.0
+ && near(cdf([4.0],1.0),0.25,1e-16)
+ && sumUniformCdf([],1.0)==Err(BadWidths) && sumUniformCdf([1.0,1.0,1.0,1.0],1.0)==Err(BadWidths)
+ && sumUniformCdf([1.0,0.0],1.0)==Err(BadWidths) && sumUniformCdf([1.0,-2.0],1.0)==Err(BadWidths)
+ && sumUniformSurvival([1.0,0.0/0.0],1.0)==Err(BadWidths) && sumUniformCdf([1.0,2.0],0.0/0.0)==Err(BadWidths)
+}
+
+-- ---- UL2a2: the acceptance statistics ----------------------------------------
+-- Powers of two throughout, so every statistic below is exact in binary:
+-- lineage = 0.5*0.25*0.5 = 1/16; L/W = 2^-10.
+pure func world() -> Params = {fLife:0.5,fComplex:0.5,fMinds:0.25,fTech:0.5,lifetimeYr:1048576.0,windowYr:1073741824.0,remnantLoYr:1e3,remnantHiYr:1e7}
+pure func plain() -> Setting = {hzWorlds:1024.0,reach:[{lifetimeYr:1e5,share:1.0}],endedYr:2097152.0,gapYr:262144.0,found:AnyCount,ended:AnyCount,late:AnyCount}
+pure func statsOf(s:Setting,p:Params) -> Statistics = match statisticsOf(s,p) {Ok(v) => v, Err(e) => {found:-1.0,ended:-1.0,late:-1.0}}
+test "the three statistics are the design's closed forms: hand values, exact in binary" {
+ let v=statsOf(plain(),world());
+ v.found==0.0625 && v.ended==0.125 && v.late==0.015625
+ && statsOf({plain()|gapYr:4194304.0},world()).late==0.0625
+ && statsOf({plain()|gapYr:0.0,endedYr:0.0},world()).late==0.0 && statsOf({plain()|gapYr:0.0,endedYr:0.0},world()).ended==0.0
+ && statsOf(plain(),{world()|fLife:0.0}).found==0.0
+}
+test "the reach share is interpolated in log share against log lifetime and held outside its knots" {
+ let knots=[{lifetimeYr:1024.0,share:1.0},{lifetimeYr:1073741824.0,share:0.0009765625}];
+ rel(statsOf({plain()|reach:knots},world()).found,0.0625*0.03125,1e-13)
+ && statsOf({plain()|reach:knots},{world()|lifetimeYr:512.0}).found==1024.0*0.0625*(512.0/1073741824.0)
+ && rel(statsOf({plain()|reach:[{lifetimeYr:16.0,share:0.5},{lifetimeYr:1024.0,share:0.25}]},world()).found,0.0625*0.25,1e-15)
+ && rel(statsOf({plain()|reach:[{lifetimeYr:16.0,share:0.5}]},world()).late,0.015625*0.5,1e-15)
+}
+test "a band includes both of its edges; just outside either edge is refused" {
+ accepts({plain()|found:Between(0.0625,1.0)},world())==Ok(true)
+ && accepts({plain()|found:Between(0.01,0.0625)},world())==Ok(true)
+ && accepts({plain()|found:AtLeast(0.0625),ended:AtMost(0.125),late:Between(0.015625,0.015625)},world())==Ok(true)
+ && accepts({plain()|found:Between(0.0625000001,1.0)},world())==Ok(false)
+ && accepts({plain()|found:Between(0.01,0.0624999999)},world())==Ok(false)
+ && accepts({plain()|ended:AtLeast(0.1250000001)},world())==Ok(false)
+ && accepts({plain()|late:AtMost(0.0156249999)},world())==Ok(false)
+ && accepts(plain(),world())==Ok(true)
+ && accepts({plain()|found:AtMost(0.0)},{world()|fLife:0.0})==Ok(true)
+}
+test "an invalid setting or parameter set is named, never scored" {
+ statisticsOf({plain()|reach:[]},world())==Err(BadSetting)
+ && statisticsOf({plain()|reach:[{lifetimeYr:1e5,share:0.0}]},world())==Err(BadSetting)
+ && statisticsOf({plain()|reach:[{lifetimeYr:1e5,share:1.5}]},world())==Err(BadSetting)
+ && statisticsOf({plain()|reach:[{lifetimeYr:1e5,share:1.0},{lifetimeYr:1e5,share:0.5}]},world())==Err(BadSetting)
+ && statisticsOf({plain()|reach:[{lifetimeYr:1e6,share:1.0},{lifetimeYr:1e5,share:0.5}]},world())==Err(BadSetting)
+ && statisticsOf({plain()|hzWorlds:0.0},world())==Err(BadSetting)
+ && statisticsOf({plain()|hzWorlds:0.0/0.0},world())==Err(BadSetting)
+ && statisticsOf({plain()|endedYr:-1.0},world())==Err(BadSetting)
+ && statisticsOf({plain()|gapYr:-1.0},world())==Err(BadSetting)
+ && accepts({plain()|found:Between(2.0,1.0)},world())==Err(BadSetting)
+ && accepts({plain()|late:AtLeast(-1.0)},world())==Err(BadSetting)
+ && accepts({plain()|ended:AtMost(0.0/0.0)},world())==Err(BadSetting)
+ && statisticsOf(plain(),{world()|fTech:1.5})==Err(BadParams)
+ && statisticsOf(plain(),{world()|lifetimeYr:0.0})==Err(BadParams)
+ && statisticsOf(plain(),{world()|lifetimeYr:600000000.0})==Err(BadParams)
+ && statisticsOf(plain(),nowhere())==Err(BadParams)
+}
+
+-- ---- UL2a2: the prior probability of an acceptance region ---------------------
+pure func hz1000() -> float = 1339731.6428103606
+pure func open() -> Setting = {hzWorlds:hz1000(),reach:[{lifetimeYr:1e5,share:1.0}],endedYr:814270.0,gapYr:2000.0,found:AnyCount,ended:AnyCount,late:AnyCount}
+pure func prob(s:Setting) -> float = pOf(acceptanceProbability(baseline(),s,1))
+test "no bands accept every universe, with no error; an impossible band accepts none and has no one-in-N" {
+ acceptanceProbability(baseline(),open(),1)==Ok({p:1.0,error:0.0})
+ && acceptanceProbability(baseline(),{open()|found:AtLeast(1e9)},1)==Ok({p:0.0,error:0.0})
+ && acceptanceProbability(baseline(),{open()|endedYr:0.0,ended:AtLeast(1.0)},1)==Ok({p:0.0,error:0.0})
+ && acceptanceProbability(baseline(),{open()|gapYr:0.0,late:Between(0.0,3.0)},1)==Ok({p:1.0,error:0.0})
+ && expectedDraws({p:0.0,error:0.0})==Err(ZeroProbability)
+ && expectedDraws({p:0.25,error:0.0})==Ok(4.0)
+ && expectedDraws({p:0.0-0.25,error:0.0})==Err(ZeroProbability)
+}
+test "probabilities of a split region add up: below, inside and above a band; two halves of a band" {
+ let lo=prob({open()|found:AtMost(3.0)});
+ let mid=prob({open()|found:Between(3.0,30.0)});
+ let hi=prob({open()|found:AtLeast(30.0)});
+ let a=prob({open()|found:Between(3.0,9.0)});
+ let b=prob({open()|found:Between(9.0,30.0)});
+ near(lo+mid+hi,1.0,1e-10) && rel(a+b,mid,1e-9) && lo>0.8 && mid>0.05 && hi>0.02
+}
+test "doubling the grid moves p by less than 1e-4 of itself on three regions (in fact below 1e-8)" {
+ let a=acceptanceProbability(baseline(),{open()|found:AtLeast(3.0)},1);
+ let b=acceptanceProbability(baseline(),{open()|found:Between(1.0,50.0),ended:Between(0.5,500.0),late:Between(0.01,5.0)},1);
+ let c=acceptanceProbability(baseline(),{open()|hzWorlds:1003.3,found:AtLeast(12.0)},1);
+ errOf(a)<=1e-8*pOf(a) && errOf(b)<=1e-8*pOf(b) && errOf(c)<=1e-8*pOf(c)
+ && pOf(a)>0.1 && pOf(b)>0.001 && pOf(c)>1e-5 && pOf(c)<1e-4
+}
+test "a finer grid gives the same answer; a grid outside 1..16 is refused" {
+ rel(pOf(acceptanceProbability(baseline(),{open()|found:Between(3.0,30.0),late:AtLeast(0.001)},2)),prob({open()|found:Between(3.0,30.0),late:AtLeast(0.001)}),1e-9)
+ && acceptanceProbability(baseline(),open(),0)==Err(BadGrid)
+ && acceptanceProbability(baseline(),open(),17)==Err(BadGrid)
+ && productTail(baseline(),1e5,0)==Err(BadGrid)
+}
+test "the region probability needs the published prior shapes: any other baseline is refused, not approximated" {
+ let fixedMinds=map(\f. if f.key=="minds" then {f|prior:Fixed(0.03)} else f,baseline());
+ let fixedLife=map(\f. if f.key=="life" then {f|prior:LogUniform(0.001,1.0)} else f,baseline());
+ let longLife=map(\f. if f.key=="lifetime" then {f|prior:LogUniform(100.0,1e10)} else f,baseline());
+ acceptanceProbability(fixedMinds,{open()|found:AtLeast(3.0)},1)==Err(UnsupportedPrior)
+ && acceptanceProbability(fixedLife,{open()|found:AtLeast(3.0)},1)==Err(UnsupportedPrior)
+ && acceptanceProbability(longLife,{open()|found:AtLeast(3.0)},1)==Err(UnsupportedPrior)
+ && productTail(fixedMinds,1e5,1)==Err(UnsupportedPrior)
+ && acceptanceProbability([],{open()|found:AtLeast(3.0)},1)==Err(BadBaseline)
+ && acceptanceProbability(baseline(),{open()|found:Between(3.0,1.0)},1)==Err(BadSetting)
+ && near(match priorMeans(fixedMinds) {Ok(m) => m.minds, Err(e) => -1.0},0.03,1e-16)
+}
+
+-- ---- UL2a2: the third statement of luck ---------------------------------------
+-- Two routes inside the package: the sum of three uniforms under a
+-- one-dimensional integral over life (productTail), and the sum of two under
+-- the two-dimensional rule (acceptanceProbability with hzWorlds = the window
+-- and full reach, so that S_found is the product itself).
+pure func viaRegion(c:float) -> float = prob({hzWorlds:5e9,reach:[{lifetimeYr:1e5,share:1.0}],endedYr:0.0,gapYr:0.0,found:AtLeast(c),ended:AnyCount,late:AnyCount})
+test "P(product >= c): the three-uniform route and the two-dimensional route agree to 1e-9 at four thresholds" {
+ all(\c. rel(pOf(productTail(baseline(),c,1)),viaRegion(c),1e-9),[1.0,200.0,1e5,3.2e7])
+}
+test "the product tail is 1 at zero, falls with the threshold, is 0 above the largest product, and refuses nonsense" {
+ productTail(baseline(),0.0,1)==Ok({p:1.0,error:0.0})
+ && productTail(baseline(),1.0000001e8,1)==Ok({p:0.0,error:0.0})
+ && pOf(productTail(baseline(),1e-30,1))>pOf(productTail(baseline(),1.0,1))
+ && pOf(productTail(baseline(),1.0,1))>pOf(productTail(baseline(),1e5,1))
+ && pOf(productTail(baseline(),1e5,1))>pOf(productTail(baseline(),9.9e7,1))
+ && pOf(productTail(baseline(),9.9e7,1))>0.0
+ && productTail(baseline(),-1.0,1)==Err(BadThreshold) && productTail(baseline(),0.0/0.0,1)==Err(BadThreshold)
+}
+test "luckProbability is the product tail at the universe's own product; a lifeless universe is matched by all" {
+ luckProbability(baseline(),calibrated(),1)==productTail(baseline(),productOf(calibrated()),1)
+ && pOf(luckProbability(baseline(),calibrated(),1))>2.7e-4 && pOf(luckProbability(baseline(),calibrated(),1))<2.9e-4
+ && luckProbability(baseline(),drawn([0.0,0.5,0.5,0.5]),1)==Ok({p:1.0,error:0.0})
+ && luckProbability(baseline(),nowhere(),1)==Err(BadParams)
+}
+
+-- ---- the draw, the test and the probability are one model ---------------------
+-- Park-Miller uniforms feed drawParams; accepts() scores each draw; the
+-- frequency must sit within 4 binomial standard errors of the computed p.
+pure func step(s:int) -> int = (s*16807)%2147483647
+pure func uni(s:int) -> float = intToFloat(s)/2147483647.0
+pure func tally(s:Setting,n:int,seed:int,hits:int) -> int =
+ if n==0 then hits else {
+  let a=step(seed); let b=step(a); let c=step(b); let d=step(c);
+  let hit=match drawParams(baseline(),[uni(a),uni(b),uni(c),uni(d)]) {
+   Ok(p) => (match accepts(s,p) {Ok(t) => t, Err(e) => false}),
+   Err(e) => false
+  };
+  tally(s,n-1,d,if hit then hits+1 else hits)
+ }
+pure func frequencyAgrees(s:Setting,n:int) -> bool {
+ let p=prob(s);
+ let f=intToFloat(tally(s,n,20261112,0))/intToFloat(n);
+ p>0.0 && abs_Float(f-p)<=4.0*sqrt(p*(1.0-p)/intToFloat(n))+2.0/intToFloat(n)
+}
+test "20000 seeded draws through drawParams and accepts: frequency within 4 se of p, three-band region" {
+ frequencyAgrees({hzWorlds:hz1000(),reach:[{lifetimeYr:1e3,share:1.0},{lifetimeYr:1e6,share:0.3},{lifetimeYr:1e8,share:0.05}],endedYr:814270.0,gapYr:2000.0,found:Between(1.0,50.0),ended:Between(0.5,500.0),late:Between(0.01,5.0)},20000)
+}
+test "20000 seeded draws: frequency within 4 se of p for a lower bound, an upper bound and a late band" {
+ frequencyAgrees({open()|found:AtLeast(3.0)},20000) && frequencyAgrees({open()|found:AtMost(1e-6)},20000)
+ && frequencyAgrees({open()|gapYr:50000.0,late:Between(0.01,2.0)},20000)
+}
+-- Probe for tools/selection_validation.md: the three statements of luck and
+-- the draw counts for the settings the design names. Not a public export.
+pure func line(name:string,r:Result[Probability,SelectionError]) -> string = match r {
+ Ok(v) => "${name} p ${v.p} error ${v.error} oneIn ${numberOf(expectedDraws(v))}\n",
+ Err(e) => "${name} ERR\n"
+}
+pure func atLeastWithin(rLy:float,c:float) -> Setting = {hzWorlds:0.2*starsWithin({rho0Pc3:0.079,scaleHeightPc:300.0},rLy),reach:[{lifetimeYr:1e5,share:1.0}],endedYr:0.0,gapYr:0.0,found:AtLeast(c),ended:AnyCount,late:AnyCount}
+export pure func luckProbe() -> string {
+ let m=means();
+ let c=calibrated();
+ let z=applyDial(baseline(),zeroDial());
+ let a="means life ${m.life} minds ${m.minds} tech ${m.tech} lifetimeYr ${m.lifetimeYr} product ${m.product} medianProduct ${productOf(z)}\n";
+ let b="calibrated product ${productOf(c)} overMedianDex ${numberOf(luckOverMedianDex(baseline(),c))} overMeanDex ${numberOf(luckOverMeanDex(baseline(),c))}\n";
+ let d="zeroDial overMedianDex ${numberOf(luckOverMedianDex(baseline(),z))} overMeanDex ${numberOf(luckOverMeanDex(baseline(),z))}\n";
+ "${a}${b}${d}${line("calibrated P(product>=3.2e7)",luckProbability(baseline(),c,1))}${line("P(product>=10^7.5)",productTail(baseline(),31622776.601683795,1))}${line("median P(product>=median product)",luckProbability(baseline(),z,1))}${line("P(product>=mean product)",productTail(baseline(),m.product,1))}${line("3 living within 81.5 ly",acceptanceProbability(baseline(),atLeastWithin(81.5,3.0),1))}${line("5 living within 81.5 ly",acceptanceProbability(baseline(),atLeastWithin(81.5,5.0),1))}${line("3 living within 326 ly",acceptanceProbability(baseline(),atLeastWithin(326.0,3.0),1))}${line("3 living within 1000 ly",acceptanceProbability(baseline(),atLeastWithin(1000.0,3.0),1))}${line("3 living within 3000 ly",acceptanceProbability(baseline(),atLeastWithin(3000.0,3.0),1))}${line("3 living within 10000 ly",acceptanceProbability(baseline(),atLeastWithin(10000.0,3.0),1))}"
+}
