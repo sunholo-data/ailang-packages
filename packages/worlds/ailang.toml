@@ -1,19 +1,19 @@
 [package]
 name = "sunholo/worlds"
-version = "0.2.0"
+version = "0.3.0"
 edition = "1"
 ailang = ">=0.56.1"
-description = "Pure cited astrobiology priors, anthropic dial, exponential-disc counts, planet occurrence, immutable histories from supplied uniforms, and the prediction of a world's state after an interval."
+description = "Pure cited astrobiology priors, anthropic dial, universe selection (a draw from the priors, an acceptance test and the prior probability of passing it), exponential-disc counts, planet occurrence, immutable histories from supplied uniforms, and the prediction of a world's state after an interval."
 license = "Apache-2.0"
 [exports]
-modules = ["sunholo/worlds/baseline", "sunholo/worlds/dial", "sunholo/worlds/disc", "sunholo/worlds/occurrence", "sunholo/worlds/history", "sunholo/worlds/planet_model", "sunholo/worlds/epoch_statistics", "sunholo/worlds/propagate"]
+modules = ["sunholo/worlds/baseline", "sunholo/worlds/dial", "sunholo/worlds/disc", "sunholo/worlds/occurrence", "sunholo/worlds/history", "sunholo/worlds/planet_model", "sunholo/worlds/epoch_statistics", "sunholo/worlds/propagate", "sunholo/worlds/selection"]
 [dependencies]
 "sunholo/celestial" = "0.6.0"
 [effects]
 max = ["IO"]
 [metadata]
 tags = ["astronomy", "astrobiology", "drake", "population", "simulation", "science"]
-ai_summary = "Pure baseline-2026.11 uncertainty priors (Sandberg rate model for life), effective anthropic luck after probability saturation, local exponential-disc Drake counts, SAG13 occurrence and stateAt histories. propagate moves a belief over the eight planet states forward in years: a constant-rate Markov chain (transitionRates, propagate) and the history sampler's exact conditional law (historyKernel, propagateExact). No RNG or I/O in public modules; years, light-years and Earth units. Distinguishes adopted assumptions from measured values."
+ai_summary = "Pure baseline-2026.11 uncertainty priors (Sandberg rate model for life), effective anthropic luck after probability saturation, local exponential-disc Drake counts, SAG13 occurrence and stateAt histories. selection draws a universe's four unmeasured parameters from the priors (drawParams), scores it against an acceptance region of three expected counts (statisticsOf, accepts), and gives the prior probability of that region with its numerical error (acceptanceProbability) and three statements of luck (over the median, over the prior mean, as a prior probability); the one-in-N is a statement about the priors, not about the real universe. propagate moves a belief over the eight planet states forward in years: a constant-rate Markov chain (transitionRates, propagate) and the history sampler's exact conditional law (historyKernel, propagateExact). epoch_statistics has closed-form shares by state, including ended-state bins and a lineage-rate form. No RNG or I/O in public modules; years, light-years and Earth units. Distinguishes adopted assumptions from measured values."
 repository = "https://github.com/sunholo-data/ailang-packages/tree/main/packages/worlds"
 license_url = "https://github.com/sunholo-data/ailang-packages/blob/main/LICENSE"
 [stability]

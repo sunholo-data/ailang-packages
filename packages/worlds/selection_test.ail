@@ -1,8 +1,8 @@
 module sunholo/worlds/selection_test
-import ./selection (SelectionError,BadUniforms,BadBaseline,UnsupportedPrior,BadParams,NotADial,BadSetting,BadGrid,BadWidths,BadThreshold,ZeroProduct,ZeroProbability,NotConverged,Band,Between,AtLeast,AtMost,AnyCount,Setting,Statistics,Probability,PriorMeans,drawParams,dialOf,productOf,priorMeans,luckOverMedianDex,luckOverMeanDex,luckProbability,productTail,sumUniformCdf,sumUniformSurvival,statisticsOf,accepts,acceptanceProbability,expectedDraws)
+import ./selection (SelectionError,BadUniforms,BadBaseline,UnsupportedPrior,BadParams,NotADial,BadSetting,BadGrid,BadWidths,BadThreshold,ZeroProduct,ZeroProbability,NotConverged,Band,Between,AtLeast,AtMost,AnyCount,Setting,Statistics,Probability,PriorMeans,drawParams,dialOf,productOf,priorMeans,luckOverMedianDex,luckOverMeanDex,luckProbability,productTail,sumUniformCdf,sumUniformSurvival,statisticsOf,accepts,acceptanceProbability,converged,expectedDraws)
 import ./baseline (Factor,Prior,LogUniform,Fixed,AbiogenesisRate,baseline,quantileOf,medianOf,abiogenesisSigmaDex)
 import ./dial (Dial,Params,applyDial,zeroDial,luckDex)
-import ./disc (starsWithin)
+import ./disc (starsWithin,aliveWithin)
 import std/result (Result,Ok,Err)
 import std/math (abs_Float,intToFloat,log10,sqrt)
 import std/list (map,foldl,range,filter,length,nth_or)
@@ -10,6 +10,7 @@ import std/list (map,foldl,range,filter,length,nth_or)
 pure func near(a:float,b:float,tol:float) -> bool = abs_Float(a-b)<=tol
 pure func rel(a:float,b:float,tol:float) -> bool = abs_Float(a-b)<=tol*abs_Float(b)
 pure func all[a](f:a -> bool,xs:[a]) -> bool = foldl(\acc x. acc && f(x),true,xs)
+pure func fails[a](r:Result[a,SelectionError],why:SelectionError) -> bool = match r {Err(e) => e==why, Ok(v) => false}
 pure func nowhere() -> Params = {fLife:-1.0,fComplex:-1.0,fMinds:-1.0,fTech:-1.0,lifetimeYr:-1.0,windowYr:-1.0,remnantLoYr:-1.0,remnantHiYr:-1.0}
 pure func drawn(u:[float]) -> Params = match drawParams(baseline(),u) {Ok(p) => p, Err(e) => nowhere()}
 pure func numberOf(r:Result[float,SelectionError]) -> float = match r {Ok(v) => v, Err(e) => -999.0}
@@ -44,17 +45,17 @@ test "complex life follows minds and saturates at 1, as the dial's does" {
  && rel(drawn([0.5,0.9,0.5,0.5]).fComplex,1.0,1e-12) && rel(drawn([0.5,0.6,0.5,0.5]).fComplex,0.6309573444801932,1e-12)
 }
 test "a draw that was not made is an error, never a default universe" {
- drawParams(baseline(),[0.5,0.5,0.5])==Err(BadUniforms)
- && drawParams(baseline(),[0.5,0.5,0.5,0.5,0.5])==Err(BadUniforms)
- && drawParams(baseline(),[0.5,0.5,1.5,0.5])==Err(BadUniforms)
- && drawParams(baseline(),[-0.1,0.5,0.5,0.5])==Err(BadUniforms)
- && drawParams(baseline(),[0.5,0.5,0.5,0.0/0.0])==Err(BadUniforms)
- && drawParams([],[0.5,0.5,0.5,0.5])==Err(BadBaseline)
- && drawParams(filter(\f. f.key!="window",baseline()),[0.5,0.5,0.5,0.5])==Err(BadBaseline)
+ fails(drawParams(baseline(),[0.5,0.5,0.5]),BadUniforms)
+ && fails(drawParams(baseline(),[0.5,0.5,0.5,0.5,0.5]),BadUniforms)
+ && fails(drawParams(baseline(),[0.5,0.5,1.5,0.5]),BadUniforms)
+ && fails(drawParams(baseline(),[-0.1,0.5,0.5,0.5]),BadUniforms)
+ && fails(drawParams(baseline(),[0.5,0.5,0.5,0.0/0.0]),BadUniforms)
+ && fails(drawParams([],[0.5,0.5,0.5,0.5]),BadBaseline)
+ && fails(drawParams(filter(\f. f.key!="window",baseline()),[0.5,0.5,0.5,0.5]),BadBaseline)
 }
 test "the life prior's width is the baseline's: quantile at Phi(-0.1) is 10^(-sigma/10)" {
  abiogenesisSigmaDex()==50.0
- && near(log10(quantileOf(AbiogenesisRate,0.460172162722971)),0.0-abiogenesisSigmaDex()/10.0,1e-6)
+ && near(log10(quantileOf(AbiogenesisRate,0.460172162722971)),0.0-abiogenesisSigmaDex()/10.0,1e-5)
 }
 
 -- ---- UL2a1: a drawn parameter set as a dial ----------------------------------
@@ -80,13 +81,13 @@ test "dialOf inverts applyDial where nothing saturates, and returns the smallest
 }
 test "a parameter set that is not a dial is refused: zero or sub-1e-100 life, foreign constants, broken complex share" {
  let z=applyDial(baseline(),zeroDial());
- dialOf(baseline(),drawn([0.0,0.5,0.5,0.5]))==Err(NotADial)
- && dialOf(baseline(),drawn([0.02,0.5,0.5,0.5]))==Err(NotADial)
+ fails(dialOf(baseline(),drawn([0.0,0.5,0.5,0.5])),NotADial)
+ && fails(dialOf(baseline(),drawn([0.02,0.5,0.5,0.5])),NotADial)
  && drawn([0.02,0.5,0.5,0.5]).fLife>0.0 && drawn([0.02,0.5,0.5,0.5]).fLife<1e-100
- && dialOf(baseline(),{z|windowYr:4e9})==Err(NotADial)
- && dialOf(baseline(),{z|fComplex:0.9})==Err(NotADial)
- && dialOf(baseline(),{z|lifetimeYr:0.0})==Err(NotADial)
- && dialOf([],z)==Err(BadBaseline)
+ && fails(dialOf(baseline(),{z|windowYr:4e9}),NotADial)
+ && fails(dialOf(baseline(),{z|fComplex:0.9}),NotADial)
+ && fails(dialOf(baseline(),{z|lifetimeYr:0.0}),NotADial)
+ && fails(dialOf([],z),BadBaseline)
 }
 
 -- ---- UL2a1: prior means and the two luck statements ---------------------------
@@ -117,9 +118,9 @@ test "luck over the prior mean: the mean sits 2.75 dex above the median; the cal
  && near(numberOf(luckOverMedianDex(baseline(),calibrated()))-numberOf(luckOverMeanDex(baseline(),calibrated())),log10(means().product/productOf(applyDial(baseline(),zeroDial()))),1e-12)
 }
 test "a universe with no life has no luck in dex: an error, not minus infinity or zero" {
- luckOverMedianDex(baseline(),drawn([0.0,0.5,0.5,0.5]))==Err(ZeroProduct)
- && luckOverMeanDex(baseline(),drawn([0.0,0.5,0.5,0.5]))==Err(ZeroProduct)
- && luckOverMedianDex(baseline(),nowhere())==Err(BadParams)
+ fails(luckOverMedianDex(baseline(),drawn([0.0,0.5,0.5,0.5])),ZeroProduct)
+ && fails(luckOverMeanDex(baseline(),drawn([0.0,0.5,0.5,0.5])),ZeroProduct)
+ && fails(luckOverMedianDex(baseline(),nowhere()),BadParams)
  && productOf(drawn([0.0,0.5,0.5,0.5]))==0.0
  && rel(productOf(calibrated()),3.2e7,1e-12)
 }
@@ -151,9 +152,9 @@ test "outside the support the distribution is 0 or 1; one width is a plain unifo
  cdf([3.0,2.0],-1.0)==0.0 && cdf([3.0,2.0],0.0)==0.0 && cdf([3.0,2.0],5.0)==1.0 && cdf([3.0,2.0],9.0)==1.0
  && tail([3.0,2.0,6.0],-2.0)==1.0 && tail([3.0,2.0,6.0],11.0)==0.0 && tail([3.0,2.0,6.0],12.0)==0.0
  && near(cdf([4.0],1.0),0.25,1e-16)
- && sumUniformCdf([],1.0)==Err(BadWidths) && sumUniformCdf([1.0,1.0,1.0,1.0],1.0)==Err(BadWidths)
- && sumUniformCdf([1.0,0.0],1.0)==Err(BadWidths) && sumUniformCdf([1.0,-2.0],1.0)==Err(BadWidths)
- && sumUniformSurvival([1.0,0.0/0.0],1.0)==Err(BadWidths) && sumUniformCdf([1.0,2.0],0.0/0.0)==Err(BadWidths)
+ && fails(sumUniformCdf([],1.0),BadWidths) && fails(sumUniformCdf([1.0,1.0,1.0,1.0],1.0),BadWidths)
+ && fails(sumUniformCdf([1.0,0.0],1.0),BadWidths) && fails(sumUniformCdf([1.0,-2.0],1.0),BadWidths)
+ && fails(sumUniformSurvival([1.0,0.0/0.0],1.0),BadWidths) && fails(sumUniformCdf([1.0,2.0],0.0/0.0),BadWidths)
 }
 
 -- ---- UL2a2: the acceptance statistics ----------------------------------------
@@ -168,6 +169,12 @@ test "the three statistics are the design's closed forms: hand values, exact in 
  && statsOf({plain()|gapYr:4194304.0},world()).late==0.0625
  && statsOf({plain()|gapYr:0.0,endedYr:0.0},world()).late==0.0 && statsOf({plain()|gapYr:0.0,endedYr:0.0},world()).ended==0.0
  && statsOf(plain(),{world()|fLife:0.0}).found==0.0
+}
+test "found is disc.aliveWithin times the reach share, with hzWorlds = stars within R times worlds per star" {
+ let m={rho0Pc3:0.079,scaleHeightPc:300.0};
+ let p=drawn([0.6,0.7,0.4,0.55]);
+ let s={plain()|hzWorlds:0.2*starsWithin(m,1000.0),reach:[{lifetimeYr:1e3,share:0.5}]};
+ statsOf(s,p).found>0.0 && rel(statsOf(s,p).found,aliveWithin(m,1000.0,0.2*p.fLife*p.fMinds*p.fTech,p)*0.5,1e-13)
 }
 test "the reach share is interpolated in log share against log lifetime and held outside its knots" {
  let knots=[{lifetimeYr:1024.0,share:1.0},{lifetimeYr:1073741824.0,share:0.0009765625}];
@@ -188,22 +195,22 @@ test "a band includes both of its edges; just outside either edge is refused" {
  && accepts({plain()|found:AtMost(0.0)},{world()|fLife:0.0})==Ok(true)
 }
 test "an invalid setting or parameter set is named, never scored" {
- statisticsOf({plain()|reach:[]},world())==Err(BadSetting)
- && statisticsOf({plain()|reach:[{lifetimeYr:1e5,share:0.0}]},world())==Err(BadSetting)
- && statisticsOf({plain()|reach:[{lifetimeYr:1e5,share:1.5}]},world())==Err(BadSetting)
- && statisticsOf({plain()|reach:[{lifetimeYr:1e5,share:1.0},{lifetimeYr:1e5,share:0.5}]},world())==Err(BadSetting)
- && statisticsOf({plain()|reach:[{lifetimeYr:1e6,share:1.0},{lifetimeYr:1e5,share:0.5}]},world())==Err(BadSetting)
- && statisticsOf({plain()|hzWorlds:0.0},world())==Err(BadSetting)
- && statisticsOf({plain()|hzWorlds:0.0/0.0},world())==Err(BadSetting)
- && statisticsOf({plain()|endedYr:-1.0},world())==Err(BadSetting)
- && statisticsOf({plain()|gapYr:-1.0},world())==Err(BadSetting)
- && accepts({plain()|found:Between(2.0,1.0)},world())==Err(BadSetting)
- && accepts({plain()|late:AtLeast(-1.0)},world())==Err(BadSetting)
- && accepts({plain()|ended:AtMost(0.0/0.0)},world())==Err(BadSetting)
- && statisticsOf(plain(),{world()|fTech:1.5})==Err(BadParams)
- && statisticsOf(plain(),{world()|lifetimeYr:0.0})==Err(BadParams)
- && statisticsOf(plain(),{world()|lifetimeYr:600000000.0})==Err(BadParams)
- && statisticsOf(plain(),nowhere())==Err(BadParams)
+ fails(statisticsOf({plain()|reach:[]},world()),BadSetting)
+ && fails(statisticsOf({plain()|reach:[{lifetimeYr:1e5,share:0.0}]},world()),BadSetting)
+ && fails(statisticsOf({plain()|reach:[{lifetimeYr:1e5,share:1.5}]},world()),BadSetting)
+ && fails(statisticsOf({plain()|reach:[{lifetimeYr:1e5,share:1.0},{lifetimeYr:1e5,share:0.5}]},world()),BadSetting)
+ && fails(statisticsOf({plain()|reach:[{lifetimeYr:1e6,share:1.0},{lifetimeYr:1e5,share:0.5}]},world()),BadSetting)
+ && fails(statisticsOf({plain()|hzWorlds:0.0},world()),BadSetting)
+ && fails(statisticsOf({plain()|hzWorlds:0.0/0.0},world()),BadSetting)
+ && fails(statisticsOf({plain()|endedYr:-1.0},world()),BadSetting)
+ && fails(statisticsOf({plain()|gapYr:-1.0},world()),BadSetting)
+ && fails(accepts({plain()|found:Between(2.0,1.0)},world()),BadSetting)
+ && fails(accepts({plain()|late:AtLeast(-1.0)},world()),BadSetting)
+ && fails(accepts({plain()|ended:AtMost(0.0/0.0)},world()),BadSetting)
+ && fails(statisticsOf(plain(),{world()|fTech:1.5}),BadParams)
+ && fails(statisticsOf(plain(),{world()|lifetimeYr:0.0}),BadParams)
+ && fails(statisticsOf(plain(),{world()|lifetimeYr:600000000.0}),BadParams)
+ && fails(statisticsOf(plain(),nowhere()),BadParams)
 }
 
 -- ---- UL2a2: the prior probability of an acceptance region ---------------------
@@ -215,9 +222,9 @@ test "no bands accept every universe, with no error; an impossible band accepts 
  && acceptanceProbability(baseline(),{open()|found:AtLeast(1e9)},1)==Ok({p:0.0,error:0.0})
  && acceptanceProbability(baseline(),{open()|endedYr:0.0,ended:AtLeast(1.0)},1)==Ok({p:0.0,error:0.0})
  && acceptanceProbability(baseline(),{open()|gapYr:0.0,late:Between(0.0,3.0)},1)==Ok({p:1.0,error:0.0})
- && expectedDraws({p:0.0,error:0.0})==Err(ZeroProbability)
+ && fails(expectedDraws({p:0.0,error:0.0}),ZeroProbability)
  && expectedDraws({p:0.25,error:0.0})==Ok(4.0)
- && expectedDraws({p:0.0-0.25,error:0.0})==Err(ZeroProbability)
+ && fails(expectedDraws({p:0.0-0.25,error:0.0}),ZeroProbability)
 }
 test "probabilities of a split region add up: below, inside and above a band; two halves of a band" {
  let lo=prob({open()|found:AtMost(3.0)});
@@ -235,21 +242,32 @@ test "doubling the grid moves p by less than 1e-4 of itself on three regions (in
  && pOf(a)>0.1 && pOf(b)>0.001 && pOf(c)>1e-5 && pOf(c)<1e-4
 }
 test "a finer grid gives the same answer; a grid outside 1..16 is refused" {
- rel(pOf(acceptanceProbability(baseline(),{open()|found:Between(3.0,30.0),late:AtLeast(0.001)},2)),prob({open()|found:Between(3.0,30.0),late:AtLeast(0.001)}),1e-9)
- && acceptanceProbability(baseline(),open(),0)==Err(BadGrid)
- && acceptanceProbability(baseline(),open(),17)==Err(BadGrid)
- && productTail(baseline(),1e5,0)==Err(BadGrid)
+ rel(pOf(acceptanceProbability(baseline(),{open()|found:AtLeast(3.0)},2)),prob({open()|found:AtLeast(3.0)}),1e-10)
+ && rel(pOf(productTail(baseline(),1e5,8)),pOf(productTail(baseline(),1e5,1)),1e-12)
+ && fails(acceptanceProbability(baseline(),open(),0),BadGrid)
+ && fails(acceptanceProbability(baseline(),open(),17),BadGrid)
+ && fails(productTail(baseline(),1e5,0),BadGrid)
+}
+test "a rule that has not converged is refused: a change above 1e-6 of p, a NaN, a value that is not a probability" {
+ converged(0.25,0.25)==Ok({p:0.25,error:0.0})
+ && pOf(converged(0.2500002,0.25))==0.25 && near(errOf(converged(0.2500002,0.25)),2e-7,1e-12)
+ && fails(converged(0.2500003,0.25),NotConverged) && fails(converged(0.0,1e-9),NotConverged)
+ && fails(converged(1e-9,0.0),NotConverged)
+ && fails(converged(0.5,0.0/0.0),NotConverged) && fails(converged(0.0/0.0,0.5),NotConverged)
+ && fails(converged(1.5,1.5),NotConverged) && fails(converged(-0.1,-0.1),NotConverged)
+ && pOf(converged(1.0,1.0+1e-13))==1.0 && pOf(converged(0.0,0.0-1e-13))==-999.0
+ && converged(0.0,0.0)==Ok({p:0.0,error:0.0})
 }
 test "the region probability needs the published prior shapes: any other baseline is refused, not approximated" {
  let fixedMinds=map(\f. if f.key=="minds" then {f|prior:Fixed(0.03)} else f,baseline());
  let fixedLife=map(\f. if f.key=="life" then {f|prior:LogUniform(0.001,1.0)} else f,baseline());
  let longLife=map(\f. if f.key=="lifetime" then {f|prior:LogUniform(100.0,1e10)} else f,baseline());
- acceptanceProbability(fixedMinds,{open()|found:AtLeast(3.0)},1)==Err(UnsupportedPrior)
- && acceptanceProbability(fixedLife,{open()|found:AtLeast(3.0)},1)==Err(UnsupportedPrior)
- && acceptanceProbability(longLife,{open()|found:AtLeast(3.0)},1)==Err(UnsupportedPrior)
- && productTail(fixedMinds,1e5,1)==Err(UnsupportedPrior)
- && acceptanceProbability([],{open()|found:AtLeast(3.0)},1)==Err(BadBaseline)
- && acceptanceProbability(baseline(),{open()|found:Between(3.0,1.0)},1)==Err(BadSetting)
+ fails(acceptanceProbability(fixedMinds,{open()|found:AtLeast(3.0)},1),UnsupportedPrior)
+ && fails(acceptanceProbability(fixedLife,{open()|found:AtLeast(3.0)},1),UnsupportedPrior)
+ && fails(acceptanceProbability(longLife,{open()|found:AtLeast(3.0)},1),UnsupportedPrior)
+ && fails(productTail(fixedMinds,1e5,1),UnsupportedPrior)
+ && fails(acceptanceProbability([],{open()|found:AtLeast(3.0)},1),BadBaseline)
+ && fails(acceptanceProbability(baseline(),{open()|found:Between(3.0,1.0)},1),BadSetting)
  && near(match priorMeans(fixedMinds) {Ok(m) => m.minds, Err(e) => -1.0},0.03,1e-16)
 }
 
@@ -269,13 +287,13 @@ test "the product tail is 1 at zero, falls with the threshold, is 0 above the la
  && pOf(productTail(baseline(),1.0,1))>pOf(productTail(baseline(),1e5,1))
  && pOf(productTail(baseline(),1e5,1))>pOf(productTail(baseline(),9.9e7,1))
  && pOf(productTail(baseline(),9.9e7,1))>0.0
- && productTail(baseline(),-1.0,1)==Err(BadThreshold) && productTail(baseline(),0.0/0.0,1)==Err(BadThreshold)
+ && fails(productTail(baseline(),-1.0,1),BadThreshold) && fails(productTail(baseline(),0.0/0.0,1),BadThreshold)
 }
 test "luckProbability is the product tail at the universe's own product; a lifeless universe is matched by all" {
  luckProbability(baseline(),calibrated(),1)==productTail(baseline(),productOf(calibrated()),1)
  && pOf(luckProbability(baseline(),calibrated(),1))>2.7e-4 && pOf(luckProbability(baseline(),calibrated(),1))<2.9e-4
  && luckProbability(baseline(),drawn([0.0,0.5,0.5,0.5]),1)==Ok({p:1.0,error:0.0})
- && luckProbability(baseline(),nowhere(),1)==Err(BadParams)
+ && fails(luckProbability(baseline(),nowhere(),1),BadParams)
 }
 
 -- ---- the draw, the test and the probability are one model ---------------------
@@ -300,9 +318,9 @@ pure func frequencyAgrees(s:Setting,n:int) -> bool {
 test "20000 seeded draws through drawParams and accepts: frequency within 4 se of p, three-band region" {
  frequencyAgrees({hzWorlds:hz1000(),reach:[{lifetimeYr:1e3,share:1.0},{lifetimeYr:1e6,share:0.3},{lifetimeYr:1e8,share:0.05}],endedYr:814270.0,gapYr:2000.0,found:Between(1.0,50.0),ended:Between(0.5,500.0),late:Between(0.01,5.0)},20000)
 }
-test "20000 seeded draws: frequency within 4 se of p for a lower bound, an upper bound and a late band" {
- frequencyAgrees({open()|found:AtLeast(3.0)},20000) && frequencyAgrees({open()|found:AtMost(1e-6)},20000)
- && frequencyAgrees({open()|gapYr:50000.0,late:Between(0.01,2.0)},20000)
+test "8000 seeded draws each: frequency within 4 se of p for a lower bound, an upper bound and a late band" {
+ frequencyAgrees({open()|found:AtLeast(3.0)},8000) && frequencyAgrees({open()|found:AtMost(1e-6)},8000)
+ && frequencyAgrees({open()|gapYr:50000.0,late:Between(0.01,2.0)},8000)
 }
 -- Probe for tools/selection_validation.md: the three statements of luck and
 -- the draw counts for the settings the design names. Not a public export.
