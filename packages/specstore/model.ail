@@ -19,7 +19,9 @@ export type Std = { name: string, version: string, status: string, owner: string
              pId: string, pEvent: string, pKey: string, pVar: string, pOther: string, j: Json }
 
 export type Dev = { rule: string, instead: string, approvedBy: string }
-export type Param = { key: string, value: string }
+-- variable: the {{name}} the value names ("" for a fixed value); allowed: that variable's allowed values
+-- from the dictionary, filled when the spec loads, so a run can check the value and not only that it is set.
+export type Param = { key: string, value: string, variable: string, allowed: [string] }
 export type Event = { id: string, description: string, trigger: string, scope: string, eventName: string,
                priority: string, since: string, changed: string, note: string, params: [Param],
                dlEvent: string, live: string }
@@ -65,8 +67,15 @@ export func toStd(j: Json) -> Std {
     pId: str(p, "id"), pEvent: str(p, "event_name"), pKey: str(p, "key"), pVar: str(p, "variable"), pOther: str(p, "other_notation"), j: j }
 }
 
+-- The variable a whole value names: "{{pageType}}" names pageType; anything else names none.
+export func variableOf(v: string) -> string =
+  if startsWith(v, "{{") && endsWith(v, "}}") && !startsWith(v, "{{env:") then replace(replace(v, "{{", ""), "}}", "") else ""
+
 export func toSpec(j: Json, rounds: [Round]) -> Spec {
   let s = obj(j, "spec");
+  let dict = map(\d. { name: str(d, "name"), definition: str(d, "definition"), typ: str(d, "type"), example: str(d, "example"),
+                       source: str(d, "source"), allowed: strs(d, "allowed") }, arr(j, "dictionary"));
+  let allowedFor = \n. match filter(\d. d.name == n && n != "", dict) { [d, ..._] => d.allowed, [] => [] };
   { client: str(s, "client"), project: str(s, "project"), owner: str(s, "owner"), version: str(s, "version"), standard: str(s, "standard"),
     deviations: map(\d. { rule: str(d, "rule"), instead: str(d, "instead"), approvedBy: str(d, "approved_by") }, arr(s, "deviations")),
     events: map(\e. { id: str(e, "id"), description: str(e, "description"), trigger: str(e, "trigger"), scope: str(e, "scope"),
@@ -74,9 +83,9 @@ export func toSpec(j: Json, rounds: [Round]) -> Spec {
                       changed: if str(e, "changed") == "" then str(e, "since") else str(e, "changed"), note: str(e, "note"),
                       dlEvent: if str(e, "datalayer_event") == "" then str(e, "eventName") else str(e, "datalayer_event"),
                       live: str(e, "live"),
-                      params: map(\p. { key: str(p, "key"), value: str(p, "value") }, arr(e, "parameters")) }, arr(j, "events")),
-    dict: map(\d. { name: str(d, "name"), definition: str(d, "definition"), typ: str(d, "type"), example: str(d, "example"),
-                    source: str(d, "source"), allowed: strs(d, "allowed") }, arr(j, "dictionary")),
+                      params: map(\p. { key: str(p, "key"), value: str(p, "value"), variable: variableOf(str(p, "value")),
+                                        allowed: allowedFor(variableOf(str(p, "value"))) }, arr(e, "parameters")) }, arr(j, "events")),
+    dict: dict,
     hist: map(\h. { version: str(h, "version"), date: str(h, "date"), author: str(h, "author"), what: str(h, "what"),
                     reader: str(h, "second_reader"), status: str(h, "status") }, arr(j, "history")),
     rounds: rounds, j: j }

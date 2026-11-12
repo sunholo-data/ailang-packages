@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.3.5
+
+A line says only what was checked. A `{{variable}}` whose dictionary entry lists allowed values is now
+checked against them: a value outside the list is a gap, `not an allowed value`. A parameter without
+a gap is `as the spec says` when its value was confirmed (a fixed value, or an allowed one) and
+`present` when the dictionary gives no allowed values, so only "set" can be confirmed. The sheet's
+Parameters tab writes the expected value out: the fixed value, `one of: …`, or `any value (name)`.
+Each parameter carries its variable and allowed values from the spec's dictionary when the spec loads.
+Tests: `qa_test.ail` (35), `view_test.ail` (9).
+
 ## 0.3.4
 
 What went right shows as well as what went wrong, so a reader can trust the check. Each round

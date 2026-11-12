@@ -6,7 +6,7 @@ import std/json (Json, JNull)
 import std/list (map, length, nth)
 import std/option (Option, Some, None)
 import ./model (Spec, toSpec, toRound)
-import ./view (summaryRows, parameterRows, latestCheckFor, checkText, countsText)
+import ./view (summaryRows, parameterRows, latestCheckFor, checkText, countsText, expectedText)
 
 func y(s: string) -> Json = match yamlDecode(s) { Ok(j) => j, Err(_) => JNull }
 
@@ -53,4 +53,10 @@ test "every parameter is a row, with what the spec expects and a written status"
 
 test "the event's result sits on its first row only, so a good visit does not read as a failure" {
   cell(summaryRows(sp()), 0, 6) == "not tested" && cell(summaryRows(sp()), 1, 6) == ""
+}
+
+test "the expected value in words: fixed as it is, a variable as what can be confirmed" {
+  expectedText({ key: "k", value: "list", variable: "", allowed: [] }) == "list" &&
+  expectedText({ key: "k", value: "{{userId}}", variable: "userId", allowed: [] }) == "any value (userId)" &&
+  expectedText({ key: "k", value: "{{lang}}", variable: "lang", allowed: ["fr", "nl"] }) == "one of: fr, nl"
 }
