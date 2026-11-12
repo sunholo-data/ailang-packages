@@ -8,7 +8,7 @@ module sunholo/agui/input
 
 import std/json (Json, decode, getString, getArray, get, jo)
 import std/option (Some, None, getOrElse)
-import std/result (Result, Ok, Err, isErr)
+import std/result (Result, Ok, Err, isOk, isErr)
 import std/list (map, length as listLength)
 
 export type AgentMessage = {role: string, id: string, content: string, name: string, toolCallId: string}
@@ -51,7 +51,7 @@ ensures { match result { Ok(v) => v.name != "", Err(_) => true } }
 }
 
 @allow_empty_ok("An empty message/tool list is a valid RunAgentInput and the recursion base case")
-pure func decodeAll[f, b](f: f, xs: [Json]) -> Result[[b], string]
+pure func decodeAll[b](f: (Json) -> Result[b, string], xs: [Json]) -> Result[[b], string]
 ensures { listLength(xs) != 0 || isOk(result) }
 {
   match xs {

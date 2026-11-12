@@ -1,5 +1,6 @@
 module sunholo/social_experiments/config
 import std/result (Result, Ok, Err)
+import std/list (length as listLength)
 import pkg/sunholo/social_dynamics/model (Config, Actor, Resource, Policies, Principal, Host, ActorPrincipal, State, Task, Authority, Allowed, Refused, Appraisal, Effect, IndicatorDelta, RelationshipDelta, Error, InvalidConfig)
 
 -- Host-authored tuning, not an asserted model of human behaviour.
@@ -25,7 +26,7 @@ ensures { match result { Ok(c) => c.version == 1 && c.timeUnit == "turn", Err(_)
     relationships: [{from: worker, to: leader, dimension: "trust", value: 50}, {from: leader, to: worker, dimension: "trust", value: 70}, {from: external, to: worker, dimension: "trust", value: 40}]
   })
 }
-export pure func actors(scenario: string) -> [Actor] ensures { result != [] } = {
+export pure func actors(scenario: string) -> [Actor] ensures { listLength(result) > 0 } = {
   let ship = scenario == "ship";
   [
     {id: if ship then "captain" else "council", capacity: 2, attributes: [], values: [], indicators: [{id: "fatigue", value: 10}, {id: "readiness", value: 50}, {id: "observations", value: 0}, {id: "trust", value: 50}]},
