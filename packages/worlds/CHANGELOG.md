@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.1.1 — 2026-11-12
+
+Update the exact `sunholo/celestial` dependency from 0.6.0 to 0.7.0 so callers
+can also use celestial's additive ICRS TAN image projection. All worlds AILANG
+source, tests, public APIs, effects and numerical results remain those of
+published 0.1.0. The imported celestial `ism` module is byte-identical across
+these dependency versions. This patch does not include worlds 0.2.0 features.
+
 ## 0.1.0 — 2026-11-02
 
 Initial pure life-and-worlds package: cited baseline-2026.11 with Sandberg's

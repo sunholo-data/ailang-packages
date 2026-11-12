@@ -7,6 +7,21 @@ reproducible histories. All public functions are pure and deterministic;
 `_smoke.ail` and the validation test probe print results. Callers own and key their RNG. This package
 has no instrument model, selection policy, world catalogue or game preset.
 
+Version 0.1.1 is the 0.1.0 API with the exact celestial dependency updated to
+0.7.0, allowing consumers to share that release's additive TAN projection.
+Every worlds `.ail` file, including tests and smoke, is byte-identical to
+published 0.1.0. Its only celestial import is `ism.poissonDraw`; that module
+is byte-identical between celestial 0.6.0 and 0.7.0. No world physics, random
+inputs, results, public exports or effect ceilings change.
+
+Validation of 0.1.1 on AILANG v0.56.1 (`05c860a`), 2026-11-12: 16 files
+checked; 34 native tests passed, 0 failed, 0 skipped. Strict-VM smoke output
+is byte-identical to 0.1.0 and the interpreter. Normal quality has no gates;
+its 50 interface signatures and IO ceiling match 0.1.0. Contract evidence
+also matches: 0/12 verified, 12 skipped, 0 errors/refuted, 13 uncontracted
+exports (existing PUB011 warning). Skipped contracts remain runtime
+assertions rather than proofs. The dependency has no further dependencies.
+
 ## Modules and units
 
 - `baseline`: `baselineVersion`, `baseline`, `medianOf`, `quantileOf`. Factors
