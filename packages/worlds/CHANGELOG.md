@@ -1,5 +1,35 @@
 # Changelog
 
+## 0.2.0 — 2026-11-12
+
+New module `propagate`: the prediction at arrival. It moves a belief over the
+eight planet states forward by an interval in years. Additive; no existing
+output changes.
+
+- `transitionRates(params)` is a continuous-time Markov generator derived from
+  the parameters `history` draws from: exits at 1/(mean sojourn) (`1/E[lead]`,
+  `1/L` split 0.75/0.15/0.10, `1/E[traces]`) and the sampler's exact epoch-0
+  hazard for Complex -> PreTech (`emergenceRatePerYr`).
+- `propagate(belief, rates, years)` solves any such chain by uniformisation
+  with scaling and squaring: non-negative, sums to 1, the identity at 0 years,
+  composable within 1e-12. Two- and three-state chains match their analytic
+  solutions to 1e-12; the baseline generator matches a 50-digit Python oracle
+  to 6e-16.
+- `historyKernel(params, seen, years)` and `propagateExact(belief, params,
+  years)` are the sampler's own conditional law, in closed form (one
+  Gauss-Legendre piece). They agree with seeded histories drawn by `historyOf`
+  within 4 standard errors at eight (state, interval) pairs.
+- **The chain is an approximation of the sampler, and not a close one at long
+  intervals.** A technological epoch lasts exactly `L`, so the sampler has no
+  technological world left `L` years after seeing one; a memoryless chain keeps
+  exp(-1) = 0.368. Measured gaps: below 5e-5 for intervals up to 1% of `L`,
+  0.011 at 10%, 0.37 at `L` (seen Technological); 0.52 at worst (seen PreTech).
+  `tools/propagate_validation.md` has the tables. Nothing was tuned to close
+  the gap.
+- `history` now exports its fixed constants (`preTechLeadLoYr`,
+  `preTechLeadHiYr`, `collapseShare`, `ecocideShare`, `transcendenceShare`).
+  Sampler outputs are unchanged.
+
 ## 0.1.0 — 2026-11-02
 
 Initial pure life-and-worlds package: cited baseline-2026.11 with Sandberg's

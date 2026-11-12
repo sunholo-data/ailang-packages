@@ -1,4 +1,4 @@
-# sunholo/worlds 0.1.0
+# sunholo/worlds 0.2.0
 
 Pure models for cited astrobiology priors, anthropic offsets, local-disc counts,
 planet occurrence, immutable world histories, and clearly labelled synthetic
@@ -28,3 +28,12 @@ inhabited background, technology intersecting a future interval, technology
 at now and surviving collapse traces. Its clipped log-uniform trace integral
 also handles deterministic and narrow persistence intervals. It describes the
 existing history model; it adds no detection assumption or new physics.
+
+`propagate` (0.2.0) answers "what will this world be when we arrive?": it moves
+a belief over the eight planet states forward by an interval in years. It has
+two propagators. `propagate` is a constant-rate Markov chain for any generator,
+with `transitionRates` supplying the one derived from the history parameters.
+`propagateExact` is the history sampler's own conditional law. They agree for
+intervals short beside the technological lifetime and differ by up to 0.5 in a
+probability beyond it; [tools/propagate_validation.md](tools/propagate_validation.md)
+gives the measurements. It adds no new physics and changes no history.
