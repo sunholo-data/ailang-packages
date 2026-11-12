@@ -1,0 +1,42 @@
+-- Tests for the sheet's written verdicts: a match is visible, totals add up, nothing rests on colour.
+module sunholo/specstore/view_test
+
+import std/yaml (decode as yamlDecode)
+import std/json (Json, JNull)
+import std/list (map, length, nth)
+import std/option (Option, Some, None)
+import ./model (Spec, toSpec, toRound)
+import ./view (summaryRows, latestCheckFor, checkText, countsText)
+
+func y(s: string) -> Json = match yamlDecode(s) { Ok(j) => j, Err(_) => JNull }
+
+func sp() -> Spec = toSpec(y("spec: {client: C, project: P, owner: Ana, version: \"1.1\", standard: \"0.1\"}
+events:
+  - {id: E01, eventName: cta_click, priority: high, parameters: [{key: a, value: x}, {key: b, value: y}]}
+  - {id: E02, eventName: page_view, priority: high, parameters: [{key: a, value: x}]}"),
+  [toRound(y("{round: 1, version: \"1.1\", date: \"2026-11-12\", tester: t, by: automated, results: [
+     {event: E01, state: not tested, check: matched, matched: 2, expected: 2, comment: ok},
+     {event: E02, state: fail, check: gaps found, matched: 0, expected: 1, comment: missing}]}"))])
+
+func cell(rows: [[(string, int)]], r: int, c: int) -> string =
+  match nth(rows, r) { Some(row) => match nth(row, c) { Some(p) => match p { (t, _) => t }, None => "?" }, None => "?" }
+
+test "a match shows as a written verdict, though its state is not tested" {
+  checkText(latestCheckFor("E01", sp().rounds)) == "matched · round 1" && countsText(latestCheckFor("E01", sp().rounds)) == "2 of 2"
+}
+
+test "the summary has one row per event and a totals row" { length(summaryRows(sp())) == 3 }
+
+test "the totals count verdicts and parameters" {
+  cell(summaryRows(sp()), 2, 3) == "matched 1 · gaps found 1 · could not check 0" && cell(summaryRows(sp()), 2, 4) == "2 of 3 (66%)"
+}
+
+test "the totals say what they were built from" { cell(summaryRows(sp()), 2, 6) == "spec v1.1 · round 1 · 2026-11-12 · automated" }
+
+test "a round written before 0.3.3 has no verdict, and the sheet leaves it blank" {
+  let old = toSpec(y("spec: {client: C, project: P, owner: Ana, version: \"1.0\", standard: \"0.1\"}
+events:
+  - {id: E01, eventName: cta_click, priority: high}"),
+    [toRound(y("{round: 1, version: \"1.0\", date: d, tester: t, by: automated, results: [{event: E01, state: fail, comment: c}]}"))]);
+  checkText(latestCheckFor("E01", old.rounds)) == "" && countsText(latestCheckFor("E01", old.rounds)) == ""
+}

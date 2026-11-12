@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.3.3
+
+Output a person can read at a glance, in written values only: a result is never carried by colour.
+`compare` writes, beside each event's state, a `check` (matched, gaps found, could not check,
+waiting for release, no visit) and the parameter counts (`matched` of `expected`), and leads each
+comment with them: "V01: 93 of 101 parameters match; …". The state still says "not tested" for a
+match, since only a person sets a pass; the check says what the run found. `view` opens on a new
+Summary tab (one written line per event, then the totals and what they were built from) and adds
+Automatic check and Parameters columns to Spec and QA rounds; the Spec tab now shows a match,
+which it hid before. Rounds written by earlier versions load as before, with those fields blank.
+Tests: `qa_test.ail` (28), `view_test.ail` (5).
+
 ## 0.3.2
 
 Two ways a spec could pass `check` and then fail every run. A `{{…}}` the standard's variable

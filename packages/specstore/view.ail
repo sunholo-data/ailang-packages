@@ -1,5 +1,6 @@
 module sunholo/specstore/view
--- The Sheet: Spec, Matrix (one column per dataLayer key), Dictionary, History, QA rounds.
+-- The Sheet: Summary, Spec, Matrix (one column per dataLayer key), Dictionary, History, QA rounds.
+-- Every result is a written value; colour sits beside a state, never instead of it.
 
 import std/option (Option, Some, None)
 import std/list (map, filter, length, foldl, concat, sortBy, dedup, flatMap)
@@ -17,6 +18,40 @@ export func latestFor(id: string, rs: [Round]) -> Option[Latest] =
       [] => acc
     }, None, rs)
 
+-- The latest automatic check of an event, matched included: "not tested" hides a match from latestFor,
+-- which keeps a person's pass from being overwritten, so the check is read from the rounds separately.
+export type Check = { round: int, check: string, matched: int, expected: int, comment: string }
+
+export func latestCheckFor(id: string, rs: [Round]) -> Option[Check] =
+  foldl(\acc. \r. match filter(\x. x.event == id && x.check != "", r.results) {
+      [x, ..._] => Some({ round: r.n, check: x.check, matched: x.matched, expected: x.expected, comment: x.comment }),
+      [] => acc
+    }, None, rs)
+
+export func paramsText(m: int, t: int) -> string = if m < 0 || t <= 0 then "" else "${show(m)} of ${show(t)}"
+
+export func checkText(c: Option[Check]) -> string = match c { Some(k) => "${k.check} · round ${show(k.round)}", None => "" }
+
+export func countsText(c: Option[Check]) -> string = match c { Some(k) => paramsText(k.matched, k.expected), None => "" }
+
+-- The first tab: one written line per event, then the totals a reader needs before opening anything else.
+export func summaryRows(sp: Spec) -> [[(string, int)]] {
+  let checks = map(\e. (e, latestCheckFor(e.id, sp.rounds)), sp.events);
+  let count = \k. length(filter(\p. match p { (_, c) => match c { Some(x) => x.check == k, None => false } }, checks));
+  let tot = foldl(\acc. \p. match p { (_, c) => match c { Some(x) => match acc { (m, t) =>
+      if x.matched >= 0 && x.expected > 0 then (m + x.matched, t + x.expected) else (m, t) }, None => acc } }, (0, 0), checks);
+  let pct = match tot { (m, t) => if t > 0 then "${show(m)} of ${show(t)} (${show((100 * m) / t)}%)" else "" };
+  let last = foldl(\acc. \r. if r.n > acc.n then { n: r.n, date: r.date, by: r.by } else acc, { n: 0, date: "", by: "" }, sp.rounds);
+  let rows = map(\p. match p { (e, c) => {
+      let result = match latestFor(e.id, sp.rounds) { Some(l) => l.state, None => "not tested" };
+      [(e.id, 0), (e.eventName, 0), (e.priority, 0), (checkText(c), 0), (countsText(c), 0), (result, stateStyle(result)),
+       (match c { Some(k) => k.comment, None => "" }, 0)]
+    } }, checks);
+  concat(rows, [[("All", 0), ("${show(length(sp.events))} events", 0), ("", 0),
+    ("matched ${show(count("matched"))} · gaps found ${show(count("gaps found"))} · could not check ${show(count("could not check"))}", 0),
+    (pct, 0), ("", 0), ("spec v${sp.version} · round ${show(last.n)} · ${last.date} · ${last.by}", 0)]])
+}
+
 export func stateStyle(s: string) -> int = if s == "pass" then 2 else if s == "fail" then 3 else if s == "blocked" then 4 else 0
 
 export func view(sp: Spec) -> [(string, string)] {
@@ -24,10 +59,11 @@ export func view(sp: Spec) -> [(string, string)] {
       let base = [(e.id, 0), (e.description, 0), (e.trigger, 0), (e.scope, 0), (e.eventName, 0),
                   (join("\n", map(\p. "${p.key} = ${p.value}", e.params)), 0), (e.priority, 0), (e.since, 0), (e.changed, 0)];
       match latestFor(e.id, sp.rounds) {
-        None => concat(base, [("—", 0), ("not tested", 4), ("", 0), ("yes", 4), (e.note, 0)]),
+        None => concat(base, [("—", 0), ("not tested", 4), (checkText(latestCheckFor(e.id, sp.rounds)), 0), (countsText(latestCheckFor(e.id, sp.rounds)), 0), ("", 0), ("yes", 4), (e.note, 0)]),
         Some(l) => {
           let re = needsRetest(keyOf(e.changed), keyOf(l.version), true);
-          concat(base, [("round ${show(l.round)} · v${l.version}", 0), (l.state, stateStyle(l.state)), (l.comment, 0),
+          concat(base, [("round ${show(l.round)} · v${l.version}", 0), (l.state, stateStyle(l.state)),
+                        (checkText(latestCheckFor(e.id, sp.rounds)), 0), (countsText(latestCheckFor(e.id, sp.rounds)), 0), (l.comment, 0),
                         (if re then "yes" else "", if re then 4 else 0), (e.note, 0)])
         }
       }
@@ -36,16 +72,19 @@ export func view(sp: Spec) -> [(string, string)] {
   let keys = sortBy(\a. \b. if a < b then -1 else if a > b then 1 else 0, dedup(flatMap(\e. map(\p. p.key, e.params), sp.events)));
   let matrixRows = map(\e. concat([(e.id, 0), (e.eventName, 0)],
       map(\k. match filter(\p. p.key == k, e.params) { [p, ..._] => (p.value, 0), [] => ("", 0) }, keys)), sp.events);
-  [ ("Spec v${sp.version}", sheetXml(["ID", "Description", "Trigger", "Scope", "eventName", "Parameters", "Priority", "Since", "Last changed", "Last QA", "Result", "QA comment", "Retest", "Note"],
-                                      specRows, [6, 30, 30, 16, 18, 36, 9, 7, 12, 15, 10, 36, 8, 24])),
+  [ ("Summary", sheetXml(["ID", "eventName", "Priority", "Automatic check", "Parameters", "Result", "Comment"],
+                         summaryRows(sp), [6, 18, 9, 30, 16, 12, 60])),
+    ("Spec v${sp.version}", sheetXml(["ID", "Description", "Trigger", "Scope", "eventName", "Parameters", "Priority", "Since", "Last changed", "Last QA", "Result", "Automatic check", "Parameters", "QA comment", "Retest", "Note"],
+                                      specRows, [6, 30, 30, 16, 18, 36, 9, 7, 12, 15, 10, 20, 12, 36, 8, 24])),
     ("Matrix", sheetXml(concat(["ID", "eventName"], keys), matrixRows, concat([6, 18], map(\k. 18, keys)))),
     ("Dictionary", sheetXml(["Name", "Definition", "Type", "Example", "Source", "Allowed"],
         map(\d. [(d.name, 0), (d.definition, 0), (d.typ, 0), (d.example, 0), (d.source, 0), (join(", ", d.allowed), 0)], sp.dict), [18, 36, 10, 16, 16, 36])),
     ("History", sheetXml(["Version", "Date", "Author", "What changed", "Second reader", "Status"],
         map(\h. [(h.version, 0), (h.date, 0), (h.author, 0), (h.what, 0), (if h.reader == "" then "—" else h.reader, 0), (h.status, 0)], sp.hist), [9, 12, 12, 50, 14, 16])),
-    ("QA rounds", sheetXml(["Round", "Version", "Date", "Tester", "By", "Event", "Result", "Comment"],
-        flatMap(\r. map(\x. [(show(r.n), 0), ("v${r.version}", 0), (r.date, 0), (r.tester, 0), (r.by, 0), (x.event, 0), (x.state, stateStyle(x.state)), (x.comment, 0)], r.results), sp.rounds),
-        [7, 9, 12, 18, 10, 7, 13, 50])) ]
+    ("QA rounds", sheetXml(["Round", "Version", "Date", "Tester", "By", "Event", "Result", "Automatic check", "Parameters", "Comment"],
+        flatMap(\r. map(\x. [(show(r.n), 0), ("v${r.version}", 0), (r.date, 0), (r.tester, 0), (r.by, 0), (x.event, 0), (x.state, stateStyle(x.state)),
+                             (x.check, 0), (paramsText(x.matched, x.expected), 0), (x.comment, 0)], r.results), sp.rounds),
+        [7, 9, 12, 18, 10, 7, 13, 18, 12, 50])) ]
 }
 
 -- ── main ────────────────────────────────────────────────────────────────────
