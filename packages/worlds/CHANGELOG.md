@@ -5,8 +5,8 @@
 Universe selection, and the closed forms a calibration needs. Additive: every
 0.2.0 export returns the same bytes for the same inputs (a 311,423-byte probe
 of all of them is identical before and after, on the VM and the interpreter).
-Not published from this branch; it is built on 0.2.0 as it stands on `main`
-and so still depends on `sunholo/celestial` 0.6.0 (see the note at the end).
+Built on 0.2.1: it keeps that release's `sunholo/celestial` 0.7.0 dependency.
+Not published from this branch.
 
 New module `selection`:
 
@@ -77,10 +77,13 @@ and within 3 Monte Carlo standard errors; the largest measured gap is 1e-11.
 `tools/selection_mutants.sh` applies 28 deliberate faults; every one fails a
 test. `tools/selection_validation.md` has the tables and commands.
 
-Dependency note for the publish stop: the registry also lists 0.2.1, a
-dependency-only bump to `sunholo/celestial` 0.7.0 that lives on the branch
-`fix/worlds-0.2.1-celestial-0.7` and is not on `main`. Decide there whether
-0.3.0 takes that bump (rebase this branch onto it) before publishing.
+## 0.2.1 — 2026-11-12
+
+Update the exact `sunholo/celestial` dependency from 0.6.0 to 0.7.0 so callers
+can combine worlds' propagation API with celestial's additive ICRS TAN image
+projection. All worlds AILANG source, tests, public APIs, effect ceilings and
+numerical results remain those of published 0.2.0. Its only imported celestial
+module, `ism`, is byte-identical across these dependency versions.
 
 ## 0.2.0 — 2026-11-12
 
