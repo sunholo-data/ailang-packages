@@ -127,9 +127,49 @@ Inner planets (Mercury-Mars) have b = c = s = f = 0.
 | `rings` | `ringLitIF`, `ringUnlitIF`, `ringLitRadiance`, `ringUnlitRadiance` (all `(w0, phaseP, tau, mu0, mu[, lux])`), `ringTransmission(tau, mu)`, `RingBand {rIn, rOut, tau, w0}`, `bandAt(bands, r)`, `RingHit {hits, radius, mu}`, `ringPlaneHit(p, dir, pole)`, `ringShadowTransmission(bands, p, sunDir, pole)` |
 | `ism` | 0.4.0. `Interval {t0, t1}`, `realSphericalHarmonicAt(l, m, u)`, `realSphericalHarmonic(l, m, theta, phi)`, `starSurfaceRadius(coeffs, dir)`, `insideStarSurface(centre, coeffs, p)`, `starSurfaceCrossings(centre, coeffs, a, b)`, `starSurfaceChords(...)`, `rayExitDistance(centre, coeffs, u, sMax)`, `chordsOf(boundaries, inside, a, b)`, `coneShellChord(axis, cosHalf, rIn, rOut, a, b)`, `insideConeShell(...)`, `ellipsoidChord(centre, u1, u2, u3, s1, s2, s3, a, b)`, `insideEllipsoid(...)`, `slabChord(normal, d0, d1, a, b)`, `nHFromExtinction(avPerPc, nhPerEbv, rV)`, `healpixRingVec(nside, pix)`, `GrainDist {k, aMin, aBreak, aMax, q, rhoGrain}`, `grainDist(rhoDust, aMin, aBreak, aMax, q, rhoGrain)`, `grainMassDensity(d)`, `grainTailMassFraction(d)`, `grainMass(d, a)`, `grainsAbove(d, a)`, `grainRadiusAt(d, a0, u)`, `poissonDraw(mean, u, v)` |
 | `frames` | `obliquityJ2000`, `eclipticToEquatorial`, `equatorialToEcliptic`, `equatorialToGalactic`, `eclipticToGalactic`, `unitFromAngles(lon, lat)`, `LonLat {lon, lat}`, `lonLat(v)`, `PoleTerm {phase0, rate, ra, dec, w}`, `PoleModel {ra0, ra1, dec0, dec1, w0, w1, w2, terms}`, `Spin {pole, ra, dec, w}`, `poleAndSpin(model, jd)`, `rotationPeriod(model)` |
+| `projection` | 0.7.0. `TanWcs {crpixX,crpixY,crvalRaDeg,crvalDecDeg,cd11,cd12,cd21,cd22}`, `Pixel {x,y}`, `Sky {raDeg,decDeg}`, `ProjectionError = InvalidWcs \| InvalidPixel \| InvalidSky \| OutsideTangentHemisphere`, `validTanWcs`, `pixelToSky(w,p)`, `skyToPixel(w,s)`, `angularSeparationDeg(a,b)` |
 | `stellar` | 0.5.0. `ldLinear(u, mu)`, `ldLinearMean(u)`, `ldQuadratic(a, b, mu)`, `ldQuadraticMean(a, b)`, `LdQuad {a, b, source, teffUsed, loggUsed}`, `ldCoeffs(teff, logg)`, `loggFromMassRadius(m, r)`, `solarLogg`, `solarTeff`, `scaleHeightRatio(teff, logg)`, `cellSizeKm(teff, logg)`, `granulationLifetimeS(teff, logg)`, `dLnIdLnT(lambdaNm, t)`, `granulationSigmaT`, `sunUmbraTeff`, `sunPenumbraTeff`, `mDwarfSpotRatio`, `faculaSigmaT`, `diffRotation(latDeg)`, `solarCycleYears`, `solarCycle25StartJd`, `solarCyclePhase(jd)`, `sporerLatitudeDeg(phase)`, `activityLevel(phase)`, `baumbach(r)`, `hAlphaNm`, `lineObservedNm(lambda0, d)`, `lineVisible(lambda)` |
 | `habitability` | 0.6.0. `HzFluxes {recentVenus,runaway,maximum,earlyMars,teffUsed,extrapolated}`, `hzFluxes(teffK)`, `hzDistanceAu(lSun,sEff)`, `insolationEarth(lSun,aAu)`, `equilibriumK(teffK,rSun,aAu,bondAlbedo)`, `rvSemiAmplitude(periodD,mPlanetEarth,mStarSun,sinI,e)`, `transitProbability(rStarSun,aAu)`, `mutualHillSpacing(a1,m1,a2,m2,mStar)` |
 | `stellar_ld` | 0.5.0. `LdRow {logg, teff, a, b, model}`, `ldRows()` (508 Claret & Bloemen 2011 V-band rows) |
+
+## FITS TAN projection (0.7.0)
+
+`projection` is pure, float64, and handles only an undistorted ICRS
+`RA---TAN`/`DEC--TAN` WCS whose full CD matrix is in degrees per pixel.
+Read and validate the FITS metadata in the caller; this package does not parse
+files, infer a projection, precess coordinates or apply SIP/TPV distortions.
+CRPIX and `Pixel` use **FITS one-based pixel centres**. An image's row flip and
+zero-based indexing are presentation adapters, never a change to the WCS.
+
+`pixelToSky` returns ICRS RA in [0,360) degrees and Dec in [-90,90].
+`skyToPixel` returns `Result[Pixel,ProjectionError]`, without clipping to image
+dimensions. Check its result against the actual image footprint separately.
+Both validate |CRPIX| and |pixel| <= 1e9, CD entries <= 360 deg/pixel in
+absolute value, and |det CD| >= 1e-24. RA inputs must be in [0,360), Dec in
+[-90,90]; comparisons also refuse NaN/infinity. The inverse rejects
+dot(source, tangent centre) <= 1e-12 (the back hemisphere and numerical
+horizon band). These numerical limits are explicit errors, not silent clamps.
+
+```ailang
+import std/result (Ok, Err)
+import pkg/sunholo/celestial/projection (skyToPixel)
+let w = {crpixX: -5951.0, crpixY: 3975.0, crvalRaDeg: 52.7887505,
+         crvalDecDeg: -52.5, cd11: -2.777777777778e-5, cd12: 0.0,
+         cd21: 0.0, cd22: 2.777777777778e-5};
+let p = skyToPixel(w,{raDeg:52.49173224571941,decDeg:-52.59225486229888});
+-- Ok({x:544.621420..., y:640.448278...}), FITS one-based.
+```
+
+The numerical test reference uses independent spherical equations and five
+real DR1 Abell 3128 catalogue directions, not a round trip through this
+implementation. Their empirical image-centroid residuals are a separate
+pixel-level registration check, not exact coordinate truth. Source queries,
+header identity and expected coordinates are recorded in `projection_test.ail`.
+`_smoke.projectionProbe(24)` covers every output under strict VM/interpreter
+parity. Contracts with trig/Result branches are runtime assertions when Z3
+reports them unencodable; do not call them proven.
+`AILANG=ailang python3 tools/projection_ref.py` checks 125 outputs against
+independent scalar spherical equations (oracle only; no Python runtime use).
 
 ## Kepler
 

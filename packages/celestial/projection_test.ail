@@ -1,0 +1,142 @@
+module sunholo/celestial/projection_test
+
+-- Independent reference: direct spherical TAN equations, not this module's
+-- Cartesian tangent basis. Actual DR1_R2 tile102017310 VIS cutout:
+-- https://euclid.esac.esa.int/dr/dr1/dpdd/merdpd/dpcards/mer_bksmosaic.html
+-- TAP: SELECT TOP 40 object_id,right_ascension,declination,tile_index,vis_det,
+-- point_like_prob,extended_flag,spurious_flag,det_quality_flag FROM
+-- dr1.mer_catalogue_wide_survey WHERE right_ascension BETWEEN 52.49 AND 52.51
+-- AND declination BETWEEN -52.61 AND -52.59.
+-- Source FITS SHA256529e7a571d083d3788362700e467674fe0ee1df6098d011ce99222280221b57a.
+-- First independent zero-based reference543.6214203582722,639.4482788747;
+-- add1 for this module's FITS convention. Measured peak543.8070890903718,
+-- 639.766201653581 differs0.3682px; that empirical registration uncertainty
+-- is distinct from the analytical oracle accuracy tested here.
+import std/result (Ok, Err)
+import std/math (intToFloat, sqrt, exp)
+import ./kepler (absf)
+import ./projection (TanWcs, Pixel, Sky, InvalidWcs, InvalidPixel, InvalidSky, OutsideTangentHemisphere, validTanWcs, pixelToSky, skyToPixel, angularSeparationDeg)
+
+pure func simple() -> TanWcs =
+  { crpixX: 1.0, crpixY: 1.0, crvalRaDeg: 0.0, crvalDecDeg: 0.0, cd11: 1.0, cd12: 0.0, cd21: 0.0, cd22: 1.0 }
+
+pure func euclid() -> TanWcs =
+  { crpixX: -5951.0, crpixY: 3975.0, crvalRaDeg: 52.7887505, crvalDecDeg: -52.5, cd11: -2.777777777778e-05, cd12: 0.0, cd21: 0.0, cd22: 2.777777777778e-05 }
+
+pure func nearPixel(w: TanWcs, s: Sky, x: float, y: float) -> bool = match skyToPixel(w, s) {
+  Ok(p) => absf(p.x - x) < 1e-06 && absf(p.y - y) < 1e-06,
+  Err(_) => false
+}
+
+pure func nearSky(w: TanWcs, p: Pixel, ra: float, dec: float) -> bool = match pixelToSky(w, p) {
+  Ok(s) => absf(s.raDeg - ra) < 1e-09 && absf(s.decDeg - dec) < 1e-09,
+  Err(_) => false
+}
+
+test "TAN CRPIX is FITS one-based and maps to CRVAL" {
+  validTanWcs(simple()) && nearSky(simple(), { x: 1.0, y: 1.0 }, 0.0, 0.0) && nearPixel(simple(), { raDeg: 0.0, decDeg: 0.0 }, 1.0, 1.0)
+}
+
+test "TAN gnomonic east one degree is atan(1 degree in radians), not one sky degree" {
+  nearSky(simple(), { x: 2.0, y: 1.0 }, 0.9998984794143886, 0.0)
+}
+
+test "TAN supports off-diagonal CD matrix and mirrored east axis" {
+  let w = { simple() | cd11: 0.0, cd12: -1.0, cd21: 1.0, cd22: 0.0 }
+  nearSky(w, { x: 1.0, y: 0.0 }, 0.9998984794143886, 0.0) && nearPixel(w, { raDeg: 0.9998984794143886, decDeg: 0.0 }, 1.0, 0.0)
+}
+
+test "Euclid DR1 Abell3128 independent spherical oracle anchor 1" {
+  nearPixel(euclid(), { raDeg: 52.49173224571941, decDeg: -52.59225486229888 }, 544.6214203582722, 640.4482788747)
+}
+
+test "Euclid DR1 Abell3128 independent spherical oracle anchor 2" {
+  nearPixel(euclid(), { raDeg: 52.49516153451485, decDeg: -52.602943682621635 }, 468.0604411137465, 255.95798384947284)
+}
+
+test "Euclid DR1 Abell3128 independent spherical oracle anchor 3" {
+  nearPixel(euclid(), { raDeg: 52.50469028742163, decDeg: -52.60478789109956 }, 259.4614439434199, 190.40081939305037)
+}
+
+test "Euclid DR1 Abell3128 independent spherical oracle anchor 4" {
+  nearPixel(euclid(), { raDeg: 52.49105413229542, decDeg: -52.60838661917309 }, 557.0574955302427, 59.64415275198235)
+}
+
+test "Euclid DR1 Abell3128 independent spherical oracle anchor 5" {
+  nearPixel(euclid(), { raDeg: 52.50914561860414, decDeg: -52.5955019864996 }, 163.34787393608258, 525.0740320903224)
+}
+
+test "RA wraps across zero without discontinuity" {
+  let w = { simple() | crvalRaDeg: 359.9, cd11: 0.1 }
+  match pixelToSky(w, { x: 3.0, y: 1.0 }) {
+    Ok(s) => s.raDeg >= 0.0 && s.raDeg < 0.2 && nearPixel(w, s, 3.0, 1.0),
+    Err(_) => false
+  }
+}
+
+test "pole-centred TAN remains defined" {
+  let w = { simple() | crvalRaDeg: 120.0, crvalDecDeg: 90.0 }
+  nearSky(w, { x: 1.0, y: 1.0 }, 120.0, 90.0) && nearPixel(w, { raDeg: 120.0, decDeg: 89.0 }, 1.0, -0.000101551513690401)
+}
+
+test "singular CD matrix refused" {
+  match pixelToSky({ simple() | cd22: 0.0 }, { x: 1.0, y: 1.0 }) {
+    Err(InvalidWcs) => true,
+    _ => false
+  }
+}
+
+test "invalid astrometry refused" {
+  match skyToPixel(simple(), { raDeg: 360.0, decDeg: 0.0 }) {
+    Err(InvalidSky) => true,
+    _ => false
+  }
+}
+
+test "pixel numerical bound refused" {
+  match pixelToSky(simple(), { x: 1e+100, y: 1.0 }) {
+    Err(InvalidPixel) => true,
+    _ => false
+  }
+}
+
+test "NaN and infinity in astrometry and WCS are explicit errors" {
+  match (skyToPixel(simple(), { raDeg: sqrt(-1.0), decDeg: 0.0 }), pixelToSky({ simple() | cd11: exp(1000.0) }, { x: 1.0, y: 1.0 }), pixelToSky(simple(), { x: exp(1000.0), y: 1.0 })) {
+    (Err(InvalidSky), Err(InvalidWcs), Err(InvalidPixel)) => true,
+    _ => false
+  }
+}
+
+test "back tangent hemisphere refused" {
+  match skyToPixel(simple(), { raDeg: 180.0, decDeg: 0.0 }) {
+    Err(OutsideTangentHemisphere) => true,
+    _ => false
+  }
+}
+
+test "tangent horizon numerical guard refused" {
+  match skyToPixel(simple(), { raDeg: 90.0, decDeg: 0.0 }) {
+    Err(OutsideTangentHemisphere) => true,
+    _ => false
+  }
+}
+
+test "angular separation handles same, antipodal and quarter-circle directions" {
+  match (angularSeparationDeg({ raDeg: 0.0, decDeg: 0.0 }, { raDeg: 0.0, decDeg: 0.0 }), angularSeparationDeg({ raDeg: 0.0, decDeg: 0.0 }, { raDeg: 180.0, decDeg: 0.0 }), angularSeparationDeg({ raDeg: 0.0, decDeg: 0.0 }, { raDeg: 90.0, decDeg: 0.0 })) {
+    (Ok(a), Ok(b), Ok(c)) => absf(a) < 1e-12 && absf(b - 180.0) < 1e-12 && absf(c - 90.0) < 1e-12,
+    _ => false
+  }
+}
+
+pure func grid(i: int) -> bool = if i > 24 then true else {
+  let f = intToFloat(i)
+  let p = { x: 1.0 + f * 29.0, y: 1.0 + f * 17.0 }
+  match pixelToSky(euclid(), p) {
+    Ok(s) => nearPixel(euclid(), s, p.x, p.y) && grid(i + 1),
+    Err(_) => false
+  }
+}
+
+test "25 source-pixel round trips across Euclid field" {
+  grid(0)
+}

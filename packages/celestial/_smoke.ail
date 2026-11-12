@@ -22,6 +22,7 @@
 module sunholo/celestial/_smoke
 
 import std/io (println)
+import std/result (Ok, Err)
 import std/math (sin, cos, sqrt, atan2, intToFloat)
 import ./kepler (Vec3, State, Orbit, solveKepler, stateFromElements, driftingState, absf, wrapPi, twoPi, pi)
 import ./frames (PoleModel, eclipticToGalactic, lonLat, poleAndSpin, obliquityJ2000)
@@ -31,6 +32,7 @@ import ./lighttime (retarded, secondsPerDay)
 import ./gravity (GravBody, accelerationAt, accelerationRelativeTo, gmSunNominal, gmEarthNominal, radiusSunNominal, radiusEarthNominal)
 import ./reflect (lambertPhase, minnaertRadiance, minnaertPhase, rhoFromGeometricAlbedo, bondAlbedo, discIlluminance, starIlluminanceAt)
 import ./habitability (hzFluxes, hzDistanceAu, insolationEarth, equilibriumK, rvSemiAmplitude, transitProbability, mutualHillSpacing)
+import ./projection (TanWcs, pixelToSky, skyToPixel, angularSeparationDeg)
 import ./rings (RingBand, ringLitIF, ringUnlitIF, ringTransmission, ringShadowTransmission, ringPlaneHit)
 import ./ism (Interval, rayExitDistance, starSurfaceCrossings, coneShellChord, ellipsoidChord, slabChord, healpixRingVec, grainDist, grainsAbove, grainRadiusAt, poissonDraw, nHFromExtinction)
 
@@ -251,6 +253,27 @@ export pure func habitabilityContractProbe(p: {kind: int, x: float}) -> float =
   else if p.kind == 5 then mutualHillSpacing(1.0, 1.0, p.x, 1.0, 1.0)
   else hzFluxes(p.x).runaway
 
+pure func projectionWcs() -> TanWcs = {crpixX: -5951.0, crpixY: 3975.0, crvalRaDeg: 52.7887505, crvalDecDeg: -52.5, cd11: -2.777777777778e-5, cd12: 0.0, cd21: 0.0, cd22: 2.777777777778e-5}
+
+pure func projectionRows(k: int, n: int, acc: [float]) -> [float] =
+ if k > n then acc else {
+  let p={x:1.0+29.0*intToFloat(k),y:1.0+17.0*intToFloat(k)};
+  match pixelToSky(projectionWcs(),p) {
+   Err(_) => [-1.0],
+   Ok(s) => match skyToPixel(projectionWcs(),s) {
+    Err(_) => [-2.0],
+    Ok(q) => match angularSeparationDeg(s,{raDeg:52.5,decDeg:-52.6}) {
+     Err(_) => [-3.0],
+     Ok(a) => projectionRows(k+1,n,s.raDeg::s.decDeg::q.x::q.y::a::acc)
+    }
+   }
+  }
+ }
+
+export pure func projectionProbe(n: int) -> [float]
+ requires {n >= 0, n <= 10000}
+ = projectionRows(0,n,[])
+
 export func main() -> () ! {IO} {
   let ea = solveKepler(0.01, 0.97);
   let keplerOk = absf(ea - 0.97 * sin(ea) - 0.01) < 0.00000000000001;
@@ -278,7 +301,8 @@ let h = hzFluxes(5780.0);
 let hzOk = h.runaway == 1.107 && h.maximum == 0.356 && absf(hzDistanceAu(1.0, h.maximum) - 1.6760038078849773) < 1e-14
   && absf(equilibriumK(5772.0, 1.0, 1.0, 0.3) - 255.0) < 1.0
   && absf(rvSemiAmplitude(365.25, 1.0, 1.0, 1.0, 0.0) - 0.0894570666118403) < 1e-14;
-if hzOk && keplerOk && oppOk && nepOk && ioOk && holdOk && phaseOk && lagOk && ringOk && emOk && ismOk
+let projectionOk = match skyToPixel(projectionWcs(),{raDeg:52.49173224571941,decDeg:-52.59225486229888}) {Ok(p)=>absf(p.x-544.6214203582722)<1e-6 && absf(p.y-640.4482788747)<1e-6,Err(_)=>false};
+if projectionOk && hzOk && keplerOk && oppOk && nepOk && ioOk && holdOk && phaseOk && lagOk && ringOk && emOk && ismOk
   then println("OK: celestial Kepler e 0.97 residual < 1e-14, Jupiter opposition 2023-11-03 +-2 d, north ecliptic pole at galactic (96.3840, 29.8114), Io sidereal period 1.769138 d, 0.1254 m/s^2 at 50,000 km above Earth, Lambert Phi(pi/2) = 1/pi, Jupiter light time 2095.8 s at 4.20 au, unlit ring limit finite, Earth-from-EMB 2023-11-03 within 200 km of Horizons, the Sun 0.284 pc inside the LIC toward alpha Cen, LIC >= 1e-13 kg grain flux within 2x of Krueger 2015, solar HZ 0.9504–1.6760 AU, Earth Teq 255 K and RV 0.089457 m/s")
-  else println("FAIL: habitability ${show(hzOk)}, ism edge ${show(licEdge)} flux ${show(flux)}, kepler ${show(ea)}, opposition ${show(oppositionLonDiff(ref - 2.0))} / ${show(oppositionLonDiff(ref + 2.0))}, NEP ${show(l)} ${show(b)}, Io ${show(o2.meanAnom)}, hold ${show(hold.acc.z)}, lag ${show(lag)}, ring ${show(ringUnlitIF(0.5, 1.3, 0.7, 0.45, 0.45))}, earth-EMB err ${show(emErr)} km")
+  else println("FAIL: projection ${show(projectionOk)}, habitability ${show(hzOk)}, ism edge ${show(licEdge)} flux ${show(flux)}, kepler ${show(ea)}, opposition ${show(oppositionLonDiff(ref - 2.0))} / ${show(oppositionLonDiff(ref + 2.0))}, NEP ${show(l)} ${show(b)}, Io ${show(o2.meanAnom)}, hold ${show(hold.acc.z)}, lag ${show(lag)}, ring ${show(ringUnlitIF(0.5, 1.3, 0.7, 0.45, 0.45))}, earth-EMB err ${show(emErr)} km")
 }

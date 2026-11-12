@@ -1,0 +1,99 @@
+-- FITS celestial RA---TAN / DEC--TAN, undistorted ICRS with a full CD matrix.
+-- Greisen & Calabretta 2002, A&A 395, 1061; Calabretta & Greisen 2002,
+-- A&A 395, 1077. Pixel coordinates are FITS ONE-based; CD is degrees/pixel.
+-- No image bounds, distortion polynomial, axis permutation, other projection,
+-- epoch precession, or RA/Dec frame conversion is inferred by this module.
+module sunholo/celestial/projection
+import std/result (Ok, Err)
+import std/math (sin, cos, atan2)
+import ./kepler (Vec3, dot, norm, cross, add, scale, absf, pi)
+import ./frames (unitFromAngles, lonLat)
+
+export type TanWcs = { crpixX: float, crpixY: float, crvalRaDeg: float, crvalDecDeg: float, cd11: float, cd12: float, cd21: float, cd22: float }
+
+export type Pixel = { x: float, y: float }
+
+export type Sky = { raDeg: float, decDeg: float }
+
+export type ProjectionError = InvalidWcs | InvalidPixel | InvalidSky | OutsideTangentHemisphere
+
+pure func rad(d: float) -> float = d * pi() / 180.0
+
+pure func deg(r: float) -> float = r * 180.0 / pi()
+
+-- Comparisons reject NaN and infinity as well as magnitudes outside the numerical domain.
+pure func bounded(x: float, limit: float) -> bool = x >= 0.0 - limit && x <= limit
+
+pure func validPixel(p: Pixel) -> bool = bounded(p.x, 1e+09) && bounded(p.y, 1e+09)
+
+pure func validSky(s: Sky) -> bool = s.raDeg >= 0.0 && s.raDeg < 360.0 && bounded(s.decDeg, 90.0)
+
+pure func determinant(w: TanWcs) -> float = w.cd11 * w.cd22 - w.cd12 * w.cd21
+
+-- CD entries bounded by 360 deg/pixel, |CRPIX|<=1e9 and |det CD|>=1e-24
+-- prevent overflow/underflow in the supported astronomical numerical domain.
+export pure func validTanWcs(w: TanWcs) -> bool ! {}
+ensures { not result || w.crvalRaDeg >= 0.0 && w.crvalRaDeg < 360.0 && w.crvalDecDeg >= -90.0 && w.crvalDecDeg <= 90.0 } {
+  bounded(w.crpixX, 1e+09) && bounded(w.crpixY, 1e+09) && w.crvalRaDeg >= 0.0 && w.crvalRaDeg < 360.0 && bounded(w.crvalDecDeg, 90.0) && bounded(w.cd11, 360.0) && bounded(w.cd12, 360.0) && bounded(w.cd21, 360.0) && bounded(w.cd22, 360.0) && absf(determinant(w)) >= 1e-24
+}
+
+pure func centre(w: TanWcs) -> Vec3 = unitFromAngles(rad(w.crvalRaDeg), rad(w.crvalDecDeg))
+
+pure func east(w: TanWcs) -> Vec3 = { x: 0.0 - sin(rad(w.crvalRaDeg)), y: cos(rad(w.crvalRaDeg)), z: 0.0 }
+
+pure func north(w: TanWcs) -> Vec3 =
+  { x: 0.0 - sin(rad(w.crvalDecDeg)) * cos(rad(w.crvalRaDeg)), y: 0.0 - sin(rad(w.crvalDecDeg)) * sin(rad(w.crvalRaDeg)), z: cos(rad(w.crvalDecDeg)) }
+
+-- A TAN pixel's ray is centre + xi*east + eta*north. lonLat accepts any
+-- nonzero length, so normalisation is unnecessary. Its centre component is 1.
+export pure func pixelToSky(w: TanWcs, p: Pixel) -> Result[Sky, ProjectionError] ! {}
+ensures { match result {
+  Ok(s) => s.raDeg >= 0.0 && s.raDeg < 360.0 && s.decDeg >= -90.0 && s.decDeg <= 90.0,
+  Err(_) => true
+} } {
+  if not validTanWcs(w) then Err(InvalidWcs) else if not validPixel(p) then Err(InvalidPixel) else {
+    let dx = p.x - w.crpixX
+    let dy = p.y - w.crpixY
+    let xi = rad(w.cd11 * dx + w.cd12 * dy)
+    let eta = rad(w.cd21 * dx + w.cd22 * dy)
+    let ray = add(centre(w), add(scale(xi, east(w)), scale(eta, north(w))))
+    let a = lonLat(ray)
+    let ra = deg(a.lon)
+    Ok({ raDeg: if ra >= 360.0 then 0.0 else ra, decDeg: deg(a.lat) })
+  }
+}
+
+-- The inverse projection is defined only on the front tangent hemisphere.
+-- Reject dot(ray,centre)<=1e-12, including the horizon's roundoff band; large
+-- output pixels outside |p|<=1e9 are an explicit InvalidPixel, never clipped.
+export pure func skyToPixel(w: TanWcs, s: Sky) -> Result[Pixel, ProjectionError] ! {}
+ensures { match result {
+  Ok(p) => p.x >= -1e+09 && p.x <= 1e+09 && p.y >= -1e+09 && p.y <= 1e+09,
+  Err(_) => true
+} } {
+  if not validTanWcs(w) then Err(InvalidWcs) else if not validSky(s) then Err(InvalidSky) else {
+    let ray = unitFromAngles(rad(s.raDeg), rad(s.decDeg))
+    let denom = dot(ray, centre(w))
+    if denom <= 1e-12 then Err(OutsideTangentHemisphere) else {
+      let xi = deg(dot(ray, east(w)) / denom)
+      let eta = deg(dot(ray, north(w)) / denom)
+      let det = determinant(w)
+      let p = { x: w.crpixX + (w.cd22 * xi - w.cd12 * eta) / det, y: w.crpixY + (w.cd11 * eta - w.cd21 * xi) / det }
+      if validPixel(p) then Ok(p) else Err(InvalidPixel)
+    }
+  }
+}
+
+-- atan2(|a cross b|, a dot b) retains accuracy for tiny and near-antipodal
+-- separations, unlike acos of a rounded dot product.
+export pure func angularSeparationDeg(a: Sky, b: Sky) -> Result[float, ProjectionError] ! {}
+ensures { match result {
+  Ok(v) => v >= 0.0 && v <= 180.0,
+  Err(_) => true
+} } {
+  if not validSky(a) || not validSky(b) then Err(InvalidSky) else {
+    let u = unitFromAngles(rad(a.raDeg), rad(a.decDeg))
+    let v = unitFromAngles(rad(b.raDeg), rad(b.decDeg))
+    Ok(deg(atan2(norm(cross(u, v)), dot(u, v))))
+  }
+}

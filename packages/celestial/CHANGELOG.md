@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.7.0
+
+Feature: pure `projection` module for undistorted ICRS FITS RA---TAN/DEC--TAN
+images with a full degrees-per-pixel CD matrix. `pixelToSky` and `skyToPixel`
+use FITS one-based pixel centres, return explicit errors for invalid numerical
+domains, singular WCS and the back tangent hemisphere, and never clip to an
+image boundary. `angularSeparationDeg` uses atan2 of vector cross/dot products
+for stable small and near-antipodal angles. Existing physical APIs are unchanged.
+
+Tests include five actual Euclid DR1 Abell 3128 catalogue directions against
+an independent spherical-trigonometry oracle, axis rotation, RA wrap, poles,
+invalid/non-finite inputs and field round trips. `_smoke.projectionProbe`
+exercises sky, pixel and separation outputs for strict VM/interpreter parity.
+No FITS file parser, distortion correction, frame precession or cosmological
+distance inference is included. Transcendental contracts are runtime assertions;
+native numerical checks are not claimed as SMT proofs.
+
 ## 0.6.1
 
 Perf (patch fix): split the 508-row limb-darkening literal into private

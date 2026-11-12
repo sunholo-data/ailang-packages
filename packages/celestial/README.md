@@ -26,6 +26,9 @@ ailang pkg-docs sunholo/celestial   # AGENT.md: usage, units, pitfalls
   distribution and a Poisson draw.
 - `frames`: ecliptic J2000 -> ICRS (IAU 2006 obliquity) -> galactic
   (Hipparcos 1997), and IAU WGCCRE 2015 pole and prime-meridian models.
+- `projection` (0.7.0): undistorted ICRS FITS TAN pixel/sky transforms with a
+  full CD matrix, one-based pixel centres, explicit invalid/horizon errors,
+  and stable angular separation. No file parsing or distortion inference.
 - `lighttime`: the retarded time and position of a source seen by an
   observer (fixed 4-step iteration; checked against JPL Horizons).
 - `gravity`: Newtonian point-mass acceleration in m/s^2 with IAU 2015
