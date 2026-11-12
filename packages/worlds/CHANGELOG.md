@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.2.1 — 2026-11-12
+
+Update the exact `sunholo/celestial` dependency from 0.6.0 to 0.7.0 so callers
+can combine worlds' propagation API with celestial's additive ICRS TAN image
+projection. All worlds AILANG source, tests, public APIs, effect ceilings and
+numerical results remain those of published 0.2.0. Its only imported celestial
+module, `ism`, is byte-identical across these dependency versions.
+
 ## 0.2.0 — 2026-11-12
 
 New module `propagate`: the prediction at arrival. It moves a belief over the
