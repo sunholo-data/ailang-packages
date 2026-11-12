@@ -39,12 +39,17 @@ the closed-form distribution of a sum of uniforms):
    parallel lines; its area is found by clipping the square (no sum-of-uniforms
    formula). That area is integrated over u1 and u4 by nested adaptive
    Gauss-Kronrod (7, 15), in quantile space, with no knowledge of where the
-   kinks are. The error stated for a cell is the sum of the rule's own
-   |K15 - G7| estimates over the final intervals of the outer integral.
+   kinks are. Each cell is integrated twice, from 96 x 16 and from 160 x 24
+   starting panels (not nested). The error stated for a cell is the larger of
+   the difference between the two runs and the rule's own summed |K15 - G7|.
+   The rule's own estimate is not enough: with 16 starting panels in u1 it
+   reported 2e-10 for the cell tail1e5 while the value was off by 1e-7 (the
+   accepted life quantiles are a narrow range that the rule under-resolved).
+   The package's value showed the gap; tools/selection_validation.md records
+   the third computation that settled it.
 
 The script refuses to write a cell whose two methods differ by more than
-3.5 standard errors, or whose quadrature error estimate exceeds 1e-9 of the
-value.
+3.5 standard errors, or whose quadrature error exceeds 1e-9 of the value.
 """
 import heapq
 import math
@@ -291,7 +296,7 @@ def pair_area(c, limits, f_life, life_yr):
     return strip_area(WM, WT, lo_s, hi_s)
 
 
-def quadrature(c):
+def quadrature(c, inner_panels, outer_panels):
     limits = [band_limits(c[k]) for k in ("found", "ended", "late")]
 
     def outer(u4):
@@ -300,10 +305,18 @@ def quadrature(c):
         def inner(u1):
             return pair_area(c, limits, life_of(NORMAL.inv_cdf(u1)), life_yr)
 
-        v, _ = adaptive(inner, 1e-300, 1.0 - 1e-16, 1e-11, 1e-16, panels=16)
+        v, _ = adaptive(inner, 1e-300, 1.0 - 1e-16, 1e-12, 1e-20, panels=inner_panels)
         return v
 
-    return adaptive(outer, 0.0, 1.0, 2e-10, 1e-18, panels=16)
+    return adaptive(outer, 0.0, 1.0, 2e-11, 1e-22, panels=outer_panels)
+
+
+def quadrature_twice(c):
+    """Two runs from different, non-nested starting panels; the value of the
+    finer and the larger of (their difference, the rule's own estimate)."""
+    coarse, _ = quadrature(c, 96, 16)
+    fine, err = quadrature(c, 160, 24)
+    return fine, max(abs(fine - coarse), err)
 
 
 def life_mean():
@@ -370,7 +383,7 @@ def main():
     worst_z = 0.0
     for c, (p_mc, se, hits) in zip(CELLS, mc):
         t0 = time.time()
-        p, err = quadrature(c)
+        p, err = quadrature_twice(c)
         z = (p_mc - p) / se
         worst_z = max(worst_z, abs(z))
         sys.stderr.write("%-14s p %.12e  err %.1e (%.1e of p)  mc %.6e +- %.2e  hits %d  z %+.2f  %.0f s\n"
@@ -394,8 +407,8 @@ def main():
     out.append("-- and the distribution of a sum of uniforms, from an independent Python")
     out.append("-- oracle: clipped areas inside nested adaptive Gauss-Kronrod in quantile")
     out.append("-- space, and a Monte Carlo of the same priors (%d draws, seed %d)." % (draws, SEED))
-    out.append("-- Reference error bound: 1e-8 of each probability; largest quadrature error")
-    out.append("-- estimate in this run: %.2e of the value. Largest gap between the two" %
+    out.append("-- Reference error bound: 1e-9 of each probability; largest difference between")
+    out.append("-- two starting grids in this run: %.2e of the value. Largest gap between the two" %
                max(err / p for _, p, err, _, _, _ in rows))
     out.append("-- oracle methods: %.2f standard errors. selection.ail must agree with the" % worst_z)
     out.append("-- quadrature to 1e-8 of the value and with the Monte Carlo within 3 standard errors.")

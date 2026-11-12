@@ -4,8 +4,8 @@ module sunholo/worlds/selection_reference_test
 -- and the distribution of a sum of uniforms, from an independent Python
 -- oracle: clipped areas inside nested adaptive Gauss-Kronrod in quantile
 -- space, and a Monte Carlo of the same priors (10000000 draws, seed 20261112).
--- Reference error bound: 1e-8 of each probability; largest quadrature error
--- estimate in this run: 1.97e-10 of the value. Largest gap between the two
+-- Reference error bound: 1e-9 of each probability; largest difference between
+-- two starting grids in this run: 1.98e-11 of the value. Largest gap between the two
 -- oracle methods: 1.39 standard errors. selection.ail must agree with the
 -- quadrature to 1e-8 of the value and with the Monte Carlo within 3 standard errors.
 import ./selection (Setting,Band,Between,AtLeast,AtMost,AnyCount,Probability,SelectionError,acceptanceProbability,productTail,priorMeans,sumUniformCdf,sumUniformSurvival)
@@ -16,18 +16,18 @@ import std/list (foldl,length)
 
 type Cell = {name:string,s:Setting,want:float,mc:float,se:float,hits:int}
 pure func cells() -> [Cell] = [
- {name:"found3",s:{hzWorlds:1339731.6428103605,reach:[{lifetimeYr:100000.0,share:1.0}],endedYr:0.0,gapYr:0.0,found:AtLeast(3.0),ended:AnyCount,late:AnyCount},want:0.12554029772021374,mc:0.1254957,se:0.00010475997770213107,hits:1254957},
- {name:"threeBands",s:{hzWorlds:1339731.6428103605,reach:[{lifetimeYr:1000.0,share:1.0},{lifetimeYr:1000000.0,share:0.3},{lifetimeYr:100000000.0,share:0.05}],endedYr:814270.0,gapYr:2000.0,found:Between(1.0,50.0),ended:Between(0.5,500.0),late:Between(0.01,5.0)},want:0.019568925579908098,mc:0.0195707,se:4.3803752923134335e-05,hits:195707},
- {name:"nearOne",s:{hzWorlds:1339731.6428103605,reach:[{lifetimeYr:100000.0,share:1.0}],endedYr:0.0,gapYr:0.0,found:AtMost(300.0),ended:AnyCount,late:AnyCount},want:0.9827193148666773,mc:0.9827381,se:4.118728785485887e-05,hits:9827381},
- {name:"tail1e5",s:{hzWorlds:1003.3,reach:[{lifetimeYr:100000.0,share:1.0}],endedYr:0.0,gapYr:0.0,found:AtLeast(12.0),ended:AnyCount,late:AnyCount},want:2.5613790104943257e-05,mc:2.7e-05,se:1.6431454896021836e-06,hits:270},
- {name:"tail1e6",s:{hzWorlds:1003.3,reach:[{lifetimeYr:100000.0,share:1.0}],endedYr:0.0,gapYr:0.0,found:AtLeast(16.0),ended:AnyCount,late:AnyCount},want:2.1838412613016553e-06,mc:2.2e-06,se:4.6904106003632565e-07,hits:22},
- {name:"narrow",s:{hzWorlds:1339731.6428103605,reach:[{lifetimeYr:100000.0,share:1.0}],endedYr:814270.0,gapYr:10000.0,found:Between(3.0,5.0),ended:Between(1.0,3.0),late:AtLeast(0.02)},want:0.001629937312357749,mc:0.0016252,se:1.2737969716403004e-05,hits:16252},
- {name:"lateOnly",s:{hzWorlds:20764332.0,reach:[{lifetimeYr:10000.0,share:1.0},{lifetimeYr:10000000.0,share:0.01}],endedYr:0.0,gapYr:50000.0,found:AnyCount,ended:AnyCount,late:Between(1.0,2.0)},want:0.018970575560461212,mc:0.0189525,se:4.3119952161093594e-05,hits:189525},
- {name:"endedOnly",s:{hzWorlds:1339731.6428103605,reach:[{lifetimeYr:100000.0,share:1.0}],endedYr:814270.0,gapYr:0.0,found:AnyCount,ended:AtLeast(2.0),late:AnyCount},want:0.17453036852192072,mc:0.1744265,se:0.0001200007900381285,hits:1744265},
- {name:"product32e6",s:{hzWorlds:5000000000.0,reach:[{lifetimeYr:100000.0,share:1.0}],endedYr:0.0,gapYr:0.0,found:AtLeast(32000000.0),ended:AnyCount,late:AnyCount},want:0.0002796068426347633,mc:0.0002763,se:5.255698415149027e-06,hits:2763},
- {name:"product1e5",s:{hzWorlds:5000000000.0,reach:[{lifetimeYr:100000.0,share:1.0}],endedYr:0.0,gapYr:0.0,found:AtLeast(100000.0),ended:AnyCount,late:AnyCount},want:0.06082265778196179,mc:0.0608154,se:7.557571509608096e-05,hits:608154},
- {name:"nearlyEmpty",s:{hzWorlds:1339731.6428103605,reach:[{lifetimeYr:100000.0,share:1.0}],endedYr:0.0,gapYr:0.0,found:AtMost(1e-06),ended:AnyCount,late:AnyCount},want:0.4612225116561887,mc:0.4614423,se:0.00015764304734770576,hits:4614423},
- {name:"gapAboveRange",s:{hzWorlds:1339731.6428103605,reach:[{lifetimeYr:100000.0,share:1.0}],endedYr:0.0,gapYr:1000000000.0,found:AtLeast(3.0),ended:AnyCount,late:AtMost(30.0)},want:0.06745361655029561,mc:0.0674411,se:7.93049796865178e-05,hits:674411}
+ {name:"found3",s:{hzWorlds:1339731.6428103605,reach:[{lifetimeYr:100000.0,share:1.0}],endedYr:0.0,gapYr:0.0,found:AtLeast(3.0),ended:AnyCount,late:AnyCount},want:0.12554029771941166,mc:0.1254957,se:0.00010475997770213107,hits:1254957},
+ {name:"threeBands",s:{hzWorlds:1339731.6428103605,reach:[{lifetimeYr:1000.0,share:1.0},{lifetimeYr:1000000.0,share:0.3},{lifetimeYr:100000000.0,share:0.05}],endedYr:814270.0,gapYr:2000.0,found:Between(1.0,50.0),ended:Between(0.5,500.0),late:Between(0.01,5.0)},want:0.019568925588604853,mc:0.0195707,se:4.3803752923134335e-05,hits:195707},
+ {name:"nearOne",s:{hzWorlds:1339731.6428103605,reach:[{lifetimeYr:100000.0,share:1.0}],endedYr:0.0,gapYr:0.0,found:AtMost(300.0),ended:AnyCount,late:AnyCount},want:0.9827193148188291,mc:0.9827381,se:4.118728785485887e-05,hits:9827381},
+ {name:"tail1e5",s:{hzWorlds:1003.3,reach:[{lifetimeYr:100000.0,share:1.0}],endedYr:0.0,gapYr:0.0,found:AtLeast(12.0),ended:AnyCount,late:AnyCount},want:2.5613792585496468e-05,mc:2.7e-05,se:1.6431454896021836e-06,hits:270},
+ {name:"tail1e6",s:{hzWorlds:1003.3,reach:[{lifetimeYr:100000.0,share:1.0}],endedYr:0.0,gapYr:0.0,found:AtLeast(16.0),ended:AnyCount,late:AnyCount},want:2.1838412612643965e-06,mc:2.2e-06,se:4.6904106003632565e-07,hits:22},
+ {name:"narrow",s:{hzWorlds:1339731.6428103605,reach:[{lifetimeYr:100000.0,share:1.0}],endedYr:814270.0,gapYr:10000.0,found:Between(3.0,5.0),ended:Between(1.0,3.0),late:AtLeast(0.02)},want:0.001629937312356981,mc:0.0016252,se:1.2737969716403004e-05,hits:16252},
+ {name:"lateOnly",s:{hzWorlds:20764332.0,reach:[{lifetimeYr:10000.0,share:1.0},{lifetimeYr:10000000.0,share:0.01}],endedYr:0.0,gapYr:50000.0,found:AnyCount,ended:AnyCount,late:Between(1.0,2.0)},want:0.018970575563344232,mc:0.0189525,se:4.3119952161093594e-05,hits:189525},
+ {name:"endedOnly",s:{hzWorlds:1339731.6428103605,reach:[{lifetimeYr:100000.0,share:1.0}],endedYr:814270.0,gapYr:0.0,found:AnyCount,ended:AtLeast(2.0),late:AnyCount},want:0.17453036852184173,mc:0.1744265,se:0.0001200007900381285,hits:1744265},
+ {name:"product32e6",s:{hzWorlds:5000000000.0,reach:[{lifetimeYr:100000.0,share:1.0}],endedYr:0.0,gapYr:0.0,found:AtLeast(32000000.0),ended:AnyCount,late:AnyCount},want:0.0002796068426336323,mc:0.0002763,se:5.255698415149027e-06,hits:2763},
+ {name:"product1e5",s:{hzWorlds:5000000000.0,reach:[{lifetimeYr:100000.0,share:1.0}],endedYr:0.0,gapYr:0.0,found:AtLeast(100000.0),ended:AnyCount,late:AnyCount},want:0.06082265778272956,mc:0.0608154,se:7.557571509608096e-05,hits:608154},
+ {name:"nearlyEmpty",s:{hzWorlds:1339731.6428103605,reach:[{lifetimeYr:100000.0,share:1.0}],endedYr:0.0,gapYr:0.0,found:AtMost(1e-06),ended:AnyCount,late:AnyCount},want:0.46122251165062306,mc:0.4614423,se:0.00015764304734770576,hits:4614423},
+ {name:"gapAboveRange",s:{hzWorlds:1339731.6428103605,reach:[{lifetimeYr:100000.0,share:1.0}],endedYr:0.0,gapYr:1000000000.0,found:AtLeast(3.0),ended:AnyCount,late:AtMost(30.0)},want:0.0674536165510776,mc:0.0674411,se:7.93049796865178e-05,hits:674411}
 ]
 pure func lifeMeanWant() -> float = 0.5019999124258734
 -- widths, x, P(sum <= x), P(sum >= x)
