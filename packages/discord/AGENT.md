@@ -7,7 +7,7 @@ declares IO solely for the offline `_smoke.ail` boot gate (`ailang run -caps IO
 --entry main _smoke.ail`); no library module uses IO. Never pass a bot token as an MCP tool
 argument. Guild membership of a human user does not imply bot channel access.
 
-Install: `ailang install sunholo/discord@0.5.0`, then
+Install: `ailang install sunholo/discord@0.5.1`, then
 `import pkg/sunholo/discord/client (...)` for channels/messages and
 `import pkg/sunholo/discord/interactions (...)` for slash commands. Consumer
 programs need `--caps Net` for the effectful entry points; the pure codecs run

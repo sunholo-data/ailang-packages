@@ -269,7 +269,7 @@ ensures { match result {Err(_)=>true,Ok(a)=>a.run.remaining<=r.remaining && a.ru
 
 export func closeWatch(r:Run)->Result[(),string] ! {FS}
 requires { isWatch(r.ui) && r.ui.seq>=0 && r.ui.seq<=10000 }
-ensures { match result {Ok(v)=>v==(),Err(_)=>true} } =
+ensures { match result {Ok(_)=>true,Err(_)=>true} } =
  appendRun(r.path,envelope(r.ui.seq+1,jo([kv("kind",js("quit")),kv("seed",jint(r.ui.seed))])))
 
 -- Transport record for background words: never a host command, never replayed.

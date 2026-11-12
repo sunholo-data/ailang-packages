@@ -12,8 +12,9 @@ module sunholo/discord/interactions
 
 import std/json (Json, decode, encode, getString, getInt, getArray, getObject, get, jo, kv, js, ja, jb, jint)
 import std/option (Some, None, getOrElse, isSome)
-import std/result (Result, Ok, Err, isErr)
+import std/result (Result, Ok, Err, isOk, isErr)
 import std/list (map, length as listLength)
+import std/string (length)
 import pkg/sunholo/discord/client (Embed, embedJson, validEmbed, DiscordError, problem)
 
 export type InteractionOption = {name: string, value: string}
@@ -76,7 +77,7 @@ ensures { listLength(xs) != 0 || isOk(result) }
 -- interactions require an id, an interaction token and command data.
 export pure func decodeInteraction(raw: string) -> Result[Interaction, string]
 ensures {
-  isErr(decode(raw)) || knownType(result.kind) && (result.kind != 2 || result.token != ""),
+  match result { Ok(v) => knownType(v.kind) && (v.kind != 2 || v.token != ""), Err(_) => true },
   match result { Ok(v) => (v.kind == 1) || (v.token != "" && v.command.name != ""), Err(_) => true }
 }
 {
