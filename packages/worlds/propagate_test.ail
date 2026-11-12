@@ -1,11 +1,20 @@
 module sunholo/worlds/propagate_test
-import ./propagate (Belief,Rates,Edge,stateIndex,certain,probabilityOf,validBelief,validRates,ratesOf,rateBetween,validParams,emergenceRatePerYr,transitionRates,transitionMatrix,propagate,historyKernel,propagateExact)
+import ./propagate (Belief,Rates,Edge,PredictionError,InvalidParams,InvalidBelief,InvalidRates,InvalidYears,OutsideExactDomain,SeenImpossible,stateIndex,certain,probabilityOf,validBelief,validRates,ratesOf,rateBetween,validParams,exactDomain,transitionRates,propagate,historyKernel,propagateExact)
+import std/result (Result,Ok,Err)
 import ./history (PlanetState,Sterile,Microbial,Complex,PreTech,Technological,Remnant,Transcended,Ecocide,historyOf,stateAt)
 import ./baseline (baseline)
 import ./dial (Params,applyDial,zeroDial)
 import std/math (exp,log,abs_Float,intToFloat,sqrt)
 import std/list (map,foldl,range,nth_or,length)
 
+-- The propagators return Result. These unwrap for the numeric tests; an Err
+-- becomes a belief of -1s (or an invalid generator), which no assertion accepts.
+pure func nowhere() -> Belief = {sterile:-1.0,microbial:-1.0,complex:-1.0,preTech:-1.0,technological:-1.0,remnant:-1.0,transcended:-1.0,ecocide:-1.0}
+pure func got(r:Result[Belief,PredictionError]) -> Belief = match r {Ok(b) => b, Err(e) => nowhere()}
+pure func chainOf(b:Belief,r:Rates,years:float) -> Belief = got(propagate(b,r,years))
+pure func exactOf(b:Belief,p:Params,years:float) -> Belief = got(propagateExact(b,p,years))
+pure func kernelOf(p:Params,s:PlanetState,years:float) -> Belief = got(historyKernel(p,s,years))
+pure func ratesFor(p:Params) -> Rates = match transitionRates(p) {Ok(r) => r, Err(e) => {q:[]}}
 pure func near(a:float,b:float,tol:float) -> bool = abs_Float(a-b)<=tol
 pure func toL(b:Belief) -> [float] = [b.sterile,b.microbial,b.complex,b.preTech,b.technological,b.remnant,b.transcended,b.ecocide]
 pure func maxDiff(a:Belief,b:Belief) -> float =
@@ -18,8 +27,8 @@ pure func sumOf(b:Belief) -> float = foldl(\acc x. acc+x,0.0,toL(b))
 pure func twoState(a:float,b:float) -> Rates = ratesOf([{src:Complex,dst:PreTech,perYr:a},{src:PreTech,dst:Complex,perYr:b}])
 pure func twoOk(a:float,b:float,t:float) -> bool {
  let r=twoState(a,b);
- let fromA=propagate(certain(Complex),r,t);
- let fromB=propagate(certain(PreTech),r,t);
+ let fromA=chainOf(certain(Complex),r,t);
+ let fromB=chainOf(certain(PreTech),r,t);
  let decay=exp(0.0-(a+b)*t);
  near(fromA.complex,b/(a+b)+a/(a+b)*decay,1e-12) && near(fromA.preTech,a/(a+b)*(1.0-decay),1e-12)
  && near(fromB.preTech,a/(a+b)+b/(a+b)*decay,1e-12) && near(fromB.complex,b/(a+b)*(1.0-decay),1e-12)
@@ -31,7 +40,7 @@ test "AC5: two-state reversible chain matches b/(a+b)+a/(a+b)exp(-(a+b)t) to 1e-
 }
 pure func chain(a:float,b:float) -> Rates = ratesOf([{src:PreTech,dst:Technological,perYr:a},{src:Technological,dst:Remnant,perYr:b}])
 pure func chainOk(a:float,b:float,t:float) -> bool {
- let got=propagate(certain(PreTech),chain(a,b),t);
+ let got=chainOf(certain(PreTech),chain(a,b),t);
  let ea=exp(0.0-a*t);
  let eb=exp(0.0-b*t);
  let mid=if a==b then a*t*ea else a/(b-a)*(ea-eb);
@@ -43,7 +52,7 @@ test "AC5: three-state chain A->B->C matches a/(b-a)(exp(-at)-exp(-bt)) to 1e-12
   [0.5,10.0,100.0,693.0,1000.0,2500.0,1e4,5e4,1e6,1e8])
 }
 pure func forkOk(b:float,c:float,t:float) -> bool {
- let got=propagate(certain(Technological),ratesOf([{src:Technological,dst:Remnant,perYr:b},{src:Technological,dst:Ecocide,perYr:c}]),t);
+ let got=chainOf(certain(Technological),ratesOf([{src:Technological,dst:Remnant,perYr:b},{src:Technological,dst:Ecocide,perYr:c}]),t);
  let gone=1.0-exp(0.0-(b+c)*t);
  near(got.technological,1.0-gone,1e-12) && near(got.remnant,b/(b+c)*gone,1e-12) && near(got.ecocide,c/(b+c)*gone,1e-12)
 }
@@ -53,26 +62,26 @@ test "AC5: three-state competing exits split in proportion to their rates, to 1e
 
 pure func lonely() -> Params = applyDial(baseline(),zeroDial())
 pure func mixed() -> Belief = {sterile:0.05,microbial:0.1,complex:0.2,preTech:0.15,technological:0.3,remnant:0.1,transcended:0.04,ecocide:0.06}
-test "years=0 is the identity bit for bit, for both propagators; invalid years leave the belief alone" {
- let r=transitionRates(lonely());
- propagate(mixed(),r,0.0)==mixed() && propagateExact(mixed(),lonely(),0.0)==mixed()
- && historyKernel(lonely(),Remnant,0.0)==certain(Remnant)
- && transitionMatrix(r,0.0)==map(\i. map(\j. if i==j then 1.0 else 0.0,range(0,8)),range(0,8))
+test "years=0 is the identity bit for bit, for both propagators" {
+ let r=ratesFor(lonely());
+ chainOf(mixed(),r,0.0)==mixed() && exactOf(mixed(),lonely(),0.0)==mixed()
+ && kernelOf(lonely(),Remnant,0.0)==certain(Remnant)
+ && propagate(mixed(),r,0.0)==Ok(mixed()) && propagateExact(mixed(),lonely(),0.0)==Ok(mixed())
 }
 test "propagate composes: a then b equals a+b within 1e-12 per state, across 1 to 1e9 years" {
- let r=transitionRates(lonely());
- foldl(\ok ab. match ab {(a,b) => ok && maxDiff(propagate(propagate(mixed(),r,a),r,b),propagate(mixed(),r,a+b))<=1e-12},true,
+ let r=ratesFor(lonely());
+ foldl(\ok ab. match ab {(a,b) => ok && maxDiff(chainOf(chainOf(mixed(),r,a),r,b),chainOf(mixed(),r,a+b))<=1e-12},true,
   [(1.0,2.0),(212.0,655.0),(1e3,9e3),(4.2e4,1.3e5),(1e5,1e5),(1e6,3e6),(1e7,5e8),(1e9,1.0),(0.0,777.0)])
 }
 test "baseline rates: 1/L exits split .75/.15/.10, 1/E[lead], 1/E[traces], epoch-0 emergence hazard" {
  let p=lonely();
- let r=transitionRates(p);
+ let r=ratesFor(p);
  validRates(r) && validParams(p)
  && near(rateBetween(r,Technological,Remnant)*p.lifetimeYr,0.75,1e-15) && near(rateBetween(r,Technological,Ecocide)*p.lifetimeYr,0.15,1e-15)
  && near(rateBetween(r,Technological,Transcended)*p.lifetimeYr,0.10,1e-15)
  && near(rateBetween(r,PreTech,Technological)*9e4/log(10.0),1.0,1e-14)
  && near(rateBetween(r,Remnant,Complex)*(1e7-1e3)/log(1e4),1.0,1e-14)
- && rateBetween(r,Complex,PreTech)==emergenceRatePerYr(p)
+ && rateBetween(r,Complex,PreTech)>2.0e-12 && rateBetween(r,Complex,PreTech)<2.01e-12
  && rateBetween(r,Sterile,Microbial)==0.0 && rateBetween(r,Microbial,Complex)==0.0
  && rateBetween(r,Remnant,Technological)==0.0 && rateBetween(r,Ecocide,Complex)==0.0 && rateBetween(r,Transcended,Remnant)==0.0
 }
@@ -82,19 +91,20 @@ test "baseline rates: 1/L exits split .75/.15/.10, 1/E[lead], 1/E[traces], epoch
 pure func small() -> Params = {fLife:1.0,fComplex:1.0,fMinds:1.0,fTech:0.5,lifetimeYr:4e5,windowYr:1e6,remnantLoYr:5e4,remnantHiYr:5e4}
 test "emergence hazard equals the hand-computed epoch-0 value; zero where no lineage is possible" {
  let lead=9e4/log(10.0);
- near(emergenceRatePerYr(small()),0.5/1e6/(0.5+0.5*(0.5-lead/1e6+0.0375)),1e-20)
- && emergenceRatePerYr({small()|fTech:0.0})==0.0 && emergenceRatePerYr({small()|fComplex:0.0,fMinds:0.0})==0.0
+ near(rateBetween(ratesFor(small()),Complex,PreTech),0.5/1e6/(0.5+0.5*(0.5-lead/1e6+0.0375)),1e-20)
+ && rateBetween(ratesFor({small()|fTech:0.0}),Complex,PreTech)==0.0
+ && rateBetween(ratesFor({small()|fComplex:0.0,fMinds:0.0}),Complex,PreTech)==0.0
 }
 pure func times() -> [float] = [1.0,1e2,1e3,1e4,5e4,1e5,2e5,1e6,1e7,1e8,1e9]
 pure func fixedAt(p:Params,r:Rates,s:PlanetState) -> bool =
- foldl(\ok t. ok && propagate(certain(s),r,t)==certain(s) && historyKernel(p,s,t)==certain(s),true,times())
+ foldl(\ok t. ok && chainOf(certain(s),r,t)==certain(s) && kernelOf(p,s,t)==certain(s),true,times())
 -- Terminal probabilities never fall as the interval grows; Sterile and
 -- Microbial keep exactly what they had.
 pure func rising(p:Params,r:Rates,b0:Belief,ts:[float],prevChain:Belief,prevExact:Belief) -> bool = match ts {
  [] => true,
  t::rest => {
-  let b=propagate(b0,r,t);
-  let x=propagateExact(b0,p,t);
+  let b=chainOf(b0,r,t);
+  let x=exactOf(b0,p,t);
   validBelief(b) && validBelief(x)
   && b.ecocide>=prevChain.ecocide && b.transcended>=prevChain.transcended
   && x.ecocide>=prevExact.ecocide && x.transcended>=prevExact.transcended
@@ -104,7 +114,7 @@ pure func rising(p:Params,r:Rates,b0:Belief,ts:[float],prevChain:Belief,prevExac
 }
 test "terminal states are absorbing and never lose probability, in the chain and in the sampler's law" {
  let p=lonely();
- let r=transitionRates(p);
+ let r=ratesFor(p);
  fixedAt(p,r,Sterile) && fixedAt(p,r,Microbial) && fixedAt(p,r,Transcended) && fixedAt(p,r,Ecocide)
  && rising(p,r,mixed(),times(),mixed(),mixed())
  && rising(p,r,certain(Technological),times(),certain(Technological),certain(Technological))
@@ -113,44 +123,44 @@ test "terminal states are absorbing and never lose probability, in the chain and
 -- seen Technological, the time left is uniform on [0,L].
 test "exact kernel from Technological: (1-x/L)+ survives, .15/.10 of the ended share, none left at x=L" {
  let p=lonely();
- let half=historyKernel(p,Technological,5e4);
- let done=historyKernel(p,Technological,1e5);
- let late=historyKernel(p,Technological,1e9);
+ let half=kernelOf(p,Technological,5e4);
+ let done=kernelOf(p,Technological,1e5);
+ let late=kernelOf(p,Technological,1e9);
  let traces=(1e7-1e3)/log(1e4);
  near(half.technological,0.5,1e-15) && near(half.ecocide,0.075,1e-15) && near(half.transcended,0.05,1e-15)
  && near(half.remnant+half.complex,0.375,1e-15)
  && near(half.remnant,0.75/1e5*(5e4-1e3+5e4*log(1e7/5e4))/log(1e4),1e-14)
  && done.technological==0.0 && near(done.ecocide,0.15,1e-15) && near(done.transcended,0.10,1e-15)
  && late.remnant==0.0 && near(late.complex,0.75,1e-15)
- && near(historyKernel(p,Remnant,1e5).remnant,1.0-(1e5-1e3+1e5*log(1e7/1e5))/log(1e4)/traces,1e-14)
- && historyKernel(p,Remnant,1e7).remnant==0.0 && historyKernel(p,Remnant,1e7).complex==1.0
+ && near(kernelOf(p,Remnant,1e5).remnant,1.0-(1e5-1e3+1e5*log(1e7/1e5))/log(1e4)/traces,1e-14)
+ && kernelOf(p,Remnant,1e7).remnant==0.0 && kernelOf(p,Remnant,1e7).complex==1.0
 }
 test "exact kernel from PreTech: residual lead E[(D-x)+]/E[D]; the whole lead is over by 1e5 yr" {
  let p=lonely();
  let lead=9e4/log(10.0);
- let early=historyKernel(p,PreTech,5e3);
- let mid=historyKernel(p,PreTech,4e4);
- let over=historyKernel(p,PreTech,1e5);
+ let early=kernelOf(p,PreTech,5e3);
+ let mid=kernelOf(p,PreTech,4e4);
+ let over=kernelOf(p,PreTech,1e5);
  near(early.preTech,1.0-5e3/lead,1e-15) && near(early.technological,5e3/lead,1e-15)
  && near(mid.preTech,1.0-(4e4-1e4+4e4*log(1e5/4e4))/log(10.0)/lead,1e-14) && near(mid.technological,1.0-mid.preTech,1e-15)
  && over.preTech==0.0 && near(over.technological,1.0,1e-15)
- && near(historyKernel(p,PreTech,2e5).technological,0.0,1e-15) && near(historyKernel(p,PreTech,2e5).ecocide,0.15,1e-15)
+ && near(kernelOf(p,PreTech,2e5).technological,0.0,1e-15) && near(kernelOf(p,PreTech,2e5).ecocide,0.15,1e-15)
 }
 -- The chain is not the sampler. These gaps are properties of a memoryless
 -- model, pinned here so nobody mistakes one for the other (see the header).
 test "known gap: the chain keeps exp(-1) Technological at x=L, where the sampler has none" {
  let p=lonely();
- let chainB=propagate(certain(Technological),transitionRates(p),p.lifetimeYr);
- near(chainB.technological,exp(-1.0),1e-9) && historyKernel(p,Technological,p.lifetimeYr).technological==0.0
- && near(propagate(certain(Technological),transitionRates(p),5e4).technological-historyKernel(p,Technological,5e4).technological,exp(-0.5)-0.5,1e-9)
+ let chainB=chainOf(certain(Technological),ratesFor(p),p.lifetimeYr);
+ near(chainB.technological,exp(-1.0),1e-9) && kernelOf(p,Technological,p.lifetimeYr).technological==0.0
+ && near(chainOf(certain(Technological),ratesFor(p),5e4).technological-kernelOf(p,Technological,5e4).technological,exp(-0.5)-0.5,1e-9)
 }
 test "propagateExact is linear in the belief and mixes the kernels" {
  let p=lonely();
- let b=propagateExact(mixed(),p,3e4);
- let k=historyKernel(p,Technological,3e4);
- let c=historyKernel(p,PreTech,3e4);
+ let b=exactOf(mixed(),p,3e4);
+ let k=kernelOf(p,Technological,3e4);
+ let c=kernelOf(p,PreTech,3e4);
  validBelief(b) && near(sumOf(b),1.0,1e-15)
- && near(b.technological,0.3*k.technological+0.15*c.technological+0.2*historyKernel(p,Complex,3e4).technological,1e-15)
+ && near(b.technological,0.3*k.technological+0.15*c.technological+0.2*kernelOf(p,Complex,3e4).technological,1e-15)
  && near(b.sterile,0.05,0.0) && near(b.microbial,0.1,0.0)
 }
 property "both propagators return a valid distribution for any interval and mixture" {
@@ -160,11 +170,84 @@ property "both propagators return a valid distribution for any interval and mixt
   let years=exp(intToFloat(m%2311)/2310.0*25.0)-1.0;
   let b={sterile:0.1*w,microbial:0.1*(1.0-w),complex:0.3*w,preTech:0.3*(1.0-w),technological:0.25,remnant:0.25,transcended:0.1*w,ecocide:0.1*(1.0-w)};
   let p={lonely()|lifetimeYr:exp(intToFloat(m%13)*1.5+4.0),fMinds:0.3,fTech:w};
-  validBelief(propagate(b,transitionRates(p),years)) && validBelief(propagateExact(b,p,years))
-  && validBelief(historyKernel(p,Complex,years))
+  validBelief(chainOf(b,ratesFor(p),years))
+  && (if exactDomain(p,years) then validBelief(kernelOf(p,Complex,years))
+    && (if p.lifetimeYr<p.windowYr/2.0 then validBelief(exactOf(b,p,years)) else propagateExact(b,p,years)==Err(SeenImpossible))
+   else propagateExact(b,p,years)==Err(OutsideExactDomain) && historyKernel(p,Complex,years)==Err(OutsideExactDomain))
  }
 }
 
+-- NOT COMPUTED IS NEVER "UNCHANGED". Every refusal is a distinct Err.
+pure func narrow() -> Params = {lonely()|windowYr:1.5e5}
+pure func noTraces() -> Params = {fLife:1.0,fComplex:1.0,fMinds:1.0,fTech:0.7,lifetimeYr:3e5,windowYr:4e5,remnantLoYr:1e3,remnantHiYr:1e5}
+pure func skewed() -> Belief = {mixed()|sterile:0.5}
+pure func refusesRates(p:Params) -> bool = match transitionRates(p) {Err(e) => e==InvalidParams, Ok(r) => false}
+test "invalid parameters, beliefs, rates and years are refused with their own error" {
+ let bad={lonely()|fMinds:2.0};
+ let r=ratesFor(lonely());
+ refusesRates(bad) && historyKernel(bad,Technological,10.0)==Err(InvalidParams)
+ && propagateExact(mixed(),bad,10.0)==Err(InvalidParams)
+ && refusesRates({lonely()|lifetimeYr:0.0}) && refusesRates({lonely()|remnantLoYr:2e7}) && not refusesRates(lonely())
+ && propagate(skewed(),r,10.0)==Err(InvalidBelief) && propagateExact(skewed(),lonely(),10.0)==Err(InvalidBelief)
+ && propagate(skewed(),r,0.0)==Err(InvalidBelief) && propagateExact(skewed(),lonely(),0.0)==Err(InvalidBelief)
+ && propagate(mixed(),{q:[]},10.0)==Err(InvalidRates) && propagate(mixed(),ratesOf([{src:Complex,dst:PreTech,perYr:-1.0}]),10.0)==Err(InvalidRates)
+ && propagate(mixed(),r,-1.0)==Err(InvalidYears) && propagate(mixed(),r,0.0/0.0)==Err(InvalidYears) && propagate(mixed(),r,2e100)==Err(InvalidYears)
+ && propagateExact(mixed(),lonely(),-1.0)==Err(InvalidYears) && historyKernel(lonely(),Remnant,0.0/0.0)==Err(InvalidYears)
+}
+-- A universe valid for history (and for 0.1.0) with a window under 2e5 years:
+-- the chain still answers; the exact path says it cannot, at every interval.
+test "a window narrower than 2e5 yr: the chain answers, the exact path reports OutsideExactDomain" {
+ validParams(narrow()) && not exactDomain(narrow(),0.0) && not exactDomain(narrow(),10.0)
+ && validRates(ratesFor(narrow())) && validBelief(chainOf(mixed(),ratesFor(narrow()),1e4))
+ && chainOf(mixed(),ratesFor(narrow()),1e4)!=mixed()
+ && historyKernel(narrow(),Technological,10.0)==Err(OutsideExactDomain)
+ && propagateExact(mixed(),narrow(),10.0)==Err(OutsideExactDomain) && propagateExact(mixed(),narrow(),0.0)==Err(OutsideExactDomain)
+}
+test "the exact domain ends at years = windowYr/2 - 1e5: Ok there, OutsideExactDomain one year later" {
+ let edge=5e9/2.0-1e5;
+ exactDomain(lonely(),edge) && not exactDomain(lonely(),edge+1.0) && not exactDomain(lonely(),-1.0)
+ && not exactDomain({lonely()|fMinds:2.0},1.0) && exactDomain(lonely(),0.0)
+ && validBelief(kernelOf(lonely(),Complex,edge)) && validBelief(exactOf(mixed(),lonely(),edge))
+ && historyKernel(lonely(),Complex,edge+1.0)==Err(OutsideExactDomain) && historyKernel(lonely(),Technological,edge+1.0)==Err(OutsideExactDomain)
+ && propagateExact(mixed(),lonely(),edge+1.0)==Err(OutsideExactDomain) && propagateExact(certain(Sterile),lonely(),1e10)==Err(OutsideExactDomain)
+}
+-- With L >= W/2 no epoch can have ended by epoch 0, so a Remnant cannot be
+-- seen there and its law is undefined. Other states are unaffected, and a
+-- belief with no Remnant weight is still propagated.
+test "a state the parameters make impossible at epoch 0 is SeenImpossible, only where it carries weight" {
+ let noRemnant={sterile:0.1,microbial:0.1,complex:0.3,preTech:0.2,technological:0.3,remnant:0.0,transcended:0.0,ecocide:0.0};
+ exactDomain(noTraces(),5e4) && historyKernel(noTraces(),Remnant,5e4)==Err(SeenImpossible)
+ && propagateExact(mixed(),noTraces(),5e4)==Err(SeenImpossible)
+ && validBelief(kernelOf(noTraces(),Technological,5e4)) && validBelief(exactOf(noRemnant,noTraces(),5e4))
+}
+-- The exact law is for ONE call over the whole interval. The labels carry no
+-- ages, so a second call restarts every clock. Seen Technological at baseline,
+-- L = 1e5: after 1e5 years none is left (the epoch has certainly ended); two
+-- steps of 5e4 years leave 0.5*0.5 = 0.25. Do not make it composable.
+test "propagateExact must not be chained: two half-steps differ from one call by 0.25" {
+ let p=lonely();
+ let once=exactOf(certain(Technological),p,1e5);
+ let twice=exactOf(exactOf(certain(Technological),p,5e4),p,5e4);
+ once.technological==0.0 && near(twice.technological,0.25,1e-6) && maxDiff(once,twice)>0.24
+ && near(maxDiff(chainOf(chainOf(certain(Technological),ratesFor(p),5e4),ratesFor(p),5e4),chainOf(certain(Technological),ratesFor(p),1e5)),0.0,1e-12)
+}
+-- Branches the baseline never reaches, by hand. capped(): L=4e5, W=1e6, so
+-- only ends within cap = W/2-L = 1e5 yr before epoch 0 exist; traces fixed
+-- at 3e5 yr outlive that. Seen Remnant, the age is uniform on [0,1e5], so the
+-- time left is uniform on [2e5,3e5].
+pure func capped() -> Params = {fLife:1.0,fComplex:1.0,fMinds:1.0,fTech:1.0,lifetimeYr:4e5,windowYr:1e6,remnantLoYr:3e5,remnantHiYr:3e5}
+test "seen Remnant where the window clips the traces: time left uniform on [2e5,3e5]" {
+ kernelOf(capped(),Remnant,1e5).remnant==1.0 && near(kernelOf(capped(),Remnant,2.5e5).remnant,0.5,1e-15)
+ && near(kernelOf(capped(),Remnant,2.2e5).complex,0.2,1e-15) && kernelOf(capped(),Remnant,3e5).remnant==0.0
+}
+-- noTraces(): L=3e5 > W/2=2e5. Seen Technological, onset lies in the last 2e5
+-- years of the window's first half, so the time left is uniform on [1e5,3e5]:
+-- nothing ends in the first 1e5 years.
+test "seen Technological with L > W/2: time left uniform on [L-W/2, L]" {
+ kernelOf(noTraces(),Technological,5e4).technological==1.0 && kernelOf(noTraces(),Technological,1e5).technological==1.0
+ && near(kernelOf(noTraces(),Technological,9e4).technological,1.0,0.0)
+ && near(kernelOf({noTraces()|windowYr:1e6},Technological,2e5).technological,1.0/3.0,1e-15)
+}
 -- THE SAMPLER ITSELF. Seeded histories are drawn with historyOf, kept when
 -- stateAt(h,0) is the seen state, and tallied at two later times with stateAt.
 -- Uniforms come from the Park-Miller generator (48271 mod 2^31-1), seed below;
@@ -209,43 +292,43 @@ pure func remSample() -> Tally = sample(lineages(),Remnant,0.5-(1e5+1e7)/5e9,0.5
 pure func comSample() -> Tally = sample(busy(),Complex,0.0,1.0,2e5,8e5,6000)
 test "sampler vs propagateExact: seen Technological, 5e4 and 2e5 years on (4000 histories)" {
  let t=techSample();
- t.n==4000 && agrees(propagateExact(certain(Technological),lineages(),5e4),t.a,t.n)
- && agrees(propagateExact(certain(Technological),lineages(),2e5),t.b,t.n)
+ t.n==4000 && agrees(exactOf(certain(Technological),lineages(),5e4),t.a,t.n)
+ && agrees(exactOf(certain(Technological),lineages(),2e5),t.b,t.n)
 }
 test "sampler vs propagateExact: seen PreTech, 4e4 and 3e5 years on (8000 draws)" {
  let t=preSample();
- t.n>2500 && agrees(propagateExact(certain(PreTech),lineages(),4e4),t.a,t.n)
- && agrees(propagateExact(certain(PreTech),lineages(),3e5),t.b,t.n)
+ t.n>2500 && agrees(exactOf(certain(PreTech),lineages(),4e4),t.a,t.n)
+ && agrees(exactOf(certain(PreTech),lineages(),3e5),t.b,t.n)
 }
 test "sampler vs propagateExact: seen Remnant, 1e5 and 3e6 years on (24000 draws, about 1950 kept)" {
  let t=remSample();
- t.n>1500 && agrees(propagateExact(certain(Remnant),lineages(),1e5),t.a,t.n)
- && agrees(propagateExact(certain(Remnant),lineages(),3e6),t.b,t.n)
+ t.n>1500 && agrees(exactOf(certain(Remnant),lineages(),1e5),t.a,t.n)
+ && agrees(exactOf(certain(Remnant),lineages(),3e6),t.b,t.n)
 }
 test "sampler vs propagateExact: seen Complex with emergence, 2e5 and 8e5 years on (6000 draws)" {
  let t=comSample();
- t.n>3000 && agrees(propagateExact(certain(Complex),busy(),2e5),t.a,t.n)
- && agrees(propagateExact(certain(Complex),busy(),8e5),t.b,t.n)
+ t.n>3000 && agrees(exactOf(certain(Complex),busy(),2e5),t.a,t.n)
+ && agrees(exactOf(certain(Complex),busy(),8e5),t.b,t.n)
 }
 -- The same samples against the Markov chain. It is outside the tolerance at
 -- every lineage pair: a property of the memoryless model, not a defect to tune.
 test "sampler vs propagate: the chain misses the same tolerance at all six lineage pairs" {
- let r=transitionRates(lineages());
+ let r=ratesFor(lineages());
  let t=techSample();
  let q=preSample();
  let m=remSample();
- not agrees(propagate(certain(Technological),r,5e4),t.a,t.n) && not agrees(propagate(certain(Technological),r,2e5),t.b,t.n)
- && not agrees(propagate(certain(PreTech),r,4e4),q.a,q.n) && not agrees(propagate(certain(PreTech),r,3e5),q.b,q.n)
- && not agrees(propagate(certain(Remnant),r,1e5),m.a,m.n) && not agrees(propagate(certain(Remnant),r,3e6),m.b,m.n)
+ not agrees(chainOf(certain(Technological),r,5e4),t.a,t.n) && not agrees(chainOf(certain(Technological),r,2e5),t.b,t.n)
+ && not agrees(chainOf(certain(PreTech),r,4e4),q.a,q.n) && not agrees(chainOf(certain(PreTech),r,3e5),q.b,q.n)
+ && not agrees(chainOf(certain(Remnant),r,1e5),m.a,m.n) && not agrees(chainOf(certain(Remnant),r,3e6),m.b,m.n)
 }
 -- Probe for tools/propagate_validation.md: one line per (seen, years, state)
 -- with the sampler's frequency, the exact law and the chain. Not a public export.
 pure func rowsFor(name:string,years:float,c:[int],n:int,x:Belief,m:Belief) -> string =
  foldl(\acc i. "${acc}${name} ${years} n=${n} state${i} sampler ${intToFloat(nth_or(c,i,0))/intToFloat(n)} exact ${nth_or(toL(x),i,0.0)} chain ${nth_or(toL(m),i,0.0)}\n","",range(0,8))
 pure func pairRows(name:string,p:Params,seen:PlanetState,t:Tally,ya:float,yb:float) -> string {
- let r=transitionRates(p);
- let first=rowsFor(name,ya,t.a,t.n,propagateExact(certain(seen),p,ya),propagate(certain(seen),r,ya));
- let second=rowsFor(name,yb,t.b,t.n,propagateExact(certain(seen),p,yb),propagate(certain(seen),r,yb));
+ let r=ratesFor(p);
+ let first=rowsFor(name,ya,t.a,t.n,exactOf(certain(seen),p,ya),chainOf(certain(seen),r,ya));
+ let second=rowsFor(name,yb,t.b,t.n,exactOf(certain(seen),p,yb),chainOf(certain(seen),r,yb));
  "${first}${second}"
 }
 export pure func comparisonProbe() -> string {
@@ -261,12 +344,12 @@ pure func floats(v:[float]) -> string = foldl(\acc x. "${acc} ${x}","",v)
 pure func seenName(s:PlanetState) -> string = match s {Complex=>"Complex",PreTech=>"PreTech",Technological=>"Technological",Remnant=>"Remnant",_=>"Other"}
 export pure func oracleProbe() -> string {
  let p=lonely();
- let r=transitionRates(p);
+ let r=ratesFor(p);
  let years=[1.0,212.0,867.0,1e4,5e4,1e5,3e5,1e6,3e6,2e7,1e9,1e11];
- let chainRows=foldl(\acc t. "${acc}chain ${t}${floats(toL(propagate(mixed(),r,t)))}\n","",years);
- let exactRows=foldl(\acc s. foldl(\inner t. "${inner}exact ${seenName(s)} ${t}${floats(toL(historyKernel(p,s,t)))}\n",acc,years),"",
+ let chainRows=foldl(\acc t. "${acc}chain ${t}${floats(toL(chainOf(mixed(),r,t)))}\n","",years);
+ let exactRows=foldl(\acc s. foldl(\inner t. "${inner}exact ${seenName(s)} ${t}${floats(toL(kernelOf(p,s,t)))}\n",acc,[1.0,212.0,867.0,1e4,5e4,1e5,3e5,1e6,3e6,2e7,1e9,2.4e9]),"",
   [Technological,PreTech,Remnant]);
- let busyRows=foldl(\acc t. "${acc}busy ${t}${floats(toL(historyKernel(busy(),Complex,t)))}\n","",[1e4,2e5,8e5]);
+ let busyRows=foldl(\acc t. "${acc}busy ${t}${floats(toL(kernelOf(busy(),Complex,t)))}\n","",[1e4,2e5,8e5]);
  "rates ${rateBetween(r,Complex,PreTech)} ${rateBetween(r,PreTech,Technological)} ${rateBetween(r,Remnant,Complex)}\n${chainRows}${exactRows}${busyRows}"
 }
 -- Probe: the largest per-state gap between the chain and the exact law at
@@ -275,14 +358,24 @@ export pure func oracleProbe() -> string {
 pure func scanGap(p:Params,r:Rates,s:PlanetState) -> (float,float) =
  foldl(\best i. match best {(gap,at) => {
   let t=exp(intToFloat(i)/40.0*log(10.0));
-  let d=maxDiff(propagate(certain(s),r,t),historyKernel(p,s,t));
+  let d=maxDiff(chainOf(certain(s),r,t),kernelOf(p,s,t));
   if d>gap then (d,t) else (gap,at)
  }},(0.0,0.0),range(0,361))
 export pure func gapProbe() -> string {
  let p=lonely();
- let r=transitionRates(p);
+ let r=ratesFor(p);
  let scan=foldl(\acc s. match scanGap(p,r,s) {(gap,at) => "${acc}worst ${seenName(s)} gap ${gap} at ${at} yr\n"},"",[Technological,PreTech,Remnant,Complex]);
- let short=foldl(\acc f. "${acc}fraction ${f} of L: Technological gap ${maxDiff(propagate(certain(Technological),r,f*p.lifetimeYr),historyKernel(p,Technological,f*p.lifetimeYr))} PreTech gap ${maxDiff(propagate(certain(PreTech),r,f*p.lifetimeYr),historyKernel(p,PreTech,f*p.lifetimeYr))} Remnant gap ${maxDiff(propagate(certain(Remnant),r,f*p.lifetimeYr),historyKernel(p,Remnant,f*p.lifetimeYr))}\n","",
+ let short=foldl(\acc f. "${acc}fraction ${f} of L: Technological gap ${maxDiff(chainOf(certain(Technological),r,f*p.lifetimeYr),kernelOf(p,Technological,f*p.lifetimeYr))} PreTech gap ${maxDiff(chainOf(certain(PreTech),r,f*p.lifetimeYr),kernelOf(p,PreTech,f*p.lifetimeYr))} Remnant gap ${maxDiff(chainOf(certain(Remnant),r,f*p.lifetimeYr),kernelOf(p,Remnant,f*p.lifetimeYr))}\n","",
   [0.001,0.01,0.03,0.1,0.3,1.0,3.0]);
  "${scan}${short}"
 }
+-- Timing probes for tools/propagate_validation.md: run each under `time`.
+-- timingNone does the setup only; the others add 1000 calls each.
+pure func timed(calls:int,f:int -> float) -> string = "${foldl(\acc i. acc+f(i),0.0,range(0,calls))}"
+export pure func timingNone() -> string = timed(0,\i. chainOf(mixed(),ratesFor(lonely()),867.0).technological)
+export pure func timingChain() -> string {
+ let r=ratesFor(lonely());
+ timed(1000,\i. chainOf(mixed(),r,867.0+intToFloat(i)).technological)
+}
+export pure func timingExact() -> string = timed(1000,\i. exactOf(mixed(),lonely(),867.0+intToFloat(i)).technological)
+export pure func timingExactQuadrature() -> string = timed(1000,\i. exactOf(mixed(),lonely(),3e5+intToFloat(i)).remnant)
