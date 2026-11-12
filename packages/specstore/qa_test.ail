@@ -6,8 +6,9 @@ import std/yaml (decode as yamlDecode)
 import std/json (Json, JNull)
 import std/list (map, length)
 import ./rules (worstOutcome, visitOutcome)
-import ./model (Std, Spec, toStd, toSpec)
-import ./qa (seenOf, outcomeFor, outcomeWith, visitsOf, visitChecks, waitingForRelease, checksGa4)
+import ./model (Std, Spec, Event, toStd, toSpec)
+import ./qa (seenOf, outcomeFor, outcomeWith, visitsOf, visitChecks, waitingForRelease, checksGa4, eventCounts, checkOf, roundYaml)
+import std/string (find)
 
 func y(s: string) -> Json = match yamlDecode(s) { Ok(j) => j, Err(_) => JNull }
 
@@ -119,4 +120,43 @@ test "site.checks without ga4 turns GA4 off; no checks list keeps it on" {
 
 test "a change not yet live waits for release; a live one is checked" {
   match shop("").events { [a, b] => !waitingForRelease(a) && waitingForRelease(b), _ => false }
+}
+
+func firstEvent(sp: Spec) -> Event = match sp.events { [x, ..._] => x }
+
+func counts(pushes: string) -> (int, int) = {
+  let sp = spec(v01());
+  eventCounts(std(), visitsOf(sp), seenOf(seen("ok", pushes, gaBoth())), firstEvent(sp))
+}
+
+func note(pushes: string) -> string = {
+  let sp = spec(v01());
+  match outcomeFor(std(), visitsOf(sp), seenOf(seen("ok", pushes, gaBoth())), firstEvent(sp)) { (_, n) => n }
+}
+
+test "a full match counts every parameter" { counts(good()) == (2, 2) }
+
+test "one fixed value wrong: one of two parameters matches" {
+  counts("{item: {event: cta_click, cta: {label: Apply, type: secondary}}}") == (1, 2)
+}
+
+test "pushed nowhere: none of the parameters arrived" { counts("{item: {event: other}}") == (0, 2) }
+
+test "a blocked visit counts nothing" {
+  let sp = spec(v01());
+  eventCounts(std(), visitsOf(sp), seenOf(seen("blocked", "", "")), firstEvent(sp)) == (-1, -1)
+}
+
+test "a failure leads with what did match" { find(note("{item: {event: cta_click, cta: {label: Apply}}}"), "V01: 1 of 2 parameters match; ") == 0 }
+
+test "a match says how many parameters it checked" { find(note(good()), "(2 of 2 parameters match)") > 0 }
+
+test "every severity has a written verdict" {
+  checkOf(0) == "matched" && checkOf(1) == "could not check" && checkOf(2) == "gaps found" && checkOf(-1) == "no visit"
+}
+
+test "the round carries the verdict and the counts as written values" {
+  let r = roundYaml(1, "1.0", "2026-11-12", [("E01", "fail", "gaps found", (1, 2), "c"), ("E02", "not tested", "matched", (-1, -1), "d")]);
+  find(r, "{event: E01, state: fail, check: \"gaps found\", matched: 1, expected: 2, comment: \"c\"}") > 0 &&
+  find(r, "{event: E02, state: not tested, check: \"matched\", comment: \"d\"}") > 0
 }
