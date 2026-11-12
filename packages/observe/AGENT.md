@@ -91,6 +91,28 @@ Do NOT use it for:
   direction as −heading: leaving home reads e^−φ, continuous with just outside,
   and a ship at rest reads 1.
 
+## Contracts are not checked unless you ask
+
+Every `requires` and `ensures` in this package is checked only when the
+program runs with `--verify-contracts`. In a normal run nothing stops a call
+outside a function's domain, and the result is silently wrong, not an error.
+Validate inputs yourself. The cases that matter:
+
+- `posterior` with a prior that is not eight non-negative numbers summing to
+  1: a short list gives a short, meaningless belief. Check `validBelief(prior)`.
+- `planckPhotonRadiance`, `photonFlux`, `photonRate`, `planetBudget` with a
+  band whose long edge × T exceeds 0.7 m K: the series stops at 2500 terms
+  and the result is silently too small.
+- `bandOf` with a width below 1e-13 of the centre, or `resolutionElement`
+  with R above 1e12: the two edges can round to the same wavelength and the
+  band holds no photons. Check `narrowBandOk(centreM, widthM)`.
+- `timeToSnrS` with a signal rate of 0, or any rate, distance or aperture
+  that is negative or zero: division by zero or a negative time.
+- `integratedSnr` and `reachM` with B t < 1: the radiometer equation does
+  not hold there.
+- `wasteHeatExcess` with γ ≥ 1, and `wasteHeatFractionFor` with an excess
+  above `maxExcessRatio()` (1e12) × K: the fraction rounds to exactly 1.
+
 ## Pitfalls
 
 - `triangleExcess` is not the wait when b lies on a beam's ray: a port beyond
@@ -125,7 +147,11 @@ Do NOT use it for:
 - `belief` does not import `sunholo/worlds`. Its `State` has the same
   constructor names; import one set of constructors and map by `stateIndex`.
 - `posterior`'s `movedMost` is an index into the list you gave (−1 if nothing
-  moved the prior).
+  moved the prior). If the same observation appears more than once it is the
+  lowest such index, so the index changes when you reorder the list, though
+  the observation it names does not.
+- Any number of looks is safe: `posterior` sums log-odds per signal, so 250
+  looks at the cap neither underflow nor fall back to the prior.
 
 ## Example
 
@@ -161,12 +187,14 @@ pLife(posterior([0.90, 0.07, 0.02, 0.004, 0.003, 0.002, 0.0005, 0.0005], HostM, 
 `ailang test --package .` (and `--strict-bytecode`) runs:
 - `lightcone_test.ail`: RS-26..RS-37 against closed forms, the at-home guard,
   the 1e-8 rad resolution and the α Cen news epoch.
+- `constants_test.ail`: every constant, bit for bit.
 - `photon_test.ail`, `link_test.ail`, `wasteheat_test.ail`: every row
   OB-1..OB-52 of stapledons-design `physics/observation.md`, each passing when
   the computed value rounded to the row's printed significant figures equals
   the printed value; and the band integral against Simpson's rule.
 - `belief_test.ail`: the posterior sums to 1, no observations return the
-  prior, the false-positive bound, quiet worlds, order independence.
+  prior, the false-positive bound, quiet worlds, order independence, and
+  hundreds of looks without underflow.
 
 `_smoke.ail` prints `OK: ...` in a clean workdir, and its `linkProbe`,
 `budgetProbe` and `beliefProbe` must print identical bytes on the strict VM

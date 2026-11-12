@@ -44,8 +44,16 @@ name; `lightcone` still works at c = 1 in light-years. No new dependency.
 - Tests: `photon_test.ail` (OB-1..OB-27, OB-41..OB-50, the series against Simpson's rule),
   `link_test.ail` (OB-28..OB-37, OB-51, OB-52), `wasteheat_test.ail` (OB-38..OB-40),
   `belief_test.ail` (normalisation, the prior-only case, the false-positive bound, quiet worlds,
-  order independence). 110 tests, the same on the strict bytecode VM and the interpreter.
+  order independence, 250 looks without underflow), `constants_test.ail` (every constant bit for
+  bit). 130 tests, the same on the strict bytecode VM and the interpreter.
   `_smoke.ail` gains `budgetProbe` and `beliefProbe`, byte-identical on both.
+- `posterior` sums each signal's looks as log-odds and never forms their product, so no number of
+  looks underflows; the factor dropped is the same for every state and cancels on normalising.
+- Domains that hold in float64, not only over the reals: `bandOf` needs a width of at least 1e-13
+  of the centre (`narrowBandOk`), `resolutionElement` R ≤ 1e12, and `wasteHeatFractionFor` an
+  excess of at most `maxExcessRatio()` (1e12) × K.
+- Contracts are checked only under `--verify-contracts`; AGENT.md lists the inputs a caller must
+  validate.
 - Contracts state the physical domains (positive distances and apertures, throughput in [0, 1],
   B t ≥ 1) and hold at run time over the probes (`--verify-contracts`). They are runtime
   assertions for the transcendental formulas, not SMT proofs. Known verifier issue on AILANG
