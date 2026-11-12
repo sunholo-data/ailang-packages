@@ -1,0 +1,40 @@
+-- Check values for sunholo/observe/wasteheat: stapledons-design
+-- physics/observation.md (baseline-2026.11) rows OB-38..OB-40.
+-- A row passes as the registry says (§4): the computed value, rounded to the
+-- row's printed significant figures, equals the printed value.
+
+module sunholo/observe/wasteheat_test
+
+import std/math (floor, log10, pow, round, intToFloat)
+import pkg/sunholo/relativity/hyper (absf)
+import ./constants (solarTeffK)
+import ./wasteheat (wasteHeatFactor, wasteHeatExcess, wasteHeatFractionFor)
+
+pure func whRoundSf(x: float, sf: int) -> float =
+  if x == 0.0 then 0.0
+  else {
+    let q = pow(10.0, floor(log10(absf(x))) - intToFloat(sf) + 1.0);
+    round(x / q) * q
+  }
+pure func whRow(got: float, printed: float, sf: int) -> bool =
+  absf(whRoundSf(got, sf) - printed) <= 0.000000001 * absf(printed)
+pure func whRel(got: float, want: float, tol: float) -> bool = absf(got - want) <= tol * absf(want)
+pure func whTenUm() -> float = 0.00001
+
+test "OB-38: waste-heat factor K at 10 um, T_w = 300 K, Sun-like star is 323.2" {
+  whRow(wasteHeatFactor(whTenUm(), solarTeffK(), 300.0), 323.2, 4)
+}
+test "OB-39: excess E at 10 um for gamma = 0.01 is 3.265" {
+  whRow(wasteHeatExcess(0.01, whTenUm(), solarTeffK(), 300.0), 3.265, 4)
+}
+test "OB-40: the smallest gamma whose excess at 10 um reaches 0.1 is 3.093e-4" {
+  whRow(wasteHeatFractionFor(0.1, whTenUm(), solarTeffK(), 300.0), 3.093e-4, 4)
+}
+test "wasteHeatFractionFor inverts wasteHeatExcess" {
+  whRel(wasteHeatExcess(wasteHeatFractionFor(0.1, whTenUm(), solarTeffK(), 300.0), whTenUm(), solarTeffK(), 300.0), 0.1, 0.000000000001) &&
+  whRel(wasteHeatFractionFor(wasteHeatExcess(0.25, whTenUm(), 4000.0, 250.0), whTenUm(), 4000.0, 250.0), 0.25, 0.000000000001)
+}
+test "waste heat at the star's own temperature has factor 1; no absorbed fraction, no excess" {
+  whRel(wasteHeatFactor(whTenUm(), 5000.0, 5000.0), 1.0, 0.000000000001) &&
+  wasteHeatExcess(0.0, whTenUm(), solarTeffK(), 300.0) == 0.0
+}
