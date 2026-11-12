@@ -1,5 +1,5 @@
 module sunholo/worlds/selection_test
-import ./selection (SelectionError,BadUniforms,BadBaseline,UnsupportedPrior,BadParams,NotADial,BadSetting,BadGrid,BadWidths,BadThreshold,ZeroProduct,ZeroProbability,NotConverged,Band,Between,AtLeast,AtMost,AnyCount,Setting,Statistics,Probability,PriorMeans,drawParams,dialOf,productOf,priorMeans,luckOverMedianDex,luckOverMeanDex,luckProbability,productTail,sumUniformCdf,sumUniformSurvival,statisticsOf,accepts,acceptanceProbability,converged,expectedDraws)
+import ./selection (SelectionError,BadUniforms,BadBaseline,UnsupportedPrior,BadParams,NotADial,BadSetting,BadGrid,BadWidths,BadThreshold,ZeroProduct,ZeroProbability,NotConverged,EndedOutsideWindow,Band,Between,AtLeast,AtMost,AnyCount,Setting,Statistics,Probability,PriorMeans,drawParams,dialOf,productOf,priorMeans,luckOverMedianDex,luckOverMeanDex,luckProbability,productTail,sumUniformCdf,sumUniformSurvival,statisticsOf,accepts,acceptanceProbability,converged,expectedDraws)
 import ./baseline (Factor,Prior,LogUniform,Fixed,AbiogenesisRate,baseline,quantileOf,medianOf,abiogenesisSigmaDex)
 import ./dial (Dial,Params,applyDial,zeroDial,luckDex)
 import ./disc (starsWithin,aliveWithin)
@@ -88,6 +88,19 @@ test "a parameter set that is not a dial is refused: zero or sub-1e-100 life, fo
  && fails(dialOf(baseline(),{z|fComplex:0.9}),NotADial)
  && fails(dialOf(baseline(),{z|lifetimeYr:0.0}),NotADial)
  && fails(dialOf([],z),BadBaseline)
+}
+
+-- Any four positive values are some dial; what a dial cannot choose is the
+-- complex-life share, which follows minds. A share 1e-6 away from the one the
+-- dial gives is not a dial, and the round trip (to 1e-12) must say so.
+test "the round trip is tight: a complex share 1e-6 off its dial value is refused, 1e-13 off is accepted, on it succeeds" {
+ let z=applyDial(baseline(),{life:-0.5,minds:0.25,tech:0.5,lifetime:1.0});
+ z.fComplex<1.0
+ && fails(dialOf(baseline(),{z|fComplex:z.fComplex*(1.0+1e-6)}),NotADial)
+ && fails(dialOf(baseline(),{z|fComplex:z.fComplex*(1.0-1e-6)}),NotADial)
+ && fails(dialOf(baseline(),{z|fComplex:z.fComplex*(1.0+1e-9)}),NotADial)
+ && (match dialOf(baseline(),{z|fComplex:z.fComplex*(1.0+1e-13)}) {Ok(d) => true, Err(e) => false})
+ && (match dialOf(baseline(),z) {Ok(d) => near(d.life,-0.5,1e-12) && near(d.minds,0.25,1e-12) && near(d.tech,0.5,1e-12) && near(d.lifetime,1.0,1e-12), Err(e) => false})
 }
 
 -- ---- UL2a1: prior means and the two luck statements ---------------------------
@@ -213,6 +226,33 @@ test "an invalid setting or parameter set is named, never scored" {
  && fails(statisticsOf(plain(),nowhere()),BadParams)
 }
 
+-- A sign that outlasts its makers by endedYr is findable now only if the
+-- lineage ended within the last endedYr years; the onset window reaches back
+-- W/2, so at most W/2 - L of that time exists. endedYr above W/2 - L would
+-- count worlds that cannot exist, and is refused.
+pure func reviewed() -> Params = {fLife:0.5,fComplex:0.1,fMinds:0.1,fTech:0.1,lifetimeYr:1e6,windowYr:5e9,remnantLoYr:1e3,remnantHiYr:1e7}
+pure func thousand(endedYr:float) -> Setting = {hzWorlds:1000.0,reach:[{lifetimeYr:1e5,share:1.0}],endedYr:endedYr,gapYr:0.0,found:AnyCount,ended:AnyCount,late:AnyCount}
+test "an ended-sign time the window cannot hold is refused: 1e12 and 1e100 years return no count" {
+ fails(statisticsOf(thousand(1e12),reviewed()),EndedOutsideWindow)
+ && fails(statisticsOf(thousand(1e100),reviewed()),EndedOutsideWindow)
+ && fails(accepts(thousand(1e12),reviewed()),EndedOutsideWindow)
+ && statsOf(thousand(2.499e9),reviewed()).ended==1000.0*0.005*2.499e9/5e9
+ && fails(statisticsOf(thousand(2.4990001e9),reviewed()),EndedOutsideWindow)
+ && statsOf(thousand(2.499e9),reviewed()).ended<=1000.0*0.005*0.5
+}
+test "the boundary endedYr = W/2 - L is accepted and one year more is refused, exactly" {
+ statsOf({plain()|endedYr:535822336.0},world()).ended==1024.0*0.0625*535822336.0/1073741824.0
+ && fails(statisticsOf({plain()|endedYr:535822337.0},world()),EndedOutsideWindow)
+ && fails(accepts({plain()|endedYr:535822337.0},world()),EndedOutsideWindow)
+ && statsOf({plain()|endedYr:535822336.0},{world()|lifetimeYr:524288.0}).ended>0.0
+}
+test "the region probability refuses an ended-sign time that the longest prior lifetime cannot hold (2.4e9 yr at the baseline)" {
+ pOf(acceptanceProbability(baseline(),{open()|endedYr:2.4e9,ended:AtLeast(1.0)},1))>0.0
+ && fails(acceptanceProbability(baseline(),{open()|endedYr:2.4000001e9,ended:AtLeast(1.0)},1),EndedOutsideWindow)
+ && fails(acceptanceProbability(baseline(),{open()|endedYr:2.4000001e9},1),EndedOutsideWindow)
+ && fails(acceptanceProbability(baseline(),{open()|endedYr:1e12,found:AtLeast(3.0)},1),EndedOutsideWindow)
+}
+
 -- ---- UL2a2: the prior probability of an acceptance region ---------------------
 pure func hz1000() -> float = 1339731.6428103606
 pure func open() -> Setting = {hzWorlds:hz1000(),reach:[{lifetimeYr:1e5,share:1.0}],endedYr:814270.0,gapYr:2000.0,found:AnyCount,ended:AnyCount,late:AnyCount}
@@ -297,44 +337,48 @@ test "luckProbability is the product tail at the universe's own product; a lifel
 }
 
 -- ---- the draw, the test and the probability are one model ---------------------
--- Park-Miller uniforms feed drawParams; accepts() scores each draw; the
--- frequency must sit within 4 binomial standard errors of the computed p.
+-- A GROSS-ERROR CHECK, not the validation. Seeded uniforms feed drawParams;
+-- accepts() scores each draw; the frequency must sit within 4 binomial
+-- standard errors of the computed p. At 20000 draws that is about +-20 % of p
+-- for the three-band region (p = 0.0196): it catches a wrong factor, a missing
+-- log or a swapped slot, and nothing finer. The validation of p is the
+-- oracle's table (selection_reference_test.ail, 1e-8 of the value).
+-- Four separate Park-Miller streams, one per factor, so that a draw is not
+-- four consecutive outputs of one generator.
 pure func step(s:int) -> int = (s*16807)%2147483647
 pure func uni(s:int) -> float = intToFloat(s)/2147483647.0
-pure func tally(s:Setting,n:int,seed:int,hits:int) -> int =
+pure func tally(s:Setting,n:int,a:int,b:int,c:int,d:int,hits:int) -> int =
  if n==0 then hits else {
-  let a=step(seed); let b=step(a); let c=step(b); let d=step(c);
   let hit=match drawParams(baseline(),[uni(a),uni(b),uni(c),uni(d)]) {
    Ok(p) => (match accepts(s,p) {Ok(t) => t, Err(e) => false}),
    Err(e) => false
   };
-  tally(s,n-1,d,if hit then hits+1 else hits)
+  tally(s,n-1,step(a),step(b),step(c),step(d),if hit then hits+1 else hits)
  }
 pure func frequencyAgrees(s:Setting,n:int) -> bool {
  let p=prob(s);
- let f=intToFloat(tally(s,n,20261112,0))/intToFloat(n);
+ let f=intToFloat(tally(s,n,20261112,314159265,271828182,141421356,0))/intToFloat(n);
  p>0.0 && abs_Float(f-p)<=4.0*sqrt(p*(1.0-p)/intToFloat(n))+2.0/intToFloat(n)
 }
-test "20000 seeded draws through drawParams and accepts: frequency within 4 se of p, three-band region" {
+test "gross-error check, 20000 seeded draws through drawParams and accepts: frequency within 4 se of p, three-band region" {
  frequencyAgrees({hzWorlds:hz1000(),reach:[{lifetimeYr:1e3,share:1.0},{lifetimeYr:1e6,share:0.3},{lifetimeYr:1e8,share:0.05}],endedYr:814270.0,gapYr:2000.0,found:Between(1.0,50.0),ended:Between(0.5,500.0),late:Between(0.01,5.0)},20000)
 }
-test "8000 seeded draws each: frequency within 4 se of p for a lower bound, an upper bound and a late band" {
+test "gross-error check, 8000 seeded draws each: frequency within 4 se of p for a lower bound, an upper bound and a late band" {
  frequencyAgrees({open()|found:AtLeast(3.0)},8000) && frequencyAgrees({open()|found:AtMost(1e-6)},8000)
  && frequencyAgrees({open()|gapYr:50000.0,late:Between(0.01,2.0)},8000)
 }
-pure func notDials(n:int,seed:int,hits:int) -> int =
+pure func notDials(n:int,a:int,b:int,c:int,d:int,hits:int) -> int =
  if n==0 then hits else {
-  let a=step(seed); let b=step(a); let c=step(b); let d=step(c);
   let miss=match drawParams(baseline(),[uni(a),uni(b),uni(c),uni(d)]) {
    Ok(p) => (match dialOf(baseline(),p) {Ok(x) => false, Err(e) => e==NotADial}),
    Err(e) => false
   };
-  notDials(n-1,d,if miss then hits+1 else hits)
+  notDials(n-1,step(a),step(b),step(c),step(d),if miss then hits+1 else hits)
  }
 -- Phi((-100 + log10 0.632)/50) = 0.0225359: a life fraction more than 100 dex
 -- below its median is outside applyDial's domain. Every other draw is a dial.
 test "8000 seeded draws: the share that is not a dial is within 4 se of 2.25 %" {
- abs_Float(intToFloat(notDials(8000,20261112,0))/8000.0-0.0225359)<=4.0*sqrt(0.0225359*0.9774641/8000.0)
+ abs_Float(intToFloat(notDials(8000,20261112,314159265,271828182,141421356,0))/8000.0-0.0225359)<=4.0*sqrt(0.0225359*0.9774641/8000.0)
 }
 -- Probe for tools/selection_validation.md: the three statements of luck and
 -- the draw counts for the settings the design names. Not a public export.
