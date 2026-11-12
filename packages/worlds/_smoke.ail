@@ -5,6 +5,7 @@ import ./disc (starsWithin,radiusQuantile,aliveWithin,existInWindow)
 import ./occurrence (sag13Expected,sag13Sample)
 import ./history (historyOf,stateAt,epochs,Technological)
 import ./epoch_statistics (historyProbabilities)
+import ./propagate (certain,validBelief,transitionRates,propagate,propagateExact)
 import std/io (println,exit)
 import std/math (abs_Float)
 import std/string (join)
@@ -17,7 +18,9 @@ export func main() -> () ! {IO} {
  let half=radiusQuantile(m,3000.0,0.75);
  let total=sag13Expected(0.5,16.0,0.5,640.0);
  let rates=historyProbabilities(p,16000.0);
- let ok=abs_Float(n-6698658.214051803)<1e-7 && abs_Float(total-2.9017005327211267)<1e-13
+ let chain=propagate(certain(Technological),transitionRates(p),867.0);
+ let exact=propagateExact(certain(Technological),p,867.0);
+ let ok=validBelief(chain) && validBelief(exact) && abs_Float(exact.technological-0.99133)<1e-12 && abs_Float(n-6698658.214051803)<1e-7 && abs_Float(total-2.9017005327211267)<1e-13
   && abs_Float(starsWithin(m,half)/starsWithin(m,3000.0)-0.75)<1e-12
   && luckDex(baseline(),zeroDial())==0.0 && stateAt(h,0.0)==Technological
   && rates.life==p.fLife && rates.tech>0.0 && rates.mindsWindow>=rates.tech && rates.remnant>0.0;
@@ -30,5 +33,7 @@ export func main() -> () ! {IO} {
  match sag13Sample(0.9,0.8) {(r,period)=>println("SAG13 ${total} sample ${r} ${period}")};
  println(join(";",map(\e. match e {(s,t)=>"${show(s)}:${t}"},epochs(h))));
  println("epoch probabilities ${rates.life} ${rates.mindsWindow} ${rates.tech} ${rates.remnant}");
- if ok then println("OK: worlds priors, dial, disc, occurrence, history") else {println("FAIL: worlds smoke");exit(1)}
+ println("arrival +867 yr from Technological: exact ${exact.technological} ${exact.remnant} ${exact.transcended} ${exact.ecocide} ${exact.complex}");
+ println("arrival +867 yr from Technological: chain ${chain.technological} ${chain.remnant} ${chain.transcended} ${chain.ecocide} ${chain.complex}");
+ if ok then println("OK: worlds priors, dial, disc, occurrence, history, propagate") else {println("FAIL: worlds smoke");exit(1)}
 }

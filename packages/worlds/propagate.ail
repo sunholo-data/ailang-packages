@@ -1,0 +1,332 @@
+module sunholo/worlds/propagate
+-- Prediction at arrival: move a belief over the eight planet states forward by
+-- an interval in years. Pure; no RNG. Two propagators are exported, and they
+-- are different things:
+--
+--   propagate(belief, rates, years)       a continuous-time Markov chain, for
+--                                         any generator. Composable.
+--   propagateExact(belief, params, years) the exact conditional law of
+--                                         history.ail's own sampler. Not
+--                                         composable: call it once, with the
+--                                         whole interval.
+--
+-- HOW history.ail MAPS TO RATES (transitionRates), per year:
+--
+--   Sterile, Microbial, Transcended, Ecocide   no exit. EXACT: historyOf never
+--     moves a world out of these. (A mind needs rank<fMinds<=fComplex, so a
+--     Microbial background never hosts a lineage.)
+--   Complex -> PreTech        emergenceRatePerYr(p)
+--       = (q/W) / (1 - q + q*(1/2 - E[D]/W + c*E[(W/2-L-R)+]/W)),
+--       q = fMinds*fTech/fComplex, the chance that a complex biosphere hosts a
+--       lineage; the denominator is P(Complex at epoch 0 | complex biosphere),
+--       which counts worlds whose lineage has not begun and worlds whose
+--       collapse traces have already faded. This is the sampler's EXACT hazard
+--       at epoch 0. It is constant only while |t| << W.
+--   PreTech -> Technological  1/E[D], D log-uniform [1e4,1e5] yr (the lead).
+--   Technological -> Remnant | Ecocide | Transcended   (0.75|0.15|0.10)/L.
+--   Remnant -> Complex        1/E[R], R log-uniform [remnantLoYr,remnantHiYr].
+--
+--   The three exit rates are 1/(mean sojourn). That keeps the long-run shares
+--   of the sampler (PreTech : Technological : Remnant = E[D] : L : 0.75 E[R],
+--   as in epoch_statistics) and the 0.75/0.15/0.10 ending split.
+--
+-- WHERE A MEMORYLESS MODEL CAN ONLY APPROXIMATE THE SAMPLER:
+--
+--   1. L is a fixed duration, not exponential. Seen Technological at a random
+--      moment, the time left is uniform on [0,L]: P(still Technological after
+--      x) is (1-x/L)+, exactly 0 from x=L. The chain gives exp(-x/L). The gap
+--      peaks at x=L: exp(-1) = 0.368.
+--   2. D and R are log-uniform, not exponential, and a state seen at a random
+--      moment is length-biased: the time left has survival E[(T-x)+]/E[T].
+--   3. The eight labels hide state. "Complex" is three kinds of world (no
+--      lineage, lineage to come, lineage over); the sampler has no second
+--      lineage, but the chain lets Remnant -> Complex -> PreTech happen again.
+--      The belief carries no age, so a chain restarts every clock.
+--   4. The finite onset window: the hazard is not constant near its edges.
+--
+--   propagateExact has none of 1-3: it uses the sampler's closed forms (below).
+--   Measured gaps are in tools/propagate_validation.md; they reach 0.37 in one
+--   probability. Prefer propagateExact for a prediction about this package's
+--   worlds; use propagate where a Markov chain is what is wanted.
+--
+-- THE EXACT KERNEL (historyKernel): the world is seen in state Y at epoch 0;
+-- onset is uniform, so ages are uniform and the laws below are exact for
+-- |epoch| << W, 2e5 <= W, years <= W/2 - 1e5. M_T(x) = E[min(T,x)] is
+-- epoch_statistics.traceCappedMean; c=0.75; A=min(L,W/2); cap=(W/2-L)+.
+--   from Technological: P(Tech)=clamp((L-x)/A,0,1); ended e=1-P(Tech);
+--     Remnant=(c/A)(M_R((x-L+A)+)-M_R((x-L)+)); Ecocide=.15e; Transcended=.10e;
+--     Complex=c*e-Remnant.
+--   from Remnant: Remnant=(M_R(cap+x)-M_R(x))/M_R(cap); Complex=the rest.
+--   from PreTech: F(x)=M_D(x)/E[D]; PreTech=1-F(x); Tech=F(x)-F(x-L);
+--     e=F(x-L); Remnant=(c/E[D])(M_D(y)-J(y)), y=(x-L)+,
+--     J(y)=E_R[M_D((y-R)+)]. J is closed form except where y-R crosses
+--     [1e4,1e5]; that piece is 16-panel 16-point Gauss-Legendre in log R
+--     (measured relative error < 1e-13). Everything else is closed form.
+--   from Complex: a lineage begins at constant density lambda (the rate above)
+--     on [0,min(x,W/2-1e5)], then runs D, L, R afresh; each share is
+--     lambda*(B(x)-B(x-T)) with B built from M_D, M_R and J. Linear in
+--     lambda: there is no second lineage.
+--
+-- Beyond those domains the kernel stays a valid distribution but is no longer
+-- claimed exact: past years = W/2 - 1e5 it drops the lineages that begin in
+-- the last 1e5 years of the window (about 1e-5 of them at baseline).
+import ./dial (Params)
+import ./history (PlanetState,Sterile,Microbial,Complex,PreTech,Technological,Remnant,Transcended,Ecocide,preTechLeadLoYr,preTechLeadHiYr,collapseShare,ecocideShare,transcendenceShare)
+import ./epoch_statistics (traceCappedMean)
+import std/math (exp,log,abs_Float,intToFloat)
+import std/list (map,foldl,length,nth_or,range,zipWith)
+
+-- Probabilities of the eight states, in history.PlanetState's order.
+export type Belief = {sterile:float,microbial:float,complex:float,preTech:float,technological:float,remnant:float,transcended:float,ecocide:float} deriving (Eq)
+-- One transition and its constant rate, per year.
+export type Edge = {src:PlanetState,dst:PlanetState,perYr:float}
+-- A generator: q[i][j] is the rate i -> j per year (i != j, >= 0) and q[i][i]
+-- is minus the row's exit rate. Rows and columns follow stateIndex.
+export type Rates = {q:[[float]]}
+
+export pure func stateIndex(s:PlanetState) -> int
+ensures {result>=0,result<=7}
+{
+ match s {Sterile=>0,Microbial=>1,Complex=>2,PreTech=>3,Technological=>4,Remnant=>5,Transcended=>6,Ecocide=>7}
+}
+pure func total(v:[float]) -> float = foldl(\acc x. acc+x,0.0,v)
+pure func unitRow(i:int) -> [float] = map(\j. if j==i then 1.0 else 0.0,range(0,8))
+pure func toList(b:Belief) -> [float] = [b.sterile,b.microbial,b.complex,b.preTech,b.technological,b.remnant,b.transcended,b.ecocide]
+pure func fromList(v:[float]) -> Belief = {sterile:nth_or(v,0,0.0),microbial:nth_or(v,1,0.0),complex:nth_or(v,2,0.0),preTech:nth_or(v,3,0.0),
+ technological:nth_or(v,4,0.0),remnant:nth_or(v,5,0.0),transcended:nth_or(v,6,0.0),ecocide:nth_or(v,7,0.0)}
+
+-- Non-negative and summing to 1 within 1e-9. NaN fails every comparison.
+export pure func validBelief(b:Belief) -> bool =
+ foldl(\ok x. ok && x>=0.0 && x<=1.0+1e-9,true,toList(b)) && abs_Float(total(toList(b))-1.0)<=1e-9
+export pure func certain(s:PlanetState) -> Belief
+ensures {validBelief(result)}
+{
+ fromList(unitRow(stateIndex(s)))
+}
+export pure func probabilityOf(b:Belief,s:PlanetState) -> float = nth_or(toList(b),stateIndex(s),0.0)
+
+pure func rowOk(row:[float],i:int) -> bool {
+ let exit=0.0-nth_or(row,i,1.0);
+ let off=total(row)+exit;
+ length(row)==8 && exit>=0.0 && exit<=8e100
+ && foldl(\ok j. ok && (j==i || (nth_or(row,j,-1.0)>=0.0 && nth_or(row,j,-1.0)<=1e100)),true,range(0,8))
+ && abs_Float(off-exit)<=1e-9*exit
+}
+-- Eight rows of eight; off-diagonal rates in [0,1e100]; each row sums to zero.
+export pure func validRates(r:Rates) -> bool =
+ length(r.q)==8 && foldl(\ok i. ok && rowOk(nth_or(r.q,i,[]),i),true,range(0,8))
+pure func validEdges(es:[Edge]) -> bool = foldl(\ok e. ok && e.perYr>=0.0 && e.perYr<=1e100,true,es)
+pure func edgeRate(es:[Edge],i:int,j:int) -> float =
+ foldl(\acc e. if stateIndex(e.src)==i && stateIndex(e.dst)==j then acc+e.perYr else acc,0.0,es)
+-- Build a generator from constant rates. Repeated edges add; an edge from a
+-- state to itself is ignored. A state with no outgoing edge is absorbing.
+export pure func ratesOf(es:[Edge]) -> Rates
+requires {validEdges(es)}
+ensures {validRates(result)}
+{
+ {q:map(\i. {
+   let off=map(\j. if j==i then 0.0 else edgeRate(es,i,j),range(0,8));
+   let exit=total(off);
+   map(\j. if j==i then 0.0-exit else nth_or(off,j,0.0),range(0,8))
+  },range(0,8))}
+}
+export pure func rateBetween(r:Rates,src:PlanetState,dst:PlanetState) -> float =
+ nth_or(nth_or(r.q,stateIndex(src),[]),stateIndex(dst),0.0)
+
+pure func minF(a:float,b:float) -> float = if a<b then a else b
+pure func positive(x:float) -> float = if x>0.0 then x else 0.0
+pure func capYr(x:float) -> float = if x>0.0 then minF(x,1e100) else 0.0
+-- propagate's and the kernel's domain: history's own, plus a window wide
+-- enough to hold the pre-technological lead on both sides of epoch 0.
+export pure func validParams(p:Params) -> bool =
+ p.fLife>=0.0 && p.fLife<=1.0 && p.fMinds>=0.0 && p.fMinds<=1.0
+ && p.fComplex>=p.fMinds && p.fComplex<=1.0 && p.fTech>=0.0 && p.fTech<=1.0
+ && p.lifetimeYr>=1e-100 && p.lifetimeYr<=1e100 && p.windowYr>=2.0*preTechLeadHiYr() && p.windowYr<=1e100
+ && p.remnantLoYr>=1e-100 && p.remnantLoYr<=p.remnantHiYr && p.remnantHiYr<=1e100
+-- E[min(D,x)] for the pre-technological lead and E[min(R,x)] for the traces.
+pure func leadCapped(x:float) -> float = traceCappedMean(preTechLeadLoYr(),preTechLeadHiYr(),capYr(x))
+pure func leadMean() -> float = leadCapped(preTechLeadHiYr())
+pure func traceCapped(p:Params,x:float) -> float = traceCappedMean(p.remnantLoYr,p.remnantHiYr,capYr(x))
+pure func traceMean(p:Params) -> float = traceCapped(p,p.remnantHiYr)
+
+-- The sampler's hazard of Complex -> PreTech at epoch 0, per year (header).
+export pure func emergenceRatePerYr(p:Params) -> float
+requires {validParams(p)}
+ensures {result>=0.0}
+{
+ if p.fComplex<=0.0 then 0.0 else {
+  let q=p.fMinds*p.fTech/p.fComplex;
+  let cap=positive(p.windowYr/2.0-p.lifetimeYr);
+  let faded=collapseShare()*(cap-traceCapped(p,cap))/p.windowYr;
+  let stillComplex=1.0-q+q*(0.5-leadMean()/p.windowYr+faded);
+  if stillComplex>0.0 then q/p.windowYr/stillComplex else 0.0
+ }
+}
+-- The Markov generator for history.ail's model: 1/(mean sojourn) exits and the
+-- exact epoch-0 emergence hazard. An approximation of the sampler (header).
+export pure func transitionRates(p:Params) -> Rates
+requires {validParams(p)}
+ensures {validRates(result)}
+{
+ ratesOf([
+  {src:Complex,dst:PreTech,perYr:emergenceRatePerYr(p)},
+  {src:PreTech,dst:Technological,perYr:1.0/leadMean()},
+  {src:Technological,dst:Remnant,perYr:collapseShare()/p.lifetimeYr},
+  {src:Technological,dst:Ecocide,perYr:ecocideShare()/p.lifetimeYr},
+  {src:Technological,dst:Transcended,perYr:transcendenceShare()/p.lifetimeYr},
+  {src:Remnant,dst:Complex,perYr:1.0/traceMean(p)}])
+}
+
+-- 8x8 products on lists. Every entry stays non-negative, so there is no
+-- cancellation; rows are renormalised after each product.
+pure func column(m:[[float]],j:int) -> [float] = map(\row. nth_or(row,j,0.0),m)
+pure func dot(a:[float],b:[float]) -> float = total(zipWith(\x y. x*y,a,b))
+pure func matMul(a:[[float]],b:[[float]]) -> [[float]] {
+ let cols=map(\j. column(b,j),range(0,8));
+ map(\row. map(\c. dot(row,c),cols),a)
+}
+pure func normRows(m:[[float]]) -> [[float]] =
+ map(\row. {let s=total(row); if s>0.0 then map(\x. x/s,row) else row},m)
+pure func identity() -> [[float]] = map(\i. unitRow(i),range(0,8))
+pure func maxExit(r:Rates) -> float =
+ foldl(\acc i. {let e=0.0-nth_or(nth_or(r.q,i,[]),i,0.0); if e>acc then e else acc},0.0,range(0,8))
+-- Horner form of sum_n x^n/n! U^n, n<=20. For x<=0.5 the dropped tail is below
+-- 1e-25 of the sum; row normalisation supplies the exp(-x) factor.
+pure func series(u:[[float]],x:float,n:int,acc:[[float]]) -> [[float]] =
+ if n==0 then acc else series(u,x,n-1,zipWith(\a b. zipWith(\s t. s+x/intToFloat(n)*t,a,b),identity(),matMul(u,acc)))
+pure func halvings(x:float,k:int) -> (float,int) = if x<=0.5 then (x,k) else halvings(x/2.0,k+1)
+pure func squareN(m:[[float]],k:int) -> [[float]] = if k<=0 then m else squareN(normRows(matMul(m,m)),k-1)
+
+-- exp(Q*years) as a row-stochastic matrix, m[i][j] = P(j after years | i now).
+-- Uniformisation: with rate = the largest exit rate, U = I + Q/rate is itself
+-- stochastic and exp(Q t) = sum_n Poisson(n; rate*t) U^n. The series is used
+-- at rate*t/2^k <= 0.5 and the result squared k times.
+pure func stochastic(m:[[float]]) -> bool =
+ length(m)==8 && foldl(\ok row. ok && length(row)==8 && foldl(\fine x. fine && x>=0.0,true,row) && abs_Float(total(row)-1.0)<=1e-12,true,m)
+export pure func transitionMatrix(r:Rates,years:float) -> [[float]]
+requires {validRates(r),years>=0.0,years<=1e100}
+ensures {stochastic(result)}
+{
+ let rate=maxExit(r);
+ if not validRates(r) || not (years>0.0) || not (rate>0.0) then identity() else {
+  let u=zipWith(\row unit. zipWith(\x d. d+x/rate,row,unit),r.q,identity());
+  match halvings(rate*minF(years,1e100),0) {
+   (x,k) => squareN(normRows(series(u,x,20,identity())),k)
+  }
+ }
+}
+-- The belief after years under a constant-rate Markov chain. Linear in the
+-- belief; the identity at years=0 (bit for bit); probabilities non-negative
+-- and summing to 1; propagate(propagate(b,r,s),r,t) equals propagate(b,r,s+t)
+-- within 1e-12 per state. Invalid rates or years leave the belief unchanged.
+export pure func propagate(belief:Belief,rates:Rates,years:float) -> Belief
+requires {validBelief(belief),validRates(rates),years>=0.0,years<=1e100}
+ensures {validBelief(result)}
+{
+ if not (years>0.0) || not validRates(rates) then belief else {
+  let m=transitionMatrix(rates,years);
+  let b=toList(belief);
+  fromList(map(\j. dot(b,column(m,j)),range(0,8)))
+ }
+}
+
+-- 16-point Gauss-Legendre on [-1,1]: positive nodes and their weights.
+pure func glNodes() -> [(float,float)] = [
+ (0.09501250983763744,0.1894506104550685),(0.2816035507792589,0.18260341504492358),
+ (0.45801677765722737,0.16915651939500254),(0.6178762444026438,0.14959598881657674),
+ (0.755404408355003,0.12462897125553388),(0.8656312023878318,0.09515851168249279),
+ (0.9445750230732326,0.062253523938647894),(0.9894009349916499,0.027152459411754096)]
+-- Trace persistence at log-fraction u of its range, and the inverse, clamped.
+pure func traceAt(p:Params,k:float,u:float) -> float = p.remnantLoYr*exp(k*u)
+pure func traceFraction(p:Params,k:float,v:float) -> float =
+ if v<=p.remnantLoYr then 0.0 else if v>=p.remnantHiYr then 1.0 else log(v/p.remnantLoYr)/k
+pure func leadPanel(p:Params,k:float,y:float,a:float,h:float) -> float =
+ foldl(\acc nw. match nw {(x,w) =>
+  acc+w*(leadCapped(y-traceAt(p,k,a+h*(1.0+x)/2.0))+leadCapped(y-traceAt(p,k,a+h*(1.0-x)/2.0)))},0.0,glNodes())*h/2.0
+-- J(y) = E_R[ M_D((y-R)+) ], R the trace persistence, D the lead (header).
+pure func leadAfterTrace(p:Params,y:float) -> float =
+ if y<=0.0 then 0.0 else if p.remnantHiYr<=p.remnantLoYr then leadCapped(y-p.remnantLoYr) else {
+  let k=log(p.remnantHiYr/p.remnantLoYr);
+  let uA=traceFraction(p,k,y-preTechLeadHiYr());
+  let uB=traceFraction(p,k,y-preTechLeadLoYr());
+  let uC=traceFraction(p,k,y);
+  let h=(uB-uA)/16.0;
+  let middle=if h>0.0 then foldl(\acc i. acc+leadPanel(p,k,y,uA+intToFloat(i)*h,h),0.0,range(0,16)) else 0.0;
+  leadMean()*uA+middle+positive(y*(uC-uB)-(traceAt(p,k,uC)-traceAt(p,k,uB))/k)
+ }
+
+-- Shares after a technological epoch: e has ended, rem of it is still Remnant.
+pure func ended(tech:float,pre:float,e:float,rem:float,stay:PlanetState) -> [float] {
+ let r=minF(positive(rem),collapseShare()*e);
+ let other=[0.0,0.0,0.0,pre,tech,r,transcendenceShare()*e,ecocideShare()*e];
+ let rest=positive(1.0-total(other));
+ map(\j. if j==stateIndex(stay) then nth_or(other,j,0.0)+rest else nth_or(other,j,0.0),range(0,8))
+}
+pure func fromTechnological(p:Params,x:float) -> [float] {
+ let span=minF(p.lifetimeYr,p.windowYr/2.0);
+ let tech=minF(1.0,positive(p.lifetimeYr-x)/span);
+ let rem=collapseShare()/span*(traceCapped(p,x-p.lifetimeYr+span)-traceCapped(p,x-p.lifetimeYr));
+ ended(tech,0.0,1.0-tech,rem,Complex)
+}
+pure func fromRemnant(p:Params,x:float) -> [float] {
+ let cap=positive(p.windowYr/2.0-p.lifetimeYr);
+ let seen=traceCapped(p,cap);
+ let rem=if seen>0.0 then minF(1.0,positive(traceCapped(p,cap+x)-traceCapped(p,x))/seen)
+  else if x<p.remnantLoYr then 1.0 else 0.0;
+ [0.0,0.0,1.0-rem,0.0,0.0,rem,0.0,0.0]
+}
+pure func fromPreTech(p:Params,x:float) -> [float] {
+ let y=positive(x-p.lifetimeYr);
+ let begun=leadCapped(x)/leadMean();
+ let e=leadCapped(y)/leadMean();
+ let rem=collapseShare()/leadMean()*(leadCapped(y)-leadAfterTrace(p,y));
+ let pre=positive(1.0-begun);
+ ended(positive(1.0-pre-e),pre,e,rem,Complex)
+}
+-- Cumulative shares for a lineage beginning at density 1 on [0,x]: PreTech,
+-- begun-and-not-ended is (x - pre) - e, ended e, Remnant rem.
+pure func cumulative(p:Params,x:float) -> (float,float,float,float) {
+ let y=positive(x-p.lifetimeYr);
+ let pre=leadCapped(x);
+ let e=y-leadCapped(y);
+ (pre,positive(x)-pre-e,e,collapseShare()*(traceCapped(p,y)-leadCapped(y)+leadAfterTrace(p,y)))
+}
+pure func fromComplex(p:Params,x:float) -> [float] {
+ let rate=emergenceRatePerYr(p);
+ let t=minF(x,positive(p.windowYr/2.0-preTechLeadHiYr()));
+ match cumulative(p,x) {(pre1,tech1,e1,rem1) => match cumulative(p,x-t) {(pre0,tech0,e0,rem0) =>
+  ended(rate*positive(tech1-tech0),rate*positive(pre1-pre0),rate*positive(e1-e0),rate*(rem1-rem0),Complex)
+ }}
+}
+-- The sampler's exact law of the state `years` after a world is seen in
+-- `seen` (header: domain, and what stops being exact outside it).
+export pure func historyKernel(p:Params,seen:PlanetState,years:float) -> Belief
+requires {validParams(p),years>=0.0,years<=1e100}
+ensures {validBelief(result)}
+{
+ if not validParams(p) || not (years>0.0) then certain(seen) else {
+  let x=minF(years,1e100);
+  match seen {
+   Technological => fromList(fromTechnological(p,x)),
+   Remnant => fromList(fromRemnant(p,x)),
+   PreTech => fromList(fromPreTech(p,x)),
+   Complex => fromList(fromComplex(p,x)),
+   _ => certain(seen)
+  }
+ }
+}
+-- The belief `years` after the moment it describes, under history.ail's own
+-- model: the belief-weighted sum of historyKernel. Exact where the kernel is.
+-- The identity at years=0 (bit for bit). NOT composable: the labels carry no
+-- ages, so two steps restart every clock. Use one call for the whole interval.
+export pure func propagateExact(belief:Belief,p:Params,years:float) -> Belief
+requires {validBelief(belief),validParams(p),years>=0.0,years<=1e100}
+ensures {validBelief(result)}
+{
+ if not validParams(p) || not (years>0.0) then belief else {
+  let rows=[unitRow(0),unitRow(1),toList(historyKernel(p,Complex,years)),toList(historyKernel(p,PreTech,years)),
+   toList(historyKernel(p,Technological,years)),toList(historyKernel(p,Remnant,years)),unitRow(6),unitRow(7)];
+  let b=toList(belief);
+  fromList(map(\j. dot(b,column(rows,j)),range(0,8)))
+ }
+}
