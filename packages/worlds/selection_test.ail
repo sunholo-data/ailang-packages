@@ -236,7 +236,7 @@ test "an ended-sign time the window cannot hold is refused: 1e12 and 1e100 years
  fails(statisticsOf(thousand(1e12),reviewed()),EndedOutsideWindow)
  && fails(statisticsOf(thousand(1e100),reviewed()),EndedOutsideWindow)
  && fails(accepts(thousand(1e12),reviewed()),EndedOutsideWindow)
- && statsOf(thousand(2.499e9),reviewed()).ended==1000.0*0.005*2.499e9/5e9
+ && rel(statsOf(thousand(2.499e9),reviewed()).ended,2.499,1e-14)
  && fails(statisticsOf(thousand(2.4990001e9),reviewed()),EndedOutsideWindow)
  && statsOf(thousand(2.499e9),reviewed()).ended<=1000.0*0.005*0.5
 }

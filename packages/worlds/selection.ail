@@ -13,7 +13,7 @@ module sunholo/worlds/selection
 --
 -- THE ACCEPTANCE TEST reads the parameters only. Three expected counts:
 --   found = hzWorlds * fLife*fMinds*fTech * (L/W) * share(L)
---   ended = hzWorlds * fLife*fMinds*fTech * endedYr/W
+--   ended = hzWorlds * fLife*fMinds*fTech * endedYr/W,  endedYr <= W/2 - L
 --   late  = found * min(1, gapYr/L)
 -- hzWorlds is the number of habitable-zone worlds inside the reference radius
 -- (disc.starsWithin times worlds per star), so found is disc.aliveWithin times
@@ -66,7 +66,9 @@ import std/list (map,foldl,length,nth_or,range,filter,sortBy,flatMap)
 --   ZeroProduct      the luck in dex of a universe whose product is zero.
 --   ZeroProbability  1/p of a region that holds no universe.
 --   NotConverged     doubling the grid moved p by more than 1e-6 of itself.
-export type SelectionError = BadUniforms | BadBaseline | UnsupportedPrior | BadParams | NotADial | BadSetting | BadGrid | BadWidths | BadThreshold | ZeroProduct | ZeroProbability | NotConverged deriving (Eq)
+--   EndedOutsideWindow endedYr above W/2 - L: more time than the onset window
+--                    holds after a lifetime of L (see statisticsOf).
+export type SelectionError = BadUniforms | BadBaseline | UnsupportedPrior | BadParams | NotADial | BadSetting | BadGrid | BadWidths | BadThreshold | ZeroProduct | ZeroProbability | NotConverged | EndedOutsideWindow deriving (Eq)
 -- A band on an expected count, both edges included.
 export type Band = Between(float,float) | AtLeast(float) | AtMost(float) | AnyCount deriving (Eq)
 -- The share of a civilisation's life during which at least one sign is on and
@@ -314,8 +316,16 @@ pure func shareAt(k:[ReachKnot],years:float) -> float = match k {
  }
 }
 -- The three expected counts of one parameter set (module header).
+-- `ended` counts lineages that ended within the last endedYr years: onsets in
+-- [-L-endedYr, -L]. Onsets start at -W/2 (history.ail), so that interval is
+-- inside the window only while endedYr <= W/2 - L. Beyond it the closed form
+-- endedYr/W would count worlds that cannot exist (it has no upper limit), so
+-- the call is refused with EndedOutsideWindow instead of being clipped: a
+-- setting that asks for more persistence than the window holds is a mistake
+-- in the setting. Within the bound, ended <= hzWorlds*fLife*fMinds*fTech/2.
 export pure func statisticsOf(s:Setting,p:Params) -> Result[Statistics,SelectionError] =
- if not okSetting(s) then Err(BadSetting) else if not okParams(p) then Err(BadParams) else {
+ if not okSetting(s) then Err(BadSetting) else if not okParams(p) then Err(BadParams)
+ else if s.endedYr>p.windowYr/2.0-p.lifetimeYr then Err(EndedOutsideWindow) else {
   let lineage=p.fLife*p.fMinds*p.fTech;
   let found=s.hzWorlds*lineage*(p.lifetimeYr/p.windowYr)*shareAt(s.reach,p.lifetimeYr);
   Ok({found:found,ended:s.hzWorlds*lineage*s.endedYr/p.windowYr,
@@ -335,7 +345,7 @@ export pure func accepts(s:Setting,p:Params) -> Result[bool,SelectionError] = ma
 
 -- ---- the prior probability of a region --------------------------------------------
 -- y0 = log10 of the smallest fMinds*fTech; v0 = log10 of the shortest lifetime.
-type Shape = {y0:float,wm:float,wt:float,v0:float,wl:float,window:float,sigma:float}
+type Shape = {y0:float,wm:float,wt:float,v0:float,wl:float,longest:float,window:float,sigma:float}
 pure func logUniform(p:Prior) -> Option[(float,float)] = match p {
  LogUniform(lo,hi) => if lo>0.0 && hi>lo && hi<=1e100 then Some((lo,hi)) else None,
  _ => None
@@ -350,7 +360,7 @@ pure func shapeOf(b:[Factor]) -> Result[Shape,SelectionError] = match readBaseli
    match (m,t,y) {((mLo,mHi),(tLo,tHi),(yLo,yHi)) =>
     if mHi>1.0 || tHi>1.0 || yHi>r.window/2.0 then Err(UnsupportedPrior)
     else Ok({y0:log10(mLo)+log10(tLo),wm:log10(mHi)-log10(mLo),wt:log10(tHi)-log10(tLo),
-     v0:log10(yLo),wl:log10(yHi)-log10(yLo),window:r.window,sigma:abiogenesisSigmaDex()})
+     v0:log10(yLo),wl:log10(yHi)-log10(yLo),longest:yHi,window:r.window,sigma:abiogenesisSigmaDex()})
    }}}}
 }
 -- The rule that turns the values at n and at 2n panels into a Probability:
@@ -452,12 +462,14 @@ pure func segments(q:Shape,law:SumLaw,fr:Frame,ln:Lines,edges:[float],n:int) -> 
  }
 }
 -- The prior probability that a universe drawn from the baseline is accepted by
--- the setting, with the change on doubling the grid (module header).
+-- the setting, with the change on doubling the grid (module header). The
+-- setting must be scoreable for every lifetime the prior can draw: endedYr
+-- above W/2 - (the longest prior lifetime) is EndedOutsideWindow.
 @allow_empty_ok("a region that holds no universe has probability 0 with no numerical error; expectedDraws refuses it")
 export pure func acceptanceProbability(b:[Factor],s:Setting,grid:int) -> Result[Probability,SelectionError] =
  if grid<1 || grid>16 then Err(BadGrid) else if not okSetting(s) then Err(BadSetting) else match shapeOf(b) {
   Err(e) => Err(e),
-  Ok(q) => {
+  Ok(q) => if s.endedYr>q.window/2.0-q.longest then Err(EndedOutsideWindow) else {
    let fr={base:log10(s.hzWorlds)-log10(q.window),gap:if s.gapYr>0.0 then log10(s.gapYr) else 0.0,
     ended:if s.endedYr>0.0 then log10(s.endedYr) else 0.0,reach:s.reach};
    let none={lower:[],upper:[],empty:false};
