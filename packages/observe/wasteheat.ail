@@ -1,0 +1,49 @@
+-- sunholo/observe/wasteheat — the mid-infrared excess of a civilisation's
+-- waste heat (Wright et al. 2014, the G-hat search): a fraction gamma of the
+-- star's luminosity is absorbed and re-radiated as a blackbody at T_w, and
+-- the star's own light drops by the same fraction.
+--
+-- The formulas are stapledons-design physics/observation.md §2.7
+-- (baseline-2026.11); rows OB-38..OB-40 are the tests. The excess does not
+-- depend on distance: distance matters only through the photon rate needed to
+-- measure it (photon.photonRate). Units: SI (metres, kelvin).
+
+module sunholo/observe/wasteheat
+
+import pkg/sunholo/relativity/hyper (expm1)
+import ./constants (secondRadiationMK)
+
+-- The spectral factor
+--   K(lambda) = (T_star / T_w)^4 x (exp(hc/(lambda k T_star)) - 1) / (exp(hc/(lambda k T_w)) - 1)
+-- the waste-heat flux over the remaining starlight at lambda, per unit
+-- gamma / (1 - gamma). The domain keeps both exponents finite:
+-- lambda x T >= 2.1e-5 m K (x <= 685).
+export pure func wasteHeatFactor(lambdaM: float, starTempK: float, wasteTempK: float) -> float
+  requires { lambdaM > 0.0, lambdaM * starTempK >= 0.000021, lambdaM * wasteTempK >= 0.000021 }
+  ensures { result >= 0.0 }
+{
+  let c2 = secondRadiationMK();
+  let t = starTempK / wasteTempK;
+  t * t * t * t * expm1(c2 / (lambdaM * starTempK)) / expm1(c2 / (lambdaM * wasteTempK))
+}
+
+-- The excess E(lambda) = gamma / (1 - gamma) x K(lambda): E = 0.1 means the
+-- star looks 10 % too bright at lambda. gamma = 1 (a Kardashev type II
+-- civilisation, the star fully hidden) has no finite excess and is outside
+-- the domain.
+export pure func wasteHeatExcess(gamma: float, lambdaM: float, starTempK: float, wasteTempK: float) -> float
+  requires { gamma >= 0.0, gamma < 1.0, lambdaM > 0.0, lambdaM * starTempK >= 0.000021, lambdaM * wasteTempK >= 0.000021 }
+  ensures { result >= 0.0 }
+{
+  gamma / (1.0 - gamma) * wasteHeatFactor(lambdaM, starTempK, wasteTempK)
+}
+
+-- The smallest gamma whose excess at lambda reaches E: with r = E / K,
+-- gamma = r / (1 + r).
+export pure func wasteHeatFractionFor(excess: float, lambdaM: float, starTempK: float, wasteTempK: float) -> float
+  requires { excess >= 0.0, lambdaM > 0.0, lambdaM * starTempK >= 0.000021, lambdaM * wasteTempK >= 0.000021 }
+  ensures { result >= 0.0, result < 1.0 }
+{
+  let r = excess / wasteHeatFactor(lambdaM, starTempK, wasteTempK);
+  r / (1.0 + r)
+}

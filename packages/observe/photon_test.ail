@@ -239,3 +239,10 @@ test "photon rate falls as distance squared and grows as aperture squared" {
   phRel(photonRate(sunBlackbody(), phTenPc(), 20.0, phVBand(), 0.5),
         photonRate(sunBlackbody(), phTenPc(), 10.0, phVBand(), 1.0) * 2.0, 0.000000000001)
 }
+
+-- The row rule itself: it accepts a value that rounds to the printed digits
+-- and rejects one that rounds to the neighbouring digit.
+test "the row rule rejects a value that rounds to a neighbouring digit" {
+  phRow(0.31834, 0.3183, 4) && not phRow(0.31836, 0.3183, 4) && not phRow(0.31824, 0.3183, 4) &&
+  phRow(100.004, 100.0, 4) && not phRow(100.06, 100.0, 4) && phRow(1.15720938e-10, 1.157e-10, 4) && not phRow(1.1564e-10, 1.157e-10, 4)
+}

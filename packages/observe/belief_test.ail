@@ -1,0 +1,203 @@
+-- Tests for sunholo/observe/belief: Bayes over the eight planet states.
+--
+-- The likelihood table is a game model (design values awaiting review), so
+-- these tests pin the model's behaviour, not registry rows: normalisation,
+-- the prior-only case, the false positives of signals-and-instruments §4.2,
+-- non-detections as evidence, and order independence.
+--
+-- blPrior is a test fixture, not the anthropic dial's prior: life is rare
+-- (P(life) = 0.0995) and technology rarer.
+
+module sunholo/observe/belief_test
+
+import std/list (length, nth_or)
+import pkg/sunholo/relativity/hyper (absf)
+import ./belief (State, Sterile, Microbial, Complex, PreTech, Technological, Remnant, Transcended, Ecocide,
+  Signal, O2, O2CH4, RedEdge, Glint, Beacon, Leakage, IndustrialGas, NightLights, WasteHeat, ArtificialTransit,
+  HostClass, HostFGK, HostM, Observation, Posterior,
+  states, signals, stateIndex, stateOfIndex, signalIndex, hostClassOfTeffK, likelihoodRow, likelihood, confidence,
+  confidenceCap, observationLikelihood, posterior, probOf, pLife, pMind, sumOf, sumsToOne, validBelief,
+  lifeOddsGainBound, pLifeBound)
+
+pure func blPrior() -> [float] = [0.90, 0.07, 0.02, 0.004, 0.003, 0.002, 0.0005, 0.0005]
+-- A prior that already suspects technology, for the quiet-world cases.
+pure func blTechPrior() -> [float] = [0.30, 0.10, 0.10, 0.05, 0.30, 0.05, 0.05, 0.05]
+pure func blSeen(s: Signal, snr: float) -> Observation = { signal: s, detected: true, snr: snr }
+pure func blMissed(s: Signal, snr: float) -> Observation = { signal: s, detected: false, snr: snr }
+pure func blP(prior: [float], host: HostClass, obs: [Observation]) -> [float] = posterior(prior, host, obs).p
+pure func blMaxDiff(a: [float], b: [float]) -> float =
+  match a {
+    [] => 0.0,
+    x :: rest => match b {
+      [] => absf(x),
+      y :: restB => { let d = absf(x - y); let m = blMaxDiff(rest, restB); if d > m then d else m }
+    }
+  }
+pure func blAll(f: float -> bool, xs: [float]) -> bool = match xs { [] => true, x :: rest => f(x) && blAll(f, rest) }
+pure func blRepeat(o: Observation, n: int) -> [Observation] = if n <= 0 then [] else o :: blRepeat(o, n - 1)
+pure func blKDwarf() -> HostClass = hostClassOfTeffK(4500.0)
+pure func blMDwarf() -> HostClass = hostClassOfTeffK(3200.0)
+
+-- ---------- the table ----------
+
+pure func blRowOk(s: Signal, h: HostClass) -> bool {
+  let row = likelihoodRow(s, h);
+  length(row) == 8 && blAll(\p. p > 0.0 && p < 1.0, row)
+}
+pure func blRowsOk(ss: [Signal]) -> bool = match ss { [] => true, s :: rest => blRowOk(s, HostFGK) && blRowOk(s, HostM) && blRowsOk(rest) }
+test "every likelihood row has eight entries strictly between 0 and 1" { length(signals()) == 10 && blRowsOk(signals()) }
+
+test "state and signal indices are the declared order (worlds.PlanetState's order for states)" {
+  stateIndex(Sterile) == 0 && stateIndex(Microbial) == 1 && stateIndex(Complex) == 2 && stateIndex(PreTech) == 3 &&
+  stateIndex(Technological) == 4 && stateIndex(Remnant) == 5 && stateIndex(Transcended) == 6 && stateIndex(Ecocide) == 7 &&
+  stateOfIndex(4) == Technological && stateOfIndex(7) == Ecocide && length(states()) == 8 &&
+  signalIndex(O2) == 0 && signalIndex(ArtificialTransit) == 9
+}
+
+test "likelihood reads the table by state" {
+  likelihood(O2, HostFGK, Complex) == nth_or(likelihoodRow(O2, HostFGK), 2, -1.0) &&
+  likelihood(WasteHeat, HostM, Transcended) == nth_or(likelihoodRow(WasteHeat, HostM), 6, -1.0)
+}
+
+test "false positive: abiotic O2 on a sterile world is ten times likelier around an M dwarf" {
+  likelihood(O2, HostM, Sterile) >= 10.0 * likelihood(O2, HostFGK, Sterile) &&
+  likelihood(O2CH4, HostM, Sterile) < likelihood(O2, HostM, Sterile) / 10.0
+}
+test "false positive: a sterile world can show a mineral edge, glint, an infrared excess and odd transits" {
+  likelihood(RedEdge, HostFGK, Sterile) > 0.01 && likelihood(Glint, HostFGK, Sterile) > 0.01 &&
+  likelihood(WasteHeat, HostFGK, Sterile) > 0.001 && likelihood(ArtificialTransit, HostFGK, Sterile) > 0.001
+}
+test "the red edge is harder to read around an M dwarf (it moves into the near-infrared)" {
+  likelihood(RedEdge, HostM, Complex) < likelihood(RedEdge, HostFGK, Complex) &&
+  likelihood(RedEdge, HostM, Sterile) == likelihood(RedEdge, HostFGK, Sterile)
+}
+test "most technological worlds are quiet: no technosignature is more likely than not, but each beats a sterile world" {
+  likelihood(Beacon, HostFGK, Technological) < 0.5 && likelihood(Leakage, HostFGK, Technological) < 0.5 &&
+  likelihood(WasteHeat, HostFGK, Technological) < 0.5 && likelihood(ArtificialTransit, HostFGK, Technological) < 0.5 &&
+  likelihood(Beacon, HostFGK, Technological) > 100.0 * likelihood(Beacon, HostFGK, Sterile) &&
+  likelihood(Leakage, HostFGK, Technological) > 100.0 * likelihood(Leakage, HostFGK, Sterile) &&
+  likelihood(WasteHeat, HostFGK, Transcended) > likelihood(WasteHeat, HostFGK, Technological)
+}
+test "host class: below 3900 K is an M dwarf" {
+  hostClassOfTeffK(3899.0) == HostM && hostClassOfTeffK(3900.0) == HostFGK && blKDwarf() == HostFGK && blMDwarf() == HostM
+}
+
+-- ---------- confidence ----------
+
+test "confidence is 0 at SNR 0, 1/2 at a hint (SNR 5), 15/16 at strong (SNR 10), and capped" {
+  confidence(0.0) == 0.0 && confidence(-3.0) == 0.0 && absf(confidence(5.0) - 0.5) < 0.000000000001 &&
+  absf(confidence(10.0) - 0.9375) < 0.000000000001 && confidence(1000.0) == confidenceCap() && confidenceCap() < 1.0
+}
+test "an observation at SNR 0 says nothing: its likelihood is the same for every state" {
+  observationLikelihood(blSeen(O2CH4, 0.0), HostFGK, Sterile) == observationLikelihood(blSeen(O2CH4, 0.0), HostFGK, Complex) &&
+  observationLikelihood(blMissed(Leakage, 0.0), HostFGK, Technological) == 0.5
+}
+
+-- ---------- posterior ----------
+
+pure func blPriorOnly() -> bool {
+  let r = posterior(blPrior(), HostFGK, []);
+  blMaxDiff(r.p, blPrior()) < 0.000000000000001 && r.movedMost == -1 && r.movedBy == 0.0 && sumsToOne(r.p)
+}
+test "prior only: no observations return the prior, and nothing moved it" { blPriorOnly() }
+
+pure func blCases() -> [[Observation]] = [
+  [blSeen(O2, 5.0)],
+  [blSeen(O2CH4, 10.0), blSeen(RedEdge, 7.0), blMissed(Leakage, 3.0)],
+  [blMissed(O2, 30.0), blMissed(Glint, 12.0), blSeen(WasteHeat, 50.0), blSeen(ArtificialTransit, 9.0)],
+  [blSeen(Beacon, 1000.0), blMissed(Beacon, 1000.0), blSeen(Beacon, 1000.0)],
+  blRepeat(blSeen(NightLights, 8.0), 40) ++ blRepeat(blMissed(IndustrialGas, 15.0), 40),
+  blRepeat(blSeen(Leakage, 1000.0), 150) ++ blRepeat(blMissed(Leakage, 1000.0), 150)
+]
+pure func blNormalised(prior: [float], host: HostClass, cases: [[Observation]]) -> bool =
+  match cases {
+    [] => true,
+    c :: rest => {
+      let p = blP(prior, host, c);
+      length(p) == 8 && absf(sumOf(p) - 1.0) <= 0.000000000001 && blAll(\x. x >= 0.0 && x <= 1.0, p) && blNormalised(prior, host, rest)
+    }
+  }
+test "the posterior sums to 1 within 1e-12 and stays in [0, 1], even for contradicting and very many observations" {
+  blNormalised(blPrior(), HostFGK, blCases()) && blNormalised(blPrior(), HostM, blCases()) && blNormalised(blTechPrior(), HostM, blCases())
+}
+
+-- A single strong O2 + CH4 reading on a K dwarf, against O2 alone on an M dwarf.
+pure func blLifeCase() -> bool {
+  let k = pLife(blP(blPrior(), blKDwarf(), [blSeen(O2CH4, 10.0)]));
+  let m = pLife(blP(blPrior(), blMDwarf(), [blSeen(O2, 10.0)]));
+  absf(pLife(blPrior()) - 0.0995) < 0.000000001 && k > 0.5 && m < 0.2 && k > 2.5 * m
+}
+test "strong O2 + CH4 on a K dwarf lifts P(life) from 0.10 above 0.5; O2 alone on an M dwarf stays under 0.2" { blLifeCase() }
+
+-- O2 alone on an M dwarf: however strong and however often it is seen, the
+-- odds of life against a sterile world grow by at most lifeOddsGainBound
+-- (4.5), and for this prior P(life) stays below 0.22.
+pure func blO2Bounded(snr: float, n: int) -> bool {
+  let p = blP(blPrior(), HostM, blRepeat(blSeen(O2, snr), n));
+  let gain = (pLife(p) / probOf(p, Sterile)) / (pLife(blPrior()) / probOf(blPrior(), Sterile));
+  gain <= lifeOddsGainBound(O2, HostM) * 1.000000001 && pLife(p) <= pLifeBound(blPrior(), O2, HostM) && pLife(p) < 0.22
+}
+test "O2 alone on an M dwarf never lifts P(life) above the stated bound, at any SNR or number of looks" {
+  absf(lifeOddsGainBound(O2, HostM) - 4.5) < 0.000000000001 && pLifeBound(blPrior(), O2, HostM) < 0.22 &&
+  blO2Bounded(5.0, 1) && blO2Bounded(10.0, 1) && blO2Bounded(30.0, 1) && blO2Bounded(1000.0, 1) &&
+  blO2Bounded(10.0, 5) && blO2Bounded(1000.0, 30)
+}
+test "the same O2 on a Sun-like host is a much stronger sign: the bound is 45, and P(life) passes 0.6" {
+  absf(lifeOddsGainBound(O2, HostFGK) - 45.0) < 0.000000000001 && pLife(blP(blPrior(), HostFGK, [blSeen(O2, 30.0)])) > 0.6
+}
+
+-- A quiet technological world: nothing heard, and the instruments could not
+-- have heard much (reachable SNR <= 1).
+pure func blQuiet(snr: float) -> [Observation] =
+  [blMissed(Leakage, snr), blMissed(Beacon, snr), blMissed(NightLights, snr), blMissed(IndustrialGas, snr)]
+test "a quiet technological world: non-detections at low reachable SNR leave the prior within 0.01" {
+  blMaxDiff(blP(blTechPrior(), HostFGK, blQuiet(1.0)), blTechPrior()) < 0.01 &&
+  blMaxDiff(blP(blTechPrior(), HostFGK, blQuiet(0.2)), blTechPrior()) < 0.001 &&
+  blMaxDiff(blP(blPrior(), HostFGK, blQuiet(1.0)), blPrior()) < 0.0001
+}
+test "silence is evidence when the instrument could have heard: the same non-detections at SNR 20 halve P(technological)" {
+  probOf(blP(blTechPrior(), HostFGK, blQuiet(20.0)), Technological) < 0.5 * probOf(blTechPrior(), Technological) &&
+  pMind(blP(blTechPrior(), HostFGK, blQuiet(20.0))) < pMind(blTechPrior())
+}
+test "a non-detection of O2 at high reachable SNR lowers P(complex life)" {
+  probOf(blP(blPrior(), HostFGK, [blMissed(O2, 20.0)]), Complex) < 0.2 * probOf(blPrior(), Complex) &&
+  probOf(blP(blPrior(), HostFGK, [blMissed(O2, 20.0)]), Sterile) > probOf(blPrior(), Sterile)
+}
+
+-- Repeated looks at one signal share one fact (is the signal there?), so
+-- they saturate at the table's likelihood and never multiply it.
+pure func blSaturates() -> bool {
+  let one = blP(blPrior(), HostM, [blSeen(O2, 1000.0)]);
+  let many = blP(blPrior(), HostM, blRepeat(blSeen(O2, 1000.0), 20));
+  blMaxDiff(one, many) < 0.000001
+}
+test "twenty certain looks at the same O2 say what one says" { blSaturates() }
+
+-- ---------- order independence, and what moved the belief ----------
+
+pure func blMix() -> [Observation] =
+  [blSeen(O2, 6.0), blMissed(Leakage, 3.0), blSeen(O2CH4, 12.0), blSeen(RedEdge, 4.0), blMissed(O2, 2.0), blSeen(Glint, 9.0)]
+pure func blMixReversed() -> [Observation] =
+  [blSeen(Glint, 9.0), blMissed(O2, 2.0), blSeen(RedEdge, 4.0), blSeen(O2CH4, 12.0), blMissed(Leakage, 3.0), blSeen(O2, 6.0)]
+pure func blMixShuffled() -> [Observation] =
+  [blSeen(RedEdge, 4.0), blSeen(O2, 6.0), blSeen(Glint, 9.0), blMissed(O2, 2.0), blSeen(O2CH4, 12.0), blMissed(Leakage, 3.0)]
+pure func blOrder() -> bool {
+  let a = posterior(blPrior(), HostFGK, blMix());
+  let b = posterior(blPrior(), HostFGK, blMixReversed());
+  let c = posterior(blPrior(), HostFGK, blMixShuffled());
+  a.p == b.p && a.p == c.p && a.movedBy == b.movedBy && a.movedBy == c.movedBy &&
+  a.movedMost == 2 && b.movedMost == 3 && c.movedMost == 4
+}
+test "the order of observations does not change the posterior (bit for bit) or which observation moved it most" { blOrder() }
+
+pure func blMoved() -> bool {
+  let r = posterior(blPrior(), HostFGK, [blSeen(O2, 5.0), blSeen(O2CH4, 10.0), blMissed(Beacon, 1.0)]);
+  let q = posterior(blPrior(), HostFGK, [blMissed(Beacon, 0.0), blSeen(O2, 0.0)]);
+  r.movedMost == 1 && r.movedBy > 0.3 && r.movedBy <= 1.0 && q.movedMost == -1 && q.movedBy == 0.0
+}
+test "movedMost names the strongest single observation; observations at SNR 0 move nothing" { blMoved() }
+
+test "validBelief accepts a normalised eight-state belief and rejects the wrong length, a negative entry, or a wrong sum" {
+  validBelief(blPrior()) && validBelief(blTechPrior()) && not validBelief([0.5, 0.5]) &&
+  not validBelief([1.1, -0.1, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]) && not validBelief([0.5, 0.2, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
+}

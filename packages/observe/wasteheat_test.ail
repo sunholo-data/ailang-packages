@@ -38,3 +38,10 @@ test "waste heat at the star's own temperature has factor 1; no absorbed fractio
   whRel(wasteHeatFactor(whTenUm(), 5000.0, 5000.0), 1.0, 0.000000000001) &&
   wasteHeatExcess(0.0, whTenUm(), solarTeffK(), 300.0) == 0.0
 }
+
+-- The row rule itself: it accepts a value that rounds to the printed digits
+-- and rejects one that rounds to the neighbouring digit.
+test "the row rule rejects a value that rounds to a neighbouring digit" {
+  whRow(0.31834, 0.3183, 4) && not whRow(0.31836, 0.3183, 4) && not whRow(0.31824, 0.3183, 4) &&
+  whRow(100.004, 100.0, 4) && not whRow(100.06, 100.0, 4) && whRow(1.15720938e-10, 1.157e-10, 4) && not whRow(1.1564e-10, 1.157e-10, 4)
+}

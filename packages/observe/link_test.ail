@@ -74,3 +74,10 @@ test "two polarisations gain sqrt(2) in SNR and 2^(1/4) in reach" {
   lkRel(integratedSnr(3.0, 2.0, 1.0, 100.0), integratedSnr(3.0, 1.0, 1.0, 100.0) * 1.4142135623730951, 0.000000000001) &&
   lkRel(reachSefdM(lkRadarW(), 5.0, 1e-25, 2.0, 1.0, 100.0), reachSefdM(lkRadarW(), 5.0, 1e-25, 1.0, 1.0, 100.0) * 1.189207115002721, 0.000000000001)
 }
+
+-- The row rule itself: it accepts a value that rounds to the printed digits
+-- and rejects one that rounds to the neighbouring digit.
+test "the row rule rejects a value that rounds to a neighbouring digit" {
+  lkRow(0.31834, 0.3183, 4) && not lkRow(0.31836, 0.3183, 4) && not lkRow(0.31824, 0.3183, 4) &&
+  lkRow(100.004, 100.0, 4) && not lkRow(100.06, 100.0, 4) && lkRow(1.15720938e-10, 1.157e-10, 4) && not lkRow(1.1564e-10, 1.157e-10, 4)
+}
