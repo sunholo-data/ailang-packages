@@ -20,7 +20,7 @@ import ./photon (Band, Blackbody, Instrument, Zodi, Budget, bandOf, resolutionEl
   planckPhotonRadiance, photonFlux, photonRate, lambertPhase, planetContrast, noiseFloorContrast,
   diffractionRad, innerWorkingAngleRad, separationRad, iwaLimitDistanceM, observable,
   photometricApertureArcsec2, zeroMagRate, zodiRate, zodiTotalRate, residualStarRate, backgroundRate,
-  darkRate, snr, timeToSnrS, referenceInstrument, referenceZodi, noZodi, planetBudget)
+  darkRate, snr, timeToSnrS, referenceInstrument, referenceZodi, noZodi, planetBudget, narrowBandOk)
 
 -- x rounded to sf significant figures (the registry oracle's round_sf).
 pure func phRoundSf(x: float, sf: int) -> float =
@@ -245,4 +245,17 @@ test "photon rate falls as distance squared and grows as aperture squared" {
 test "the row rule rejects a value that rounds to a neighbouring digit" {
   phRow(0.31834, 0.3183, 4) && not phRow(0.31836, 0.3183, 4) && not phRow(0.31824, 0.3183, 4) &&
   phRow(100.004, 100.0, 4) && not phRow(100.06, 100.0, 4) && phRow(1.15720938e-10, 1.157e-10, 4) && not phRow(1.1564e-10, 1.157e-10, 4)
+}
+
+-- ---------- the narrowest band float64 can hold ----------
+-- bandOf's domain is a width of at least 1e-13 of the centre (a resolving
+-- power of at most 1e12 in resolutionElement); below about 2e-16 the two
+-- edges round to the same double.
+pure func phWider(b: Band) -> bool = b.hiM > b.loM
+test "the narrowest bands in the domain still have hiM > loM" {
+  phWider(bandOf(1.0, 1e-13)) && phWider(bandOf(0.00000076, 0.00000076 * 1e-13)) && phWider(bandOf(3.0e8, 3.0e-5)) &&
+  phWider(resolutionElement(0.00000076, 1e12)) && phWider(resolutionElement(1.0, 1e12)) && phWider(resolutionElement(0.00012, 1e12))
+}
+test "narrowBandOk is the domain: 1e-13 of the centre is in, 1e-20 is out" {
+  narrowBandOk(1.0, 1e-13) && narrowBandOk(0.00000076, 0.00000076 / 1e12) && not narrowBandOk(1.0, 1e-20) && not narrowBandOk(1.0, 0.0)
 }

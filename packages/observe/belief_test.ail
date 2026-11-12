@@ -71,12 +71,20 @@ test "the red edge is harder to read around an M dwarf (it moves into the near-i
   likelihood(RedEdge, HostM, Complex) < likelihood(RedEdge, HostFGK, Complex) &&
   likelihood(RedEdge, HostM, Sterile) == likelihood(RedEdge, HostFGK, Sterile)
 }
-test "most technological worlds are quiet: no technosignature is more likely than not, but each beats a sterile world" {
+-- Every technosignature row, on both hosts: no more likely than not on a
+-- technological world, and likelier there than on a sterile one.
+pure func blTechRow(s: Signal, h: HostClass, minGain: float) -> bool =
+  likelihood(s, h, Technological) <= 0.5 && likelihood(s, h, Technological) >= minGain * likelihood(s, h, Sterile)
+pure func blTechRows(h: HostClass) -> bool =
+  blTechRow(Beacon, h, 100.0) && blTechRow(Leakage, h, 100.0) && blTechRow(IndustrialGas, h, 100.0) &&
+  blTechRow(NightLights, h, 100.0) && blTechRow(WasteHeat, h, 2.0) && blTechRow(ArtificialTransit, h, 10.0)
+test "all six technosignatures: at most even odds on a technological world; over a sterile one, 100x for beacon, leakage, gas and lights, 10x for transits, 2x for waste heat" {
+  blTechRows(HostFGK) && blTechRows(HostM)
+}
+test "most technological worlds are quiet: beacon, leakage, waste heat and megastructure transits are each under 0.5, and waste heat marks the Transcended" {
   likelihood(Beacon, HostFGK, Technological) < 0.5 && likelihood(Leakage, HostFGK, Technological) < 0.5 &&
   likelihood(WasteHeat, HostFGK, Technological) < 0.5 && likelihood(ArtificialTransit, HostFGK, Technological) < 0.5 &&
-  likelihood(Beacon, HostFGK, Technological) > 100.0 * likelihood(Beacon, HostFGK, Sterile) &&
-  likelihood(Leakage, HostFGK, Technological) > 100.0 * likelihood(Leakage, HostFGK, Sterile) &&
-  likelihood(WasteHeat, HostFGK, Transcended) > likelihood(WasteHeat, HostFGK, Technological)
+  likelihood(WasteHeat, HostFGK, Transcended) > 10.0 * likelihood(WasteHeat, HostFGK, Technological)
 }
 -- lifeOddsGainBound's claim rests on this: a living state is never less
 -- likely than Sterile to show a signal.
@@ -98,6 +106,10 @@ test "host class: below 3900 K is an M dwarf" {
 test "confidence is 0 at SNR 0, 1/2 at a hint (SNR 5), 15/16 at strong (SNR 10), and capped" {
   confidence(0.0) == 0.0 && confidence(-3.0) == 0.0 && absf(confidence(5.0) - 0.5) < 0.000000000001 &&
   absf(confidence(10.0) - 0.9375) < 0.000000000001 && confidence(1000.0) == confidenceCap() && confidenceCap() < 1.0
+}
+test "the confidence cap is 0.999: one look can favour a state by at most 1999 to 1" {
+  confidenceCap() == 0.999 && confidence(40.0) == 0.999 &&
+  absf(observationLikelihood(blSeen(Beacon, 1000.0), HostFGK, Technological) - (0.05 * 0.9995 + 0.95 * 0.0005)) < 0.000000000000001
 }
 test "an observation at SNR 0 says nothing: its likelihood is the same for every state" {
   observationLikelihood(blSeen(O2CH4, 0.0), HostFGK, Sterile) == observationLikelihood(blSeen(O2CH4, 0.0), HostFGK, Complex) &&
@@ -214,3 +226,45 @@ test "validBelief accepts a normalised eight-state belief and rejects the wrong 
   validBelief(blPrior()) && validBelief(blTechPrior()) && not validBelief([0.5, 0.5]) &&
   not validBelief([1.1, -0.1, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]) && not validBelief([0.5, 0.2, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
 }
+
+-- ---------- many looks must not underflow ----------
+-- 150 detections and 100 non-detections of leakage, all at the cap: the 50
+-- extra detections outweigh the rest by 1999^50, so the signal is there and
+-- the belief is the prior times the Leakage row, normalised. The raw products
+-- (0.0005^100 and smaller) are below the smallest double.
+pure func blLeakRow() -> [float] = likelihoodRow(Leakage, HostFGK)
+pure func blTimes(a: [float], b: [float]) -> [float] =
+  match a { [] => [], x :: rest => match b { [] => [], y :: restB => (x * y) :: blTimes(rest, restB) } }
+pure func blScale(xs: [float], k: float) -> [float] = match xs { [] => [], x :: rest => (x / k) :: blScale(rest, k) }
+pure func blSurelyThere() -> [float] { let w = blTimes(blPrior(), blLeakRow()); blScale(w, sumOf(w)) }
+pure func blLooks(seen: int, missed: int) -> [Observation] =
+  blRepeat(blSeen(Leakage, 1000.0), seen) ++ blRepeat(blMissed(Leakage, 1000.0), missed)
+pure func blAsymmetric() -> bool {
+  let p = blP(blPrior(), HostFGK, blLooks(150, 100));
+  blMaxDiff(p, blSurelyThere()) < 0.000000000001 && probOf(p, Technological) > 0.7 && probOf(p, Sterile) < 0.25 && sumsToOne(p)
+}
+test "150 detections against 100 non-detections do not underflow: the belief is the prior times the Leakage row" { blAsymmetric() }
+
+pure func blAsymmetricOrder() -> bool {
+  let a = posterior(blPrior(), HostFGK, blLooks(150, 100));
+  let b = posterior(blPrior(), HostFGK, blRepeat(blMissed(Leakage, 1000.0), 100) ++ blRepeat(blSeen(Leakage, 1000.0), 150));
+  a.p == b.p && a.movedBy == b.movedBy
+}
+test "and the same looks in the other order give the same bits" { blAsymmetricOrder() }
+
+test "95 detections and 95 non-detections cancel exactly: the belief is the prior to 1e-15" {
+  blMaxDiff(blP(blPrior(), HostFGK, blLooks(95, 95)), blPrior()) < 0.000000000000001
+}
+test "100 non-detections against 60 detections: the signal is not there, and P(technological) falls" {
+  probOf(blP(blPrior(), HostFGK, blLooks(60, 100)), Technological) < 0.91 * probOf(blPrior(), Technological) &&
+  sumsToOne(blP(blPrior(), HostFGK, blLooks(60, 100)))
+}
+
+-- movedMost among identical observations is the lowest index given.
+pure func blDuplicates() -> bool {
+  let a = posterior(blPrior(), HostFGK, [blSeen(O2, 5.0), blSeen(O2CH4, 10.0), blSeen(RedEdge, 3.0), blSeen(O2CH4, 10.0)]);
+  let b = posterior(blPrior(), HostFGK, [blSeen(O2CH4, 10.0), blSeen(RedEdge, 3.0), blSeen(O2CH4, 10.0), blSeen(O2, 5.0)]);
+  let c = posterior(blPrior(), HostFGK, [blSeen(RedEdge, 3.0), blSeen(O2, 5.0), blSeen(O2CH4, 10.0), blSeen(O2CH4, 10.0)]);
+  a.movedMost == 1 && b.movedMost == 0 && c.movedMost == 2 && a.p == b.p && a.p == c.p && a.movedBy == c.movedBy
+}
+test "movedMost among identical observations is the lowest index given, under any permutation" { blDuplicates() }

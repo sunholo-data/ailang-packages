@@ -8,7 +8,7 @@ module sunholo/observe/wasteheat_test
 import std/math (floor, log10, pow, round, intToFloat)
 import pkg/sunholo/relativity/hyper (absf)
 import ./constants (solarTeffK)
-import ./wasteheat (wasteHeatFactor, wasteHeatExcess, wasteHeatFractionFor)
+import ./wasteheat (wasteHeatFactor, wasteHeatExcess, wasteHeatFractionFor, maxExcessRatio)
 
 pure func whRoundSf(x: float, sf: int) -> float =
   if x == 0.0 then 0.0
@@ -45,3 +45,12 @@ test "the row rule rejects a value that rounds to a neighbouring digit" {
   whRow(0.31834, 0.3183, 4) && not whRow(0.31836, 0.3183, 4) && not whRow(0.31824, 0.3183, 4) &&
   whRow(100.004, 100.0, 4) && not whRow(100.06, 100.0, 4) && whRow(1.15720938e-10, 1.157e-10, 4) && not whRow(1.1564e-10, 1.157e-10, 4)
 }
+
+-- wasteHeatFractionFor's domain ends at excess = maxExcessRatio() x K: beyond
+-- about 1e16 x K, r / (1 + r) rounds to exactly 1 (a fully hidden star).
+pure func whEdge() -> bool {
+  let k = wasteHeatFactor(whTenUm(), solarTeffK(), 300.0);
+  let g = wasteHeatFractionFor(maxExcessRatio() * k * 0.999, whTenUm(), solarTeffK(), 300.0);
+  maxExcessRatio() == 1e12 && g < 1.0 && g > 0.999999999998
+}
+test "at the edge of its domain (excess 1e12 K) the fraction is still below 1" { whEdge() }
