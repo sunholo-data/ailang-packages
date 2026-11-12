@@ -31,7 +31,7 @@
 
 module sunholo/observe/belief
 
-import std/math (pow)
+import std/math (pow, exp, log)
 import std/list (length, nth_or)
 
 -- The eight planet states, in the order of sunholo/worlds PlanetState.
@@ -63,7 +63,8 @@ export type Observation = { signal: Signal, detected: bool, snr: float }
 
 -- p: the belief over the eight states, in stateIndex order, summing to 1.
 -- movedMost: the index, in the list given, of the observation that on its
--- own moves the prior furthest (-1 if none moves it). movedBy: how far, as
+-- own moves the prior furthest (-1 if none moves it; the lowest index if
+-- the same observation appears more than once). movedBy: how far, as
 -- the total variation distance between the prior and the belief after that
 -- observation alone (0 to 1).
 export type Posterior = { p: [float], movedMost: int, movedBy: float }
@@ -281,26 +282,44 @@ pure func sortObs(obs: [Observation], acc: [Observation]) -> [Observation] =
 
 -- ---------- evidence ----------
 
--- The likelihood of all the (sorted) observations for one state: looks at
--- the same signal are multiplied under "there" and "not there" first, then
--- mixed by the table; signals multiply.
+-- What one look adds to the log-odds that the signal is there:
+-- +ln((1 + c)/(1 - c)) for a detection, the negative for a non-detection,
+-- 0 at SNR 0. At the cap it is ln 1999 = 7.6.
+pure func logOdds(o: Observation) -> float {
+  let c = confidence(o.snr);
+  let l = log((1.0 + c) / (1.0 - c));
+  if o.detected then l else 0.0 - l
+}
+
+-- The likelihood of all the (sorted) observations for one state, up to a
+-- factor that is the same for every state. Looks at one signal are summed as
+-- log-odds first, lr = ln(prod P(look | there) / prod P(look | not there)),
+-- then mixed by the table; signals multiply.
+--
+-- The products themselves are never formed: 100 looks at the cap would
+-- multiply to 0.0005^100, below the smallest double. Dividing both products
+-- by the larger leaves the pair (1, e^-|lr|), and the divisor is the same
+-- for every state, so it cancels when the belief is normalised. Each
+-- signal's factor is then at least 1e-4 (the smallest table entry), so ten
+-- signals cannot underflow whatever the number of looks.
 pure func evidence(sorted: [Observation], host: HostClass, state: State) -> float =
   match sorted {
     [] => 1.0,
-    o :: rest => group(rest, host, state, o.signal, givenThere(o), givenAbsent(o), 1.0)
+    o :: rest => group(rest, host, state, o.signal, logOdds(o), 1.0)
   }
 
-pure func group(obs: [Observation], host: HostClass, state: State, cur: Signal, there: float, absent: float, acc: float) -> float =
+pure func group(obs: [Observation], host: HostClass, state: State, cur: Signal, lr: float, acc: float) -> float =
   match obs {
-    [] => acc * mix(cur, host, state, there, absent),
+    [] => acc * mix(cur, host, state, lr),
     o :: rest =>
-      if o.signal == cur then group(rest, host, state, cur, there * givenThere(o), absent * givenAbsent(o), acc)
-      else group(rest, host, state, o.signal, givenThere(o), givenAbsent(o), acc * mix(cur, host, state, there, absent))
+      if o.signal == cur then group(rest, host, state, cur, lr + logOdds(o), acc)
+      else group(rest, host, state, o.signal, logOdds(o), acc * mix(cur, host, state, lr))
   }
 
-pure func mix(signal: Signal, host: HostClass, state: State, there: float, absent: float) -> float {
+-- p x there + (1 - p) x absent, with the larger of the two scaled to 1.
+pure func mix(signal: Signal, host: HostClass, state: State, lr: float) -> float {
   let p = likelihood(signal, host, state);
-  p * there + (1.0 - p) * absent
+  if lr >= 0.0 then p + (1.0 - p) * exp(0.0 - lr) else p * exp(lr) + (1.0 - p)
 }
 
 -- ---------- beliefs ----------
@@ -356,12 +375,13 @@ pure func weigh(prior: [float], sts: [State], sorted: [Observation], host: HostC
     }
   }
 
--- Bayes for a sorted list; the normalised prior if the evidence leaves
--- nothing (it cannot, with the cap, short of underflow).
+-- Bayes for a sorted list. The evidence is positive for every state (see
+-- `evidence`), so the total is positive for any valid prior; the guard only
+-- covers a prior that is all zeros, which is returned as given.
 pure func update(prior: [float], host: HostClass, sorted: [Observation]) -> [float] {
   let w = weigh(prior, states(), sorted, host);
   let total = sumOf(w);
-  if total > 0.0 then scale(w, total) else scale(prior, sumOf(prior))
+  if total > 0.0 then scale(w, total) else prior
 }
 
 pure func absDiff(a: [float], b: [float]) -> float =
@@ -373,9 +393,10 @@ pure func absDiff(a: [float], b: [float]) -> float =
     }
   }
 
--- The observation that alone moves the prior furthest. Ties go to the
--- earlier observation in the canonical order, so the choice does not depend
--- on the order given.
+-- The observation that alone moves the prior furthest. Ties between
+-- different observations go to the earlier one in the canonical order, so
+-- the choice does not depend on the order given. Among identical
+-- observations the index is the lowest one given.
 pure func strongest(obs: [Observation], i: int, base: [float], host: HostClass, best: int, bestBy: float, bestObs: [Observation]) -> Posterior =
   match obs {
     [] => { p: [], movedMost: best, movedBy: bestBy },
