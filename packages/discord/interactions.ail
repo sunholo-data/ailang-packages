@@ -1,0 +1,181 @@
+module sunholo/discord/interactions
+
+-- Generic Discord interactions codec (slash commands and friends).
+-- Application-agnostic: this module decodes what Discord POSTs to an
+-- Interactions Endpoint, builds the immediate callback responses, and builds
+-- followup payloads. Which commands exist and what they do is application
+-- wiring (registration payloads are data; the host dispatches by name).
+--
+-- Signature verification (Ed25519 over the payload + X-Signature-Timestamp,
+-- against the application's PUBLIC key) is a host responsibility — Discord's
+-- endpoints are only trustworthy behind it. This module never sees secrets.
+
+import std/json (Json, decode, encode, getString, getInt, getArray, getObject, get, jo, kv, js, ja, jb, jint)
+import std/option (Some, None, getOrElse, isSome)
+import std/result (Result, Ok, Err, isErr)
+import std/list (map, length as listLength)
+import pkg/sunholo/discord/client (Embed, embedJson, validEmbed, DiscordError, problem)
+
+export type InteractionOption = {name: string, value: string}
+export type InteractionCommand = {id: string, name: string, options: [InteractionOption]}
+export type Interaction = {kind: int, id: string, token: string, applicationId: string, command: InteractionCommand}
+
+-- Interaction types this codec understands: 1 = PING (portal verification),
+-- 2 = APPLICATION_COMMAND. Anything else decodes to an error (host may then
+-- answer 400 rather than guess).
+export pure func knownType(t: int) -> bool
+ensures { result == (t == 1 || t == 2) }
+tests [(1, true), (2, true), (3, false), (0, false)]
+{
+  t == 1 || t == 2
+}
+
+pure func decodeOption(o: Json) -> Result[InteractionOption, string]
+ensures { match result { Ok(v) => v.name != "", Err(_) => true } }
+{
+  let name = getOrElse(getString(o, "name"), "");
+  if name == "" then Err("Option missing name")
+  else Ok({name: name, value: match get(o, "value") {
+    Some(v) => getStringOfValue(v),
+    None => ""
+  }})
+}
+
+-- Option values arrive typed by Discord (string/int/bool/…); a string
+-- consumer-facing codec renders them via their JSON form.
+pure func getStringOfValue(v: Json) -> string
+ensures { length(result) >= 0 }
+{
+  show(v)
+}
+
+@allow_empty_ok("An interaction with zero options is valid (argument-less slash command)")
+pure func decodeCommand(data: Json) -> Result[InteractionCommand, string]
+ensures { match result { Ok(c) => c.name != "", Err(_) => true } }
+{
+  let id = getOrElse(getString(data, "id"), "");
+  let name = getOrElse(getString(data, "name"), "");
+  if name == "" then Err("Command data missing name")
+  else match decodeAll(decodeOption, getOrElse(getArray(data, "options"), [])) {
+    Err(e) => Err(e),
+    Ok(options) => Ok({id: id, name: name, options: options})
+  }
+}
+
+@allow_empty_ok("Empty option/command lists are valid and the recursion base case")
+pure func decodeAll[f, b](f: f, xs: [Json]) -> Result[[b], string]
+ensures { listLength(xs) != 0 || isOk(result) }
+{
+  match xs {
+  [] => Ok([]), x :: rest => match f(x) {
+    Err(e) => Err(e), Ok(b) => match decodeAll(f, rest) { Err(e) => Err(e), Ok(bs) => Ok(b :: bs) } }
+  }
+}
+
+-- Decode a raw interaction POST body. PING bodies carry no command; command
+-- interactions require an id, an interaction token and command data.
+export pure func decodeInteraction(raw: string) -> Result[Interaction, string]
+ensures {
+  isErr(decode(raw)) || knownType(result.kind) && (result.kind != 2 || result.token != ""),
+  match result { Ok(v) => (v.kind == 1) || (v.token != "" && v.command.name != ""), Err(_) => true }
+}
+{
+  match decode(raw) {
+  Err(_) => Err("Malformed interaction JSON"),
+  Ok(j) => decodeInteractionJson(j)
+  }
+}
+
+pure func decodeInteractionJson(j: Json) -> Result[Interaction, string]
+ensures { match result { Ok(v) => v.kind == 1 || v.kind == 2, Err(_) => true } }
+{
+  let t = getOrElse(getInt(j, "type"), 0);
+  if not knownType(t) then Err("Unsupported interaction type: ${show(t)}")
+  else if t == 1 then Ok(pingInteraction(j))
+  else match get(j, "data") {
+    None => Err("Application command interaction missing data"),
+    Some(data) => match decodeCommand(data) {
+      Err(e) => Err(e),
+      Ok(command) => Ok(commandInteraction(j, command))
+    }
+  }
+}
+
+pure func pingInteraction(j: Json) -> Interaction
+ensures { result.kind == 1 }
+= {kind: 1, id: getOrElse(getString(j, "id"), ""), token: getOrElse(getString(j, "token"), ""),
+   applicationId: getOrElse(getString(j, "application_id"), ""), command: {id: "", name: "", options: []}}
+
+pure func commandInteraction(j: Json, command: InteractionCommand) -> Interaction
+ensures { result.kind == 2, result.command.name == command.name }
+= {kind: 2, id: getOrElse(getString(j, "id"), ""), token: getOrElse(getString(j, "token"), ""),
+   applicationId: getOrElse(getString(j, "application_id"), ""), command: command}
+
+-- A command option definition for registration payloads.
+export pure func commandOption(name: string, description: string, required: bool) -> Json
+ensures { getOrElse(getString(result, "name"), "") == name }
+{
+  jo([kv("name", js(name)), kv("description", js(description)), kv("type", jint(3)), kv("required", jb(required))])
+}
+
+-- A slash-command definition (type 3 = STRING options here; extend as needed).
+export pure func commandDefinition(name: string, description: string, options: [Json]) -> Json
+ensures { getOrElse(getString(result, "name"), "") == name, isSome(getString(result, "description")) }
+{
+  jo([kv("name", js(name)), kv("description", js(description)),
+    if listLength(options) != 0 then kv("options", ja(options)) else kv("options", ja([]))])
+}
+
+-- Registration body for PUT /applications/{appId}/commands (replaces the
+-- application's global command set with exactly this list).
+export pure func registrationBody(defs: [Json]) -> string
+ensures { listLength(defs) != 0 || result == "[]" }
+{
+  encode(ja(defs))
+}
+
+-- Immediate callback: answer the portal PING.
+export pure func callbackPong() -> Json
+ensures { getInt(result, "type") == Some(1) }
+{
+  jo([kv("type", jint(1))])
+}
+
+-- Immediate callback: acknowledge now, deliver later via the followup URL.
+export pure func callbackDeferred() -> Json
+ensures { getInt(result, "type") == Some(5) }
+{
+  jo([kv("type", jint(5))])
+}
+
+-- Immediate callback: reply inline (only for work that finishes well inside
+-- Discord's 3-second window).
+export pure func callbackMessage(text: string, embeds: [Embed]) -> Json
+ensures { getInt(result, "type") == Some(4) }
+{
+  jo([kv("type", jint(4)), kv("data", messageData(text, embeds))])
+}
+
+-- Followup payload for POST /webhooks/{appId}/{interactionToken}.
+export pure func followupBody(text: string, embeds: [Embed]) -> Json
+ensures { (text != "" || listLength(embeds) != 0) || result == jo([]) }
+{
+  messageData(text, embeds)
+}
+
+pure func messageData(text: string, embeds: [Embed]) -> Json
+ensures { listLength(embeds) == 0 || isSome(get(result, "embeds")), text == "" || isSome(get(result, "content")) }
+{
+  jo(
+    (if text != "" then [kv("content", js(text))] else []) ++
+    (if listLength(embeds) != 0 then [kv("embeds", ja(map(embedJson, embeds)))] else [])
+  )
+}
+
+-- The followup URL for a deferred interaction; interaction tokens are
+-- standalone (no bot token in the request) and valid for 15 minutes.
+export pure func followupUrl(applicationId: string, interactionToken: string) -> string
+ensures { result == "/webhooks/${applicationId}/${interactionToken}" }
+{
+  "/webhooks/${applicationId}/${interactionToken}"
+}
