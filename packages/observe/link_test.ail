@@ -1,0 +1,83 @@
+-- Check values for sunholo/observe/link: stapledons-design
+-- physics/observation.md (baseline-2026.11) rows OB-28..OB-37, OB-51, OB-52.
+-- A row passes as the registry says (§4): the computed value, rounded to the
+-- row's printed significant figures, equals the printed value.
+
+module sunholo/observe/link_test
+
+import std/math (floor, log10, pow, round, intToFloat)
+import pkg/sunholo/relativity/hyper (absf)
+import ./constants (lightYearM, janskyWm2Hz, snrHint, snrStrong)
+import ./link (dishAreaM2, sefdWm2Hz, sefdJy, fluxWm2, linkSnr, linkSnrSefd, integratedSnr, reachM, reachSefdM,
+  eirpFromErpW, referenceDishAreaM2, referenceTsysK, largeArrayAreaM2)
+
+pure func lkRoundSf(x: float, sf: int) -> float =
+  if x == 0.0 then 0.0
+  else {
+    let q = pow(10.0, floor(log10(absf(x))) - intToFloat(sf) + 1.0);
+    round(x / q) * q
+  }
+pure func lkRow(got: float, printed: float, sf: int) -> bool =
+  absf(lkRoundSf(got, sf) - printed) <= 0.000000001 * absf(printed)
+pure func lkRel(got: float, want: float, tol: float) -> bool = absf(got - want) <= tol * absf(want)
+
+pure func lkRadarW() -> float = 2e13
+pure func lkTvW() -> float = eirpFromErpW(1000000.0, 0.4)
+-- reach in light-years with the reference dish (n_pol = 1)
+pure func lkDishLy(eirpW: float, target: float, bandwidthHz: float, seconds: float) -> float =
+  reachM(eirpW, target, referenceDishAreaM2(), referenceTsysK(), 1.0, bandwidthHz, seconds) / lightYearM()
+pure func lkArrayLy(eirpW: float, target: float, bandwidthHz: float, seconds: float) -> float =
+  reachM(eirpW, target, largeArrayAreaM2(), referenceTsysK(), 1.0, bandwidthHz, seconds) / lightYearM()
+
+test "OB-28: effective area of the reference dish is 5498 m2" {
+  lkRow(dishAreaM2(100.0, 0.70), 5498.0, 4) && referenceDishAreaM2() == dishAreaM2(100.0, 0.70)
+}
+test "OB-29: SEFD of the reference dish is 12.56 Jy" {
+  lkRow(sefdJy(referenceDishAreaM2(), 25.0), 12.56, 4) &&
+  lkRel(sefdWm2Hz(referenceDishAreaM2(), 25.0), sefdJy(referenceDishAreaM2(), 25.0) * janskyWm2Hz(), 0.000000000001)
+}
+test "OB-30: linkSnr for 2e13 W at 100 ly, reference dish, 1 Hz is 14.16" {
+  lkRow(linkSnr(lkRadarW(), 100.0 * lightYearM(), referenceDishAreaM2(), 1.0, 25.0), 14.16, 4)
+}
+test "OB-31: 2e13 W gives SNR 1 at 376.3 ly (reference dish, 1 Hz, 1 s)" { lkRow(lkDishLy(lkRadarW(), 1.0, 1.0, 1.0), 376.3, 4) }
+test "OB-32: and SNR 10 at 119.0 ly" { lkRow(lkDishLy(lkRadarW(), snrStrong(), 1.0, 1.0), 119.0, 4) }
+test "OB-33: 2e13 W gives SNR 5 at 1.193e4 ly (SEFD 1.5 Jy, 0.01 Hz, 3600 s)" {
+  lkRow(reachSefdM(lkRadarW(), 5.0, 1.5 * janskyWm2Hz(), 1.0, 0.01, 3600.0) / lightYearM(), 1.193e4, 4)
+}
+test "OB-34: EIRP of a TV video carrier, 1.64 x 0.4 x 1000 kW = 6.560e5 W" { lkRow(lkTvW(), 6.560e5, 4) }
+test "OB-35: the TV carrier gives SNR 1 at 0.9388 ly (reference dish, 0.1 Hz, 3600 s)" {
+  lkRow(lkDishLy(lkTvW(), 1.0, 0.1, 3600.0), 0.9388, 4)
+}
+test "OB-36: and at 12.66 ly with the large array" { lkRow(lkArrayLy(lkTvW(), 1.0, 0.1, 3600.0), 12.66, 4) }
+test "OB-37: and SNR 10 at 4.004 ly with the large array" { lkRow(lkArrayLy(lkTvW(), snrStrong(), 0.1, 3600.0), 4.004, 4) }
+test "OB-51: 2e13 W gives a hint (SNR 5) at 168.3 ly (reference dish, 1 Hz, 1 s)" {
+  lkRow(lkDishLy(lkRadarW(), snrHint(), 1.0, 1.0), 168.3, 4)
+}
+test "OB-52: the TV carrier gives a hint at 5.662 ly (large array, 0.1 Hz, 3600 s)" {
+  lkRow(lkArrayLy(lkTvW(), snrHint(), 0.1, 3600.0), 5.662, 4)
+}
+
+-- The reach inverts the link: at d(SNR) the integrated SNR is the target.
+pure func lkInverts(eirpW: float, target: float, bandwidthHz: float, seconds: float) -> bool {
+  let d = reachM(eirpW, target, referenceDishAreaM2(), referenceTsysK(), 1.0, bandwidthHz, seconds);
+  let one = linkSnr(eirpW, d, referenceDishAreaM2(), bandwidthHz, referenceTsysK());
+  lkRel(integratedSnr(one, 1.0, bandwidthHz, seconds), target, 0.000000000001)
+}
+test "reachM inverts linkSnr x sqrt(n_pol B t)" {
+  lkInverts(lkRadarW(), 1.0, 1.0, 1.0) && lkInverts(lkTvW(), 5.0, 0.1, 3600.0) && lkInverts(lkRadarW(), 10.0, 0.01, 3600.0)
+}
+test "linkSnr is the flux over SEFD x B, and falls as distance squared" {
+  lkRel(linkSnr(lkRadarW(), 3e17, 5000.0, 2.0, 30.0), fluxWm2(lkRadarW(), 3e17) / (sefdWm2Hz(5000.0, 30.0) * 2.0), 0.000000000001) &&
+  lkRel(linkSnrSefd(lkRadarW(), 6e17, 1e-25, 1.0) * 4.0, linkSnrSefd(lkRadarW(), 3e17, 1e-25, 1.0), 0.000000000001)
+}
+test "two polarisations gain sqrt(2) in SNR and 2^(1/4) in reach" {
+  lkRel(integratedSnr(3.0, 2.0, 1.0, 100.0), integratedSnr(3.0, 1.0, 1.0, 100.0) * 1.4142135623730951, 0.000000000001) &&
+  lkRel(reachSefdM(lkRadarW(), 5.0, 1e-25, 2.0, 1.0, 100.0), reachSefdM(lkRadarW(), 5.0, 1e-25, 1.0, 1.0, 100.0) * 1.189207115002721, 0.000000000001)
+}
+
+-- The row rule itself: it accepts a value that rounds to the printed digits
+-- and rejects one that rounds to the neighbouring digit.
+test "the row rule rejects a value that rounds to a neighbouring digit" {
+  lkRow(0.31834, 0.3183, 4) && not lkRow(0.31836, 0.3183, 4) && not lkRow(0.31824, 0.3183, 4) &&
+  lkRow(100.004, 100.0, 4) && not lkRow(100.06, 100.0, 4) && lkRow(1.15720938e-10, 1.157e-10, 4) && not lkRow(1.1564e-10, 1.157e-10, 4)
+}

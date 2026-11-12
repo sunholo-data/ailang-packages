@@ -1,0 +1,478 @@
+-- sunholo/observe/belief — what a set of observations says about a world:
+-- Bayes over the eight planet states.
+--
+-- THIS MODULE IS A GAME MODEL. The photon and link budgets are pinned by
+-- stapledons-design physics/observation.md; nothing here is. The registry
+-- has no likelihood rows. Every number in likelihoodRow, the confidence
+-- curve and its cap is a DESIGN VALUE AWAITING REVIEW. The qualitative basis
+-- of each is stapledons-design features/next/signals-and-instruments.md
+-- §4.2 (biosignatures and their false positives), §4.3 (technosignatures)
+-- and §7 (the evidence ledger).
+--
+-- The model, in three statements:
+--   1. likelihood(signal, host, state) is the chance that a world in that
+--      state, around that class of star, shows the signal at all.
+--   2. An observation is trusted with weight c = confidence(snr). With
+--      weight c it reports the truth about whether the signal is there; with
+--      weight 1 - c it is a coin flip. So a detection has probability
+--      (1 + c)/2 if the signal is there and (1 - c)/2 if it is not, and a
+--      non-detection the reverse. For a non-detection, snr is the SNR the
+--      instrument would have reached had the signal been there (from the
+--      photon or link budget): a deep look that sees nothing is evidence, a
+--      shallow one is not.
+--   3. Looks at the same signal share one fact (is it there?), so they are
+--      combined before the table is applied:
+--        L(state) = p x prod P(look | there) + (1 - p) x prod P(look | not there)
+--      Twenty looks at abiotic oxygen are still abiotic oxygen. Different
+--      signals are taken as independent given the state.
+--
+-- The states and their order are sunholo/worlds history.PlanetState's. This
+-- package does not depend on sunholo/worlds: map by stateIndex.
+
+module sunholo/observe/belief
+
+import std/math (pow, exp, log)
+import std/list (length, nth_or)
+
+-- The eight planet states, in the order of sunholo/worlds PlanetState.
+export type State = Sterile | Microbial | Complex | PreTech | Technological | Remnant | Transcended | Ecocide deriving (Eq)
+
+-- The ten signals (signals-and-instruments §4.2, §4.3).
+--   O2                 O2 or O3 alone
+--   O2CH4              O2 or O3 together with CH4 (chemical disequilibrium)
+--   RedEdge            a surface reflectance edge like vegetation's
+--   Glint              ocean glint or water vapour: liquid water (habitability, not life)
+--   Beacon             an intentional narrowband radio or optical beacon
+--   Leakage            undirected radio or radar leakage
+--   IndustrialGas      CFCs, NF3, NO2
+--   NightLights        artificial light on the night side
+--   WasteHeat          a mid-infrared excess above the instrument's threshold
+--   ArtificialTransit  a non-planetary light-curve shape
+-- One spectrum gives O2 or O2CH4, not both: record O2CH4 when CH4 is seen
+-- with the oxygen, O2 when it is not.
+export type Signal = O2 | O2CH4 | RedEdge | Glint | Beacon | Leakage | IndustrialGas | NightLights | WasteHeat | ArtificialTransit deriving (Eq)
+
+-- The host star's class, as far as the false positives need it. HostM is a
+-- host around which a desiccated world can hold abiotic O2.
+export type HostClass = HostFGK | HostM deriving (Eq)
+
+-- One look at one signal. detected: whether the signal was seen. snr: the
+-- SNR of the detection, or for a non-detection the SNR the instrument would
+-- have reached had the signal been there.
+export type Observation = { signal: Signal, detected: bool, snr: float }
+
+-- p: the belief over the eight states, in stateIndex order, summing to 1.
+-- movedMost: the index, in the list given, of the observation that on its
+-- own moves the prior furthest (-1 if none moves it; the lowest index if
+-- the same observation appears more than once). movedBy: how far, as
+-- the total variation distance between the prior and the belief after that
+-- observation alone (0 to 1).
+export type Posterior = { p: [float], movedMost: int, movedBy: float }
+
+export pure func states() -> [State]
+  ensures { length(result) == 8 }
+{
+  [Sterile, Microbial, Complex, PreTech, Technological, Remnant, Transcended, Ecocide]
+}
+
+export pure func signals() -> [Signal]
+  ensures { length(result) == 10 }
+{
+  [O2, O2CH4, RedEdge, Glint, Beacon, Leakage, IndustrialGas, NightLights, WasteHeat, ArtificialTransit]
+}
+
+export pure func stateIndex(s: State) -> int
+  ensures { result >= 0, result <= 7 }
+{
+  match s {
+    Sterile => 0,
+    Microbial => 1,
+    Complex => 2,
+    PreTech => 3,
+    Technological => 4,
+    Remnant => 5,
+    Transcended => 6,
+    Ecocide => 7
+  }
+}
+
+export pure func stateOfIndex(i: int) -> State
+  requires { i >= 0, i <= 7 }
+{
+  if i == 0 then Sterile else if i == 1 then Microbial else if i == 2 then Complex else if i == 3 then PreTech
+  else if i == 4 then Technological else if i == 5 then Remnant else if i == 6 then Transcended else Ecocide
+}
+
+export pure func signalIndex(s: Signal) -> int
+  ensures { result >= 0, result <= 9 }
+{
+  match s {
+    O2 => 0,
+    O2CH4 => 1,
+    RedEdge => 2,
+    Glint => 3,
+    Beacon => 4,
+    Leakage => 5,
+    IndustrialGas => 6,
+    NightLights => 7,
+    WasteHeat => 8,
+    ArtificialTransit => 9
+  }
+}
+
+-- Below 3900 K (about spectral type M0) the host is an M dwarf. A design
+-- threshold: the game has no activity or age for the star here.
+export pure func hostClassOfTeffK(teffK: float) -> HostClass = if teffK < 3900.0 then HostM else HostFGK
+
+-- ---------- THE TABLE: design values awaiting review ----------
+--
+-- likelihoodRow(signal, host): the chance that a world in each state shows
+-- the signal, in the order
+--   [Sterile, Microbial, Complex, PreTech, Technological, Remnant, Transcended, Ecocide]
+-- Every number is a design value. None is measured; none is in the registry.
+-- The comment on each row gives its qualitative basis in
+-- signals-and-instruments (S&I). How the states are read: PreTech and
+-- Technological worlds keep a complex biosphere; Remnant is a fallen
+-- civilisation whose traces have not yet faded, on a living world;
+-- Transcended is a mind that has left the planetary scale; Ecocide is a
+-- world its minds killed.
+export pure func likelihoodRow(signal: Signal, host: HostClass) -> [float]
+  ensures { length(result) == 8 }
+{
+  match signal {
+    -- S&I §4.2 row 1. Oxygenic photosynthesis fills the air of a complex
+    -- biosphere; a microbial one often has none (Earth before the Great
+    -- Oxidation). False positive: "abiotic O2 from water photolysis on
+    -- desiccated worlds around active M dwarfs; CO2 photolysis": Sterile is
+    -- 0.02 around FGK stars and ten times that around M dwarfs.
+    O2 => match host {
+      HostFGK => [0.02, 0.30, 0.90, 0.90, 0.85, 0.80, 0.50, 0.10],
+      HostM => [0.20, 0.30, 0.90, 0.90, 0.85, 0.80, 0.50, 0.10]
+    },
+    -- S&I §4.2 row 1. "Life keeps both in an atmosphere that would destroy
+    -- one within decades." Abiotic O2 does not come with CH4, so Sterile is
+    -- 0.002 (0.01 around M dwarfs, where both abiotic routes are likelier).
+    -- Not every oxygen-rich biosphere holds detectable CH4 (Earth's is weak
+    -- today), so the living states sit below their O2 values.
+    O2CH4 => match host {
+      HostFGK => [0.002, 0.20, 0.70, 0.70, 0.65, 0.55, 0.30, 0.02],
+      HostM => [0.01, 0.20, 0.70, 0.70, 0.65, 0.55, 0.30, 0.02]
+    },
+    -- S&I §4.2 row 3. Photosynthetic pigment on land; microbes alone give
+    -- none. False positive: "minerals with edges" (0.03 for any world).
+    -- "The edge moves with the host star (plants around M dwarfs may absorb
+    -- into the near-infrared, Kiang et al. 2007)", so around an M dwarf the
+    -- living states are halved: the edge is often outside the band read.
+    RedEdge => match host {
+      HostFGK => [0.03, 0.03, 0.60, 0.60, 0.50, 0.55, 0.30, 0.03],
+      HostM => [0.03, 0.03, 0.30, 0.30, 0.25, 0.275, 0.15, 0.03]
+    },
+    -- S&I §4.2 row 5. "Liquid water (habitability, not life)": every living
+    -- state has it, and one sterile world in ten does too or mimics it
+    -- ("glint from other liquids, or glint mimicked by clouds"). A world its
+    -- minds killed often keeps its oceans (0.40).
+    Glint => [0.10, 0.80, 0.90, 0.90, 0.90, 0.85, 0.60, 0.40],
+    -- S&I §4.3 row 1. "Across the galaxy if they are aimed at you": few
+    -- civilisations aim one at the ship (0.05). A fallen one may leave a
+    -- beacon running (0.01). Natural worlds: 1e-4, for interference and
+    -- unexplained narrowband events.
+    Beacon => [0.0001, 0.0001, 0.0001, 0.0001, 0.05, 0.01, 0.02, 0.0005],
+    -- S&I §4.3 row 2 and observation.md "what the rows say": the link budget
+    -- does not hide a radar, "its narrow, brief beam does, and the likelihood
+    -- model carries that chance". 0.10 is the chance a technological world's
+    -- leakage crosses the ship during a look. Traces fall silent quickly.
+    Leakage => [0.0001, 0.0001, 0.0001, 0.0001, 0.10, 0.001, 0.005, 0.0005],
+    -- S&I §4.3 row 3. "No known abiotic source for CFCs" (0.001 for
+    -- misread spectra). Not every technological world pollutes (0.40);
+    -- long-lived gases outlast their makers (Remnant 0.15), and a world
+    -- killed by its industry keeps them (Ecocide 0.30).
+    IndustrialGas => [0.001, 0.001, 0.001, 0.002, 0.40, 0.15, 0.05, 0.30],
+    -- S&I §4.3 row 4. "City illumination": half of technological worlds;
+    -- fire on a pre-technological one (0.01); natural false positives
+    -- (aurorae, lava, lightning) 5e-4.
+    NightLights => [0.0005, 0.0005, 0.0005, 0.01, 0.50, 0.02, 0.05, 0.01],
+    -- S&I §4.3 row 5 and observation.md OB-40. "A Dyson swarm shows across
+    -- the galaxy", but a civilisation like humanity is far below any
+    -- threshold (Technological 0.01): only a Transcended one is likely to
+    -- re-radiate a visible fraction of its star (0.50). False positive: warm
+    -- dust and debris discs give natural excesses (0.005).
+    WasteHeat => [0.005, 0.005, 0.005, 0.005, 0.01, 0.02, 0.50, 0.005],
+    -- S&I §4.3 row 6. "Megastructures, swarms": rare below the Transcended
+    -- scale; relics keep transiting after their makers fall (Remnant 0.05).
+    -- False positive: rings, dust and comet swarms (0.002).
+    ArtificialTransit => [0.002, 0.002, 0.002, 0.002, 0.02, 0.05, 0.30, 0.005]
+  }
+}
+
+-- The chance that a world in `state` around a `host` star shows `signal`:
+-- one entry of likelihoodRow. A design value (see THE TABLE).
+export pure func likelihood(signal: Signal, host: HostClass, state: State) -> float
+  ensures { result > 0.0, result < 1.0 }
+{
+  let p = nth_or(likelihoodRow(signal, host), stateIndex(state), 0.5);
+  if p > 0.0 && p < 1.0 then p else 0.5
+}
+
+-- ---------- how far an observation is trusted (design values) ----------
+
+-- No single observation is trusted beyond this weight. It keeps every
+-- likelihood above 0, so contradicting observations cannot rule out every
+-- state at once.
+export pure func confidenceCap() -> float = 0.999
+
+-- The weight given to an observation at this SNR: 1 - 2^(-(snr/5)^2), capped.
+-- 0 at SNR 0, 1/2 at a hint (SNR 5, observation.md OB-41), 15/16 at strong
+-- (SNR 10, OB-42). The two thresholds are the registry's; the curve through
+-- them is a design value. A negative or non-finite SNR counts as 0.
+export pure func confidence(snr: float) -> float
+  ensures { result >= 0.0, result <= 0.999 }
+{
+  if snr > 0.0 then {
+    let u = snr / 5.0;
+    let c = 1.0 - pow(2.0, 0.0 - u * u);
+    if c > confidenceCap() then confidenceCap() else if c > 0.0 then c else 0.0
+  } else 0.0
+}
+
+-- P(this look | the signal is there) and P(this look | it is not).
+pure func givenThere(o: Observation) -> float {
+  let c = confidence(o.snr);
+  if o.detected then (1.0 + c) / 2.0 else (1.0 - c) / 2.0
+}
+pure func givenAbsent(o: Observation) -> float {
+  let c = confidence(o.snr);
+  if o.detected then (1.0 - c) / 2.0 else (1.0 + c) / 2.0
+}
+
+-- The likelihood of one observation on its own, for a world in `state`:
+-- p x P(look | there) + (1 - p) x P(look | not there).
+export pure func observationLikelihood(o: Observation, host: HostClass, state: State) -> float
+  ensures { result > 0.0, result < 1.0 }
+{
+  let p = likelihood(o.signal, host, state);
+  p * givenThere(o) + (1.0 - p) * givenAbsent(o)
+}
+
+-- ---------- canonical order ----------
+-- Observations are folded in one fixed order (signal, non-detections first,
+-- then SNR), so any permutation of the same observations gives the same bits.
+
+pure func cleanSnr(o: Observation) -> float = if o.snr > 0.0 then o.snr else 0.0
+pure func rank(o: Observation) -> int = if o.detected then 1 else 0
+
+pure func before(a: Observation, b: Observation) -> bool {
+  let ia = signalIndex(a.signal);
+  let ib = signalIndex(b.signal);
+  if ia != ib then ia < ib
+  else if rank(a) != rank(b) then rank(a) < rank(b)
+  else cleanSnr(a) < cleanSnr(b)
+}
+
+pure func insert(o: Observation, sorted: [Observation]) -> [Observation] =
+  match sorted {
+    [] => [o],
+    x :: rest => if before(o, x) then o :: sorted else x :: insert(o, rest)
+  }
+
+pure func sortObs(obs: [Observation], acc: [Observation]) -> [Observation] =
+  match obs {
+    [] => acc,
+    o :: rest => sortObs(rest, insert(o, acc))
+  }
+
+-- ---------- evidence ----------
+
+-- What one look adds to the log-odds that the signal is there:
+-- +ln((1 + c)/(1 - c)) for a detection, the negative for a non-detection,
+-- 0 at SNR 0. At the cap it is ln 1999 = 7.6.
+pure func logOdds(o: Observation) -> float {
+  let c = confidence(o.snr);
+  let l = log((1.0 + c) / (1.0 - c));
+  if o.detected then l else 0.0 - l
+}
+
+-- The likelihood of all the (sorted) observations for one state, up to a
+-- factor that is the same for every state. Looks at one signal are summed as
+-- log-odds first, lr = ln(prod P(look | there) / prod P(look | not there)),
+-- then mixed by the table; signals multiply.
+--
+-- The products themselves are never formed: 100 looks at the cap would
+-- multiply to 0.0005^100, below the smallest double. Dividing both products
+-- by the larger leaves the pair (1, e^-|lr|), and the divisor is the same
+-- for every state, so it cancels when the belief is normalised. Each
+-- signal's factor is then at least 1e-4 (the smallest table entry), so ten
+-- signals cannot underflow whatever the number of looks.
+pure func evidence(sorted: [Observation], host: HostClass, state: State) -> float =
+  match sorted {
+    [] => 1.0,
+    o :: rest => group(rest, host, state, o.signal, logOdds(o), 1.0)
+  }
+
+pure func group(obs: [Observation], host: HostClass, state: State, cur: Signal, lr: float, acc: float) -> float =
+  match obs {
+    [] => acc * mix(cur, host, state, lr),
+    o :: rest =>
+      if o.signal == cur then group(rest, host, state, cur, lr + logOdds(o), acc)
+      else group(rest, host, state, o.signal, logOdds(o), acc * mix(cur, host, state, lr))
+  }
+
+-- p x there + (1 - p) x absent, with the larger of the two scaled to 1.
+pure func mix(signal: Signal, host: HostClass, state: State, lr: float) -> float {
+  let p = likelihood(signal, host, state);
+  if lr >= 0.0 then p + (1.0 - p) * exp(0.0 - lr) else p * exp(lr) + (1.0 - p)
+}
+
+-- ---------- beliefs ----------
+
+export pure func sumOf(xs: [float]) -> float =
+  match xs {
+    [] => 0.0,
+    x :: rest => x + sumOf(rest)
+  }
+
+-- A belief sums to 1 within 1e-12.
+export pure func sumsToOne(p: [float]) -> bool {
+  let d = sumOf(p) - 1.0;
+  d <= 0.000000000001 && d >= -0.000000000001
+}
+
+pure func allNonNegative(xs: [float]) -> bool =
+  match xs {
+    [] => true,
+    x :: rest => x >= 0.0 && allNonNegative(rest)
+  }
+
+-- A usable prior: eight entries, none negative, summing to 1 within 1e-9.
+export pure func validBelief(p: [float]) -> bool {
+  let d = sumOf(p) - 1.0;
+  length(p) == 8 && allNonNegative(p) && d <= 0.000000001 && d >= -0.000000001
+}
+
+export pure func probOf(belief: [float], state: State) -> float = nth_or(belief, stateIndex(state), 0.0)
+
+-- P(a living world at last light): every state but Sterile and Ecocide.
+-- Transcended counts as living (a design choice).
+export pure func pLife(belief: [float]) -> float =
+  probOf(belief, Microbial) + probOf(belief, Complex) + probOf(belief, PreTech) + probOf(belief, Technological) +
+  probOf(belief, Remnant) + probOf(belief, Transcended)
+
+-- P(a mind is there at last light): PreTech or Technological.
+export pure func pMind(belief: [float]) -> float = probOf(belief, PreTech) + probOf(belief, Technological)
+
+pure func scale(xs: [float], k: float) -> [float] =
+  match xs {
+    [] => [],
+    x :: rest => (x / k) :: scale(rest, k)
+  }
+
+-- prior x evidence for each state, in order.
+pure func weigh(prior: [float], sts: [State], sorted: [Observation], host: HostClass) -> [float] =
+  match prior {
+    [] => [],
+    w :: rest => match sts {
+      [] => [],
+      s :: restS => (w * evidence(sorted, host, s)) :: weigh(rest, restS, sorted, host)
+    }
+  }
+
+-- Bayes for a sorted list. The evidence is positive for every state (see
+-- `evidence`), so the total is positive for any valid prior; the guard only
+-- covers a prior that is all zeros, which is returned as given.
+pure func update(prior: [float], host: HostClass, sorted: [Observation]) -> [float] {
+  let w = weigh(prior, states(), sorted, host);
+  let total = sumOf(w);
+  if total > 0.0 then scale(w, total) else prior
+}
+
+pure func absDiff(a: [float], b: [float]) -> float =
+  match a {
+    [] => 0.0,
+    x :: rest => match b {
+      [] => 0.0,
+      y :: restB => (if x > y then x - y else y - x) + absDiff(rest, restB)
+    }
+  }
+
+-- The observation that alone moves the prior furthest. Ties between
+-- different observations go to the earlier one in the canonical order, so
+-- the choice does not depend on the order given. Among identical
+-- observations the index is the lowest one given.
+pure func strongest(obs: [Observation], i: int, base: [float], host: HostClass, best: int, bestBy: float, bestObs: [Observation]) -> Posterior =
+  match obs {
+    [] => { p: [], movedMost: best, movedBy: bestBy },
+    o :: rest => {
+      let tv = absDiff(update(base, host, [o]), base) / 2.0;
+      let better = match bestObs {
+        [] => tv > 0.0,
+        b :: _ => tv > bestBy || (tv == bestBy && before(o, b))
+      };
+      if better then strongest(rest, i + 1, base, host, i, tv, [o]) else strongest(rest, i + 1, base, host, best, bestBy, bestObs)
+    }
+  }
+
+-- Bayes over the eight states. prior is a belief in stateIndex order; the
+-- result's p is prior x likelihood of every observation, normalised. No
+-- observations return the prior. The result does not depend on the order of
+-- the observations, bit for bit. See the module header for the model.
+export pure func posterior(prior: [float], host: HostClass, observations: [Observation]) -> Posterior
+  requires { validBelief(prior) }
+  ensures { sumsToOne(result.p) }
+{
+  let base = scale(prior, sumOf(prior));
+  let moved = strongest(observations, 0, base, host, -1, 0.0, []);
+  { p: update(prior, host, sortObs(observations, [])), movedMost: moved.movedMost, movedBy: moved.movedBy }
+}
+
+-- ---------- the false-positive bound ----------
+
+pure func maxLiving(row: [float], i: int, best: float) -> float =
+  match row {
+    [] => best,
+    p :: rest => maxLiving(rest, i + 1, if i >= 1 && i <= 6 && p > best then p else best)
+  }
+
+-- The most that looks at one signal can multiply the odds of life against a
+-- sterile world, at any SNR and for any number of looks: the largest
+-- likelihood among the living states over the sterile one (at least 1). It
+-- holds for any mix of detections and non-detections because no living
+-- state is less likely than Sterile to show any signal (a test pins that).
+-- O2 alone around an M dwarf: 0.90 / 0.20 = 4.5; around an FGK star, 45.
+export pure func lifeOddsGainBound(signal: Signal, host: HostClass) -> float
+  ensures { result >= 1.0 }
+{
+  let row = likelihoodRow(signal, host);
+  let g = maxLiving(row, 0, 0.0) / likelihood(signal, host, Sterile);
+  if g > 1.0 then g else 1.0
+}
+
+-- The table row as a list of certainties: the belief if the signal were
+-- known to be there (or, with `there` false, known not to be).
+pure func weighCertain(prior: [float], row: [float], there: bool) -> [float] =
+  match prior {
+    [] => [],
+    w :: rest => match row {
+      [] => [],
+      p :: restP => (w * (if there then p else 1.0 - p)) :: weighCertain(rest, restP, there)
+    }
+  }
+
+pure func pLifeCertain(prior: [float], signal: Signal, host: HostClass, there: bool) -> float {
+  let w = weighCertain(prior, likelihoodRow(signal, host), there);
+  pLife(scale(w, sumOf(w)))
+}
+
+-- The ceiling on P(life) after any looks at one signal alone, for this
+-- prior: the largest of P(life) under the prior, with the signal known to be
+-- there, and with it known not to be. Every posterior from looks at that one
+-- signal lies between the prior and one of those two, whatever the SNR and
+-- however many looks. For O2 alone around an M dwarf this is the stated
+-- bound on a desiccated world's false positive.
+export pure func pLifeCeiling(prior: [float], signal: Signal, host: HostClass) -> float
+  requires { validBelief(prior) }
+  ensures { result >= 0.0, result <= 1.000000000001 }
+{
+  let a = pLife(scale(prior, sumOf(prior)));
+  let b = pLifeCertain(prior, signal, host, true);
+  let c = pLifeCertain(prior, signal, host, false);
+  if b >= a && b >= c then b else if c >= a then c else a
+}

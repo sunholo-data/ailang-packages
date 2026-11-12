@@ -1,12 +1,17 @@
 -- Boot probe for publish: prints "OK: ..." iff independent checks hold in a
 -- clean workdir — the Earth rate astern at the top speed (RS-28), the
 -- catch-up of a one-day-late signal at 0.9c (RS-31), the right-angle excess
--- (RS-33), and a covered port's zero wait (RS-37).
+-- (RS-33), and a covered port's zero wait (RS-37); and from 0.2.0 the time
+-- to a hint on the Earth twin at 10 pc (OB-15, 20.68 h), the radar's SNR-1
+-- reach (OB-31, 376.3 ly), the waste-heat factor (OB-38, 323.2) and a
+-- normalised belief that a strong O2 + CH4 reading lifts above 0.5.
 --
--- linkProbe is the VM-vs-interpreter probe: pure, and the strict bytecode VM
--- must print the same bytes as the interpreter. From packages/observe:
+-- linkProbe, budgetProbe and beliefProbe are the VM-vs-interpreter probes:
+-- pure, and the strict bytecode VM must print the same bytes as the
+-- interpreter. From packages/observe:
 --   ailang run --quiet --relax-modules --bytecode --strict-bytecode --entry linkProbe --args-json 64 _smoke.ail
 --   ailang run --quiet --relax-modules --entry linkProbe --args-json 64 _smoke.ail
+--   (likewise budgetProbe 64 and beliefProbe 64; compare with cmp)
 --   ailang run --quiet --relax-modules --caps IO --entry main _smoke.ail
 module sunholo/observe/_smoke
 
@@ -17,6 +22,12 @@ import pkg/sunholo/relativity/optics (Vec3)
 import pkg/sunholo/relativity/hyper (absf, atanh)
 import pkg/sunholo/relativity/kinematics (oneMinusBeta, rapidityOfOneMinusBeta)
 import ./lightcone (seenAt, catchUp, triangleExcess, onBeamLine, linkWindow, earthRate)
+import ./constants (pi, auM, parsecM, lightYearM, earthRadiusM, solarTeffK)
+import ./photon (Blackbody, Budget, sunBlackbody, planetContrast, planetBudget, referenceInstrument, referenceZodi, snr, timeToSnrS,
+  iwaLimitDistanceM, photonFlux, bandOf)
+import ./link (linkSnr, integratedSnr, reachM, referenceDishAreaM2, referenceTsysK)
+import ./wasteheat (wasteHeatFactor, wasteHeatExcess, wasteHeatFractionFor)
+import ./belief (Observation, HostFGK, HostM, O2, O2CH4, RedEdge, Leakage, WasteHeat, posterior, pLife, sumsToOne, confidence)
 
 pure func v(x: float, y: float, z: float) -> Vec3 = { x: x, y: y, z: z }
 
@@ -36,14 +47,65 @@ pure func row(k: int, n: int, acc: [float]) -> [float] =
 
 export pure func linkProbe(n: int) -> [float] = row(0, n, [])
 
+-- The photon, link and waste-heat budgets over an n-step sweep of star
+-- temperature, distance, aperture, phase and bandwidth.
+pure func budgetRow(k: int, n: int, acc: [float]) -> [float] =
+  if k > n then acc
+  else {
+    let u = intToFloat(k) / intToFloat(n);
+    let star = { tempK: 2800.0 + 7000.0 * u, radiusM: 695700000.0 * (0.2 + 1.5 * u) };
+    let d = (4.0 + 200.0 * u) * lightYearM();
+    let inst = { referenceInstrument() | apertureM: 4.0 + 96.0 * u };
+    let c = planetContrast(0.1 + 0.5 * u, earthRadiusM() * (0.5 + 10.0 * u), auM() * (0.05 + 5.0 * u), 0.1 + 2.9 * u);
+    let b = planetBudget(star, c, d, 0.00000076 + 0.000001 * u, 70.0 + 70.0 * u, inst, referenceZodi());
+    let bw = 0.01 + 10.0 * u;
+    let secs = 100.0 + 3600.0 * u;
+    budgetRow(k + 1, n, b.signal :: b.background :: snr(b.signal, b.background, b.dark, 36000.0) ::
+      timeToSnrS(5.0, b.signal, b.background, b.dark) :: photonFlux(star, d, bandOf(0.000000551, 0.000000088)) ::
+      iwaLimitDistanceM(auM() * (0.05 + 5.0 * u), 3.5, 0.00000076, inst.apertureM) ::
+      integratedSnr(linkSnr(2e13 * (0.001 + u), d, referenceDishAreaM2(), bw, referenceTsysK()), 1.0, bw, secs) ::
+      reachM(656000.0 * (1.0 + 1000.0 * u), 1.0 + 9.0 * u, referenceDishAreaM2(), referenceTsysK(), 1.0, bw, secs) ::
+      wasteHeatFactor(0.000005 + 0.00002 * u, star.tempK, 150.0 + 400.0 * u) ::
+      wasteHeatExcess(0.9 * u, 0.00001, star.tempK, 300.0) :: wasteHeatFractionFor(0.01 + u, 0.00001, star.tempK, 300.0) :: acc)
+  }
+
+export pure func budgetProbe(n: int) -> [float] = budgetRow(0, n, [])
+
+-- Beliefs over an n-step sweep of SNR, on both host classes.
+pure func beliefRow(k: int, n: int, acc: [float]) -> [float] =
+  if k > n then acc
+  else {
+    let u = intToFloat(k) / intToFloat(n);
+    let prior = [0.90 - 0.5 * u, 0.07 + 0.2 * u, 0.02 + 0.1 * u, 0.004 + 0.1 * u, 0.003 + 0.1 * u, 0.002, 0.0005, 0.0005];
+    let obs = [{ signal: O2, detected: true, snr: 20.0 * u }, { signal: Leakage, detected: false, snr: 30.0 * (1.0 - u) },
+               { signal: O2CH4, detected: k % 2 == 0, snr: 12.0 * u }, { signal: O2, detected: k % 3 == 0, snr: 3.0 + u },
+               { signal: WasteHeat, detected: k % 5 == 0, snr: 50.0 * u }, { signal: RedEdge, detected: true, snr: 7.0 }];
+    let a = posterior(prior, HostFGK, obs);
+    let b = posterior(prior, HostM, obs);
+    beliefRow(k + 1, n, a.p ++ b.p ++ (a.movedBy :: intToFloat(a.movedMost) :: b.movedBy :: intToFloat(b.movedMost) :: confidence(20.0 * u) :: acc))
+  }
+
+export pure func beliefProbe(n: int) -> [float] = beliefRow(0, n, [])
+
+pure func earthTwinBudget() -> Budget =
+  planetBudget(sunBlackbody(), planetContrast(0.2, earthRadiusM(), auM(), pi() / 2.0), 10.0 * parsecM(), 0.00000076, 140.0,
+    referenceInstrument(), referenceZodi())
+
 export func main() -> () ! {IO} {
+  let twin = earthTwinBudget();
+  let hintH = timeToSnrS(5.0, twin.signal, twin.background, twin.dark) / 3600.0;
+  let radarLy = reachM(2e13, 1.0, referenceDishAreaM2(), referenceTsysK(), 1.0, 1.0, 1.0) / lightYearM();
+  let heat = wasteHeatFactor(0.00001, solarTeffK(), 300.0);
+  let seen = posterior([0.90, 0.07, 0.02, 0.004, 0.003, 0.002, 0.0005, 0.0005], HostFGK, [{ signal: O2CH4, detected: true, snr: 10.0 }]);
+  let ok2 = absf(hintH - 20.68) < 0.005 && absf(radarLy - 376.3) < 0.05 && absf(heat - 323.2) < 0.05 &&
+    sumsToOne(seen.p) && pLife(seen.p) > 0.5 && seen.movedMost == 0 && length(budgetProbe(8)) == 99 && length(beliefProbe(8)) == 189;
   let rate = earthRate(v(40.0, 0.0, 0.0), v(1.0, 0.0, 0.0), rapidityOfOneMinusBeta(0.000001));
   let catch = catchUp(1.0, oneMinusBeta(atanh(0.9)));
   let excess = triangleExcess(v(40.0, 0.0, 0.0), v(40.0, 30.0, 0.0));
   let a = v(40.0, 0.0, 0.0);
   let covered = linkWindow(a, v(60.0, 0.0, 0.0), 20.0, onBeamLine(a, v(60.0, 0.0, 0.0), 0.0000001));
   let ok = absf(rate - sqrt(0.000001 / 1.999999)) < 0.000000000001 && absf(catch - 10.0) < 0.000000001 &&
-    absf(excess - 60.0) < 0.000000001 && covered == 0.0 && length(linkProbe(8)) == 54;
-  if ok then println("OK: sunholo/observe rate ${show(rate)} catch-up ${show(catch)} excess ${show(excess)} covered ${show(covered)}")
-  else println("FAIL: sunholo/observe rate ${show(rate)} catch-up ${show(catch)} excess ${show(excess)} covered ${show(covered)}")
+    absf(excess - 60.0) < 0.000000001 && covered == 0.0 && length(linkProbe(8)) == 54 && ok2;
+  if ok then println("OK: sunholo/observe rate ${show(rate)} catch-up ${show(catch)} excess ${show(excess)} covered ${show(covered)} hint ${show(hintH)} h radar ${show(radarLy)} ly heat ${show(heat)} P(life) ${show(pLife(seen.p))}")
+  else println("FAIL: sunholo/observe rate ${show(rate)} catch-up ${show(catch)} excess ${show(excess)} covered ${show(covered)} hint ${show(hintH)} h radar ${show(radarLy)} ly heat ${show(heat)} P(life) ${show(pLife(seen.p))}")
 }
