@@ -1,9 +1,10 @@
-# sunholo/worlds 0.2.0
+# sunholo/worlds 0.3.0
 
 Pure models for cited astrobiology priors, anthropic offsets, local-disc counts,
 planet occurrence, immutable world histories, and clearly labelled synthetic
 stellar/planet mass approximations. The package takes uniforms;
-it does not own a random generator or choose game presets or strategies.
+it does not own a random generator or choose game presets, acceptance bands or
+strategies.
 
 The normative source is Stapledon's Voyage's
 [life-and-worlds registry](https://github.com/sunholo-data/stapledons-design/blob/feat/life-and-worlds/physics/life-and-worlds.md),
@@ -41,3 +42,21 @@ lifetime; at baseline the largest gap in one probability is 0.523 (seen
 PreTech, 1e5 years on) and 0.368 seen Technological at L years on.
 [tools/propagate_validation.md](tools/propagate_validation.md) gives the
 measurements. It adds no new physics and changes no history.
+
+`selection` (0.3.0) draws a universe instead of dialling one. `drawParams` maps
+four uniforms through the priors' quantile functions; `statisticsOf` and
+`accepts` score the result against an acceptance region of three expected
+counts (living worlds within reach, ended worlds with a sign left, living worlds
+that will have ended on arrival); `acceptanceProbability` gives the prior
+probability of that region with the change on doubling its grid, and
+`expectedDraws` the one-in-N. The one-in-N is a statement about these priors,
+not a probability about the real universe, and passing the test fixes
+expectations only: an accepted universe can still be empty near any one star.
+Three statements of luck sit beside it: over the product of the prior medians
+(`luckOverMedianDex`, the old `luckDex`), over the prior mean
+(`luckOverMeanDex`) and as a prior probability (`luckProbability`). For a
+universe with every fraction at 1 and a lifetime of 3.2e7 years these are 5.20
+dex, 2.45 dex and one in 3,576. `epoch_statistics` adds the ended-state bins,
+the late-contact share and a closed form for a rate of successive lineages.
+[tools/selection_validation.md](tools/selection_validation.md) gives the oracle
+comparison and the deliberate-fault table.

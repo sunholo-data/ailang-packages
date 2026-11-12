@@ -322,6 +322,20 @@ test "8000 seeded draws each: frequency within 4 se of p for a lower bound, an u
  frequencyAgrees({open()|found:AtLeast(3.0)},8000) && frequencyAgrees({open()|found:AtMost(1e-6)},8000)
  && frequencyAgrees({open()|gapYr:50000.0,late:Between(0.01,2.0)},8000)
 }
+pure func notDials(n:int,seed:int,hits:int) -> int =
+ if n==0 then hits else {
+  let a=step(seed); let b=step(a); let c=step(b); let d=step(c);
+  let miss=match drawParams(baseline(),[uni(a),uni(b),uni(c),uni(d)]) {
+   Ok(p) => (match dialOf(baseline(),p) {Ok(x) => false, Err(e) => e==NotADial}),
+   Err(e) => false
+  };
+  notDials(n-1,d,if miss then hits+1 else hits)
+ }
+-- Phi((-100 + log10 0.632)/50) = 0.0225359: a life fraction more than 100 dex
+-- below its median is outside applyDial's domain. Every other draw is a dial.
+test "8000 seeded draws: the share that is not a dial is within 4 se of 2.25 %" {
+ abs_Float(intToFloat(notDials(8000,20261112,0))/8000.0-0.0225359)<=4.0*sqrt(0.0225359*0.9774641/8000.0)
+}
 -- Probe for tools/selection_validation.md: the three statements of luck and
 -- the draw counts for the settings the design names. Not a public export.
 pure func line(name:string,r:Result[Probability,SelectionError]) -> string = match r {

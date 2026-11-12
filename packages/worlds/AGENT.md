@@ -5,11 +5,14 @@
 Use for teaching or simulating the Drake chain with explicit priors and
 reproducible histories. All public functions are pure and deterministic;
 `_smoke.ail` and the validation test probe print results. Callers own and key their RNG. This package
-has no instrument model, selection policy, world catalogue or game preset.
+has no instrument model, world catalogue or game preset. `selection` supplies the
+mechanics of drawing and testing a universe; the acceptance bands and everything
+about detection are the caller's.
 
 ## Modules and units
 
-- `baseline`: `baselineVersion`, `baseline`, `medianOf`, `quantileOf`. Factors
+- `baseline`: `baselineVersion`, `baseline`, `medianOf`, `quantileOf`,
+  `abiogenesisSigmaDex` (50, the width of the life prior's log10 rate). Factors
   have a stable key, prior, dialled flag, citation and qualification. Measured
   values retain reported bounds but `quantileOf(Measured(...))` returns the
   adopted point: no unreported probability density is invented. `AbiogenesisRate`
@@ -144,6 +147,91 @@ has no instrument model, selection policy, world catalogue or game preset.
 - `history` also exports its fixed design constants: `preTechLeadLoYr`,
   `preTechLeadHiYr`, `collapseShare`, `ecocideShare`, `transcendenceShare`.
 
+- `selection` (0.3.0): drawing a universe from the priors, testing it, and
+  saying how rare an accepted one is. All functions return
+  `Result[_, SelectionError]`; an `Err` names why nothing was computed
+  (`BadUniforms | BadBaseline | UnsupportedPrior | BadParams | NotADial |
+  BadSetting | BadGrid | BadWidths | BadThreshold | ZeroProduct |
+  ZeroProbability | NotConverged`). Never use a number you did not get from an
+  `Ok`.
+  - **What a draw is.** `drawParams(baseline, [uLife, uMinds, uTech,
+    uLifetime])` returns the `Params` whose four dialled values are the prior
+    quantiles at those uniforms (each in [0,1]), exactly as `quantileOf` gives
+    them; the complex-life share follows minds as `applyDial` moves it; window
+    and remnant limits are the baseline's. One call is one draw. It does not
+    look at any setting, re-draw, or tilt anything. The caller supplies and
+    keys the uniforms.
+  - **A draw as a dial.** `dialOf(baseline, params)` gives the `Dial` for which
+    `applyDial(baseline, dial)` returns those parameters (checked to 1e-12 in
+    every field before it answers). It returns `Err(NotADial)` when no dial in
+    `applyDial`'s [-100, 100] dex domain does: a zero fraction, constants that
+    are not the baseline's, or a life fraction more than 100 dex below its
+    median. The last is 2.25 % of draws, because the life prior spans hundreds
+    of dex. Such a draw is still valid for `historyOf` (it is a universe with
+    no life); use the `Params` from `drawParams` directly.
+  - **The acceptance test.** `Setting` is data: `hzWorlds` (habitable-zone
+    worlds inside the reference radius: `disc.starsWithin` times worlds per
+    star), `reach` (knots of the share of a civilisation's life during which a
+    sign is on and within reach, against lifetime in years; interpolated
+    linearly in log share against log lifetime, held constant outside the
+    knots; one knot is a constant), `endedYr` (the time an ended world's sign
+    stays findable, standing in for the lifetime), `gapYr` (light time plus
+    travel time) and three `Band`s (`Between(lo,hi) | AtLeast(lo) | AtMost(hi)
+    | AnyCount`, edges included). `statisticsOf(setting, params)` returns
+    `found = hzWorlds·fLife·fMinds·fTech·(L/W)·share(L)` (that is
+    `disc.aliveWithin` times the share), `ended = hzWorlds·fLife·fMinds·fTech·
+    endedYr/W` and `late = found·min(1, gapYr/L)`. `accepts` is true when each
+    is inside its band.
+  - **What the test does and does not guarantee.** It reads the four
+    parameters only, never a seed. The three numbers are expected counts over
+    all the places things could fall. Passing guarantees that those
+    expectations are in the bands, and nothing else: an accepted universe can
+    still be empty near any one star, and a refused one can hold a contact. It
+    does not model detection; `reach`, `endedYr`, `gapYr`, `hzWorlds` and the
+    bands are inputs the caller must have measured elsewhere. A lifetime above
+    half the window is refused (`BadParams`): `found` would overstate it.
+  - **The probability.** `acceptanceProbability(baseline, setting, grid)` is
+    the probability, over the baseline's priors, that a draw is accepted.
+    `grid` (1 to 16) is the number of Gauss-Legendre panels per smooth piece;
+    1 is enough. The result is `{p, error}`: `p` at twice the grid, and `error`
+    the change from `grid` to twice `grid`. `error` is a measured change, not a
+    bound, and it says nothing about how well the priors are known. A change
+    above 1e-6 of `p` is `Err(NotConverged)`. It needs the published prior
+    shapes (the rate model for life; log-uniform minds, tech and lifetime;
+    lifetime never above half the window) and returns `Err(UnsupportedPrior)`
+    for any other baseline. A region no universe can reach is `Ok({p: 0,
+    error: 0})`; `expectedDraws` of it is `Err(ZeroProbability)`.
+  - **The one-in-N is a statement about the priors, not about the real
+    universe.** `expectedDraws(probability)` is 1/p: how many draws from these
+    literature ranges an acceptance region takes on average (the index of the
+    accepted draw in one run is geometric with that mean). It is not the
+    chance that our universe is like the accepted one, and it changes if the
+    priors change (the canon lifetime bound of 1e8 yr against Sandberg's 1e10
+    is one such choice).
+  - **Three statements of luck** for a parameter set (seti-factors §3.8).
+    `luckOverMedianDex`: log10 of fLife·fMinds·fTech·L over the product of the
+    prior medians; equal to `luckDex` for a dial. `luckOverMeanDex`: the same
+    over the prior mean of the product (`priorMeans`: life 0.5020, minds
+    0.1446, tech 0.2150, lifetime 7.238e6 yr, product 1.130e5). A universe with
+    no life has no luck in dex: `Err(ZeroProduct)`. `luckProbability`: the
+    prior probability of a product at least as large (`productTail` for a bare
+    threshold). For the calibrated universe (all fractions 1, L = 3.2e7 yr):
+    5.204 dex, 2.452 dex and 2.796e-4, one in 3,576.
+  - `sumUniformCdf(widths, x)` and `sumUniformSurvival(widths, x)`: a sum of
+    one, two or three independent uniforms on [0, width]. The survival
+    function is computed from the far end, so a tail of 1e-9 keeps its digits.
+  - `converged(coarse, fine)` is the rule that turns two grid values into a
+    `Probability`; it is public so that its refusal can be tested.
+  - Cost on the bytecode VM (Apple M4 Max, shared machine): 12
+    `acceptanceProbability` calls in 1.2 s. The tree-walking interpreter is
+    about 100 times slower (about 9 s a call).
+  - Evidence: `selection_reference_test.ail` (generated by
+    `tools/selection_oracle.py`) holds `acceptanceProbability` to an
+    independent oracle at 12 regions, p from 0.98 to 2.2e-6, to 1e-8 of the
+    value (measured gap at most 1e-11) and within 3 standard errors of a
+    1e7-draw Monte Carlo; `selection_test.ail` scores seeded draws through
+    `drawParams` and `accepts` against the computed p.
+
 ## Example
 
 ```ailang
@@ -182,6 +270,16 @@ Validation commands: `ailang lock`, `ailang check --package .`,
 that involve transcendental functions are runtime assertions, not claimed
 SMT proofs. Packages remain unpublished until the attended release handoff.
 
+Validation of 0.3.0 on AILANG v0.56.1 (`05c860a`), 2026-11-12: check 24 files;
+native 125 passed, 0 failed, 0 skipped; strict-VM suite 125 passed with 122
+named-test bodies on the VM and none falling back. `acceptanceProbability`
+agrees with the independent reference table at 12 regions to 1e-11 (tolerance
+1e-8) and with a 1e7-draw Monte Carlo within 1.4 standard errors, on both; four
+probes and the smoke program byte-identical on VM and interpreter; a
+311,423-byte probe of every 0.2.0 export byte-identical to 0.2.0; 28 deliberate
+faults all killed. `ailang pkg quality .`: no gates (contracts 1/19 verified, 0
+refuted). `tools/selection_validation.md` has the detail. Not published.
+
 Validation of 0.2.0 on AILANG v0.56.1 (`05c860a`), 2026-11-12: check 19 files;
 native 65 passed, 0 failed, 0 skipped; strict-VM suite 65 passed with 62
 named-test bodies on the VM and none falling back. `historyKernel` agrees with
@@ -215,6 +313,22 @@ interpreter workaround is present in package logic.
   with clipping and support equal bounds; a narrow-interval log series avoids
   hi/lo cancellation. The adopted collapse share remains 0.75. No history,
   physical input or RNG result is changed by this statistics module.
+  Added in 0.3.0, each returning `Result[_, EpochError]` (`EpochParamsInvalid |
+  EpochYearsInvalid | EpochCountInvalid | LineageCountInvalid |
+  LineagesOverlap`): `endedShares(params)` gives the probability that a
+  habitable-zone world is `Remnant`, `Ecocide` or `Transcended` at epoch 0
+  (the remnant value is `historyProbabilities`' own; the other two are their
+  ending shares of the lineages already ended, which is (W/2 − L)/W of them);
+  `endedWorlds(params, hzWorlds)` multiplies by a world count;
+  `lateShare(gapYr, lifetimeYr)` is min(1, G/L), the share of civilisations
+  alive now that end within G years when a lifetime is exactly L (a memoryless
+  lifetime would give 1 − exp(−G/L); that is not this model);
+  `lineageShares(params, lineagesPerWorld)` is a closed form for a lineage
+  RATE: n evenly spaced lineages per technology-hosting world in the window,
+  alive share n·L/W and remnant share n·0.75·E[min(trace, W/n − L)]/W, each
+  times fLife·fMinds·fTech. It is a mean-field statement, not a Poisson
+  process and not a generator; `historyOf` still draws at most one lineage.
+  More lineages than fit end to end are `Err(LineagesOverlap)`.
 
 Validation caveat on AILANG v0.56.0 (reported as
 `inbox_1793648615351_707bec99`): `--verify-contracts` rejects invalid `requires`

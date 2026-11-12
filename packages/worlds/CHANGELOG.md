@@ -1,5 +1,87 @@
 # Changelog
 
+## 0.3.0 — 2026-11-12
+
+Universe selection, and the closed forms a calibration needs. Additive: every
+0.2.0 export returns the same bytes for the same inputs (a 311,423-byte probe
+of all of them is identical before and after, on the VM and the interpreter).
+Not published from this branch; it is built on 0.2.0 as it stands on `main`
+and so still depends on `sunholo/celestial` 0.6.0 (see the note at the end).
+
+New module `selection`:
+
+- `drawParams(baseline, [u1,u2,u3,u4])` is one **draw**: the prior quantile of
+  life, minds, tech and lifetime at the four uniforms, bit for bit, with
+  complex life following minds as `applyDial` moves it. Nothing is selected.
+- `dialOf(baseline, params)` writes a parameter set as an `applyDial` dial and
+  checks the round trip to 1e-12. It refuses (`NotADial`) what no dial in
+  `applyDial`'s [-100, 100] dex domain can give. **2.25 % of draws are in that
+  class**: a life fraction more than 100 dex below its median (the life prior
+  is that wide). Such a draw is still a valid `Params` for `historyOf`.
+- `priorMeans`, `luckOverMedianDex`, `luckOverMeanDex`, `luckProbability`: the
+  three statements of luck. The prior means are 0.5020 (life), 0.1446 (minds),
+  0.2150 (tech) and 7.238e6 yr (lifetime); their product is 1.130e5, 2.752 dex
+  above the product of the medians (199.9).
+- `statisticsOf(setting, params)` and `accepts`: the acceptance test's three
+  expected counts (found, ended, late) and whether each is inside its band,
+  edges included.
+- `acceptanceProbability(baseline, setting, grid)`: the prior probability that
+  a draw is accepted, by the closed-form distribution of a sum of two uniforms
+  inside Gauss-Legendre panels over the life factor and the lifetime, the panel
+  ends placed on the kinks. `productTail(baseline, threshold, grid)` is the
+  same for a threshold on the product, through a sum of three uniforms. Both
+  return `{p, error}`, `error` being the change when the grid is doubled, and
+  refuse (`NotConverged`) a change above 1e-6 of `p`. `expectedDraws` is 1/p.
+- `sumUniformCdf`, `sumUniformSurvival`: a sum of one, two or three uniforms of
+  given widths, with full relative accuracy in both tails.
+- Every function returns a `Result`; nothing returns a default in place of an
+  answer. `SelectionError` names the twelve reasons.
+
+Values computed here, with the change on doubling the grid (all run, none
+tuned):
+
+| Quantity | Value | Change on doubling |
+|---|---|---|
+| P(fLife·fMinds·fTech·L ≥ 3.2e7), the calibrated universe (proposed LW-55p) | 2.79607e-4, **1 in 3,576** | 0 (below rounding) |
+| the same at 10^7.5 | 2.88440e-4, 1 in 3,467 | 0 |
+| Calibrated universe over the product of medians | 5.204 dex | — |
+| Calibrated universe over the prior mean | 2.452 dex | — |
+| P(product ≥ the median product) | 0.27392 | 0 |
+| P(product ≥ the prior mean product) | 0.05787 | 0 |
+
+The review's estimate for LW-55p was "about 2.9e-4, 1 in 3,500"; the computed
+value is 2.796e-4.
+
+`epoch_statistics` gains, each returning `Result[_, EpochError]`:
+
+- `endedShares(params)` and `endedWorlds(params, hzWorlds)`: Remnant, Ecocide
+  and Transcended at epoch 0 for the one-lineage history model.
+- `lateShare(gapYr, lifetimeYr)`: min(1, G/L).
+- `lineageShares(params, lineagesPerWorld)`: alive and remnant shares for
+  evenly spaced lineages on one world, in closed form. It is not a generator
+  and not `history`'s model.
+- **A correction to a printed table.** seti-factors §3.4 prints 15 % and 80 %
+  for the share of living contacts that end within 16,000 years at lifetimes of
+  1e5 and 1e4 years. Those are 1 − exp(−G/L), a memoryless lifetime. With the
+  fixed lifetime this model has they are 16 % and 100 %. Every other cell of
+  the four rows is reproduced at its printed figure.
+
+`baseline` exports `abiogenesisSigmaDex()` (50, the width of the life prior's
+log-rate); `lifeQuantile` reads it, with no change in any quantile.
+
+Evidence: `selection_reference_test.ail` holds `acceptanceProbability` and
+`productTail` to an independent Python oracle (`tools/selection_oracle.py`:
+clipped areas inside adaptive Gauss-Kronrod, and a 1e7-draw Monte Carlo of the
+priors) at 12 regions with p from 0.98 down to 2.2e-6, to 1e-8 of the value
+and within 3 Monte Carlo standard errors; the largest measured gap is 1e-11.
+`tools/selection_mutants.sh` applies 28 deliberate faults; every one fails a
+test. `tools/selection_validation.md` has the tables and commands.
+
+Dependency note for the publish stop: the registry also lists 0.2.1, a
+dependency-only bump to `sunholo/celestial` 0.7.0 that lives on the branch
+`fix/worlds-0.2.1-celestial-0.7` and is not on `main`. Decide there whether
+0.3.0 takes that bump (rebase this branch onto it) before publishing.
+
 ## 0.2.0 — 2026-11-12
 
 New module `propagate`: the prediction at arrival. It moves a belief over the
