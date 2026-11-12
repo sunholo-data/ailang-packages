@@ -1,10 +1,11 @@
 module sunholo/specstore/view
--- The Sheet: Read me, Summary, Parameters, Spec, Matrix (one column per dataLayer key), Dictionary, History, QA rounds.
+-- The Sheet: Read me, Summary, Parameters, Visits, Spec, Matrix (one column per dataLayer key), Dictionary, History, QA rounds.
 -- Every result is a written value; colour sits beside a state, never instead of it.
 
 import std/option (Option, Some, None)
 import std/list (map, filter, length, foldl, concat, sortBy, dedup, flatMap, zip, range, take)
-import std/string (join)
+import std/string (join, find)
+import std/json (Json, JBool, get)
 import ./rules (needsRetest)
 import ./model (Field, Rule, Std, Dev, Param, Event, Dict, Hist, Res, Round, VisitRes, ParamRes, Spec, str, arr, strs, obj, loadYaml, toStd, toSpec, toRound, loadSpec, matches, varsIn, parseVersion, keyOf, present, fieldsOf, missingIn, dup)
 import ./xlsx (sheetXml)
@@ -88,12 +89,43 @@ export func parameterRows(sp: Spec) -> [[(string, int)]] =
       None => []
     }, sp.events)
 
+-- One step of a visit, in words a reader follows without the selector.
+export func stepText(st: Json) -> string {
+  let d = str(st, "do");
+  let tab = match get(st, "new_tab") { Some(JBool(true)) => " in a new tab", _ => "" };
+  if d == "click" then "click${tab}"
+  else if d == "pick" then "pick one at random${tab}"
+  else if d == "fill" then (if find(str(st, "value"), "{{env:QA_TEST_") >= 0 then "fill in the test account" else "fill in a field")
+  else if d == "press" then "press ${str(st, "key")}"
+  else if d == "goto" then "go to ${str(st, "url")}"
+  else if d == "wait" then "wait"
+  else d
+}
+
+export func consentText(c: string) -> string =
+  if c == "accept" then "accepted" else if c == "reject" then "refused" else if c == "none" then "not answered" else c
+
+-- The visits tab: what each visit does, so V01 means something without the spec open. A visit may
+-- carry a description; without one its steps are written out.
+export func visitRows(sp: Spec) -> [[(string, int)]] {
+  let ids = \xs. if length(xs) > 0 && length(xs) == length(sp.events) then "every event (${show(length(xs))})"
+                 else join(", ", map(\i. match filter(\e. e.id == i, sp.events) { [e, ..._] => "${i} ${e.eventName}", [] => i }, xs));
+  map(\v. {
+      let steps = arr(v, "steps");
+      let does = if str(v, "description") != "" then str(v, "description")
+                 else match steps { [] => "open the page and stay", _ => join(", then ", map(stepText, steps)) };
+      [(str(v, "id"), 0), (str(v, "url"), 0), (consentText(str(v, "consent")), 0), (does, 0),
+       (ids(strs(v, "expects")), 0), (ids(strs(v, "forbids")), 0)]
+    }, arr(sp.j, "visits"))
+}
+
 -- The first tab: what each tab shows and what every written value means, so the sheet explains itself to a
 -- reader who was not in the room. The same for every spec; nothing in it comes from the spec.
 export func readMeRows(version: string) -> [[(string, int)]] = map(\r. map(\c. (c, 0), r), [
     ["THE TABS", "What each tab shows", "When to read it"],
     ["Summary", "One line per event and visit: what that visit found, how many parameters are right, the event's result. Totals at the bottom.", "Every morning: is anything wrong, and where"],
     ["Parameters", "One line per parameter on the visit that checked it: what the spec expects, in words, and its status.", "When deciding the gaps, line by line"],
+    ["Visits", "What each visit does: the page, the consent choice, its steps, the events it expects and the ones it forbids.", "To see what V01, V02, … mean"],
     ["Spec v${version}", "The spec itself: one row per event with its description, trigger, scope, parameters, priority, versions and latest result.", "To see what an event should be"],
     ["Matrix", "Events against dataLayer keys: which event should send which key, with which value.", "To see the whole tagging plan at a glance"],
     ["Dictionary", "Every variable: what it means, its type, an example, where it comes from, its allowed values.", "To see what a value is allowed to be"],
@@ -153,6 +185,8 @@ export func view(sp: Spec) -> [(string, string)] {
                          summaryRows(sp), [6, 18, 9, 10, 40, 16, 12, 60])),
     ("Parameters", sheetXml(["ID", "eventName", "Visit", "Key", "Expected", "Status"],
                             parameterRows(sp), [6, 18, 8, 34, 24, 18])),
+    ("Visits", sheetXml(["Visit", "Page", "Consent", "What it does", "Expects", "Forbids"],
+                        visitRows(sp), [7, 30, 12, 70, 40, 30])),
     ("Spec v${sp.version}", sheetXml(["ID", "Description", "Trigger", "Scope", "eventName", "Parameters", "Priority", "Since", "Last changed", "Last QA", "Result", "Automatic check", "Parameters", "QA comment", "Retest", "Note"],
                                       specRows, [6, 30, 30, 16, 18, 36, 9, 7, 12, 15, 10, 20, 12, 36, 8, 24])),
     ("Matrix", sheetXml(concat(["ID", "eventName"], keys), matrixRows, concat([6, 18], map(\k. 18, keys)))),

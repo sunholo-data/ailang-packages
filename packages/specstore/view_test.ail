@@ -6,7 +6,7 @@ import std/json (Json, JNull)
 import std/list (map, length, nth, any)
 import std/option (Option, Some, None)
 import ./model (Spec, toSpec, toRound)
-import ./view (summaryRows, parameterRows, latestCheckFor, checkText, countsText, expectedText, readMeRows, view)
+import ./view (summaryRows, parameterRows, latestCheckFor, checkText, countsText, expectedText, readMeRows, view, visitRows)
 
 func y(s: string) -> Json = match yamlDecode(s) { Ok(j) => j, Err(_) => JNull }
 
@@ -69,8 +69,26 @@ test "the sheet opens on Read me, which explains every tab and every written val
   let tabs = map(\t. match t { (n, _) => n }, view(sp()));
   let words = map(\r. match r { [(w, _), ..._] => w, [] => "" }, readMeRows("1.1"));
   match tabs { [first, ..._] => first == "Read me", [] => false } &&
-  !any(\w. !any(\x. x == w, words), ["Summary", "Parameters", "Spec v1.1", "Matrix", "Dictionary", "History", "QA rounds",
+  !any(\w. !any(\x. x == w, words), ["Summary", "Parameters", "Visits", "Spec v1.1", "Matrix", "Dictionary", "History", "QA rounds",
      "matched", "gaps found", "correctly absent", "sent although forbidden", "could not check", "did not run", "waiting for release", "no visit",
      "as the spec says", "present", "missing", "empty", "not an allowed value", "differs", "not pushed",
      "not tested", "pass", "fail", "blocked"])
+}
+
+func withVisits() -> Spec = toSpec(y("spec: {client: C, project: P, owner: Ana, version: \"1.1\", standard: \"0.1\"}
+events:
+  - {id: E01, eventName: search, priority: high}
+  - {id: E02, eventName: login, priority: high}
+visits:
+  - {id: V01, url: /, consent: accept, steps: [{do: click, selector: a}, {do: pick, selector: b, new_tab: true}], expects: [E01]}
+  - {id: V02, url: /login, consent: accept, steps: [{do: fill, selector: e, value: \"{{env:QA_TEST_EMAIL}}\"}, {do: click, selector: s}], expects: [E02]}
+  - {id: V03, url: /, consent: reject, forbids: [E01, E02]}
+  - {id: V04, url: /, consent: accept, description: Open the home page and read the banner, expects: [E01]}"), [])
+
+test "the visits tab says what each visit does, in words" {
+  let r = visitRows(withVisits());
+  cell(r, 0, 3) == "click, then pick one at random in a new tab" && cell(r, 0, 4) == "E01 search" &&
+  cell(r, 1, 3) == "fill in the test account, then click" &&
+  cell(r, 2, 2) == "refused" && cell(r, 2, 3) == "open the page and stay" && cell(r, 2, 5) == "every event (2)" &&
+  cell(r, 3, 3) == "Open the home page and read the banner"
 }

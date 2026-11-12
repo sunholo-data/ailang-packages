@@ -10,8 +10,9 @@ that is not a number is a gap of its own; text is still compared exactly. Observ
 written beside every parameter, since a logged-in visit can push personal data; a value appears only
 where it differs from a fixed or allowed one. The sheet opens on a Read me tab: what each tab
 shows and when to read it, and what every written value in Automatic check, Status and Result means
-(a test keeps it complete). Rounds from earlier versions load as before.
-Tests: `qa_test.ail` (38), `view_test.ail` (11).
+(a test keeps it complete). A Visits tab says what each visit does: the page, the consent choice, its
+steps in words (or its `description`, when the spec gives one), and the events it expects and forbids.
+Rounds from earlier versions load as before. Tests: `qa_test.ail` (38), `view_test.ail` (12).
 
 ## 0.3.5
 
