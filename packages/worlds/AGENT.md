@@ -81,6 +81,69 @@ has no instrument model, selection policy, world catalogue or game preset.
   High-radius predictions are broad and prior-dependent. Apply to labelled
   synthetic populations only; never replace archive or curated values.
 
+- `propagate` (0.2.0): the prediction at arrival. `Belief` is a record of eight
+  probabilities (`sterile`, `microbial`, `complex`, `preTech`, `technological`,
+  `remnant`, `transcended`, `ecocide`); `certain(state)`, `probabilityOf`,
+  `validBelief` (non-negative, sum within 1e-9 of 1). Time is in years.
+  **Every propagator returns `Result[Belief, PredictionError]`.** A prediction
+  that was not computed is an `Err` saying why; the input is never handed back
+  in its place. Never show a player a belief you did not get from an `Ok`.
+  `PredictionError` is `InvalidParams | InvalidBelief | InvalidRates |
+  InvalidYears | OutsideExactDomain | SeenImpossible`.
+  There are two propagators and they are not interchangeable:
+  - `propagate(belief, rates, years)` is a constant-rate Markov chain. `Rates`
+    is an 8×8 generator in `stateIndex` order (the order of `PlanetState`);
+    build one with `ratesOf([{src, dst, perYr}])` or take
+    `transitionRates(params)` (a `Result`: `Err(InvalidParams)` outside
+    `validParams`), read it with `rateBetween`, check it with `validRates`.
+    `Ok(belief)` itself at 0 years, linear in the belief, and composable: `a`
+    then `b` equals `a+b` within 1e-12 per state. Rates up to 1e100 per year,
+    years in [0, 1e100].
+  - `propagateExact(belief, params, years)` is the conditional law of the
+    `history` sampler, built from `historyKernel(params, seen, years)`.
+  - **What the exact law assumes.** It is the population law for a world about
+    which nothing is known but its label, observed at an epoch near the centre
+    of the onset window. Call it **once, with the whole interval** (light age
+    plus travel time). Do not chain it: a belief carries no ages, so a second
+    call restarts every clock (seen Technological at baseline, one call over L
+    years leaves 0 technological; two half-steps leave 0.25; a test pins
+    this). It does not use a second sighting of the same world: if the ship
+    has looked twice, the kernel knows nothing of the first look.
+  - **Where the exact law is exact:** `exactDomain(params, years)`, which is
+    `validParams`, `windowYr >= 2e5`, and `0 <= years <= windowYr/2 - 1e5`.
+    Check it first. Outside it both functions return
+    `Err(OutsideExactDomain)`, including at 0 years; `transitionRates` and
+    `propagate` still answer for every valid parameter set, as the
+    approximation they are. `Err(SeenImpossible)` means the parameters allow
+    no world in that state at epoch 0 (a Remnant when `lifetimeYr >=
+    windowYr/2`); `propagateExact` raises it only if the belief puts weight
+    there.
+  - `validParams` is `history`'s parameter domain with `epoch_statistics`'
+    1e-100 floors on the times. A universe `history` accepts is not refused
+    for its window.
+  - `transitionRates` maps the sampler to rates: Complex→PreTech at the
+    sampler's exact hazard at epoch 0; PreTech→Technological at 1/E[lead];
+    Technological→Remnant, Ecocide, Transcended at 0.75/L, 0.15/L, 0.10/L;
+    Remnant→Complex at 1/E[traces]. Sterile, Microbial, Transcended and
+    Ecocide never change, exactly as in the sampler.
+  - The chain only approximates the sampler. Largest gap in one probability
+    at baseline (L = 1e5 yr): **0.523, seen PreTech, 1e5 years on**; seen
+    Technological 0.368 at L years on (the sampler has none left, the chain
+    keeps exp(-1)); seen Remnant 0.321 at 1.9e6 years on. For short intervals
+    it is small: seen Technological 5e-5 at 1 % of L, 0.011 at 10 %. The chain
+    also allows a second lineage after traces fade; the sampler does not.
+    For a prediction about worlds drawn by `historyOf`, use `propagateExact`.
+  - One piece of the PreTech and Complex kernels is 16×16-point Gauss-Legendre
+    quadrature; the rest is closed form. `propagate_reference_test.ail` holds
+    the kernel to an independent oracle's exact law at 42 cells, to 1e-9.
+  - Parameters are whatever the caller believes. Passing the true dial gives
+    the true law; passing an estimate gives the estimate's prediction.
+  - Cost on the bytecode VM (Apple M4 Max; command and output in
+    `tools/propagate_validation.md` §6): 3.2 ms per `propagate` call, 0.23 ms
+    per `propagateExact` call, 0.78 ms when the quadrature piece is in play.
+- `history` also exports its fixed design constants: `preTechLeadLoYr`,
+  `preTechLeadHiYr`, `collapseShare`, `ecocideShare`, `transcendenceShare`.
+
 ## Example
 
 ```ailang
@@ -91,9 +154,20 @@ let p = applyDial(baseline(), zeroDial());
 let n = starsWithin({rho0Pc3:0.079,scaleHeightPc:300.0},1000.0)
 ```
 
+```ailang
+import pkg/sunholo/worlds/propagate (certain, exactDomain, propagateExact, PredictionError)
+import pkg/sunholo/worlds/history (Technological)
+import std/result (Result, Ok, Err)
+-- The picture is 212 years old and arrival is 655 years away: one call.
+let shown = match propagateExact(certain(Technological), p, 212.0 + 655.0) {
+  Ok(atArrival) => atArrival.technological,   -- 0.99133 at baseline
+  Err(why) => -1.0                            -- show "no prediction", never the old belief
+}
+```
+
 ## Evidence and known corrections
 
-Native tests include LW check rows, the historical feature tables, a 10,000-
+Native tests include the closed-form Markov chains and seeded-history comparisons for `propagate`, LW check rows, the historical feature tables, a 10,000-
 point occurrence histogram, 10,000 histories' order/duration and state share,
 and 10,000 cross-dial nesting checks with identical onsets. The published
 feature text has three rounding inconsistencies: at 1000 ly the reference ever
@@ -108,7 +182,16 @@ Validation commands: `ailang lock`, `ailang check --package .`,
 that involve transcendental functions are runtime assertions, not claimed
 SMT proofs. Packages remain unpublished until the attended release handoff.
 
-Latest local validation on AILANG v0.56.0: check 14 files; native 29 passed,
+Validation of 0.2.0 on AILANG v0.56.1 (`05c860a`), 2026-11-12: check 19 files;
+native 65 passed, 0 failed, 0 skipped; strict-VM suite 65 passed with 62
+named-test bodies on the VM and none falling back. `historyKernel` agrees with
+the independent reference table at 42 cells to 1e-9 on both; `propagate_ref.py`
+oracle OK; five probes and the smoke program byte-identical on VM and
+interpreter; 3000 histories from `historyOf` byte-identical to 0.1.0. Verifier:
+1 verified (`stateIndex`), 0 refuted. `tools/propagate_validation.md` has the
+detail. Not published.
+
+Earlier validation of 0.1.0 on AILANG v0.56.0: check 14 files; native 29 passed,
 0 failed, 0 skipped; strict-VM suite 29 passed; conditional-CDF oracle 780 quantiles;
 VM/interpreter grid JSON byte-identical. Full quality now reports no gates and
 staged smoke passed after celestial 0.6.0 appeared in the registry. Contracts:
