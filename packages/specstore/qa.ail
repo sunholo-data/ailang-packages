@@ -15,10 +15,10 @@ import std/option (Option, Some, None)
 import std/json (Json, JString, JNumber, JBool, JNull, JArray, encode, decode, get, js, ja, jo, kv)
 import std/fs (readFile, writeFile)
 import std/io (println)
-import std/list (map, filter, length, any, flatMap, foldl)
+import std/list (map, filter, length, any, flatMap, foldl, concat)
 import std/string (split, join, trim, endsWith, substring, find, length as strLength)
 import ./rules (worstOutcome, visitOutcome)
-import ./model (Std, Event, Param, Spec, Round, str, arr, strs, obj, matches, dup, keyOf)
+import ./model (Std, Event, Param, Spec, Round, ParamRes, VisitRes, str, arr, strs, obj, matches, dup, keyOf)
 
 export type Visit = { id: string, url: string, consent: string, expects: [string], forbids: [string], j: Json }
 export type Seen = { id: string, status: string, reason: string, pushes: [Json], hits: [string] }
@@ -231,6 +231,45 @@ export func eventCounts(std: Std, vs: [Visit], seen: [Seen], e: Event) -> (int, 
   }
 }
 
+-- One parameter's problems as a written status.
+export func statusOf(problems: [string]) -> string = match problems {
+    [] => "as the spec says",
+    _ => if any(\m. find(m, " missing") >= 0 || find(m, " is empty") >= 0, problems) then "missing"
+         else if any(\m. endsWith(m, " empty"), problems) then "empty"
+         else "differs"
+  }
+
+-- Every parameter of an event on one visit that ran: from its first dataLayer push, or "not pushed".
+export func paramResults(std: Std, e: Event, s: Seen) -> [ParamRes] =
+  if e.dlEvent == "none" then []
+  else match filter(\x. str(x, "event") == e.dlEvent, s.pushes) {
+    [x, ..._] => map(\p. { key: p.key, status: statusOf(oneParam(std, p, x)) }, e.params),
+    [] => map(\p. { key: p.key, status: "not pushed" }, e.params)
+  }
+
+func noCounts(v: string, ck: string) -> VisitRes = { visit: v, check: ck, matched: -1, expected: -1, params: [] }
+
+-- The event on every visit that expects or forbids it, so a visit that went right shows as its own line.
+export func visitResults(std: Std, ga4: bool, vs: [Visit], seen: [Seen], e: Event) -> [VisitRes] {
+  let expecting = map(\v. match filter(\s. s.id == v.id, seen) {
+      [] => noCounts(v.id, "did not run"),
+      [s, ..._] => if s.status != "ok" then noCounts(v.id, "could not check") else {
+        let sev = match inVisitWith(std, ga4, e, s) { (x, _) => x };
+        let ps = paramResults(std, e, s);
+        let ok = length(filter(\p. p.status == "as the spec says", ps));
+        { visit: v.id, check: if sev == 0 then "matched" else "gaps found",
+          matched: if length(ps) == 0 then -1 else ok, expected: if length(ps) == 0 then -1 else length(ps), params: ps }
+      }
+    }, filter(\v. any(\i. i == e.id, v.expects), vs));
+  let forbidding = map(\v. match filter(\s. s.id == v.id, seen) {
+      [] => noCounts(v.id, "did not run"),
+      [s, ..._] => match absentIn(e, s) {
+        (sev, _) => noCounts(v.id, if sev == 0 then "correctly absent" else if sev == 1 then "could not check" else "sent although forbidden")
+      }
+    }, filter(\v. any(\i. i == e.id, v.forbids), vs));
+  concat(expecting, forbidding)
+}
+
 -- The written verdict beside the state, which says "not tested" for both a match and an event never
 -- checked: only a person sets a pass.
 export func checkOf(sev: int) -> string =
@@ -242,13 +281,30 @@ export func stateOf(sev: int) -> string =
 export func commentOf(sev: int, note: string) -> string =
   if sev == 0 then "Matched automatically; a person sets the pass. ${note}" else note
 
-export func roundYaml(n: int, version: string, date: string, rows: [(string, string, string, (int, int), string)]) -> string =
+func countLines(ind: string, m: int, t: int) -> [string] =
+  if m >= 0 then ["${ind}matched: ${show(m)}", "${ind}expected: ${show(t)}"] else []
+
+func visitLines(v: VisitRes) -> [string] = flatMap(\xs. xs, [
+    ["      - visit: ${v.visit}", "        check: ${encode(js(v.check))}"],
+    countLines("        ", v.matched, v.expected),
+    if length(v.params) == 0 then []
+    else concat(["        params:"], map(\p. "          - {key: ${encode(js(p.key))}, status: ${encode(js(p.status))}}", v.params))
+  ])
+
+func resultLines(r: (string, string, string, (int, int), [VisitRes], string)) -> [string] =
+  match r { (i, st, ck, counts, visits, c) => match counts { (m, t) => flatMap(\xs. xs, [
+    ["  - event: ${i}", "    state: ${st}", "    check: ${encode(js(ck))}"],
+    countLines("    ", m, t),
+    ["    comment: ${encode(js(c))}"],
+    if length(visits) == 0 then [] else concat(["    visits:"], flatMap(visitLines, visits))
+  ]) } }
+
+export func roundYaml(n: int, version: string, date: string, rows: [(string, string, string, (int, int), [VisitRes], string)]) -> string =
   join("\n", flatMap(\xs. xs, [
     ["# Written by specstore compare from a scheduled run. Not edited after writing.",
      "round: ${show(n)}", "version: ${encode(js(version))}", "date: ${encode(js(date))}",
      "tester: specstore compare", "by: automated", "results:"],
-    map(\r. match r { (i, st, ck, counts, c) => match counts { (m, t) =>
-      "  - {event: ${i}, state: ${st}, check: ${encode(js(ck))}, ${if m >= 0 then "matched: ${show(m)}, expected: ${show(t)}, " else ""}comment: ${encode(js(c))}}" } }, rows),
+    flatMap(resultLines, rows),
     [""]
   ]))
 
@@ -262,18 +318,18 @@ export func runCompare(std: Std, sp: Spec, obsPath: string, out: string) -> () !
       let n = 1 + foldl(\acc. \r. if r.n > acc then r.n else acc, 0, sp.rounds);
       let date = substring(str(o, "captured_at"), 0, 10);
       let ga4 = checksGa4(sp.j);
-      let rows = map(\e. if waitingForRelease(e) then (e.id, "not tested", "waiting for release", (-1, -1), "Waiting for release: changed in v${e.changed}, live is v${e.live}. Not checked until the client puts it live.")
+      let rows = map(\e. if waitingForRelease(e) then (e.id, "not tested", "waiting for release", (-1, -1), [], "Waiting for release: changed in v${e.changed}, live is v${e.live}. Not checked until the client puts it live.")
         else match outcomeWith(std, ga4, vs, seen, e) {
-          (sev, note) => if sev < 0 then (e.id, "not tested", checkOf(sev), (-1, -1), note)
-                         else (e.id, stateOf(sev), checkOf(sev), eventCounts(std, vs, seen, e), commentOf(sev, note))
+          (sev, note) => if sev < 0 then (e.id, "not tested", checkOf(sev), (-1, -1), [], note)
+                         else (e.id, stateOf(sev), checkOf(sev), eventCounts(std, vs, seen, e), visitResults(std, ga4, vs, seen, e), commentOf(sev, note))
         }, sp.events);
       writeFile(out, roundYaml(n, sp.version, date, rows));
-      let count = \st. length(filter(\r. match r { (_, s, _, _, _) => s == st }, rows));
-      let totals = foldl(\acc. \r. match r { (_, _, _, counts, _) => match counts { (m, t) => match acc { (am, at) =>
+      let count = \st. length(filter(\r. match r { (_, s, _, _, _, _) => s == st }, rows));
+      let totals = foldl(\acc. \r. match r { (_, _, _, counts, _, _) => match counts { (m, t) => match acc { (am, at) =>
           if m >= 0 then (am + m, at + t) else (am, at) } } }, (0, 0), rows);
-      let matchedCount = length(filter(\r. match r { (_, _, ck, _, _) => ck == "matched" }, rows));
+      let matchedCount = length(filter(\r. match r { (_, _, ck, _, _, _) => ck == "matched" }, rows));
       if observedFor != sp.version then println("  ~ the run was planned from v${observedFor}; the spec is now v${sp.version}") else ();
-      foldl(\u. \r. match r { (i, st, _, _, c) => println("  ${if st == "fail" then "✗" else if st == "blocked" then "!" else "·"} ${i}  ${st}  ${c}") }, (), rows);
+      foldl(\u. \r. match r { (i, st, _, _, _, c) => println("  ${if st == "fail" then "✗" else if st == "blocked" then "!" else "·"} ${i}  ${st}  ${c}") }, (), rows);
       let paramLine = match totals { (m, t) => if t > 0 then "; ${show(m)} of ${show(t)} parameters as the spec says" else "" };
       println("✓ wrote ${out}: QA round ${show(n)} of v${sp.version}, ${show(count("fail"))} failed, ${show(count("blocked"))} could not be checked, ${show(length(rows) - count("fail") - count("blocked"))} not failed (a person sets the pass), ${show(matchedCount)} matched${paramLine}")
     }
