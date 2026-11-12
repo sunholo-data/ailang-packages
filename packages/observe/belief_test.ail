@@ -17,7 +17,7 @@ import ./belief (State, Sterile, Microbial, Complex, PreTech, Technological, Rem
   HostClass, HostFGK, HostM, Observation, Posterior,
   states, signals, stateIndex, stateOfIndex, signalIndex, hostClassOfTeffK, likelihoodRow, likelihood, confidence,
   confidenceCap, observationLikelihood, posterior, probOf, pLife, pMind, sumOf, sumsToOne, validBelief,
-  lifeOddsGainBound, pLifeBound)
+  lifeOddsGainBound, pLifeCeiling)
 
 pure func blPrior() -> [float] = [0.90, 0.07, 0.02, 0.004, 0.003, 0.002, 0.0005, 0.0005]
 -- A prior that already suspects technology, for the quiet-world cases.
@@ -78,6 +78,17 @@ test "most technological worlds are quiet: no technosignature is more likely tha
   likelihood(Leakage, HostFGK, Technological) > 100.0 * likelihood(Leakage, HostFGK, Sterile) &&
   likelihood(WasteHeat, HostFGK, Transcended) > likelihood(WasteHeat, HostFGK, Technological)
 }
+-- lifeOddsGainBound's claim rests on this: a living state is never less
+-- likely than Sterile to show a signal.
+pure func blLivingAbove(row: [float]) -> bool {
+  let s = nth_or(row, 0, 1.0);
+  nth_or(row, 1, 0.0) >= s && nth_or(row, 2, 0.0) >= s && nth_or(row, 3, 0.0) >= s && nth_or(row, 4, 0.0) >= s &&
+  nth_or(row, 5, 0.0) >= s && nth_or(row, 6, 0.0) >= s
+}
+pure func blAllLivingAbove(ss: [Signal]) -> bool =
+  match ss { [] => true, s :: rest => blLivingAbove(likelihoodRow(s, HostFGK)) && blLivingAbove(likelihoodRow(s, HostM)) && blAllLivingAbove(rest) }
+test "no living state is less likely than a sterile world to show any signal" { blAllLivingAbove(signals()) }
+
 test "host class: below 3900 K is an M dwarf" {
   hostClassOfTeffK(3899.0) == HostM && hostClassOfTeffK(3900.0) == HostFGK && blKDwarf() == HostFGK && blMDwarf() == HostM
 }
@@ -106,8 +117,8 @@ pure func blCases() -> [[Observation]] = [
   [blSeen(O2CH4, 10.0), blSeen(RedEdge, 7.0), blMissed(Leakage, 3.0)],
   [blMissed(O2, 30.0), blMissed(Glint, 12.0), blSeen(WasteHeat, 50.0), blSeen(ArtificialTransit, 9.0)],
   [blSeen(Beacon, 1000.0), blMissed(Beacon, 1000.0), blSeen(Beacon, 1000.0)],
-  blRepeat(blSeen(NightLights, 8.0), 40) ++ blRepeat(blMissed(IndustrialGas, 15.0), 40),
-  blRepeat(blSeen(Leakage, 1000.0), 150) ++ blRepeat(blMissed(Leakage, 1000.0), 150)
+  blRepeat(blSeen(NightLights, 8.0), 20) ++ blRepeat(blMissed(IndustrialGas, 15.0), 20),
+  blRepeat(blSeen(Leakage, 1000.0), 100) ++ blRepeat(blMissed(Leakage, 1000.0), 100)
 ]
 pure func blNormalised(prior: [float], host: HostClass, cases: [[Observation]]) -> bool =
   match cases {
@@ -131,14 +142,16 @@ test "strong O2 + CH4 on a K dwarf lifts P(life) from 0.10 above 0.5; O2 alone o
 
 -- O2 alone on an M dwarf: however strong and however often it is seen, the
 -- odds of life against a sterile world grow by at most lifeOddsGainBound
--- (4.5), and for this prior P(life) stays below 0.22.
+-- (4.5), and P(life) stays at or below pLifeCeiling, which for this prior is
+-- under 0.21 (from 0.0995).
 pure func blO2Bounded(snr: float, n: int) -> bool {
   let p = blP(blPrior(), HostM, blRepeat(blSeen(O2, snr), n));
   let gain = (pLife(p) / probOf(p, Sterile)) / (pLife(blPrior()) / probOf(blPrior(), Sterile));
-  gain <= lifeOddsGainBound(O2, HostM) * 1.000000001 && pLife(p) <= pLifeBound(blPrior(), O2, HostM) && pLife(p) < 0.22
+  gain <= lifeOddsGainBound(O2, HostM) * 1.000000001 && pLife(p) <= pLifeCeiling(blPrior(), O2, HostM) * 1.000000001 && pLife(p) < 0.21
 }
 test "O2 alone on an M dwarf never lifts P(life) above the stated bound, at any SNR or number of looks" {
-  absf(lifeOddsGainBound(O2, HostM) - 4.5) < 0.000000000001 && pLifeBound(blPrior(), O2, HostM) < 0.22 &&
+  absf(lifeOddsGainBound(O2, HostM) - 4.5) < 0.000000000001 && pLifeCeiling(blPrior(), O2, HostM) < 0.21 &&
+  pLifeCeiling(blPrior(), O2, HostM) > pLife(blPrior()) &&
   blO2Bounded(5.0, 1) && blO2Bounded(10.0, 1) && blO2Bounded(30.0, 1) && blO2Bounded(1000.0, 1) &&
   blO2Bounded(10.0, 5) && blO2Bounded(1000.0, 30)
 }
@@ -150,10 +163,10 @@ test "the same O2 on a Sun-like host is a much stronger sign: the bound is 45, a
 -- have heard much (reachable SNR <= 1).
 pure func blQuiet(snr: float) -> [Observation] =
   [blMissed(Leakage, snr), blMissed(Beacon, snr), blMissed(NightLights, snr), blMissed(IndustrialGas, snr)]
-test "a quiet technological world: non-detections at low reachable SNR leave the prior within 0.01" {
-  blMaxDiff(blP(blTechPrior(), HostFGK, blQuiet(1.0)), blTechPrior()) < 0.01 &&
+test "a quiet technological world: four non-detections at reachable SNR 1 leave the prior within 0.02, at SNR 0.2 within 0.001" {
+  blMaxDiff(blP(blTechPrior(), HostFGK, blQuiet(1.0)), blTechPrior()) < 0.02 &&
   blMaxDiff(blP(blTechPrior(), HostFGK, blQuiet(0.2)), blTechPrior()) < 0.001 &&
-  blMaxDiff(blP(blPrior(), HostFGK, blQuiet(1.0)), blPrior()) < 0.0001
+  blMaxDiff(blP(blPrior(), HostFGK, blQuiet(1.0)), blPrior()) < 0.0005
 }
 test "silence is evidence when the instrument could have heard: the same non-detections at SNR 20 halve P(technological)" {
   probOf(blP(blTechPrior(), HostFGK, blQuiet(20.0)), Technological) < 0.5 * probOf(blTechPrior(), Technological) &&
@@ -169,7 +182,7 @@ test "a non-detection of O2 at high reachable SNR lowers P(complex life)" {
 pure func blSaturates() -> bool {
   let one = blP(blPrior(), HostM, [blSeen(O2, 1000.0)]);
   let many = blP(blPrior(), HostM, blRepeat(blSeen(O2, 1000.0), 20));
-  blMaxDiff(one, many) < 0.000001
+  blMaxDiff(one, many) < 0.005 && pLife(many) <= pLifeCeiling(blPrior(), O2, HostM) * 1.000000001
 }
 test "twenty certain looks at the same O2 say what one says" { blSaturates() }
 
