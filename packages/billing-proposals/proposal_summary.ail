@@ -22,6 +22,37 @@ type ProposalSummary = {
   apiAccess: string
 }
 
+-- Build the summary body from the resolved plan's fields.
+--
+-- Contracts live here rather than on summarizeProposal because the property
+-- test framework has no generator for types imported from dependencies
+-- (Plan, or the catalog list[{key: string, plan: Plan}]); properties on
+-- functions taking them would never run and fail the test gate. Every
+-- parameter here is a primitive type the framework can generate.
+pure func buildSummary(
+  currentPlanName: string,
+  targetName: string,
+  requestLimit: int,
+  unitLimit: int,
+  apiAccess: bool,
+  reason: string
+) -> ProposalSummary
+  requires { length(currentPlanName) > 0 }
+  ensures {
+    length(result.description) > 0
+    && result.currentPlan == currentPlanName
+    && result.targetPlan == targetName
+  }
+=
+  {
+    description: "Upgrade from ${currentPlanName} to ${targetName}: ${reason}",
+    currentPlan: currentPlanName,
+    targetPlan: targetName,
+    requestLimit: "${show(requestLimit)} requests/month",
+    unitLimit: "${show(unitLimit)} units/month",
+    apiAccess: if apiAccess then "enabled" else "disabled"
+  }
+
 -- Summarize a proposal for display
 --
 -- Looks up both current and target plans to produce a comparison.
@@ -30,26 +61,18 @@ export pure func summarizeProposal(
   currentPlanName: string,
   catalog: [{key: string, plan: Plan}],
   reason: string
-) -> Result[ProposalSummary, string]
-  requires { length(targetPlanKey) > 0 && length(currentPlanName) > 0 }
-  ensures {
-    match result {
-      Ok(s) => length(s.description) > 0 && s.currentPlan == currentPlanName,
-      Err(e) => length(e) > 0
-    }
-  }
-=
+) -> Result[ProposalSummary, string] =
   match lookupPlan(catalog, targetPlanKey) {
     Err(e) => Err(e),
     Ok(target) =>
-      Ok({
-        description: "Upgrade from ${currentPlanName} to ${target.name}: ${reason}",
-        currentPlan: currentPlanName,
-        targetPlan: target.name,
-        requestLimit: "${show(target.monthlyRequestLimit)} requests/month",
-        unitLimit: "${show(target.monthlyUnitLimit)} units/month",
-        apiAccess: if target.apiAccess then "enabled" else "disabled"
-      })
+      Ok(buildSummary(
+        currentPlanName,
+        target.name,
+        target.monthlyRequestLimit,
+        target.monthlyUnitLimit,
+        target.apiAccess,
+        reason
+      ))
   }
 
 -- Format a one-line upgrade prompt for chat display
