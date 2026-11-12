@@ -137,18 +137,22 @@ export pure func photonRate(src: Blackbody, distanceM: float, apertureM: float, 
 
 -- The phase function of a Lambert sphere: (sin a + (pi - a) cos a) / pi.
 -- alphaRad is the phase angle star-planet-observer: 0 at full phase (1),
--- pi/2 at quadrature (1/pi), pi at new (0).
+-- pi/2 at quadrature (1/pi), pi at new (0). A rounding residue outside
+-- [0, 1] (possible within about 1e-8 rad of full or new phase) is returned
+-- as the bound.
 export pure func lambertPhase(alphaRad: float) -> float
   requires { alphaRad >= 0.0, alphaRad <= 3.1415926535897936 }
+  ensures { result >= 0.0, result <= 1.0 }
 {
-  (sin(alphaRad) + (pi() - alphaRad) * cos(alphaRad)) / pi()
+  let f = (sin(alphaRad) + (pi() - alphaRad) * cos(alphaRad)) / pi();
+  if f < 0.0 then 0.0 else if f > 1.0 then 1.0 else f
 }
 
 -- Reflected-light contrast, the planet's brightness over its star's:
 -- C = A_g x Phi(alpha) x (R_p / a)^2. The planet's photon rate is C times
 -- the star's.
 export pure func planetContrast(geomAlbedo: float, planetRadiusM: float, orbitM: float, phaseRad: float) -> float
-  requires { geomAlbedo >= 0.0, planetRadiusM >= 0.0, orbitM > 0.0, phaseRad >= 0.0, phaseRad <= 3.1415926535897936 }
+  requires { geomAlbedo >= 0.0, planetRadiusM >= 0.0, orbitM > 0.0, phaseRad >= 0.0, phaseRad <= 3.1415926535897936 }  ensures { result >= 0.0 }
 {
   let r = planetRadiusM / orbitM;
   geomAlbedo * lambertPhase(phaseRad) * r * r
