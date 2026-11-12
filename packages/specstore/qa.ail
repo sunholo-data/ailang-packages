@@ -15,13 +15,13 @@ import std/option (Option, Some, None)
 import std/json (Json, JString, JNumber, JBool, JNull, JArray, encode, decode, get, js, ja, jo, kv)
 import std/fs (readFile, writeFile)
 import std/io (println)
-import std/list (map, filter, length, any, flatMap, foldl, concat)
+import std/list (map, filter, length, any, flatMap, foldl, concat, sortBy, last)
 import std/string (split, join, trim, endsWith, startsWith, substring, find, stringToFloat, length as strLength)
 import ./rules (worstOutcome, visitOutcome)
 import ./model (Std, Event, Param, Spec, Round, ParamRes, VisitRes, str, arr, strs, obj, matches, dup, keyOf)
 
 export type Visit = { id: string, url: string, consent: string, expects: [string], forbids: [string], j: Json }
-export type Seen = { id: string, status: string, reason: string, pushes: [Json], hits: [string] }
+export type Seen = { id: string, status: string, reason: string, pushes: [Json], hits: [string], pages: [string] }
 
 export func visitsOf(sp: Spec) -> [Visit] =
   map(\v. { id: str(v, "id"), url: str(v, "url"),
@@ -74,10 +74,38 @@ export func planJson(sp: Spec) -> string =
 
 -- ── compare: what was seen against what the spec says ────────────────────────
 
+-- A page's path: no scheme, host, query or fragment. A query can carry a search term or, after a login,
+-- personal data, so it never reaches a round.
+export func pathOf(u: string) -> string {
+  let noQ = match split(u, "?") { [a, ..._] => a, [] => u };
+  let noH = match split(noQ, "#") { [a, ..._] => a, [] => noQ };
+  let at = find(noH, "://");
+  if at < 0 then noH
+  else {
+    let rest = substring(noH, at + 3, strLength(noH));
+    let slash = find(rest, "/");
+    if slash < 0 then "/" else substring(rest, slash, strLength(rest))
+  }
+}
+
+func stampOf(j: Json) -> float = match get(j, "t") { Some(JNumber(n)) => n, _ => 0.0 }
+
+-- Consecutive repeats merged: many pushes on one page are one page.
+export func squeeze(xs: [string]) -> [string] =
+  foldl(\acc. \x. match last(acc) { Some(y) => if y == x then acc else concat(acc, [x]), None => [x] }, [], xs)
+
+-- The pages a visit went through, in time order: where it started, every page a push or a hit came
+-- from, where it ended.
+export func pagesOf(v: Json) -> [string] {
+  let stamped = concat(map(\p. (stampOf(p), str(p, "url")), arr(v, "datalayer")), map(\h. (stampOf(h), str(h, "page")), arr(v, "hits")));
+  let ordered = sortBy(\a. \b. match a { (ta, _) => match b { (tb, _) => if ta < tb then -1 else if ta > tb then 1 else 0 } }, stamped);
+  squeeze(filter(\x. x != "", map(pathOf, concat([str(v, "url")], concat(map(\x. match x { (_, u) => u }, ordered), [str(v, "final_url")])))))
+}
+
 export func seenOf(o: Json) -> [Seen] =
   map(\v. { id: str(v, "id"), status: str(v, "status"), reason: str(v, "reason"),
             pushes: map(\r. obj(r, "item"), arr(v, "datalayer")),
-            hits: map(\h. str(h, "en"), arr(v, "hits")) }, arr(o, "visits"))
+            hits: map(\h. str(h, "en"), arr(v, "hits")), pages: pagesOf(v) }, arr(o, "visits"))
 
 export func numText(s: string) -> string =
   if endsWith(s, ".0") then substring(s, 0, strLength(s) - 2) else s
@@ -268,7 +296,7 @@ export func paramResults(std: Std, e: Event, s: Seen) -> [ParamRes] =
     [] => map(\p. { key: p.key, status: "not pushed" }, e.params)
   }
 
-func noCounts(v: string, ck: string, c: string) -> VisitRes = { visit: v, check: ck, matched: -1, expected: -1, comment: c, params: [] }
+func noCounts(v: string, ck: string, c: string, pages: [string]) -> VisitRes = { visit: v, check: ck, matched: -1, expected: -1, comment: c, pages: pages, params: [] }
 
 -- A visit's own note, without the "V01: " the event's comment needs to tell its visits apart.
 export func ownNote(v: string, note: string) -> string =
@@ -277,21 +305,21 @@ export func ownNote(v: string, note: string) -> string =
 -- The event on every visit that expects or forbids it, so a visit that went right shows as its own line.
 export func visitResults(std: Std, ga4: bool, vs: [Visit], seen: [Seen], e: Event) -> [VisitRes] {
   let expecting = map(\v. match filter(\s. s.id == v.id, seen) {
-      [] => noCounts(v.id, "did not run", "did not run"),
-      [s, ..._] => if s.status != "ok" then noCounts(v.id, "could not check", "could not check (${s.status}: ${s.reason})") else {
+      [] => noCounts(v.id, "did not run", "did not run", []),
+      [s, ..._] => if s.status != "ok" then noCounts(v.id, "could not check", "could not check (${s.status}: ${s.reason})", s.pages) else {
         let res = inVisitWith(std, ga4, e, s);
         let sev = match res { (x, _) => x };
         let note = match res { (_, n) => ownNote(v.id, n) };
         let ps = paramResults(std, e, s);
         let ok = length(filter(\p. p.status == "as the spec says" || p.status == "present", ps));
         { visit: v.id, check: if sev == 0 then "matched" else "gaps found",
-          matched: if length(ps) == 0 then -1 else ok, expected: if length(ps) == 0 then -1 else length(ps), comment: note, params: ps }
+          matched: if length(ps) == 0 then -1 else ok, expected: if length(ps) == 0 then -1 else length(ps), comment: note, pages: s.pages, params: ps }
       }
     }, filter(\v. any(\i. i == e.id, v.expects), vs));
   let forbidding = map(\v. match filter(\s. s.id == v.id, seen) {
-      [] => noCounts(v.id, "did not run", "did not run"),
+      [] => noCounts(v.id, "did not run", "did not run", []),
       [s, ..._] => match absentIn(e, s) {
-        (sev, n) => noCounts(v.id, if sev == 0 then "correctly absent" else if sev == 1 then "could not check" else "sent although forbidden", ownNote(v.id, n))
+        (sev, n) => noCounts(v.id, if sev == 0 then "correctly absent" else if sev == 1 then "could not check" else "sent although forbidden", ownNote(v.id, n), s.pages)
       }
     }, filter(\v. any(\i. i == e.id, v.forbids), vs));
   concat(expecting, forbidding)
@@ -314,6 +342,7 @@ func countLines(ind: string, m: int, t: int) -> [string] =
 func visitLines(v: VisitRes) -> [string] = flatMap(\xs. xs, [
     ["      - visit: ${v.visit}", "        check: ${encode(js(v.check))}"],
     if v.comment == "" then [] else ["        comment: ${encode(js(v.comment))}"],
+    if length(v.pages) == 0 then [] else ["        pages: [${join(", ", map(\p. encode(js(p)), v.pages))}]"],
     countLines("        ", v.matched, v.expected),
     if length(v.params) == 0 then []
     else concat(["        params:"], map(\p. "          - {key: ${encode(js(p.key))}, status: ${encode(js(p.status))}}", v.params))

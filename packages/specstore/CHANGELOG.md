@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.3.7
+
+Where each visit went. A round records, for each visit, the pages it went through in time order (paths
+only: no host, no query string, no fragment, since a query can carry a search term or, after a login,
+personal data). The Visits tab shows where a visit starts (from the spec) and the pages it reached in
+the latest run: "4: / → /search → … → /stay/…". Tests: `qa_test.ail` (41), `view_test.ail` (13).
+
 ## 0.3.6
 
 Every line describes itself, in every export. Each visit in a round carries its own comment, and the

@@ -60,7 +60,7 @@ export func summaryRows(sp: Spec) -> [[(string, int)]] {
   let count = \k. length(filter(\l. match l { (ck, _) => ck == k }, lines));
   let tot = foldl(\acc. \e. match latestCheckFor(e.id, sp.rounds) {
       Some(k) => foldl(\a. \v. match a { (m, t) => if v.matched >= 0 && v.expected > 0 then (m + v.matched, t + v.expected) else (m, t) },
-                       acc, match k.visits { [] => [{ visit: "", check: k.check, matched: k.matched, expected: k.expected, comment: "", params: [] }], vs => vs }),
+                       acc, match k.visits { [] => [{ visit: "", check: k.check, matched: k.matched, expected: k.expected, comment: "", pages: [], params: [] }], vs => vs }),
       None => acc }, (0, 0), sp.events);
   let pct = match tot { (m, t) => if t > 0 then "${show(m)} of ${show(t)} (${show((100 * m) / t)}%)" else "" };
   let last = foldl(\acc. \r. if r.n > acc.n then { n: r.n, date: r.date, by: r.by } else acc, { n: 0, date: "", by: "" }, sp.rounds);
@@ -105,8 +105,18 @@ export func stepText(st: Json) -> string {
 export func consentText(c: string) -> string =
   if c == "accept" then "accepted" else if c == "reject" then "refused" else if c == "none" then "not answered" else c
 
+-- The pages a visit went through in the latest round that recorded them.
+export func latestPagesFor(id: string, rs: [Round]) -> [string] =
+  foldl(\acc. \r. match flatMap(\x. filter(\v. v.visit == id && length(v.pages) > 0, x.visits), r.results) {
+      [v, ..._] => v.pages,
+      [] => acc
+    }, [], rs)
+
+export func pagesText(ps: [string]) -> string = match ps { [] => "", _ => "${show(length(ps))}: ${join(" → ", ps)}" }
+
 -- The visits tab: what each visit does, so V01 means something without the spec open. A visit may
--- carry a description; without one its steps are written out.
+-- carry a description; without one its steps are written out. Where it starts comes from the spec,
+-- the pages it went through from the latest round.
 export func visitRows(sp: Spec) -> [[(string, int)]] {
   let ids = \xs. if length(xs) > 0 && length(xs) == length(sp.events) then "every event (${show(length(xs))})"
                  else join(", ", map(\i. match filter(\e. e.id == i, sp.events) { [e, ..._] => "${i} ${e.eventName}", [] => i }, xs));
@@ -115,7 +125,7 @@ export func visitRows(sp: Spec) -> [[(string, int)]] {
       let does = if str(v, "description") != "" then str(v, "description")
                  else match steps { [] => "open the page and stay", _ => join(", then ", map(stepText, steps)) };
       [(str(v, "id"), 0), (str(v, "url"), 0), (consentText(str(v, "consent")), 0), (does, 0),
-       (ids(strs(v, "expects")), 0), (ids(strs(v, "forbids")), 0)]
+       (pagesText(latestPagesFor(str(v, "id"), sp.rounds)), 0), (ids(strs(v, "expects")), 0), (ids(strs(v, "forbids")), 0)]
     }, arr(sp.j, "visits"))
 }
 
@@ -125,7 +135,7 @@ export func readMeRows(version: string) -> [[(string, int)]] = map(\r. map(\c. (
     ["THE TABS", "What each tab shows", "When to read it"],
     ["Summary", "One line per event and visit: what that visit found, how many parameters are right, the event's result. Totals at the bottom.", "Every morning: is anything wrong, and where"],
     ["Parameters", "One line per parameter on the visit that checked it: what the spec expects, in words, and its status.", "When deciding the gaps, line by line"],
-    ["Visits", "What each visit does: the page, the consent choice, its steps, the events it expects and the ones it forbids.", "To see what V01, V02, … mean"],
+    ["Visits", "What each visit does: where it starts, the consent choice, its steps, the pages it went through in the latest run, the events it expects and the ones it forbids.", "To see what V01, V02, … mean"],
     ["Spec v${version}", "The spec itself: one row per event with its description, trigger, scope, parameters, priority, versions and latest result.", "To see what an event should be"],
     ["Matrix", "Events against dataLayer keys: which event should send which key, with which value.", "To see the whole tagging plan at a glance"],
     ["Dictionary", "Every variable: what it means, its type, an example, where it comes from, its allowed values.", "To see what a value is allowed to be"],
@@ -185,8 +195,8 @@ export func view(sp: Spec) -> [(string, string)] {
                          summaryRows(sp), [6, 18, 9, 10, 40, 16, 12, 60])),
     ("Parameters", sheetXml(["ID", "eventName", "Visit", "Key", "Expected", "Status"],
                             parameterRows(sp), [6, 18, 8, 34, 24, 18])),
-    ("Visits", sheetXml(["Visit", "Page", "Consent", "What it does", "Expects", "Forbids"],
-                        visitRows(sp), [7, 30, 12, 70, 40, 30])),
+    ("Visits", sheetXml(["Visit", "Starts on", "Consent", "What it does", "Pages reached (latest run)", "Expects", "Forbids"],
+                        visitRows(sp), [7, 24, 12, 60, 70, 40, 30])),
     ("Spec v${sp.version}", sheetXml(["ID", "Description", "Trigger", "Scope", "eventName", "Parameters", "Priority", "Since", "Last changed", "Last QA", "Result", "Automatic check", "Parameters", "QA comment", "Retest", "Note"],
                                       specRows, [6, 30, 30, 16, 18, 36, 9, 7, 12, 15, 10, 20, 12, 36, 8, 24])),
     ("Matrix", sheetXml(concat(["ID", "eventName"], keys), matrixRows, concat([6, 18], map(\k. 18, keys)))),
