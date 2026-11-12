@@ -3,10 +3,10 @@ module sunholo/specstore/view_test
 
 import std/yaml (decode as yamlDecode)
 import std/json (Json, JNull)
-import std/list (map, length, nth)
+import std/list (map, length, nth, any)
 import std/option (Option, Some, None)
 import ./model (Spec, toSpec, toRound)
-import ./view (summaryRows, parameterRows, latestCheckFor, checkText, countsText, expectedText)
+import ./view (summaryRows, parameterRows, latestCheckFor, checkText, countsText, expectedText, readMeRows, view, visitRows)
 
 func y(s: string) -> Json = match yamlDecode(s) { Ok(j) => j, Err(_) => JNull }
 
@@ -16,8 +16,8 @@ events:
   - {id: E02, eventName: page_view, priority: high, parameters: [{key: a, value: x}]}"),
   [toRound(y("{round: 1, version: \"1.1\", date: \"2026-11-12\", tester: t, by: automated, results: [
      {event: E01, state: not tested, check: matched, matched: 2, expected: 2, comment: ok,
-      visits: [{visit: V01, check: matched, matched: 2, expected: 2, params: [{key: a, status: as the spec says}, {key: b, status: as the spec says}]},
-               {visit: V03, check: correctly absent}]},
+      visits: [{visit: V01, check: matched, matched: 2, expected: 2, comment: \"all 2 match\", params: [{key: a, status: as the spec says}, {key: b, status: as the spec says}]},
+               {visit: V03, check: correctly absent, comment: \"correctly absent\"}]},
      {event: E02, state: fail, check: gaps found, matched: 0, expected: 1, comment: missing,
       visits: [{visit: V01, check: gaps found, matched: 0, expected: 1, params: [{key: a, status: missing}]}]}]}"))])
 
@@ -56,7 +56,39 @@ test "the event's result sits on its first row only, so a good visit does not re
 }
 
 test "the expected value in words: fixed as it is, a variable as what can be confirmed" {
-  expectedText({ key: "k", value: "list", variable: "", allowed: [] }) == "list" &&
-  expectedText({ key: "k", value: "{{userId}}", variable: "userId", allowed: [] }) == "any value (userId)" &&
-  expectedText({ key: "k", value: "{{lang}}", variable: "lang", allowed: ["fr", "nl"] }) == "one of: fr, nl"
+  expectedText({ key: "k", value: "list", variable: "", allowed: [], typ: "text" }) == "list" &&
+  expectedText({ key: "k", value: "{{userId}}", variable: "userId", allowed: [], typ: "text" }) == "any value (userId)" &&
+  expectedText({ key: "k", value: "{{lang}}", variable: "lang", allowed: ["fr", "nl"], typ: "text" }) == "one of: fr, nl"
+}
+
+test "each summary line carries its own visit's comment, not the whole event's" {
+  cell(summaryRows(sp()), 0, 7) == "all 2 match" && cell(summaryRows(sp()), 1, 7) == "correctly absent"
+}
+
+test "the sheet opens on Read me, which explains every tab and every written value the sheet uses" {
+  let tabs = map(\t. match t { (n, _) => n }, view(sp()));
+  let words = map(\r. match r { [(w, _), ..._] => w, [] => "" }, readMeRows("1.1"));
+  match tabs { [first, ..._] => first == "Read me", [] => false } &&
+  !any(\w. !any(\x. x == w, words), ["Summary", "Parameters", "Visits", "Spec v1.1", "Matrix", "Dictionary", "History", "QA rounds",
+     "matched", "gaps found", "correctly absent", "sent although forbidden", "could not check", "did not run", "waiting for release", "no visit",
+     "as the spec says", "present", "missing", "empty", "not an allowed value", "differs", "not pushed",
+     "not tested", "pass", "fail", "blocked"])
+}
+
+func withVisits() -> Spec = toSpec(y("spec: {client: C, project: P, owner: Ana, version: \"1.1\", standard: \"0.1\"}
+events:
+  - {id: E01, eventName: search, priority: high}
+  - {id: E02, eventName: login, priority: high}
+visits:
+  - {id: V01, url: /, consent: accept, steps: [{do: click, selector: a}, {do: pick, selector: b, new_tab: true}], expects: [E01]}
+  - {id: V02, url: /login, consent: accept, steps: [{do: fill, selector: e, value: \"{{env:QA_TEST_EMAIL}}\"}, {do: click, selector: s}], expects: [E02]}
+  - {id: V03, url: /, consent: reject, forbids: [E01, E02]}
+  - {id: V04, url: /, consent: accept, description: Open the home page and read the banner, expects: [E01]}"), [])
+
+test "the visits tab says what each visit does, in words" {
+  let r = visitRows(withVisits());
+  cell(r, 0, 3) == "click, then pick one at random in a new tab" && cell(r, 0, 4) == "E01 search" &&
+  cell(r, 1, 3) == "fill in the test account, then click" &&
+  cell(r, 2, 2) == "refused" && cell(r, 2, 3) == "open the page and stay" && cell(r, 2, 5) == "every event (2)" &&
+  cell(r, 3, 3) == "Open the home page and read the banner"
 }
