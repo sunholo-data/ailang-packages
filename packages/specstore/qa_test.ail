@@ -32,8 +32,11 @@ func seen(status: string, pushes: string, hits: string) -> Json =
   y("{visits: [{id: V01, status: ${status}, reason: r, datalayer: [${pushes}], hits: [${hits}]}]}")
 
 func outcome(sp: Spec, o: Json, n: int) -> int =
-  match outcomeFor(std(), visitsOf(sp), seenOf(o), match sp.events { [a, b, c] => if n == 1 then a else if n == 2 then b else c, _ => match sp.events { [x, ..._] => x } }) {
-    (s, _) => s
+  match sp.events {
+    [] => -1,
+    [x, ..._] => match outcomeFor(std(), visitsOf(sp), seenOf(o), match sp.events { [a, b, c] => if n == 1 then a else if n == 2 then b else c, _ => x }) {
+      (s, _) => s
+    }
   }
 
 func v01() -> string = "  - {id: V01, url: /, consent: accept, expects: [E01, E02]}"
