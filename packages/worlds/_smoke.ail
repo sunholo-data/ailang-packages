@@ -1,16 +1,42 @@
 module sunholo/worlds/_smoke
 import ./baseline (baseline,baselineVersion,quantileOf,AbiogenesisRate)
-import ./dial (applyDial,zeroDial,luckDex)
+import ./dial (Params,applyDial,zeroDial,luckDex)
 import ./disc (starsWithin,radiusQuantile,aliveWithin,existInWindow)
 import ./occurrence (sag13Expected,sag13Sample)
 import ./history (historyOf,stateAt,epochs,Technological)
 import ./epoch_statistics (historyProbabilities)
 import ./propagate (certain,validBelief,transitionRates,propagate,propagateExact,PredictionError,OutsideExactDomain)
+import ./selection (drawParams,dialOf,acceptanceProbability,expectedDraws,luckProbability,AtLeast,AnyCount)
+import ./epoch_statistics (endedShares)
 import std/result (Result,Ok,Err)
 import std/io (println,exit)
 import std/math (abs_Float)
 import std/string (join)
 import std/list (map)
+-- The 0.3.0 additions, in their own function: with them inline, main exceeds
+-- the strict VM's 256-register limit for one function.
+func selectionSmoke(p:Params,n:float) -> bool ! {IO} {
+ let drawn=drawParams(baseline(),[0.6,0.7,0.4,0.55]);
+ let setting={hzWorlds:0.2*n,reach:[{lifetimeYr:1e5,share:1.0}],endedYr:0.0,gapYr:0.0,found:AtLeast(3.0),ended:AnyCount,late:AnyCount};
+ let chance=acceptanceProbability(baseline(),setting,1);
+ let selected=match (drawn,chance) {
+  (Ok(q),Ok(c)) => (match dialOf(baseline(),q) {Ok(d) => abs_Float(c.p-0.1255402977194)<1e-9 && abs_Float(luckDex(baseline(),d)-0.8992000846277812)<1e-9, Err(e) => false}),
+  _ => false
+ };
+ match chance {
+  Ok(c) => println("selection: 3 living within 1000 ly p ${c.p} error ${c.error} oneIn ${match expectedDraws(c) {Ok(v) => v, Err(e) => -1.0}}"),
+  Err(e) => println("selection: ERR")
+ };
+ match luckProbability(baseline(),applyDial(baseline(),{life:3.0,minds:3.0,tech:3.0,lifetime:2.505149978319906}),1) {
+  Ok(c) => println("selection: calibrated universe p ${c.p}"),
+  Err(e) => println("selection: ERR")
+ };
+ match endedShares(p) {
+  Ok(e) => println("ended shares ${e.remnant} ${e.ecocide} ${e.transcended}"),
+  Err(e) => println("ended shares: ERR")
+ };
+ selected
+}
 export func main() -> () ! {IO} {
  let p=applyDial(baseline(),zeroDial());
  let m={rho0Pc3:0.079,scaleHeightPc:300.0};
@@ -41,5 +67,6 @@ export func main() -> () ! {IO} {
  println("epoch probabilities ${rates.life} ${rates.mindsWindow} ${rates.tech} ${rates.remnant}");
  println("arrival +867 yr from Technological: exact ${exact.technological} ${exact.remnant} ${exact.transcended} ${exact.ecocide} ${exact.complex}");
  println("arrival +867 yr from Technological: chain ${chain.technological} ${chain.remnant} ${chain.transcended} ${chain.ecocide} ${chain.complex}");
- if ok then println("OK: worlds priors, dial, disc, occurrence, history, propagate") else {println("FAIL: worlds smoke");exit(1)}
+ let selected=selectionSmoke(p,n);
+ if ok && selected then println("OK: worlds priors, dial, disc, occurrence, history, propagate, selection") else {println("FAIL: worlds smoke");exit(1)}
 }
