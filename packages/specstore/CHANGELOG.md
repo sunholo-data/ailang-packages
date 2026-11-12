@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.3.4
+
+What went right shows as well as what went wrong, so a reader can trust the check. Each round
+result now lists every visit that expects or forbids the event, with its own written verdict
+(matched, gaps found, could not check, did not run; correctly absent, sent although forbidden),
+and on the visit that checked them every parameter with a written status (as the spec says,
+missing, empty, differs, not pushed). The round is written as block YAML. The Summary tab has a
+line per event and visit, so a consent-reject visit that found nothing is a line of its own, and
+counts every visit in its totals; a new Parameters tab lists every parameter with what the spec
+expects and its status. The event's result sits on its first line only. Tests: `qa_test.ail` (31),
+`view_test.ail` (8).
+
 ## 0.3.3
 
 Output a person can read at a glance, in written values only: a result is never carried by colour.

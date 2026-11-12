@@ -27,7 +27,12 @@ export type Dict = { name: string, definition: string, typ: string, example: str
 export type Hist = { version: string, date: string, author: string, what: string, reader: string, status: string }
 -- check: compare's written verdict (matched, gaps found, could not check, waiting for release, no visit);
 -- matched / expected: parameters as the spec says, of those it lists. "" and -1 in rounds written before 0.3.3.
-export type Res = { event: string, state: string, check: string, matched: int, expected: int, comment: string }
+-- One parameter on one visit, as a written status: as the spec says, missing, empty, differs, not pushed.
+export type ParamRes = { key: string, status: string }
+-- One visit's verdict on an event: matched, gaps found, could not check, did not run (a visit that expects
+-- it); correctly absent, sent although forbidden (a visit that forbids it). params on the visit that counted.
+export type VisitRes = { visit: string, check: string, matched: int, expected: int, params: [ParamRes] }
+export type Res = { event: string, state: string, check: string, matched: int, expected: int, comment: string, visits: [VisitRes] }
 export type Round = { n: int, version: string, date: string, tester: string, by: string, results: [Res], j: Json }
 export type Spec = { client: string, project: string, owner: string, version: string, standard: string,
               deviations: [Dev], events: [Event], dict: [Dict], hist: [Hist], rounds: [Round], j: Json }
@@ -82,7 +87,11 @@ export func toRound(j: Json) -> Round =
     tester: str(j, "tester"), by: str(j, "by"),
     results: map(\r. { event: str(r, "event"), state: str(r, "state"), check: str(r, "check"),
                         matched: intOr(r, "matched", -1), expected: intOr(r, "expected", -1),
-                        comment: str(r, "comment") }, arr(j, "results")), j: j }
+                        comment: str(r, "comment"),
+                        visits: map(\v. { visit: str(v, "visit"), check: str(v, "check"),
+                                          matched: intOr(v, "matched", -1), expected: intOr(v, "expected", -1),
+                                          params: map(\p. { key: str(p, "key"), status: str(p, "status") }, arr(v, "params")) },
+                                    arr(r, "visits")) }, arr(j, "results")), j: j }
 
 export func intOr(j: Json, k: string, d: int) -> int = match getInt(j, k) { Some(i) => i, None => d }
 
