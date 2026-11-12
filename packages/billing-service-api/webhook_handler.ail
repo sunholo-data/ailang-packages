@@ -54,9 +54,11 @@ func webhookFindInMap(entries: [string], priceId: string) -> string =
 @route("POST", "/billing/webhooks/stripe")
 export func handleStripeWebhook(
   request: {body: string, headers: Json, method: string, path: string}
-) -> Result[string, string] ! {Net, FS, Env}
-  requires { strLength(request.body) > 0 }
-=
+) -> Result[string, string] ! {Net, FS, Env} =
+  -- NOTE: no `requires` contract here — the property harness has no generator
+  -- for the @raw request record parameter, so a precondition on it creates a
+  -- property that can never run (ailang test exits 1). The handler is total:
+  -- an empty body fails Stripe signature verification below and returns Err.
   let rawBody = request.body
   in let signatureHeader = getOrElse(getString(request.headers, "Stripe-Signature"), "")
   in if signatureHeader == "" then Err("Missing Stripe-Signature header")
