@@ -35,7 +35,8 @@ export type ParamRes = { key: string, status: string }
 -- One visit's verdict on an event: matched, gaps found, could not check, did not run (a visit that expects
 -- it); correctly absent, sent although forbidden (a visit that forbids it). params on the visit that counted.
 -- comment: what this visit found, for this visit only.
-export type VisitRes = { visit: string, check: string, matched: int, expected: int, comment: string, params: [ParamRes] }
+-- pages: the paths the visit went through, in order (no query string: it can carry personal data).
+export type VisitRes = { visit: string, check: string, matched: int, expected: int, comment: string, pages: [string], params: [ParamRes] }
 export type Res = { event: string, state: string, check: string, matched: int, expected: int, comment: string, visits: [VisitRes] }
 export type Round = { n: int, version: string, date: string, tester: string, by: string, results: [Res], j: Json }
 export type Spec = { client: string, project: string, owner: string, version: string, standard: string,
@@ -101,7 +102,7 @@ export func toRound(j: Json) -> Round =
                         matched: intOr(r, "matched", -1), expected: intOr(r, "expected", -1),
                         comment: str(r, "comment"),
                         visits: map(\v. { visit: str(v, "visit"), check: str(v, "check"),
-                                          matched: intOr(v, "matched", -1), expected: intOr(v, "expected", -1), comment: str(v, "comment"),
+                                          matched: intOr(v, "matched", -1), expected: intOr(v, "expected", -1), comment: str(v, "comment"), pages: strs(v, "pages"),
                                           params: map(\p. { key: str(p, "key"), status: str(p, "status") }, arr(v, "params")) },
                                     arr(r, "visits")) }, arr(j, "results")), j: j }
 

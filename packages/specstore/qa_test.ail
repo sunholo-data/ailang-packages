@@ -7,7 +7,7 @@ import std/json (Json, JNull)
 import std/list (map, length)
 import ./rules (worstOutcome, visitOutcome)
 import ./model (Std, Spec, Event, toStd, toSpec)
-import ./qa (seenOf, outcomeFor, outcomeWith, visitsOf, visitChecks, waitingForRelease, checksGa4, eventCounts, checkOf, roundYaml, visitResults, statusOf, sameValue)
+import ./qa (seenOf, outcomeFor, outcomeWith, visitsOf, visitChecks, waitingForRelease, checksGa4, eventCounts, checkOf, roundYaml, visitResults, statusOf, sameValue, pathOf, pagesOf)
 import std/string (find)
 
 func y(s: string) -> Json = match yamlDecode(s) { Ok(j) => j, Err(_) => JNull }
@@ -157,8 +157,8 @@ test "every severity has a written verdict" {
 
 test "the round carries the verdict, the counts and each visit as written values" {
   let r = roundYaml(1, "1.0", "2026-11-12", [("E01", "fail", "gaps found", (1, 2),
-      [{ visit: "V01", check: "gaps found", matched: 1, expected: 2, comment: "1 of 2 parameters match", params: [{ key: "cta.label", status: "as the spec says" }, { key: "cta.type", status: "missing" }] },
-       { visit: "V03", check: "correctly absent", matched: -1, expected: -1, comment: "correctly absent", params: [] }], "c")]);
+      [{ visit: "V01", check: "gaps found", matched: 1, expected: 2, comment: "1 of 2 parameters match", pages: ["/", "/search"], params: [{ key: "cta.label", status: "as the spec says" }, { key: "cta.type", status: "missing" }] },
+       { visit: "V03", check: "correctly absent", matched: -1, expected: -1, comment: "correctly absent", pages: ["/"], params: [] }], "c")]);
   find(r, "  - event: E01\n    state: fail\n    check: \"gaps found\"\n    matched: 1\n    expected: 2\n") >= 0 &&
   find(r, "      - visit: V03\n        check: \"correctly absent\"") > 0 &&
   find(r, "          - {key: \"cta.label\", status: \"as the spec says\"}") > 0
@@ -235,4 +235,20 @@ test "each visit carries its own comment, without the visit's name in front" {
     [a, b] => find(a.comment, "1 of 2 parameters match; cta.type missing") == 0 && b.comment == "correctly absent",
     _ => false
   }
+}
+
+test "a page is its path: no host, no query, no fragment" {
+  pathOf("https://site.example/fr/search?q=ardennes&mail=a@b.c#top") == "/fr/search" && pathOf("https://site.example") == "/" && pathOf("/stay/12") == "/stay/12"
+}
+
+test "a visit's pages in time order, repeats merged, queries dropped" {
+  pagesOf(y("{url: \"https://s.example/\", final_url: \"https://s.example/stay/9?x=1\",
+    datalayer: [{t: 3, url: \"https://s.example/search?q=a\"}, {t: 1, url: \"https://s.example/\"}, {t: 4, url: \"https://s.example/search?q=b\"}],
+    hits: [{t: 5, page: \"https://s.example/stay/9\"}]}")) == ["/", "/search", "/stay/9"]
+}
+
+test "the round lists each visit's pages" {
+  let r = roundYaml(1, "1.0", "2026-11-12", [("E01", "fail", "gaps found", (1, 2),
+      [{ visit: "V01", check: "gaps found", matched: 1, expected: 2, comment: "c", pages: ["/", "/search"], params: [] }], "c")]);
+  find(r, "        pages: [\"/\", \"/search\"]") > 0
 }
