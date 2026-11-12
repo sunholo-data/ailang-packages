@@ -8,8 +8,10 @@ whole event's comment with every other visit in it. The event's full comment sta
 the Spec tab. A variable the dictionary types as `number` is compared as a number (3.00 is 3); a value
 that is not a number is a gap of its own; text is still compared exactly. Observed values are not
 written beside every parameter, since a logged-in visit can push personal data; a value appears only
-where it differs from a fixed or allowed one. Rounds from earlier versions load as before.
-Tests: `qa_test.ail` (38), `view_test.ail` (10).
+where it differs from a fixed or allowed one. The sheet opens on a Read me tab: what each tab
+shows and when to read it, and what every written value in Automatic check, Status and Result means
+(a test keeps it complete). Rounds from earlier versions load as before.
+Tests: `qa_test.ail` (38), `view_test.ail` (11).
 
 ## 0.3.5
 

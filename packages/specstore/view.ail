@@ -1,5 +1,5 @@
 module sunholo/specstore/view
--- The Sheet: Summary, Parameters, Spec, Matrix (one column per dataLayer key), Dictionary, History, QA rounds.
+-- The Sheet: Read me, Summary, Parameters, Spec, Matrix (one column per dataLayer key), Dictionary, History, QA rounds.
 -- Every result is a written value; colour sits beside a state, never instead of it.
 
 import std/option (Option, Some, None)
@@ -88,6 +88,46 @@ export func parameterRows(sp: Spec) -> [[(string, int)]] =
       None => []
     }, sp.events)
 
+-- The first tab: what each tab shows and what every written value means, so the sheet explains itself to a
+-- reader who was not in the room. The same for every spec; nothing in it comes from the spec.
+export func readMeRows(version: string) -> [[(string, int)]] = map(\r. map(\c. (c, 0), r), [
+    ["Tabs", "", ""],
+    ["Summary", "One line per event and visit: what that visit found, how many parameters are right, the event's result. Totals at the bottom.", "Every morning: is anything wrong, and where"],
+    ["Parameters", "One line per parameter on the visit that checked it: what the spec expects, in words, and its status.", "Deciding the gaps, line by line"],
+    ["Spec v${version}", "The spec itself: one row per event with its description, trigger, scope, parameters, priority, versions and latest result.", "The reference: what each event should be"],
+    ["Matrix", "Events against dataLayer keys: which event should send which key, with which value.", "The whole tagging plan at a glance"],
+    ["Dictionary", "Every variable: what it means, its type, an example, where it comes from, its allowed values.", "What a value is allowed to be"],
+    ["History", "Every version of the spec: who changed what, the second reader, its status.", "What changed, and when"],
+    ["QA rounds", "Every round so far, every event: result, automatic check, parameters, comment.", "How things have moved over time"],
+    ["", "", ""],
+    ["Automatic check", "What one visit found for one event", ""],
+    ["matched", "Every parameter as the spec says (and the GA4 hit, where the spec checks GA4).", ""],
+    ["gaps found", "The event was seen, but at least one parameter is missing, empty or not as the spec says; or it was not seen at all.", ""],
+    ["correctly absent", "A visit that forbids the event (consent refused, say) and did not see it. A good result.", ""],
+    ["sent although forbidden", "A visit that forbids the event saw it.", ""],
+    ["could not check", "The visit stopped before it could check (a step failed). Fix the visit first.", ""],
+    ["did not run", "The visit was not in this run.", ""],
+    ["waiting for release", "The event changed in a version the client has not put live yet. Not checked until it is.", ""],
+    ["no visit", "No visit covers the event, so nothing checked it.", ""],
+    ["", "", ""],
+    ["Parameter status", "One parameter on one visit", ""],
+    ["as the spec says", "The value itself is confirmed: the fixed value, or one of the variable's allowed values.", ""],
+    ["present", "Set, but the dictionary lists no allowed values for it, so only that it is set can be confirmed.", ""],
+    ["missing", "The key is not in the push.", ""],
+    ["empty", "The key is there with no value.", ""],
+    ["not an allowed value", "A value the dictionary does not list for this variable.", ""],
+    ["differs", "Not the fixed value the spec gives, or not a number where the dictionary says number.", ""],
+    ["not pushed", "The event itself was not seen, so none of its parameters were.", ""],
+    ["", "", ""],
+    ["Result", "The event's state in the round", ""],
+    ["not tested", "Not judged by a person yet. An automatic run never records a pass: a match still reads not tested, with matched in Automatic check.", ""],
+    ["pass", "A person checked it and signed the round.", ""],
+    ["fail", "Gaps found.", ""],
+    ["blocked", "Could not be checked.", ""],
+    ["", "", ""],
+    ["Written values only", "Every result is written. Colour, where there is any, sits beside a value and never replaces it. The sheet is a view: change the spec, never the sheet.", ""]
+  ])
+
 export func stateStyle(s: string) -> int = if s == "pass" then 2 else if s == "fail" then 3 else if s == "blocked" then 4 else 0
 
 export func view(sp: Spec) -> [(string, string)] {
@@ -108,7 +148,8 @@ export func view(sp: Spec) -> [(string, string)] {
   let keys = sortBy(\a. \b. if a < b then -1 else if a > b then 1 else 0, dedup(flatMap(\e. map(\p. p.key, e.params), sp.events)));
   let matrixRows = map(\e. concat([(e.id, 0), (e.eventName, 0)],
       map(\k. match filter(\p. p.key == k, e.params) { [p, ..._] => (p.value, 0), [] => ("", 0) }, keys)), sp.events);
-  [ ("Summary", sheetXml(["ID", "eventName", "Priority", "Visit", "Automatic check", "Parameters", "Result", "Comment"],
+  [ ("Read me", sheetXml(["What", "Means", "Read it for"], readMeRows(sp.version), [24, 90, 40])),
+    ("Summary", sheetXml(["ID", "eventName", "Priority", "Visit", "Automatic check", "Parameters", "Result", "Comment"],
                          summaryRows(sp), [6, 18, 9, 10, 40, 16, 12, 60])),
     ("Parameters", sheetXml(["ID", "eventName", "Visit", "Key", "Expected", "Status"],
                             parameterRows(sp), [6, 18, 8, 34, 24, 18])),

@@ -3,10 +3,10 @@ module sunholo/specstore/view_test
 
 import std/yaml (decode as yamlDecode)
 import std/json (Json, JNull)
-import std/list (map, length, nth)
+import std/list (map, length, nth, any)
 import std/option (Option, Some, None)
 import ./model (Spec, toSpec, toRound)
-import ./view (summaryRows, parameterRows, latestCheckFor, checkText, countsText, expectedText)
+import ./view (summaryRows, parameterRows, latestCheckFor, checkText, countsText, expectedText, readMeRows, view)
 
 func y(s: string) -> Json = match yamlDecode(s) { Ok(j) => j, Err(_) => JNull }
 
@@ -63,4 +63,14 @@ test "the expected value in words: fixed as it is, a variable as what can be con
 
 test "each summary line carries its own visit's comment, not the whole event's" {
   cell(summaryRows(sp()), 0, 7) == "all 2 match" && cell(summaryRows(sp()), 1, 7) == "correctly absent"
+}
+
+test "the sheet opens on Read me, which explains every tab and every written value the sheet uses" {
+  let tabs = map(\t. match t { (n, _) => n }, view(sp()));
+  let words = map(\r. match r { [(w, _), ..._] => w, [] => "" }, readMeRows("1.1"));
+  match tabs { [first, ..._] => first == "Read me", [] => false } &&
+  !any(\w. !any(\x. x == w, words), ["Summary", "Parameters", "Spec v1.1", "Matrix", "Dictionary", "History", "QA rounds",
+     "matched", "gaps found", "correctly absent", "sent although forbidden", "could not check", "did not run", "waiting for release", "no visit",
+     "as the spec says", "present", "missing", "empty", "not an allowed value", "differs", "not pushed",
+     "not tested", "pass", "fail", "blocked"])
 }
