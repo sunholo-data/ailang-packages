@@ -1,0 +1,31 @@
+-- The constants of stapledons-design physics/observation.md §2.1
+-- (baseline-2026.11), pinned bit for bit. Values the registry prints are
+-- compared with the printed literal; values it defines (parsec, light-year,
+-- mas, hc/k) are compared with the full double of the definition, computed
+-- outside AILANG (Python: 149597870700.0 * 648000.0 / math.pi, and so on).
+
+module sunholo/observe/constants_test
+
+import ./constants (pi, planckJs, lightSpeedMs, boltzmannJK, auM, parsecM, lightYearM, janskyWm2Hz, arcsecRad, masRad,
+  solarRadiusM, solarTeffK, earthRadiusM, jupiterRadiusM, secondRadiationMK, snrHint, snrStrong)
+
+test "h, c and k are the exact SI 2019 values" {
+  planckJs() == 6.62607015e-34 && lightSpeedMs() == 299792458.0 && boltzmannJK() == 1.380649e-23
+}
+test "the astronomical unit is 149597870700 m" { auM() == 149597870700.0 }
+test "the parsec is 648000/pi AU = 3.0856775814913673e16 m, to the last bit" {
+  parsecM() == 3.0856775814913673e16 && parsecM() == 30856775814913672.0 && parsecM() != auM() * 206265.0
+}
+test "the Julian light-year is c x 365.25 x 86400 s = 9.4607304725808e15 m, exactly" {
+  lightYearM() == 9.4607304725808e15 && lightYearM() == 9460730472580800.0
+}
+test "the jansky is 1e-26 W m^-2 Hz^-1" { janskyWm2Hz() == 1e-26 }
+test "the arcsecond and milliarcsecond are pi/648000 and pi/648000000 rad" {
+  arcsecRad() == 4.84813681109536e-06 && masRad() == 4.84813681109536e-09 && pi() == 3.141592653589793
+}
+test "the nominal Sun: 6.957e8 m and 5772 K" { solarRadiusM() == 6.957e8 && solarTeffK() == 5772.0 }
+test "the nominal equatorial radii: Earth 6.3781e6 m, Jupiter 7.1492e7 m" {
+  earthRadiusM() == 6.3781e6 && jupiterRadiusM() == 7.1492e7
+}
+test "hc/k is 0.014387768775039337 m K" { secondRadiationMK() == 0.014387768775039337 }
+test "the thresholds: a hint is SNR 5, strong is SNR 10" { snrHint() == 5.0 && snrStrong() == 10.0 }

@@ -4,6 +4,7 @@
 
 Local only; never published.
 
+- **Contract fix (2026-11-12).** The `ensures` clause of `closeWatch` read `Ok(v)=>v==()`. Unit has no `Eq` instance, so AILANG's contract type-check (sunholo-data/ailang#2283) rejects it. It now reads `Ok(_)=>true`, which is the same predicate: every unit value equals `()`.
 - **Stand down at the check-in (crew_core 0.6.0, 2026-10-16).**
   - `crew-sim --skip ... --stand-down on|off` (default on). With stand-downs
     on, the `crew_skip/1` line counts `relief.*`, `stand_downs.*` and the live

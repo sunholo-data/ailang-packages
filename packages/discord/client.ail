@@ -227,7 +227,7 @@ ensures { match result { Ok(c) => validId(c.id), Err(_) => true } }
 
 @allow_empty_ok("An empty channel array is a valid Discord response and recursion base case")
 export pure func parseChannels(xs: [Json]) -> Result[[DiscordChannel], DiscordError]
-ensures { length(xs) != 0 || isOk(result) }
+ensures { listLength(xs) != 0 || isOk(result) }
 {
   match xs {
   [] => Ok([]), x :: rest => match parseChannel(x) {
@@ -256,7 +256,7 @@ ensures { isErr(result) || validId(getOrElse(getString(j, "id"), "")) }
 
 @allow_empty_ok("An empty message page is valid, including the pagination termination condition")
 export pure func parseMessages(xs: [Json]) -> Result[[DiscordMessage], DiscordError]
-ensures { length(xs) != 0 || isOk(result) }
+ensures { listLength(xs) != 0 || isOk(result) }
 {
   match xs {
   [] => Ok([]), x :: rest => match parseMessage(x) {

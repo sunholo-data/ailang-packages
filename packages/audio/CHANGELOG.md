@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.6.2
+
+Fix: integer literals in recipe JSON. AILANG's `std/json` now decodes an integer literal such as `60` as `JInt(60)`; only fractional and
+exponent literals stay `JNumber`. Older compilers give `JNumber(60.0)` for both.
+The recipe and sound type checks (`recipe.fieldErrors`, `sound.typeOk`) matched only `JNumber` and had
+no catch-all, so on such a compiler any recipe with an integer field (`"seconds": 1`, `"rate": 8000`)
+stopped with a run-time match failure, and integer event `times` silently became `0.0`. They now read
+numbers with `asNumber`, which accepts both shapes. Behaviour on older compilers, and for fractional
+values on every compiler, is unchanged: every rendered sound and every error message is as in 0.6.1.
+
 ## 0.6.1
 
 Fix: `_smoke.ail`'s 0.6 sound probe renders 0.06 s (was 0.25 s; three scattered events, a 0.04 s reverb tail), so the smoke fits CI's 30 s limit (it took 30.0 s on a GitHub runner, PUB015). No code or sample change: every module and every rendered sound is as in 0.6.0.

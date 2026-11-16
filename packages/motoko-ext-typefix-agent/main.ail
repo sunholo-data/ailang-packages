@@ -8,13 +8,14 @@
 --   GET  /.well-known/agent.json   — agent card with the auto-generated skill
 --   POST /a2a/                     — JSON-RPC tasks/send
 --
--- Skill ID (auto-derived from module path): main.handle_typefix
+-- Skill ID (auto-derived from the file's path under <pkg-dir>): main.handle_typefix
 --
--- (Note: package-namespaced module declarations like
--- `module sunholo/motoko_ext_typefix_agent/main` were silently dropped by
--- serve-api's registerModule under-basePath filter when hosted via
--- `ailang serve-api <pkg-dir>/`. The flat `module main` declaration
--- registers cleanly. Filed as feedback against AILANG.)
+-- (Note: this module was first declared flat, `module main`, because in
+-- May 2026 serve-api silently dropped package-namespaced declarations when
+-- hosted via `ailang serve-api <pkg-dir>/`. That is fixed: on AILANG v0.59.0
+-- the namespaced module registers and the skill ID is unchanged. The flat
+-- name was never a valid manifest export — every export must start with the
+-- package name — so the package could not be loaded at all.)
 --
 -- The function takes a single `compile_error` string (the failed `make
 -- check_core` output, an IMP010 line, etc.) and returns a JSON-encoded
@@ -22,7 +23,7 @@
 -- intentionally trivial: a real type-fixer would use microRAG + an LLM call,
 -- but the toy proves the wire-a2a-agent plumbing without that complexity.
 
-module main
+module sunholo/motoko_ext_typefix_agent/main
 
 import std/string (contains)
 import std/json (encode, jo, kv, js, jnum)

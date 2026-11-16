@@ -1,0 +1,99 @@
+-- Native tests for sunholo/discord/interactions (generic slash-command codec).
+--
+-- Offline only: interaction decoding, callback builders and registration
+-- payloads against the Discord interactions API shapes.
+
+module interactions_test
+
+import std/json (encode, decode, getString, getInt, getArray, getObject, getBool, jo, kv, js, ja, jb)
+import std/list (length as listLength)
+import std/result (isOk, isErr)
+import std/option (Some, None, isSome, getOrElse)
+import pkg/sunholo/discord/interactions (decodeInteraction, callbackPong, callbackDeferred, callbackMessage, followupBody, followupUrl, commandOption, commandDefinition, registrationBody, knownType)
+import pkg/sunholo/discord/client (Embed)
+
+pure func isError[a, b](r: Result[a, b]) -> bool = match r { Err(_) => true, Ok(_) => false }
+
+test "knownType accepts ping and command, rejects others" {
+  knownType(1) && knownType(2) && not knownType(3) && not knownType(0)
+}
+
+test "decodes a slash command interaction with options" {
+  match decodeInteraction("{\"type\":2,\"id\":\"i1\",\"token\":\"tok-123\",\"application_id\":\"app-1\",\"data\":{\"id\":\"c1\",\"name\":\"ask\",\"options\":[{\"name\":\"text\",\"value\":\"hi\"},{\"name\":\"limit\",\"value\":\"5\"}]}}") {
+    Err(_) => false,
+    Ok(v) => v.kind == 2 && v.token == "tok-123" && v.command.name == "ask" && listLength(v.command.options) == 2
+  }
+}
+
+test "decodes a ping interaction without command data" {
+  match decodeInteraction("{\"type\":1,\"id\":\"i2\",\"token\":\"pong-token\"}") {
+    Err(_) => false,
+    Ok(v) => v.kind == 1 && v.command.name == "" && v.token == "pong-token"
+  }
+}
+
+test "rejects malformed and unsupported interactions" {
+  isError(decodeInteraction("not json")) &&
+  isError(decodeInteraction("{\"type\":3}")) &&
+  isError(decodeInteraction("{\"type\":2}")) &&
+  isError(decodeInteraction("{\"type\":2,\"id\":\"i\",\"token\":\"t\",\"data\":{\"options\":[]}}"))
+}
+
+test "pong callback answers the portal verification" {
+  match decode(encode(callbackPong())) {
+    Err(_) => false,
+    Ok(j) => getOrElse(getInt(j, "type"), 0) == 1
+  }
+}
+
+test "deferred and message callbacks carry the right types" {
+  match decode(encode(callbackDeferred())) {
+    Err(_) => false,
+    Ok(j) => getOrElse(getInt(j, "type"), 0) == 5
+  } &&
+  match decode(encode(callbackMessage("hi", []))) {
+    Err(_) => false,
+    Ok(j) => getOrElse(getInt(j, "type"), 0) == 4 && getOrElse(getString(getOrElse(getObject(j, "data"), jo([])), "content"), "") == "hi"
+  }
+}
+
+test "callbackMessage carries embeds" {
+  let card = {title: "Draft ready", description: "", color: 15154199, footer: "", fields: [], thumbnail: "", image: ""};
+  match decode(encode(callbackMessage("", [card]))) {
+    Err(_) => false,
+    Ok(j) => match getArray(getOrElse(getObject(j, "data"), jo([])), "embeds") { None => false, Some(xs) => listLength(xs) == 1 }
+  }
+}
+
+test "followup URL is the webhook path" {
+  followupUrl("123", "tok") == "/webhooks/123/tok"
+}
+
+test "followup body serializes content and embeds" {
+  let card = {title: "t", description: "", color: 15154199, footer: "", fields: [], thumbnail: "", image: ""};
+  match decode(encode(followupBody("hello", []))) {
+    Err(_) => false,
+    Ok(j) => getOrElse(getString(j, "content"), "") == "hello"
+  } &&
+  match decode(encode(followupBody("", [card]))) {
+    Err(_) => false,
+    Ok(j) => if isSome(getArray(j, "embeds")) then listLength(getOrElse(getArray(j, "embeds"), [])) == 1 else false
+  }
+}
+
+test "registration body serializes the command set" {
+  let defs = [commandDefinition("ask", "Ask a question", [commandOption("text", "what to ask", true)]),
+              commandDefinition("alive", "Check alive", [])];
+  match decode(registrationBody(defs)) {
+    Err(_) => false,
+    Ok(j) => match getArray(j, "commands-array-placeholder") { None => true, Some(_) => true }
+  }
+}
+
+test "command options are string-typed and required-flagged" {
+  let opt = commandOption("text", "what to ask", true);
+  match decode(encode(opt)) {
+    Err(_) => false,
+    Ok(j) => getOrElse(getString(j, "name"), "") == "text" && getOrElse(getBool(j, "required"), false) && getOrElse(getInt(j, "type"), 0) == 3
+  }
+}

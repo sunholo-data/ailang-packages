@@ -1,0 +1,490 @@
+module sunholo/worlds/selection
+-- Universe selection: draw a universe's four unmeasured parameters from the
+-- baseline's priors, test it against an acceptance region, and say how rare an
+-- accepted universe is. Pure; the caller owns the uniforms. Source: game design
+-- r3/universe-lab.md, "Selection, not distortion"; stapledons-design
+-- features/next/seti-factors.md s3.8 (the three statements of luck).
+--
+-- A DRAW is one parameter set: each factor's prior quantile at one uniform,
+-- in the order life, minds, tech, lifetime. Nothing is selected, tilted or
+-- re-drawn here. Complex life follows minds exactly as dial.applyDial moves
+-- it, so a draw can be written as a dial (dialOf) and then goes through
+-- applyDial and historyOf unchanged.
+--
+-- THE ACCEPTANCE TEST reads the parameters only. Three expected counts:
+--   found = hzWorlds * fLife*fMinds*fTech * (L/W) * share(L)
+--   ended = hzWorlds * fLife*fMinds*fTech * endedYr/W,  endedYr <= W/2 - L
+--   late  = found * min(1, gapYr/L)
+-- hzWorlds is the number of habitable-zone worlds inside the reference radius
+-- (disc.starsWithin times worlds per star), so found is disc.aliveWithin times
+-- the reach share. A universe is accepted when each count is inside its band,
+-- both edges included. The counts are EXPECTATIONS: an accepted universe can
+-- still hold nothing near any one star, and a refused one can hold something.
+--
+-- THE PROBABILITY p of a region is taken over the priors. With x the log10 of
+-- the abiogenesis rate (Normal(0, sigma^2); fLife = 1-exp(-10^x)) and v =
+-- log10 L (uniform), the three conditions are an interval for
+-- s = log10(fLife*fMinds*fTech):  A(v) <= s <= B(v). log10(fMinds*fTech) is a
+-- constant plus a sum of two uniforms, whose distribution F2 is closed form:
+--   p = E_v E_x [ F2(B(v)-y0-l(x)) - F2(A(v)-y0-l(x)) ],  l = log10 fLife.
+-- Both expectations are 16-point Gauss-Legendre on panels whose ends are the
+-- kinks: in x where an argument of F2 meets one of its own breakpoints, with
+-- fixed ends through the bend of l(x) and the Normal tails in closed form; in
+-- v at the reach knots, at the gap, where two of the lines A_i, B_i cross, and
+-- where one meets a breakpoint of F2 at fLife = 1. The reach share is
+-- log-linear between knots, so every such v is found by one division.
+-- `grid` is the number of panels per smooth piece. The rule is run at `grid`
+-- and at twice `grid`; p is the finer value and `error` is the change. That is
+-- a measured numerical error, not a bound, and not the uncertainty of the
+-- priors. A change above 1e-6 of p is refused (NotConverged).
+--
+-- THE ONE-IN-N (expectedDraws, 1/p) is a statement about these priors: how
+-- many draws from the literature's ranges a region takes on average. It is not
+-- a probability that the real universe is like this.
+import ./baseline (Factor,Prior,LogUniform,Measured,Fixed,AbiogenesisRate,quantileOf,medianOf,abiogenesisSigmaDex)
+import ./dial (Dial,Params,applyDial)
+import std/result (Result,Ok,Err)
+import std/option (Option,Some,None)
+import std/math (pow,exp,log,log10,abs_Float,intToFloat,floatToInt)
+import std/list (map,foldl,length,nth_or,range,filter,sortBy,flatMap)
+
+-- Why a value was not computed.
+--   BadUniforms      not four numbers in [0,1].
+--   BadBaseline      a required factor is missing or outside dial's domain.
+--   UnsupportedPrior the probability needs the published shapes: the rate
+--                    model for life, log-uniform minds, tech and lifetime
+--                    with lifetime never above half the window.
+--   BadParams        a fraction outside [0,1], a non-positive lifetime or
+--                    window, or a lifetime above half the window.
+--   NotADial         no dial in applyDial's [-100,100] dex domain gives these
+--                    parameters (a zero fraction, a life fraction below
+--                    1e-100 of its median, foreign constants).
+--   BadSetting       see okSetting.
+--   BadGrid          grid outside 1..16.
+--   BadWidths        not one, two or three positive finite widths, or a NaN x.
+--   BadThreshold     negative or NaN.
+--   ZeroProduct      the luck in dex of a universe whose product is zero.
+--   ZeroProbability  1/p of a region that holds no universe.
+--   NotConverged     doubling the grid moved p by more than 1e-6 of itself.
+--   EndedOutsideWindow endedYr above W/2 - L: more time than the onset window
+--                    holds after a lifetime of L (see statisticsOf).
+export type SelectionError = BadUniforms | BadBaseline | UnsupportedPrior | BadParams | NotADial | BadSetting | BadGrid | BadWidths | BadThreshold | ZeroProduct | ZeroProbability | NotConverged | EndedOutsideWindow deriving (Eq)
+-- A band on an expected count, both edges included.
+export type Band = Between(float,float) | AtLeast(float) | AtMost(float) | AnyCount deriving (Eq)
+-- The share of a civilisation's life during which at least one sign is on and
+-- within reach, tabulated against its lifetime in years.
+export type ReachKnot = {lifetimeYr:float,share:float}
+export type Setting = {hzWorlds:float,reach:[ReachKnot],endedYr:float,gapYr:float,found:Band,ended:Band,late:Band}
+export type Statistics = {found:float,ended:float,late:float}
+export type Probability = {p:float,error:float} deriving (Eq)
+export type PriorMeans = {life:float,minds:float,tech:float,lifetimeYr:float,product:float}
+
+-- ---- the baseline, read once -------------------------------------------------
+type Read = {life:Prior,minds:Prior,tech:Prior,lifetime:Prior,complex:float,window:float,remLo:float,remHi:float}
+pure func find(b:[Factor],key:string) -> Option[Prior] = match b {
+ [] => None,
+ f::rest => if f.key==key then Some(f.prior) else find(rest,key)
+}
+pure func inUnit(x:float) -> bool = x>=1e-100 && x<=1.0
+-- The same domain as dial.applyDial's contract, so applyDial may be called.
+pure func okRead(r:Read) -> bool =
+ inUnit(medianOf(r.life)) && inUnit(medianOf(r.minds)) && inUnit(medianOf(r.tech))
+ && r.complex>=medianOf(r.minds) && r.complex<=1.0
+ && medianOf(r.lifetime)>=1e-100 && medianOf(r.lifetime)<=1e100
+ && r.window>0.0 && r.window<=1e100 && r.remLo>0.0 && r.remLo<=r.remHi && r.remHi<=1e100
+pure func readFour(b:[Factor],l:Prior,m:Prior,t:Prior,y:Prior) -> Result[Read,SelectionError] =
+ match find(b,"complex") { None => Err(BadBaseline), Some(c) =>
+ match find(b,"window") { None => Err(BadBaseline), Some(w) =>
+ match find(b,"remnantLo") { None => Err(BadBaseline), Some(lo) =>
+ match find(b,"remnantHi") { None => Err(BadBaseline), Some(hi) => {
+  let r={life:l,minds:m,tech:t,lifetime:y,complex:medianOf(c),window:medianOf(w),remLo:medianOf(lo),remHi:medianOf(hi)};
+  if okRead(r) then Ok(r) else Err(BadBaseline)
+ }}}}}
+pure func readBaseline(b:[Factor]) -> Result[Read,SelectionError] =
+ match find(b,"life") { None => Err(BadBaseline), Some(l) =>
+ match find(b,"minds") { None => Err(BadBaseline), Some(m) =>
+ match find(b,"tech") { None => Err(BadBaseline), Some(t) =>
+ match find(b,"lifetime") { None => Err(BadBaseline), Some(y) => readFour(b,l,m,t,y) }}}}
+
+-- ---- the draw ------------------------------------------------------------------
+pure func okFraction(x:float) -> bool = x>=0.0 && x<=1.0
+pure func paramsOf(r:Read,fLife:float,fMinds:float,fTech:float,lifetimeYr:float) -> Params {
+ let raw=r.complex*(fMinds/medianOf(r.minds));
+ let capped=if raw>1.0 then 1.0 else raw;
+ {fLife:fLife,fComplex:if capped<fMinds then fMinds else capped,fMinds:fMinds,fTech:fTech,
+  lifetimeYr:lifetimeYr,windowYr:r.window,remnantLoYr:r.remLo,remnantHiYr:r.remHi}
+}
+-- One parameter set from four uniforms in [0,1]: life, minds, tech, lifetime.
+-- Each is its prior's quantile, bit for bit. No acceptance test is applied.
+export pure func drawParams(b:[Factor],u:[float]) -> Result[Params,SelectionError] =
+ if length(u)!=4 || not foldl(\ok x. ok && x>=0.0 && x<=1.0,true,u) then Err(BadUniforms) else match readBaseline(b) {
+  Err(e) => Err(e),
+  Ok(r) => {
+   let fLife=quantileOf(r.life,nth_or(u,0,0.5));
+   let fMinds=quantileOf(r.minds,nth_or(u,1,0.5));
+   let fTech=quantileOf(r.tech,nth_or(u,2,0.5));
+   let years=quantileOf(r.lifetime,nth_or(u,3,0.5));
+   if okFraction(fLife) && okFraction(fMinds) && okFraction(fTech) && years>0.0 && years<=1e100
+   then Ok(paramsOf(r,fLife,fMinds,fTech,years)) else Err(BadBaseline)
+  }
+ }
+pure func same(a:float,b:float) -> bool = abs_Float(a-b)<=1e-12*abs_Float(b)
+pure func sameParams(a:Params,b:Params) -> bool =
+ same(a.fLife,b.fLife) && same(a.fMinds,b.fMinds) && same(a.fComplex,b.fComplex) && same(a.fTech,b.fTech)
+ && same(a.lifetimeYr,b.lifetimeYr) && a.windowYr==b.windowYr && a.remnantLoYr==b.remnantLoYr && a.remnantHiYr==b.remnantHiYr
+pure func okOffset(d:float) -> bool = d>= -100.0 && d<=100.0
+-- The dial that applyDial turns into these parameters: each offset is log10 of
+-- the value over its prior median. Ok only if applyDial(b, dial) returns the
+-- parameters to 1e-12 in every field. A saturated fraction gets the smallest
+-- offset that saturates it.
+export pure func dialOf(b:[Factor],p:Params) -> Result[Dial,SelectionError] = match readBaseline(b) {
+ Err(e) => Err(e),
+ Ok(r) => if not (p.fLife>0.0 && p.fMinds>0.0 && p.fTech>0.0 && p.lifetimeYr>0.0) then Err(NotADial) else {
+  let d={life:log10(p.fLife)-log10(medianOf(r.life)),minds:log10(p.fMinds)-log10(medianOf(r.minds)),
+   tech:log10(p.fTech)-log10(medianOf(r.tech)),lifetime:log10(p.lifetimeYr)-log10(medianOf(r.lifetime))};
+  if not (okOffset(d.life) && okOffset(d.minds) && okOffset(d.tech) && okOffset(d.lifetime)) then Err(NotADial)
+  else if sameParams(applyDial(b,d),p) then Ok(d) else Err(NotADial)
+ }
+}
+
+-- ---- quadrature and the Normal -------------------------------------------------
+-- 16-point Gauss-Legendre on [-1,1]: positive nodes and their weights.
+pure func glNodes() -> [(float,float)] = [
+ (0.09501250983763744,0.1894506104550685),(0.2816035507792589,0.18260341504492358),
+ (0.45801677765722737,0.16915651939500254),(0.6178762444026438,0.14959598881657674),
+ (0.755404408355003,0.12462897125553388),(0.8656312023878318,0.09515851168249279),
+ (0.9445750230732326,0.062253523938647894),(0.9894009349916499,0.027152459411754096)]
+pure func gl(f:float -> float,a:float,b:float) -> float {
+ let c=(a+b)/2.0;
+ let h=(b-a)/2.0;
+ foldl(\acc nw. match nw {(x,w) => acc+w*(f(c-h*x)+f(c+h*x))},0.0,glNodes())*h
+}
+pure func panels(f:float -> float,a:float,b:float,k:int) -> float {
+ let h=(b-a)/intToFloat(k);
+ foldl(\acc i. acc+gl(f,a+h*intToFloat(i),a+h*intToFloat(i+1)),0.0,range(0,k))
+}
+-- Sum over consecutive edges; `n` panels per piece, more where a piece is
+-- longer than `span`.
+pure func pieces(f:float -> float,edges:[float],n:int,span:float) -> float = match edges {
+ [] => 0.0,
+ a::tail => match tail {
+  [] => 0.0,
+  b::rest => (if b>a then panels(f,a,b,n*(1+floatToInt((b-a)/span))) else 0.0)+pieces(f,tail,n,span)
+ }
+}
+pure func cmp(a:float,b:float) -> int = if a<b then 0-1 else if a>b then 1 else 0
+-- erf by its Maclaurin series (|t| < 2) and erfc by its continued fraction.
+pure func erfSeries(t:float,k:int,term:float,acc:float) -> float =
+ if k>60 then acc else {
+  let next=0.0-term*t*t/intToFloat(k+1);
+  erfSeries(t,k+1,next,acc+next/intToFloat(2*k+3))
+ }
+pure func erfcTail(t:float,k:int,d:float) -> float = if k==0 then d else erfcTail(t,k-1,t+intToFloat(k)*0.5/d)
+pure func erfc(t:float) -> float =
+ if t<0.0 then 2.0-erfc(0.0-t)
+ else if t<2.0 then 1.0-1.1283791670955126*erfSeries(t,0,t,t)
+ else exp(0.0-t*t)/(1.7724538509055159*erfcTail(t,120,t))
+-- P(Z <= z) for a standard Normal.
+pure func normalCdf(z:float) -> float = 0.5*erfc(0.0-z/1.4142135623730951)
+
+-- ---- the life factor -----------------------------------------------------------
+-- x is log10 of the abiogenesis rate. From xTop up, fLife is 1 in float64
+-- (1 - exp(-100)); baseline.quantileOf saturates at the same point.
+pure func xTop() -> float = 2.0
+-- log10 fLife at x. The series is 1-exp(-r) for small r, free of cancellation.
+pure func lifeLog(x:float) -> float =
+ if x>=xTop() then 0.0 else if x< -3.0 then {
+  let r=pow(10.0,x);
+  x+log10(1.0-r*(0.5-r*(1.0/6.0-r*(1.0/24.0-r*(1.0/120.0-r/720.0)))))
+ } else log10(1.0-exp(0.0-pow(10.0,x)))
+-- The x at which log10 fLife is l; xTop for l >= 0.
+pure func xOfLifeLog(l:float) -> float =
+ if l>=0.0 then xTop() else {
+  let f=pow(10.0,l);
+  let x=if f<1e-3 then l+log10(1.0+f*(0.5+f*(1.0/3.0+f*(0.25+f*0.2)))) else if f>=1.0 then xTop() else log10(0.0-log(1.0-f));
+  if x>xTop() then xTop() else x
+ }
+pure func bend() -> [float] = [-3.0,-2.5,-2.0,-1.5,-1.0,-0.5,0.0,0.5,1.0,1.5]
+-- E[h(log10 fLife)] over x ~ Normal(0, sigma^2), for an h that is smooth
+-- between its kinks and equal to hLow below the lowest of them.
+pure func lifeExpect(h:float -> float,kinks:[float],hLow:float,sigma:float,n:int) -> float {
+ let xs=sortBy(cmp,map(xOfLifeLog,filter(\k. k<0.0,kinks)));
+ let above=normalCdf(0.0-xTop()/sigma);
+ match xs {
+  [] => hLow*(1.0-above)+h(0.0)*above,
+  xmin::rest => {
+   let inner=sortBy(cmp,filter(\x. x>xmin && x<xTop(),rest++bend()));
+   let g=\x. exp(0.0-x*x/(2.0*sigma*sigma))/(sigma*2.5066282746310002)*h(lifeLog(x));
+   hLow*normalCdf(xmin/sigma)+pieces(g,[xmin]++inner++[xTop()],n,sigma/2.0)+h(0.0)*above
+  }
+ }
+}
+pure func lifeMean(sigma:float) -> float =
+ lifeExpect(\l. pow(10.0,l),map(\i. 0.0-intToFloat(i),range(4,41)),0.0,sigma,1)
+
+-- ---- prior means and two statements of luck -------------------------------------
+pure func meanOf(p:Prior) -> float = match p {
+ Fixed(v) => v,
+ Measured(v,lo,hi) => v,
+ LogUniform(lo,hi) => if hi==lo then lo else (hi-lo)/log(hi/lo),
+ AbiogenesisRate => lifeMean(abiogenesisSigmaDex())
+}
+-- The mean of each dialled prior, and their product (the factors are
+-- independent, so it is the mean of the product). A Measured or Fixed row
+-- contributes its adopted point, as quantileOf does.
+export pure func priorMeans(b:[Factor]) -> Result[PriorMeans,SelectionError] = match readBaseline(b) {
+ Err(e) => Err(e),
+ Ok(r) => {
+  let m={life:meanOf(r.life),minds:meanOf(r.minds),tech:meanOf(r.tech),lifetimeYr:meanOf(r.lifetime),product:0.0};
+  let product=m.life*m.minds*m.tech*m.lifetimeYr;
+  if product>0.0 && product<=1e300 then Ok({m|product:product}) else Err(BadBaseline)
+ }
+}
+pure func okProduct(p:Params) -> bool =
+ okFraction(p.fLife) && okFraction(p.fMinds) && okFraction(p.fTech) && p.lifetimeYr>0.0 && p.lifetimeYr<=1e100
+-- fLife * fMinds * fTech * lifetime: technological lineage-years per
+-- habitable-zone world. Divided by the window it is the living share.
+export pure func productOf(p:Params) -> float = p.fLife*p.fMinds*p.fTech*p.lifetimeYr
+pure func dexOver(p:Params,life:float,minds:float,tech:float,years:float) -> Result[float,SelectionError] =
+ if not okProduct(p) then Err(BadParams) else if productOf(p)<=0.0 then Err(ZeroProduct)
+ else Ok(log10(p.fLife)-log10(life)+log10(p.fMinds)-log10(minds)+log10(p.fTech)-log10(tech)+log10(p.lifetimeYr)-log10(years))
+-- Statement 1: log10 of the product over the product of the prior medians.
+-- For applyDial(b, d) this is dial.luckDex(b, d).
+export pure func luckOverMedianDex(b:[Factor],p:Params) -> Result[float,SelectionError] = match readBaseline(b) {
+ Err(e) => Err(e),
+ Ok(r) => dexOver(p,medianOf(r.life),medianOf(r.minds),medianOf(r.tech),medianOf(r.lifetime))
+}
+-- Statement 2: log10 of the product over the prior mean of the product.
+export pure func luckOverMeanDex(b:[Factor],p:Params) -> Result[float,SelectionError] = match priorMeans(b) {
+ Err(e) => Err(e),
+ Ok(m) => dexOver(p,m.life,m.minds,m.tech,m.lifetimeYr)
+}
+
+-- ---- the distribution of a sum of independent uniforms --------------------------
+-- U_i uniform on [0, w_i]. P(sum <= x) = sum over subsets S of
+-- (-1)^|S| (x - w(S))+^n / (n! prod w). That form loses digits near the top,
+-- so the upper half is taken from the far end by symmetry.
+type SumLaw = {terms:[(float,float)],norm:float,n:int,total:float}
+pure func sumLaw(w:[float]) -> SumLaw = {
+ terms:foldl(\acc x. acc++map(\st. match st {(s,sign) => (s+x,0.0-sign)},acc),[(0.0,1.0)],w),
+ norm:foldl(\acc x. acc*x,1.0,w)*(if length(w)==3 then 6.0 else if length(w)==2 then 2.0 else 1.0),
+ n:length(w),total:foldl(\acc x. acc+x,0.0,w)}
+pure func power(d:float,n:int) -> float = if n==3 then d*d*d else if n==2 then d*d else d
+pure func lowerHalf(law:SumLaw,x:float) -> float =
+ foldl(\acc st. match st {(s,sign) => if x>s then acc+sign*power(x-s,law.n) else acc},0.0,law.terms)/law.norm
+pure func cdfOf(law:SumLaw,x:float) -> float =
+ if x<=0.0 then 0.0 else if x>=law.total then 1.0
+ else if x<=law.total/2.0 then lowerHalf(law,x) else 1.0-lowerHalf(law,law.total-x)
+pure func survivalOf(law:SumLaw,x:float) -> float =
+ if x<=0.0 then 1.0 else if x>=law.total then 0.0
+ else if x>=law.total/2.0 then lowerHalf(law,law.total-x) else 1.0-lowerHalf(law,x)
+pure func okWidths(w:[float],x:float) -> bool =
+ length(w)>=1 && length(w)<=3 && foldl(\ok v. ok && v>0.0 && v<=1e100,true,w) && x>= -1e300 && x<=1e300
+-- P(U_1 + ... + U_n <= x), U_i uniform on [0, widths_i], n = 1, 2 or 3.
+export pure func sumUniformCdf(widths:[float],x:float) -> Result[float,SelectionError] =
+ if okWidths(widths,x) then Ok(cdfOf(sumLaw(widths),x)) else Err(BadWidths)
+-- P(U_1 + ... + U_n >= x), with full relative accuracy in the upper tail.
+export pure func sumUniformSurvival(widths:[float],x:float) -> Result[float,SelectionError] =
+ if okWidths(widths,x) then Ok(survivalOf(sumLaw(widths),x)) else Err(BadWidths)
+
+-- ---- the acceptance statistics ---------------------------------------------------
+pure func okBand(b:Band) -> bool = match b {
+ Between(lo,hi) => lo>=0.0 && hi>=lo && hi<=1e100,
+ AtLeast(lo) => lo>=0.0 && lo<=1e100,
+ AtMost(hi) => hi>=0.0 && hi<=1e100,
+ AnyCount => true
+}
+pure func okReach(k:[ReachKnot],prev:float) -> bool = match k {
+ [] => true,
+ r::rest => r.lifetimeYr>prev && r.lifetimeYr<=1e100 && r.share>0.0 && r.share<=1.0 && okReach(rest,r.lifetimeYr)
+}
+-- hzWorlds in (0, 1e100]; at least one reach knot, lifetimes positive and
+-- strictly increasing, shares in (0, 1]; endedYr and gapYr in [0, 1e100];
+-- band edges in [0, 1e100] with lo <= hi. NaN fails every test.
+pure func okSetting(s:Setting) -> bool =
+ s.hzWorlds>0.0 && s.hzWorlds<=1e100 && length(s.reach)>=1 && okReach(s.reach,0.0)
+ && s.endedYr>=0.0 && s.endedYr<=1e100 && s.gapYr>=0.0 && s.gapYr<=1e100
+ && okBand(s.found) && okBand(s.ended) && okBand(s.late)
+pure func okParams(p:Params) -> bool =
+ okProduct(p) && p.windowYr>0.0 && p.windowYr<=1e100 && p.lifetimeYr<=p.windowYr/2.0
+-- The reach share at a lifetime: log-linear between knots, held outside them.
+pure func shareAt(k:[ReachKnot],years:float) -> float = match k {
+ [] => 0.0,
+ a::rest => if years<=a.lifetimeYr then a.share else match rest {
+  [] => a.share,
+  b::more => if years<b.lifetimeYr then a.share*pow(b.share/a.share,log(years/a.lifetimeYr)/log(b.lifetimeYr/a.lifetimeYr)) else shareAt(rest,years)
+ }
+}
+-- The three expected counts of one parameter set (module header).
+-- `ended` counts lineages that ended within the last endedYr years: onsets in
+-- [-L-endedYr, -L]. Onsets start at -W/2 (history.ail), so that interval is
+-- inside the window only while endedYr <= W/2 - L. Beyond it the closed form
+-- endedYr/W would count worlds that cannot exist (it has no upper limit), so
+-- the call is refused with EndedOutsideWindow instead of being clipped: a
+-- setting that asks for more persistence than the window holds is a mistake
+-- in the setting. Within the bound, ended <= hzWorlds*fLife*fMinds*fTech/2.
+export pure func statisticsOf(s:Setting,p:Params) -> Result[Statistics,SelectionError] =
+ if not okSetting(s) then Err(BadSetting) else if not okParams(p) then Err(BadParams)
+ else if s.endedYr>p.windowYr/2.0-p.lifetimeYr then Err(EndedOutsideWindow) else {
+  let lineage=p.fLife*p.fMinds*p.fTech;
+  let found=s.hzWorlds*lineage*(p.lifetimeYr/p.windowYr)*shareAt(s.reach,p.lifetimeYr);
+  Ok({found:found,ended:s.hzWorlds*lineage*s.endedYr/p.windowYr,
+   late:found*(if s.gapYr<p.lifetimeYr then s.gapYr/p.lifetimeYr else 1.0)})
+ }
+pure func inBand(b:Band,v:float) -> bool = match b {
+ Between(lo,hi) => v>=lo && v<=hi,
+ AtLeast(lo) => v>=lo,
+ AtMost(hi) => v<=hi,
+ AnyCount => true
+}
+-- Whether each count is inside its band, edges included.
+export pure func accepts(s:Setting,p:Params) -> Result[bool,SelectionError] = match statisticsOf(s,p) {
+ Err(e) => Err(e),
+ Ok(v) => Ok(inBand(s.found,v.found) && inBand(s.ended,v.ended) && inBand(s.late,v.late))
+}
+
+-- ---- the prior probability of a region --------------------------------------------
+-- y0 = log10 of the smallest fMinds*fTech; v0 = log10 of the shortest lifetime.
+type Shape = {y0:float,wm:float,wt:float,v0:float,wl:float,longest:float,window:float,sigma:float}
+pure func logUniform(p:Prior) -> Option[(float,float)] = match p {
+ LogUniform(lo,hi) => if lo>0.0 && hi>lo && hi<=1e100 then Some((lo,hi)) else None,
+ _ => None
+}
+pure func isRate(p:Prior) -> bool = match p { AbiogenesisRate => true, _ => false }
+pure func shapeOf(b:[Factor]) -> Result[Shape,SelectionError] = match readBaseline(b) {
+ Err(e) => Err(e),
+ Ok(r) => if not isRate(r.life) then Err(UnsupportedPrior) else
+  match logUniform(r.minds) { None => Err(UnsupportedPrior), Some(m) =>
+  match logUniform(r.tech) { None => Err(UnsupportedPrior), Some(t) =>
+  match logUniform(r.lifetime) { None => Err(UnsupportedPrior), Some(y) =>
+   match (m,t,y) {((mLo,mHi),(tLo,tHi),(yLo,yHi)) =>
+    if mHi>1.0 || tHi>1.0 || yHi>r.window/2.0 then Err(UnsupportedPrior)
+    else Ok({y0:log10(mLo)+log10(tLo),wm:log10(mHi)-log10(mLo),wt:log10(tHi)-log10(tLo),
+     v0:log10(yLo),wl:log10(yHi)-log10(yLo),longest:yHi,window:r.window,sigma:abiogenesisSigmaDex()})
+   }}}}
+}
+-- The rule that turns the values at n and at 2n panels into a Probability:
+-- the finer value, and the change as its error. Refused when the finer value
+-- is not a probability (NaN, or outside [0,1] by more than 1e-12) or when the
+-- change exceeds 1e-6 of it. Exported so that the refusal can be tested.
+export pure func converged(coarse:float,fine:float) -> Result[Probability,SelectionError] {
+ let change=abs_Float(fine-coarse);
+ if not (fine>= -1e-12 && fine<=1.0+1e-12) || not (change<=1e-6*abs_Float(fine)) then Err(NotConverged)
+ else Ok({p:if fine<0.0 then 0.0 else if fine>1.0 then 1.0 else fine,error:change})
+}
+pure func doubled(rule:int -> float,n:int) -> Result[Probability,SelectionError] = converged(rule(n),rule(2*n))
+-- Statement 3 for a threshold: the prior probability that
+-- fLife*fMinds*fTech*lifetime >= threshold. One integral over life; the other
+-- three factors are a sum of three uniforms in log10.
+export pure func productTail(b:[Factor],threshold:float,grid:int) -> Result[Probability,SelectionError] =
+ if grid<1 || grid>16 then Err(BadGrid) else if not (threshold>=0.0 && threshold<=1e300) then Err(BadThreshold) else match shapeOf(b) {
+  Err(e) => Err(e),
+  Ok(q) => if threshold==0.0 then Ok({p:1.0,error:0.0}) else {
+   let law=sumLaw([q.wm,q.wt,q.wl]);
+   let need=log10(threshold)-q.y0-q.v0;
+   doubled(\n. lifeExpect(\l. survivalOf(law,need-l),map(\st. match st {(s,sign) => need-s},law.terms),0.0,q.sigma,n),grid)
+  }
+ }
+-- Statement 3 for a universe: the prior probability of a product at least as
+-- large as its own.
+export pure func luckProbability(b:[Factor],p:Params,grid:int) -> Result[Probability,SelectionError] =
+ if not okProduct(p) then Err(BadParams) else productTail(b,productOf(p),grid)
+
+-- Lines in v = log10 L. A statistic is 10^(s + c(v)) with s = log10 of
+-- fLife*fMinds*fTech, so a band edge e is the line s = log10 e - c(v). A
+-- Level is a constant: a breakpoint of the two-uniform law above y0.
+type Stat = Found | Ended | Late | Level
+type Line = {stat:Stat,edge:float}
+type Lines = {lower:[Line],upper:[Line],empty:bool}
+-- base = log10(hzWorlds/window); gap and ended are log10 of their years.
+type Frame = {base:float,gap:float,ended:float,reach:[ReachKnot]}
+-- log10 of the reach share at v: linear between knots.
+pure func logShare(k:[ReachKnot],v:float) -> float = match k {
+ [] => 0.0,
+ a::rest => if v<=log10(a.lifetimeYr) then log10(a.share) else match rest {
+  [] => log10(a.share),
+  b::more => if v<log10(b.lifetimeYr) then log10(a.share)+(log10(b.share)-log10(a.share))*(v-log10(a.lifetimeYr))/(log10(b.lifetimeYr)-log10(a.lifetimeYr)) else logShare(rest,v)
+ }
+}
+pure func lineAt(fr:Frame,ln:Line,v:float) -> float = match ln.stat {
+ Found => ln.edge-(fr.base+v+logShare(fr.reach,v)),
+ Ended => ln.edge-(fr.base+fr.ended),
+ Late => ln.edge-(fr.base+logShare(fr.reach,v)+(if v<fr.gap then v else fr.gap)),
+ Level => ln.edge
+}
+pure func bandLo(b:Band) -> float = match b { Between(lo,hi) => lo, AtLeast(lo) => lo, _ => 0.0 }
+pure func bandHi(b:Band) -> Option[float] = match b { Between(lo,hi) => Some(hi), AtMost(hi) => Some(hi), _ => None }
+-- Add one statistic's band. `live` is false when the statistic is zero in
+-- every universe (no ended time, no gap): the band must then include 0.
+pure func withBand(acc:Lines,b:Band,live:bool,stat:Stat) -> Lines =
+ if not live then {acc|empty:acc.empty || bandLo(b)>0.0} else {
+  let lo=bandLo(b);
+  let low=if lo>0.0 then acc.lower++[{stat:stat,edge:log10(lo)}] else acc.lower;
+  match bandHi(b) {
+   None => {acc|lower:low},
+   Some(hi) => if hi<=0.0 then {acc|empty:true} else {acc|lower:low,upper:acc.upper++[{stat:stat,edge:log10(hi)}]}
+  }
+ }
+-- Where two lines cross inside [a,b]; both are linear there.
+pure func crossing(fr:Frame,f:Line,g:Line,a:float,b:float) -> [float] {
+ let da=lineAt(fr,f,a)-lineAt(fr,g,a);
+ let db=lineAt(fr,f,b)-lineAt(fr,g,b);
+ if (da<0.0 && db>0.0) || (da>0.0 && db<0.0) then [a+(b-a)*da/(da-db)] else []
+}
+pure func crossings(fr:Frame,fs:[Line],a:float,b:float) -> [float] = match fs {
+ [] => [],
+ f::rest => flatMap(\g. crossing(fr,f,g,a,b),rest)++crossings(fr,rest,a,b)
+}
+pure func largest(fr:Frame,fs:[Line],v:float) -> float = foldl(\acc f. {let x=lineAt(fr,f,v); if x>acc then x else acc},-1e300,fs)
+pure func smallest(fr:Frame,fs:[Line],v:float) -> float = foldl(\acc f. {let x=lineAt(fr,f,v); if x<acc then x else acc},1e300,fs)
+-- P(A <= log10(fLife*fMinds*fTech) <= B) at one lifetime, over life, minds and tech.
+pure func atLifetime(q:Shape,law:SumLaw,fr:Frame,ln:Lines,v:float,n:int) -> float {
+ let hasA=length(ln.lower)>0;
+ let hasB=length(ln.upper)>0;
+ let a=largest(fr,ln.lower,v)-q.y0;
+ let b=smallest(fr,ln.upper,v)-q.y0;
+ if hasA && hasB && a>=b then 0.0 else {
+  let h=\l. (if hasB then cdfOf(law,b-l) else 1.0)-(if hasA then cdfOf(law,a-l) else 0.0);
+  let kinks=(if hasB then map(\st. match st {(s,sign) => b-s},law.terms) else [])++(if hasA then map(\st. match st {(s,sign) => a-s},law.terms) else []);
+  lifeExpect(h,kinks,if hasA then 0.0 else 1.0,q.sigma,n)
+ }
+}
+pure func segment(q:Shape,law:SumLaw,fr:Frame,ln:Lines,a:float,b:float,n:int) -> float {
+ let levels=map(\st. match st {(s,sign) => {stat:Level,edge:q.y0+s}},law.terms);
+ let cuts=sortBy(cmp,filter(\x. x>a && x<b,crossings(fr,ln.lower++ln.upper++levels,a,b)));
+ pieces(\v. atLifetime(q,law,fr,ln,v,n),[a]++cuts++[b],n,q.wl)
+}
+pure func segments(q:Shape,law:SumLaw,fr:Frame,ln:Lines,edges:[float],n:int) -> float = match edges {
+ [] => 0.0,
+ a::tail => match tail {
+  [] => 0.0,
+  b::rest => (if b>a then segment(q,law,fr,ln,a,b,n) else 0.0)+segments(q,law,fr,ln,tail,n)
+ }
+}
+-- The prior probability that a universe drawn from the baseline is accepted by
+-- the setting, with the change on doubling the grid (module header). The
+-- setting must be scoreable for every lifetime the prior can draw: endedYr
+-- above W/2 - (the longest prior lifetime) is EndedOutsideWindow.
+@allow_empty_ok("a region that holds no universe has probability 0 with no numerical error; expectedDraws refuses it")
+export pure func acceptanceProbability(b:[Factor],s:Setting,grid:int) -> Result[Probability,SelectionError] =
+ if grid<1 || grid>16 then Err(BadGrid) else if not okSetting(s) then Err(BadSetting) else match shapeOf(b) {
+  Err(e) => Err(e),
+  Ok(q) => if s.endedYr>q.window/2.0-q.longest then Err(EndedOutsideWindow) else {
+   let fr={base:log10(s.hzWorlds)-log10(q.window),gap:if s.gapYr>0.0 then log10(s.gapYr) else 0.0,
+    ended:if s.endedYr>0.0 then log10(s.endedYr) else 0.0,reach:s.reach};
+   let none={lower:[],upper:[],empty:false};
+   let ln=withBand(withBand(withBand(none,s.found,true,Found),s.ended,s.endedYr>0.0,Ended),s.late,s.gapYr>0.0,Late);
+   if ln.empty then Ok({p:0.0,error:0.0})
+   else if length(ln.lower)==0 && length(ln.upper)==0 then Ok({p:1.0,error:0.0}) else {
+    let top=q.v0+q.wl;
+    let knots=map(\k. log10(k.lifetimeYr),s.reach)++(if s.gapYr>0.0 then [fr.gap] else []);
+    let edges=[q.v0]++sortBy(cmp,filter(\x. x>q.v0 && x<top,knots))++[top];
+    let law=sumLaw([q.wm,q.wt]);
+    doubled(\n. segments(q,law,fr,ln,edges,n)/q.wl,grid)
+   }
+  }
+ }
+-- The expected number of draws until one is accepted: 1/p. The index of the
+-- accepted draw in any one run is geometric with this mean.
+export pure func expectedDraws(pr:Probability) -> Result[float,SelectionError] =
+ if pr.p>0.0 && pr.p<=1.0 then Ok(1.0/pr.p) else Err(ZeroProbability)

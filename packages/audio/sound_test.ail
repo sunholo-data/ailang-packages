@@ -121,3 +121,15 @@ test "renderSoundChecked refuses too many events, event frames and work" {
     _ => false
   }
 }
+
+-- Integer literals decode as JInt on newer compilers and as JNumber on older ones; event times read both alike.
+test "integer event times place events exactly like the same float times" {
+  let t = \ts. one("{\"id\":\"it\",\"seconds\":1.25,\"rate\":8000,\"layers\":[{\"kind\":\"events\",\"amp\":0.5,\"voices\":[{\"seconds\":0.02,\"layers\":[{\"kind\":\"sine\",\"freq\":500,\"amp\":0.5}]}],\"times\":${ts}}]}");
+  let a = rendered(t("[0,1]"));
+  size(a) == 10000 && a == rendered(t("[0.0,1.0]")) && peakAbs(drop(8000, a)) > 0.0
+}
+
+test "integer and float literals pass the 0.6 type checks alike" {
+  let t = \v. one("{\"id\":\"ty\",\"seconds\":0.1,\"rate\":8000,\"layers\":[{\"kind\":\"events\",\"amp\":0.5,\"seed\":${v},\"voices\":[{\"seconds\":0.02,\"layers\":[{\"kind\":\"sine\",\"freq\":500,\"amp\":0.5}]}],\"scatter\":{\"count\":2}}]}");
+  accepted(t("3")) && accepted(t("3.0")) && refused(t("3.5"), "seed")
+}

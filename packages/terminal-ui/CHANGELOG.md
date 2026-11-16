@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.3.1
+
+Fix: transcript integers. AILANG's `std/json` now decodes an integer literal such as `60` as `JInt(60)`; only fractional and
+exponent literals stay `JNumber`. Older compilers give `JNumber(60.0)` for both.
+`decodeTranscript` read integer fields only from `JNumber`, so on such a compiler every transcript,
+including one `encodeTranscript` had just written, failed to decode. It now reads numbers with
+`asNumber`. Fractional values are still refused, and nothing changes on older compilers.
+
 ## 0.3.0
 
 Add a pure bounded Unicode codepoint text field: exact insertion, navigation,

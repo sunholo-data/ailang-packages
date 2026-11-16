@@ -1,0 +1,261 @@
+-- Check values for sunholo/observe/photon: stapledons-design
+-- physics/observation.md (baseline-2026.11) rows OB-1..OB-27 and OB-41..OB-50.
+--
+-- A row passes exactly as the registry says (§4): the computed value, rounded
+-- to the row's printed significant figures, equals the printed value. phRow
+-- does that rounding; no row has a looser tolerance. Expected values are the
+-- registry's printed digits, never this module's output.
+--
+-- The band integral is also checked against Simpson's rule, a second method
+-- that shares no code with the series in photon.ail (registry §2.2 asks for a
+-- relative 1e-6).
+
+module sunholo/observe/photon_test
+
+import std/math (floor, log10, pow, round, exp, intToFloat)
+import pkg/sunholo/relativity/hyper (absf)
+import ./constants (pi, lightSpeedMs, secondRadiationMK, auM, parsecM, lightYearM, masRad,
+  solarRadiusM, solarTeffK, earthRadiusM, jupiterRadiusM, snrHint, snrStrong)
+import ./photon (Band, Blackbody, Instrument, Zodi, Budget, bandOf, resolutionElement, sunBlackbody,
+  planckPhotonRadiance, photonFlux, photonRate, lambertPhase, planetContrast, noiseFloorContrast,
+  diffractionRad, innerWorkingAngleRad, separationRad, iwaLimitDistanceM, observable,
+  photometricApertureArcsec2, zeroMagRate, zodiRate, zodiTotalRate, residualStarRate, backgroundRate,
+  darkRate, snr, timeToSnrS, referenceInstrument, referenceZodi, noZodi, planetBudget, narrowBandOk)
+
+-- x rounded to sf significant figures (the registry oracle's round_sf).
+pure func phRoundSf(x: float, sf: int) -> float =
+  if x == 0.0 then 0.0
+  else {
+    let q = pow(10.0, floor(log10(absf(x))) - intToFloat(sf) + 1.0);
+    round(x / q) * q
+  }
+
+-- The registry's pass rule: got, rounded to the printed figures, is the printed value.
+pure func phRow(got: float, printed: float, sf: int) -> bool =
+  absf(phRoundSf(got, sf) - printed) <= 0.000000001 * absf(printed)
+
+pure func phRel(got: float, want: float, tol: float) -> bool = absf(got - want) <= tol * absf(want)
+
+-- ---------- the registry's standing inputs (§4) ----------
+
+pure func phHalfPi() -> float = pi() / 2.0
+pure func phO2M() -> float = 0.00000076
+pure func phO2Element() -> Band = resolutionElement(phO2M(), 140.0)
+pure func phVBand() -> Band = bandOf(0.000000551, 0.000000088)
+pure func phTenPc() -> float = 10.0 * parsecM()
+pure func phTenLy() -> float = 10.0 * lightYearM()
+pure func phEarthTwin() -> float = planetContrast(0.2, earthRadiusM(), auM(), phHalfPi())
+pure func phInst(apertureM: float) -> Instrument = { referenceInstrument() | apertureM: apertureM }
+pure func phStar(distanceM: float) -> float = photonRate(sunBlackbody(), distanceM, 10.0, phO2Element(), 0.04)
+pure func phBudget(distanceM: float, apertureM: float, zodi: Zodi) -> Budget =
+  planetBudget(sunBlackbody(), phEarthTwin(), distanceM, phO2M(), 140.0, phInst(apertureM), zodi)
+pure func phHours(target: float, b: Budget) -> float = timeToSnrS(target, b.signal, b.background, b.dark) / 3600.0
+pure func phOmega() -> float = photometricApertureArcsec2(0.7, phO2M(), 10.0)
+pure func phN0() -> float = zeroMagRate(phStar(phTenPc()), 4.81)
+pure func phIwaEdgeM(apertureM: float) -> float = iwaLimitDistanceM(auM(), 3.5, phO2M(), apertureM)
+
+-- ---------- OB-1..OB-6: phase, contrast, noise floor ----------
+
+test "OB-1: Lambert phase at quadrature is 1/pi = 0.3183" {
+  phRow(lambertPhase(phHalfPi()), 0.3183, 4) && phRel(lambertPhase(phHalfPi()), 1.0 / pi(), 0.000000000001)
+}
+test "OB-2: Lambert phase at 60 degrees is 0.6090" { phRow(lambertPhase(pi() / 3.0), 0.6090, 4) }
+test "OB-3: Earth-twin contrast is 1.157e-10" { phRow(phEarthTwin(), 1.157e-10, 4) }
+test "OB-4: Jupiter-twin contrast is 1.344e-9" {
+  phRow(planetContrast(0.5, jupiterRadiusM(), 5.2 * auM(), phHalfPi()), 1.344e-9, 4)
+}
+test "OB-5: hot-Jupiter reflected contrast is 2.908e-6" {
+  phRow(planetContrast(0.1, jupiterRadiusM(), 0.05 * auM(), phHalfPi()), 2.908e-6, 4)
+}
+test "OB-6: noise-floor contrast for 26.5 mag is 2.512e-11" { phRow(noiseFloorContrast(26.5), 2.512e-11, 4) }
+test "Lambert phase is 1 at full phase and 0 at new" {
+  phRel(lambertPhase(0.0), 1.0, 0.000000000001) && absf(lambertPhase(pi())) < 0.000000000001
+}
+
+-- ---------- OB-7..OB-13: photon rates ----------
+
+test "OB-7: Sun at 10 pc, V-like band, flux 9.975e7 photons/s/m2" {
+  phRow(photonFlux(sunBlackbody(), phTenPc(), phVBand()), 9.975e7, 4)
+}
+test "OB-8: Sun at 10 pc, V-like band, 10 m, tau 1: 7.834e9 photons/s" {
+  phRow(photonRate(sunBlackbody(), phTenPc(), 10.0, phVBand(), 1.0), 7.834e9, 4)
+}
+test "OB-9: Sun at 10 pc, O2 A element, reference instrument: 1.914e7 photons/s" { phRow(phStar(phTenPc()), 1.914e7, 4) }
+test "OB-10: Earth twin at 10 pc, counted rate S = 2.215e-3 photons/s" {
+  phRow(phBudget(phTenPc(), 10.0, referenceZodi()).signal, 2.215e-3, 4)
+}
+test "OB-11: Earth twin at 10 ly, counted rate 2.356e-2 photons/s" {
+  phRow(phBudget(phTenLy(), 10.0, referenceZodi()).signal, 2.356e-2, 4)
+}
+test "OB-12: residual starlight zeta N* = 1.914e-3 photons/s" {
+  phRow(residualStarRate(1e-10, phStar(phTenPc())), 1.914e-3, 4)
+}
+test "OB-13: dark rate 192 x 3e-5 = 5.760e-3 counts/s" {
+  phRow(darkRate(192.0, 3e-5), 5.760e-3, 4) && phRow(phBudget(phTenPc(), 10.0, referenceZodi()).dark, 5.760e-3, 4)
+}
+
+-- ---------- OB-14..OB-20: SNR and integration time ----------
+
+pure func phOb14() -> bool {
+  let b = phBudget(phTenPc(), 10.0, referenceZodi());
+  phRow(snr(b.signal, b.background, b.dark, 36000.0), 3.477, 4)
+}
+test "OB-14: SNR on the Earth twin at 10 pc after 10 hours is 3.477" { phOb14() }
+test "OB-15: time to a hint (SNR 5) at 10 pc is 20.68 h" {
+  phRow(phHours(snrHint(), phBudget(phTenPc(), 10.0, referenceZodi())), 20.68, 4)
+}
+test "OB-16: time to strong (SNR 10) at 10 pc is 82.70 h" {
+  phRow(phHours(snrStrong(), phBudget(phTenPc(), 10.0, referenceZodi())), 82.70, 4)
+}
+test "OB-17: time to a hint at 10 ly is 0.6805 h" {
+  phRow(phHours(5.0, phBudget(phTenLy(), 10.0, referenceZodi())), 0.6805, 4)
+}
+test "OB-18: time to SNR 5 at 10 ly with D = 4 m is 8.554 h" {
+  phRow(phHours(5.0, phBudget(phTenLy(), 4.0, referenceZodi())), 8.554, 4)
+}
+test "OB-19: time to SNR 5 at 10 pc with D = 4 m is 615.9 h (photon budget only)" {
+  phRow(phHours(5.0, phBudget(phTenPc(), 4.0, referenceZodi())), 615.9, 4)
+}
+test "OB-19 note: that planet is inside the 4 m inner working angle, so it is not observable" {
+  not observable(auM(), phTenPc(), 3.5, phO2M(), 4.0) && observable(auM(), phTenPc(), 3.5, phO2M(), 10.0)
+}
+test "OB-20: time to SNR 5 at 10 pc with D = 100 m is 0.05993 h" {
+  phRow(phHours(5.0, phBudget(phTenPc(), 100.0, referenceZodi())), 0.05993, 4)
+}
+
+-- snr and timeToSnrS invert each other.
+pure func phInverse() -> bool {
+  let b = phBudget(phTenPc(), 10.0, referenceZodi());
+  let t = timeToSnrS(7.0, b.signal, b.background, b.dark);
+  phRel(snr(b.signal, b.background, b.dark, t), 7.0, 0.000000000001)
+}
+test "snr(timeToSnrS(target)) is the target" { phInverse() }
+
+-- ---------- OB-21..OB-27: what the coronagraph can reach ----------
+
+test "OB-21: diffraction scale at 0.76 um, 10 m, is 15.68 mas" { phRow(diffractionRad(phO2M(), 10.0) / masRad(), 15.68, 4) }
+test "OB-22: inner working angle 3.5 lambda/D is 54.87 mas" {
+  phRow(innerWorkingAngleRad(3.5, phO2M(), 10.0) / masRad(), 54.87, 4)
+}
+test "OB-23: 1 AU at 10 pc subtends 100.0 mas" { phRow(separationRad(auM(), phTenPc()) / masRad(), 100.0, 4) }
+test "OB-24: 1 AU clears the IWA out to 59.45 ly at 10 m" { phRow(phIwaEdgeM(10.0) / lightYearM(), 59.45, 4) }
+test "OB-25: and to 23.78 ly at 4 m" { phRow(phIwaEdgeM(4.0) / lightYearM(), 23.78, 4) }
+test "OB-26: and to 594.5 ly at 100 m" { phRow(phIwaEdgeM(100.0) / lightYearM(), 594.5, 4) }
+test "OB-27: time to a hint at the 10 m IWA edge is 183.1 h" {
+  phRow(phHours(5.0, phBudget(phIwaEdgeM(10.0), 10.0, referenceZodi())), 183.1, 4)
+}
+test "the IWA edge is observable from just inside and not from just outside" {
+  observable(auM(), 0.999 * phIwaEdgeM(10.0), 3.5, phO2M(), 10.0) &&
+  not observable(auM(), 1.001 * phIwaEdgeM(10.0), 3.5, phO2M(), 10.0)
+}
+
+-- ---------- OB-41..OB-50: thresholds, zodiacal light ----------
+
+test "OB-41: the threshold for a hint is SNR 5" { phRow(snrHint(), 5.0, 1) && snrHint() == 5.0 }
+test "OB-42: the threshold for strong is SNR 10" { phRow(snrStrong(), 10.0, 2) && snrStrong() == 10.0 }
+test "OB-43: photometric aperture at 0.76 um, 10 m, X = 0.7 is 3.783e-4 arcsec2" { phRow(phOmega(), 3.783e-4, 4) }
+test "OB-44: zero-magnitude rate N0 is 1.607e9 photons/s" { phRow(phN0(), 1.607e9, 4) }
+test "OB-45: local zodi rate (l = 1, z = 23) is 3.835e-4 photons/s" {
+  phRow(zodiRate(phN0(), phOmega(), 1.0, 23.0), 3.835e-4, 4)
+}
+test "OB-46: exozodi rate (n = 4.5, z1 = 22) is 4.335e-3 photons/s" {
+  phRow(zodiRate(phN0(), phOmega(), 4.5, 22.0), 4.335e-3, 4)
+}
+
+pure func phOb47() -> bool {
+  let star = phStar(phTenPc());
+  let z = zodiTotalRate(phN0(), phOmega(), referenceZodi());
+  phRow(backgroundRate(1e-10, star, z), 6.633e-3, 4) &&
+  phRow(phBudget(phTenPc(), 10.0, referenceZodi()).background, 6.633e-3, 4) &&
+  phRel(z, zodiRate(phN0(), phOmega(), 1.0, 23.0) + zodiRate(phN0(), phOmega(), 4.5, 22.0), 0.000000000001)
+}
+test "OB-47: total background B = OB-12 + OB-45 + OB-46 = 6.633e-3 photons/s" { phOb47() }
+test "OB-48: OB-15 with no zodiacal light is 14.00 h" {
+  phRow(phHours(snrHint(), phBudget(phTenPc(), 10.0, noZodi())), 14.00, 4)
+}
+test "OB-49: time to strong at 10 ly is 2.722 h" {
+  phRow(phHours(snrStrong(), phBudget(phTenLy(), 10.0, referenceZodi())), 2.722, 4)
+}
+test "OB-50: time to strong at the 10 m IWA edge is 732.3 h" {
+  phRow(phHours(snrStrong(), phBudget(phIwaEdgeM(10.0), 10.0, referenceZodi())), 732.3, 4)
+}
+
+-- OB-45/OB-46 "the same for any aperture and distance": N0 grows as D^2 and
+-- the photometric aperture shrinks as D^-2.
+pure func phZodiOf(distanceM: float, apertureM: float) -> float {
+  let b = phBudget(distanceM, apertureM, referenceZodi());
+  b.background - residualStarRate(1e-10, photonRate(sunBlackbody(), distanceM, apertureM, phO2Element(), 0.04))
+}
+test "the zodiacal rate does not depend on aperture or distance" {
+  phRel(phZodiOf(phTenPc(), 4.0), phZodiOf(phTenPc(), 100.0), 0.0000000001) &&
+  phRel(phZodiOf(phTenLy(), 10.0), phZodiOf(phTenPc(), 10.0), 0.0000000001)
+}
+
+-- ---------- the band integral against Simpson's rule ----------
+
+pure func phIntegrand(lambdaM: float, tempK: float) -> float =
+  2.0 * lightSpeedMs() / (lambdaM * lambdaM * lambdaM * lambdaM) / (exp(secondRadiationMK() / (lambdaM * tempK)) - 1.0)
+
+pure func phSimpsonSum(i: int, n: int, lo: float, h: float, tempK: float, acc: float) -> float =
+  if i >= n then acc
+  else phSimpsonSum(i + 1, n, lo, h, tempK,
+    acc + (if i % 2 == 1 then 4.0 else 2.0) * phIntegrand(lo + intToFloat(i) * h, tempK))
+
+pure func phSimpson(tempK: float, b: Band) -> float {
+  let n = 2000;
+  let h = (b.hiM - b.loM) / intToFloat(n);
+  phSimpsonSum(1, n, b.loM, h, tempK, phIntegrand(b.loM, tempK) + phIntegrand(b.hiM, tempK)) * h / 3.0
+}
+
+pure func phAgrees(tempK: float, b: Band) -> bool = phRel(planckPhotonRadiance(tempK, b), phSimpson(tempK, b), 0.000001)
+
+test "band integral = Simpson to 1e-6: Sun in the V-like band and the O2 A element" {
+  phAgrees(solarTeffK(), phVBand()) && phAgrees(solarTeffK(), phO2Element())
+}
+test "band integral = Simpson to 1e-6: M dwarf (3000 K) at 0.76 um, hot star (30000 K) in the V-like band" {
+  phAgrees(3000.0, phO2Element()) && phAgrees(30000.0, phVBand())
+}
+test "band integral = Simpson to 1e-6: Sun at 10 um (R = 20) and a 300 K body at 10 um" {
+  phAgrees(solarTeffK(), resolutionElement(0.00001, 20.0)) && phAgrees(300.0, resolutionElement(0.00001, 20.0))
+}
+test "band integral = Simpson to 1e-6 near the edge of the stated domain (lambda T = 0.69 m K)" {
+  phAgrees(6900.0, bandOf(0.000095, 0.00001))
+}
+
+-- The whole spectrum integrates to 2c (kT/hc)^3 x 2 zeta(3) (the closed form
+-- of the blackbody photon radiance). The band stops at 120 um, which leaves
+-- out 8e-5 of the photons.
+pure func phWide() -> bool {
+  let t = 5772.0;
+  let k = 1.0 / secondRadiationMK();
+  let total = 2.0 * lightSpeedMs() * (k * t) * (k * t) * (k * t) * 2.0 * 1.2020569031595942;
+  phRel(planckPhotonRadiance(t, { loM: 0.00000001, hiM: 0.00012 }), total, 0.0002)
+}
+test "a band from 10 nm to 120 um holds the whole solar photon output (2 zeta(3) limit)" { phWide() }
+
+test "photon rate falls as distance squared and grows as aperture squared" {
+  phRel(photonRate(sunBlackbody(), 2.0 * phTenPc(), 10.0, phVBand(), 1.0) * 4.0,
+        photonRate(sunBlackbody(), phTenPc(), 10.0, phVBand(), 1.0), 0.000000000001) &&
+  phRel(photonRate(sunBlackbody(), phTenPc(), 20.0, phVBand(), 0.5),
+        photonRate(sunBlackbody(), phTenPc(), 10.0, phVBand(), 1.0) * 2.0, 0.000000000001)
+}
+
+-- The row rule itself: it accepts a value that rounds to the printed digits
+-- and rejects one that rounds to the neighbouring digit.
+test "the row rule rejects a value that rounds to a neighbouring digit" {
+  phRow(0.31834, 0.3183, 4) && not phRow(0.31836, 0.3183, 4) && not phRow(0.31824, 0.3183, 4) &&
+  phRow(100.004, 100.0, 4) && not phRow(100.06, 100.0, 4) && phRow(1.15720938e-10, 1.157e-10, 4) && not phRow(1.1564e-10, 1.157e-10, 4)
+}
+
+-- ---------- the narrowest band float64 can hold ----------
+-- bandOf's domain is a width of at least 1e-13 of the centre (a resolving
+-- power of at most 1e12 in resolutionElement); below about 2e-16 the two
+-- edges round to the same double.
+pure func phWider(b: Band) -> bool = b.hiM > b.loM
+test "the narrowest bands in the domain still have hiM > loM" {
+  phWider(bandOf(1.0, 1e-13)) && phWider(bandOf(0.00000076, 0.00000076 * 1e-13)) && phWider(bandOf(3.0e8, 3.0e-5)) &&
+  phWider(resolutionElement(0.00000076, 1e12)) && phWider(resolutionElement(1.0, 1e12)) && phWider(resolutionElement(0.00012, 1e12))
+}
+test "narrowBandOk is the domain: 1e-13 of the centre is in, 1e-20 is out" {
+  narrowBandOk(1.0, 1e-13) && narrowBandOk(0.00000076, 0.00000076 / 1e12) && not narrowBandOk(1.0, 1e-20) && not narrowBandOk(1.0, 0.0)
+}

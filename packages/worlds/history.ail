@@ -10,6 +10,14 @@ export type History = {biosphere:PlanetState,mind:Option[Mind]}
 pure func barren() -> History = {biosphere:Sterile,mind:None}
 pure func logarithmic(lo:float,hi:float,u:float) -> float = lo*pow(hi/lo,u)
 pure func ending(u:float) -> PlanetState = if u<0.75 then Remnant else if u<0.90 then Ecocide else Transcended
+-- The sampler's fixed design constants, exported so that statistics of this
+-- model (propagate, epoch_statistics) read them from one place. The shares are
+-- the widths of ending's thresholds; history_test ties them to the sampler.
+export pure func preTechLeadLoYr() -> float = 1e4
+export pure func preTechLeadHiYr() -> float = 1e5
+export pure func collapseShare() -> float = 0.75
+export pure func ecocideShare() -> float = 0.15
+export pure func transcendenceShare() -> float = 0.10
 
 -- Eight keyed uniforms, in [0,1): life, pathway rank, reserved, technology,
 -- onset, pre-tech lead, ending, trace persistence. One pathway rank thresholds
@@ -35,7 +43,7 @@ export pure func historyOf
    else {
     let onset=(nth_or(u,4,0.5)-0.5)*p.windowYr;
     let endT=onset+p.lifetimeYr;
-    {biosphere:bio,mind:Some({preTechT:onset-logarithmic(1e4,1e5,nth_or(u,5,0.5)),techT:onset,endT:endT,
+    {biosphere:bio,mind:Some({preTechT:onset-logarithmic(preTechLeadLoYr(),preTechLeadHiYr(),nth_or(u,5,0.5)),techT:onset,endT:endT,
      ending:ending(nth_or(u,6,0.5)),tracesUntilT:endT+logarithmic(p.remnantLoYr,p.remnantHiYr,nth_or(u,7,0.5))})}
    }
   }

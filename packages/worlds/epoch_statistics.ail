@@ -4,6 +4,8 @@ module sunholo/worlds/epoch_statistics
 -- "life" means an inhabited immutable background, including ended lineages;
 -- "mindsWindow" means a technological epoch overlaps [0,futureWindowYr].
 import ./dial (Params)
+import ./history (collapseShare,ecocideShare,transcendenceShare)
+import std/result (Result,Ok,Err)
 import std/math (log)
 
 export type Probabilities = {life:float,mindsWindow:float,tech:float,remnant:float}
@@ -47,3 +49,67 @@ ensures {result.life>=0.0,result.life<=1.0,result.tech>=0.0,result.tech<=result.
  tech:lineage*past/p.windowYr,
  remnant:lineage*0.75*traceCappedMean(p.remnantLoYr,p.remnantHiYr,positive(p.windowYr/2.0-p.lifetimeYr))/p.windowYr}
 }
+
+-- ---- 0.3.0: ended-state bins, the late-contact share, a lineage rate ----------
+-- Why a closed form was not computed.
+--   EpochParamsInvalid   outside validParams above.
+--   EpochYearsInvalid    a negative or NaN gap, or a lifetime that is not positive.
+--   EpochCountInvalid    a world count that is negative, NaN or above 1e100.
+--   LineageCountInvalid  lineages per world not in (0, 1e100].
+--   LineagesOverlap      more lineages than fit end to end in the window.
+export type EpochError = EpochParamsInvalid | EpochYearsInvalid | EpochCountInvalid | LineageCountInvalid | LineagesOverlap deriving (Eq)
+-- Per habitable-zone world at epoch 0, or expected worlds (endedWorlds).
+export type EndedShares = {remnant:float,ecocide:float,transcended:float}
+export type LineageShares = {alive:float,remnant:float,spacingYr:float,quietYr:float}
+
+-- The probability that a habitable-zone world is in each ended state at
+-- epoch 0, for history.ail's one-lineage model. A lineage has ended by now
+-- when its onset fell more than L before now: (W/2 - L)/W of the window.
+-- Ecocide and Transcended are permanent labels, so each is its ending share of
+-- those. Remnant is historyProbabilities' remnant (collapse traces still
+-- present), by the same expression. These are states, not detections.
+export pure func endedShares(p:Params) -> Result[EndedShares,EpochError] =
+ if not validParams(p) then Err(EpochParamsInvalid) else {
+  let lineage=p.fLife*p.fMinds*p.fTech;
+  let over=positive(p.windowYr/2.0-p.lifetimeYr);
+  Ok({remnant:lineage*collapseShare()*traceCappedMean(p.remnantLoYr,p.remnantHiYr,over)/p.windowYr,
+   ecocide:lineage*ecocideShare()*over/p.windowYr,transcended:lineage*transcendenceShare()*over/p.windowYr})
+ }
+-- Expected worlds in each ended state among hzWorlds habitable-zone worlds
+-- (for a radius: disc.starsWithin times habitable-zone worlds per star).
+export pure func endedWorlds(p:Params,hzWorlds:float) -> Result[EndedShares,EpochError] =
+ if not (hzWorlds>=0.0 && hzWorlds<=1e100) then Err(EpochCountInvalid) else match endedShares(p) {
+  Err(e) => Err(e),
+  Ok(s) => Ok({remnant:hzWorlds*s.remnant,ecocide:hzWorlds*s.ecocide,transcended:hzWorlds*s.transcended})
+ }
+-- The share of civilisations alive now that end within gapYr: min(1, G/L).
+-- A lifetime is exactly L and the age of a living one is uniform on [0, L],
+-- away from the window's edges. A memoryless lifetime would give
+-- 1-exp(-G/L) instead; that is not this model.
+export pure func lateShare(gapYr:float,lifetimeYr:float) -> Result[float,EpochError] =
+ if not (gapYr>=0.0 && gapYr<=1e100 && lifetimeYr>=1e-100 && lifetimeYr<=1e100) then Err(EpochYearsInvalid)
+ else Ok(minF(1.0,gapYr/lifetimeYr))
+-- A lineage RATE in closed form; no generator, and not history.ail's model.
+-- A world that hosts technology at all (probability fLife*fMinds*fTech) has
+-- lineagesPerWorld technological lineages in the window, evenly spaced: one
+-- starts every spacingYr = W/n years, lasts L, and leaves quietYr = W/n - L
+-- before the next. Per habitable-zone world:
+--   alive   = lineage * n * L / W
+--   remnant = lineage * n * collapseShare * E[min(trace, quietYr)] / W
+-- (a collapse's traces are overwritten by the next onset). With n = 1 these
+-- are historyProbabilities' tech and remnant wherever the window edge does
+-- not bind. Even spacing is a mean-field statement: it is exact for the
+-- shares of a regular sequence and is not a Poisson process. More lineages
+-- than fit end to end (n * L > W) are refused.
+export pure func lineageShares(p:Params,lineagesPerWorld:float) -> Result[LineageShares,EpochError] =
+ if not validParams(p) then Err(EpochParamsInvalid)
+ else if not (lineagesPerWorld>0.0 && lineagesPerWorld<=1e100) then Err(LineageCountInvalid) else {
+  let spacing=p.windowYr/lineagesPerWorld;
+  if spacing<p.lifetimeYr then Err(LineagesOverlap) else {
+   let lineage=p.fLife*p.fMinds*p.fTech;
+   let quiet=spacing-p.lifetimeYr;
+   Ok({alive:lineage*lineagesPerWorld*p.lifetimeYr/p.windowYr,
+    remnant:lineage*lineagesPerWorld*collapseShare()*traceCappedMean(p.remnantLoYr,p.remnantHiYr,quiet)/p.windowYr,
+    spacingYr:spacing,quietYr:quiet})
+  }
+ }

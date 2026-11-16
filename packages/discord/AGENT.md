@@ -7,11 +7,20 @@ declares IO solely for the offline `_smoke.ail` boot gate (`ailang run -caps IO
 --entry main _smoke.ail`); no library module uses IO. Never pass a bot token as an MCP tool
 argument. Guild membership of a human user does not imply bot channel access.
 
-Install: `ailang install sunholo/discord@0.4.0`, then
-`import pkg/sunholo/discord/client (...)`. Consumer programs need `--caps Net`
-for the effectful entry points; the pure codecs run with no capabilities. Full
-quickstart, pagination pattern and error-kind table: package README.md and
-`ailang pkg-docs sunholo/discord` (this file).
+Install: `ailang install sunholo/discord@0.5.1`, then
+`import pkg/sunholo/discord/client (...)` for channels/messages and
+`import pkg/sunholo/discord/interactions (...)` for slash commands. Consumer
+programs need `--caps Net` for the effectful entry points; the pure codecs run
+with no capabilities. Full quickstart, pagination pattern and error-kind table:
+package README.md and `ailang pkg-docs sunholo/discord` (this file).
+
+Interactions (0.5.0): decode what Discord POSTs to an Interactions Endpoint
+(`decodeInteraction` — PING and APPLICATION_COMMAND), build the immediate
+callback (`callbackPong`, `callbackDeferred`, `callbackMessage`), build
+followup payloads, and serialize command registrations
+(`commandDefinition`, `commandOption`, `registrationBody`). Ed25519 signature
+verification is host-side (e.g. pynacl) against the application PUBLIC key —
+never a secret.
 
 ```ailang
 import pkg/sunholo/discord/client (readMessages, messageJson)

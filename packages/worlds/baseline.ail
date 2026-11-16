@@ -43,9 +43,11 @@ pure func normalQuantile(u: float) -> float =
 
 -- Stable f_l for tiny rates. At large rates it is exactly 1 at float64
 -- precision; at extreme normal tails the correctly rounded result may be 0.
+-- Standard deviation of log10(lambda V t) in Sandberg's rate model (s3.1.1).
+export pure func abiogenesisSigmaDex() -> float = 50.0
 pure func lifeQuantile(u: float) -> float =
  if u <= 0.0 then 0.0 else if u >= 1.0 then 1.0 else {
-  let x=50.0*normalQuantile(u);
+  let x=abiogenesisSigmaDex()*normalQuantile(u);
   if x > 2.0 then 1.0 else {
    let rate=pow(10.0,x);
    if rate < 1e-5 then rate*(1.0-rate*(0.5-rate/6.0)) else 1.0-exp(-rate)

@@ -17,7 +17,7 @@ import std/math (sin, cos, exp, log, round, floatToInt, pow, floor)
 import std/option (Option, Some, None)
 import std/result (Result, Ok, Err)
 import std/string (join, floatToStr, length as textLength)
-import std/json (Json, decode, getString, getNumber, getBool, getArray, getObject, getInt, get, keys, JNull, JBool, JNumber, JString, JArray, JObject)
+import std/json (Json, decode, getString, getNumber, getBool, getArray, getObject, getInt, get, keys, asNumber, JNull, JBool, JString, JArray, JObject)
 import ./dsp (twoPi, absF, onePole, lowpass, sweepLowpass, softSat, normalisePeak)
 import ./noise (rampNoise, white)
 import ./safety (AudioError, InvalidRecipe, ResourceLimit, InvalidSamples, RenderLimits, limitsValid, inRange, samplesInRange, fitsWork)
@@ -234,13 +234,16 @@ export pure func parseRecipes(text: string) -> Result[[Recipe], string] = parseR
 pure func fieldErrors(j: Json, key: string, kind: string) -> [string] = match get(j, key) {
   None => [],
   Some(v) => {
-    let ok = match v {
-      JNumber(x) => if kind == "integer" then inRange(x, -2147483647.0, 2147483647.0) && x == floor(x) else kind == "number",
-      JString(_) => kind == "string",
-      JBool(_) => kind == "boolean",
-      JObject(_) => kind == "object",
-      JArray(_) => kind == "array",
-      JNull => false
+    -- asNumber reads both number shapes (decode gives integer literals as JInt on newer compilers).
+    let ok = match asNumber(v) {
+      Some(x) => if kind == "integer" then inRange(x, -2147483647.0, 2147483647.0) && x == floor(x) else kind == "number",
+      None => match v {
+        JString(_) => kind == "string",
+        JBool(_) => kind == "boolean",
+        JObject(_) => kind == "object",
+        JArray(_) => kind == "array",
+        _ => false
+      }
     };
     if ok then [] else ["${key}: expected ${kind}"]
   }

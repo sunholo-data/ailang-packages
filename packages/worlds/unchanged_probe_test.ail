@@ -1,0 +1,71 @@
+module sunholo/worlds/unchanged_probe_test
+-- Not a test of new behaviour: a probe that prints the outputs of every
+-- export that existed in 0.2.0, so two trees can be compared with cmp.
+--   ailang run --strict-bytecode --entry unchangedProbe unchanged_probe_test.ail
+-- Run it in a checkout of 0.2.0 (copy this one file in) and in this tree.
+import ./baseline (Prior,LogUniform,Measured,Fixed,AbiogenesisRate,baseline,baselineVersion,medianOf,quantileOf)
+import ./dial (Dial,Params,applyDial,zeroDial,luckDex)
+import ./disc (starsWithin,radiusQuantile,everWithin,aliveWithin,existInWindow)
+import ./occurrence (FGK,MDwarf,Other,etaEarth,sag13Expected,sag13Sample,planetCount)
+import ./history (PlanetState,Technological,Remnant,Complex,PreTech,historyOf,stateAt,epochs,preTechLeadLoYr,preTechLeadHiYr,collapseShare,ecocideShare,transcendenceShare)
+import ./planet_model (dwarfInTable,dwarfMassSun,centralRadiusEarth,massForRadius)
+import ./epoch_statistics (traceCappedMean,historyProbabilities)
+import ./propagate (Belief,certain,transitionRates,propagate,historyKernel,propagateExact,exactDomain,rateBetween,validParams)
+import std/result (Result,Ok,Err)
+import std/math (intToFloat)
+import std/list (map,foldl,range)
+import std/string (join)
+
+pure func us() -> [float] = [0.0,1e-12,0.001,0.02,0.1,0.25,0.4,0.5,0.6,0.75,0.9,0.98,0.999,1.0]
+pure func priors() -> [Prior] = [AbiogenesisRate,LogUniform(0.001,1.0),LogUniform(0.01,1.0),LogUniform(100.0,1e8),Fixed(0.4),Measured(1.65,1.46,1.84)]
+pure func quantiles() -> string = join(",",map(\p. join(" ",map(\u. "${quantileOf(p,u)}",us())),priors()))
+pure func dials() -> [Dial] = map(\i. {life:intToFloat(i%5)-2.0,minds:intToFloat(i%7)*0.5-1.0,tech:intToFloat(i%3)*0.75,lifetime:intToFloat(i%11)*0.5-2.5},range(0,40))
+pure func showP(p:Params) -> string = "${p.fLife} ${p.fComplex} ${p.fMinds} ${p.fTech} ${p.lifetimeYr} ${p.windowYr} ${p.remnantLoYr} ${p.remnantHiYr}"
+pure func dialled() -> string = join("\n",map(\d. "${showP(applyDial(baseline(),d))} luck ${luckDex(baseline(),d)}",dials()))
+pure func discRows() -> string {
+ let m={rho0Pc3:0.079,scaleHeightPc:300.0};
+ join("\n",map(\i. {
+  let r=81.5*intToFloat(i+1)*intToFloat(i+1);
+  let p=applyDial(baseline(),{life:0.0,minds:0.5,tech:0.25,lifetime:intToFloat(i%4)});
+  "${starsWithin(m,r)} ${radiusQuantile(m,r,intToFloat(i)/12.0)} ${everWithin(m,r,0.00012)} ${aliveWithin(m,r,0.00012,p)} ${existInWindow(m,r,0.00012,p,24000.0)}"
+ },range(0,12)))
+}
+pure func lattice(n:int) -> [float] = [
+ (intToFloat((n*7919)%10000)+0.5)/10000.0,(intToFloat((n*3571)%10000)+0.5)/10000.0,
+ (intToFloat((n*1237)%10000)+0.5)/10000.0,(intToFloat((n*1777)%10000)+0.5)/10000.0,
+ (intToFloat((n*8887)%10000)+0.5)/10000.0,(intToFloat((n*3019)%10000)+0.5)/10000.0,
+ (intToFloat((n*4567)%10000)+0.5)/10000.0,(intToFloat((n*4051)%10000)+0.5)/10000.0]
+pure func rich() -> Params = applyDial(baseline(),{life:1.0,minds:2.0,tech:1.5,lifetime:3.0})
+pure func histories(p:Params,n:int) -> string = join("\n",map(\i. {
+  let h=historyOf(p,i%17!=0,lattice(i));
+  let e=join(";",map(\x. match x {(s,t)=>"${show(s)}:${t}"},epochs(h)));
+  "${show(h.biosphere)} ${show(stateAt(h,0.0))} ${show(stateAt(h,1e6))} ${show(stateAt(h,-2e8))} ${e}"
+ },range(0,n)))
+pure func showB(r:Result[Belief,a]) -> string = match r {
+ Ok(b) => "${b.sterile} ${b.microbial} ${b.complex} ${b.preTech} ${b.technological} ${b.remnant} ${b.transcended} ${b.ecocide}",
+ Err(e) => "Err"
+}
+pure func arrivals() -> string {
+ let p=applyDial(baseline(),zeroDial());
+ let states=[Complex,PreTech,Technological,Remnant];
+ let years=[0.0,867.0,5e4,1e5,3e6,3e9];
+ let chain=match transitionRates(p) {
+  Ok(r) => join("\n",map(\s. join("\n",map(\y. showB(propagate(certain(s),r,y)),years)),states)),
+  Err(e) => "Err"
+ };
+ let exact=join("\n",map(\s. join("\n",map(\y. "${showB(historyKernel(p,s,y))} | ${showB(propagateExact(certain(s),rich(),y))} ${show(exactDomain(p,y))}",years)),states));
+ "${chain}\n${exact}"
+}
+pure func marginals() -> string = join("\n",map(\d. {
+  let q=historyProbabilities(applyDial(baseline(),d),16000.0);
+  "${q.life} ${q.mindsWindow} ${q.tech} ${q.remnant}"
+ },dials()))
+pure func misc() -> string {
+ let s=match sag13Sample(0.9,0.8) {(r,per)=>"${r} ${per}"};
+ let teffs=join(" ",map(\i. "${dwarfMassSun(2380.0+intToFloat(i)*484.0)}",range(0,11)));
+ let radii=join(" ",map(\i. "${centralRadiusEarth(0.01*intToFloat((i+1)*(i+1)*(i+1)))} ${massForRadius(0.5+intToFloat(i)*1.5,(intToFloat(i)+0.5)/11.0)}",range(0,11)));
+ "${baselineVersion()} ${medianOf(AbiogenesisRate)} ${etaEarth(FGK)} ${etaEarth(MDwarf)} ${etaEarth(Other)} ${sag13Expected(0.5,16.0,0.5,640.0)} ${s} ${planetCount(2.9,0.3,0.7)} ${show(dwarfInTable(3000.0))} ${teffs} ${radii} ${traceCappedMean(1e3,1e7,5e5)} ${preTechLeadLoYr()} ${preTechLeadHiYr()} ${collapseShare()} ${ecocideShare()} ${transcendenceShare()} ${show(validParams(rich()))}"
+}
+export pure func unchangedProbe() -> string =
+ "${quantiles()}\n${dialled()}\n${discRows()}\n${histories(applyDial(baseline(),zeroDial()),1000)}\n${histories(rich(),2000)}\n${arrivals()}\n${marginals()}\n${misc()}"
+test "the probe of 0.2.0's exports runs" { baselineVersion()=="baseline-2026.11" }

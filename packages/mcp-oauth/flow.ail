@@ -37,7 +37,7 @@ import std/list (map, filter, zip, length as listLen, contains)
 import std/bytes (fromBase64, toString)
 import std/io (println)
 import std/math (intToFloat, floatToInt)
-import ./core (ClientConfig, challengeMethodOk, pkceOk, redirectOk, codeExpiresAt, isExpired, verifierCharsOk, authResponseUrl,
+import ./core (ClientConfig, challengeMethodOk, pkceOk, redirectOk, codeExpiresAt, isExpired, verifierCharsOk, stateCharsOk, authResponseUrl,
   clientKind, cimdUrlOk, formGet, formUnescape, isSecretMethod, refreshPolicyOk, stableIdleExpiresAt, stableRefreshLive, stableAbsoluteSec)
 import ./clients (ClientRecord, DcrRequest, clientKey, clientRecordJson, parseClientRecord, clientLive, clientAccepted, touchClient,
   clientStoreExpiry, dcrUnusedTtlSec, dcrRedirectUriOk, validateDcr, dcrError, dcrResponseFields, dcrCallerWindowKey,
@@ -141,9 +141,10 @@ pure func statusOf(errJson: string) -> int =
 pure func errorResponse(errJson: string) -> (int, string, string) =
   if statusOf(errJson) == 401 then (401, errJson, basicChallenge()) else (statusOf(errJson), errJson, "")
 
--- state is echoed into the redirect URL unencoded, so only unreserved
--- characters are accepted (RFC 3986 §2.3), max 512.
-pure func stateOk(state: string) -> bool = length(state) <= 512 && verifierCharsOk(state)
+-- state: RFC 6749 VSCHAR, at most 2048 (core.stateCharsOk); the redirect
+-- echoes it percent-encoded (core.authResponseUrl). 0.2.0 allowed unreserved
+-- characters only, max 512, which refused Gemini Enterprise's web app (P0-2).
+pure func stateOk(state: string) -> bool = stateCharsOk(state)
 
 pure func getStringOr(j: Json, k: string) -> string = match getString(j, k) { Some(s) => s, None => "" }
 
@@ -327,7 +328,7 @@ func authorizeChecked(h: Hooks, loginUrl: string, clientId: string, kind: string
   else if challengeMethodOk(method) == false then Err(oauthError("invalid_request", "code_challenge_method must be S256"))
   else if length(challenge) != 43 then Err(oauthError("invalid_request", "code_challenge must be a 43-character S256 value"))
   else if redirectOk(redirectUri, registered) == false then Err(oauthError("invalid_request", "redirect_uri is not registered for this client"))
-  else if stateOk(state) == false then Err(oauthError("invalid_request", "state must be unreserved characters, at most 512"))
+  else if stateOk(state) == false then Err(oauthError("invalid_request", "state must be printable ASCII (RFC 6749 VSCHAR), at most 2048 characters"))
   else {
     let handle = newSecret();
     let rec = encode(jo([kv("client_id", js(clientId)), kv("redirect_uri", js(redirectUri)),

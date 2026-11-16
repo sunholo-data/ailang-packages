@@ -1,0 +1,54 @@
+-- sunholo/observe/constants — the constants of stapledons-design
+-- physics/observation.md §2.1 (baseline-2026.11), SI units.
+--
+-- Each is a nullary function whose name carries its unit. The photon, link
+-- and waste-heat modules take SI inputs (metres, seconds, kelvin, watts,
+-- hertz); convert distances with lightYearM() or parsecM(). The lightcone
+-- module is separate: it works at c = 1 in light-years and years.
+
+module sunholo/observe/constants
+
+import std/math (PI)
+
+export pure func pi() -> float = PI()
+
+-- Planck constant, J s (exact, SI 2019).
+export pure func planckJs() -> float = 6.62607015e-34
+
+-- Speed of light, m/s (exact).
+export pure func lightSpeedMs() -> float = 299792458.0
+
+-- Boltzmann constant, J/K (exact, SI 2019).
+export pure func boltzmannJK() -> float = 1.380649e-23
+
+-- Astronomical unit, m (exact, IAU 2012 Resolution B2).
+export pure func auM() -> float = 149597870700.0
+
+-- Parsec, m: 648000/pi AU (IAU 2015 Resolution B2) = 3.0856775814913673e16.
+export pure func parsecM() -> float = auM() * 648000.0 / pi()
+
+-- Julian light-year, m: c x 365.25 x 86400 s = 9.4607304725808e15.
+export pure func lightYearM() -> float = lightSpeedMs() * 365.25 * 86400.0
+
+-- Jansky, W m^-2 Hz^-1.
+export pure func janskyWm2Hz() -> float = 1e-26
+
+-- Arcsecond and milliarcsecond, rad.
+export pure func arcsecRad() -> float = pi() / (180.0 * 3600.0)
+export pure func masRad() -> float = arcsecRad() / 1000.0
+
+-- Nominal solar radius (m) and effective temperature (K), IAU 2015 Resolution B3.
+export pure func solarRadiusM() -> float = 695700000.0
+export pure func solarTeffK() -> float = 5772.0
+
+-- Nominal equatorial radii of Earth and Jupiter, m (IAU 2015 Resolution B3).
+export pure func earthRadiusM() -> float = 6378100.0
+export pure func jupiterRadiusM() -> float = 71492000.0
+
+-- hc/k, m K: the second radiation constant. x = hc/(lambda k T) = c2 / (lambda T).
+export pure func secondRadiationMK() -> float = planckJs() * lightSpeedMs() / boltzmannJK()
+
+-- The two pinned detection thresholds (observation.md §2.4, ruling 2;
+-- OB-41, OB-42): SNR 5 is "a hint", SNR 10 is "strong".
+export pure func snrHint() -> float = 5.0
+export pure func snrStrong() -> float = 10.0

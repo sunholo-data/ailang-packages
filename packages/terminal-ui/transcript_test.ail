@@ -104,3 +104,11 @@ property "generated text survives the versioned codec exactly" {
     _ => false
   }
 }
+
+-- Integer literals decode as JInt on newer compilers and as JNumber on older ones; both are integers here.
+test "hand-written integer and integral-float literals decode; a fraction does not" {
+  let cfg = \cols. "{\"version\":1,\"config\":{\"columns\":${cols},\"rows\":24,\"ansi\":false,\"max_events\":8,\"max_bytes\":4096,\"max_frame_bytes\":4096},\"events\":[]}";
+  decodeTranscript(cfg("60"), 4096) == Ok({ version: 1, config: config(), events: [] })
+    && decodeTranscript(cfg("60.0"), 4096) == Ok({ version: 1, config: config(), events: [] })
+    && (match decodeTranscript(cfg("60.5"), 4096) { Err(_) => true, Ok(_) => false })
+}

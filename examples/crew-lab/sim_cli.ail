@@ -6,7 +6,7 @@ import std/result (Result, Ok, Err)
 import std/option (Option, Some, None)
 import std/list (map, filter, foldl, length, head, any, range, sortBy, nth, flatMap, forEachE)
 import std/string (join, split, stringToInt, trim)
-import std/json (Json, JObject, JNumber, decode)
+import std/json (Json, JObject, decode, asNumber)
 import std/math (intToFloat, floatToInt, floor)
 import std/crypto (sha256Hex)
 import pkg/sunholo/crew_core/scenario (Scenario, decodeScenario, scenarioHash)
@@ -65,10 +65,14 @@ func readOr(path: string, fallback: string) -> Result[string, string] ! {FS} =
 
 type Sample = {path: string, value: float} deriving (Eq)
 
-pure func leaves(prefix: string, j: Json) -> [Sample] = match j {
- JNumber(n) => [{path: prefix, value: n}],
- JObject(kvs) => flatMap(\p. leaves(if prefix == "" then p.key else "${prefix}.${p.key}", p.value), kvs),
- _ => []
+-- asNumber reads both number shapes: decode gives an integer literal as JInt on
+-- newer compilers and as JNumber on older ones.
+pure func leaves(prefix: string, j: Json) -> [Sample] = match asNumber(j) {
+ Some(n) => [{path: prefix, value: n}],
+ None => match j {
+  JObject(kvs) => flatMap(\p. leaves(if prefix == "" then p.key else "${prefix}.${p.key}", p.value), kvs),
+  _ => []
+ }
 }
 
 pure func paths(xs: [Sample], seen: [string]) -> [string] = match xs {

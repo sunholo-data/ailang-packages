@@ -1,0 +1,118 @@
+-- sunholo/observe/link — the radio link budget: how far a transmitter of a
+-- given power can be heard by a receiver of a given area and noise.
+--
+-- The formulas are stapledons-design physics/observation.md §2.6
+-- (baseline-2026.11), the radiometer equation as Sheikh et al. 2025 Eq. 1–3
+-- write it; rows OB-28..OB-37, OB-51 and OB-52 are the tests.
+--
+-- Units: SI. ...W watts (EIRP: the power an isotropic transmitter would need
+-- to look as bright as the real beam does from inside it), ...M metres,
+-- ...M2 square metres, ...K kelvin, ...Hz hertz, seconds. Convert distances
+-- with constants.lightYearM().
+--
+-- The model (registry §5): a signal narrower than one channel, no Doppler
+-- drift, no interstellar scattering, and a transmitter that points at the
+-- receiver for the whole integration. Whether a beam points at the ship at
+-- all is a likelihood (belief), not a budget.
+
+module sunholo/observe/link
+
+import std/math (sqrt)
+import ./constants (pi, boltzmannJK, janskyWm2Hz)
+
+-- Effective area of a circular dish: efficiency x pi D^2 / 4, m^2.
+export pure func dishAreaM2(diameterM: float, efficiency: float) -> float
+  requires { diameterM > 0.0, efficiency > 0.0, efficiency <= 1.0 }
+  ensures { result > 0.0 }
+{
+  efficiency * pi() * diameterM * diameterM / 4.0
+}
+
+-- System equivalent flux density, W m^-2 Hz^-1: SEFD = 2 k T_sys / A_e.
+export pure func sefdWm2Hz(areaM2: float, tSysK: float) -> float
+  requires { areaM2 > 0.0, tSysK > 0.0 }
+  ensures { result > 0.0 }
+{
+  2.0 * boltzmannJK() * tSysK / areaM2
+}
+
+-- The same in janskys (1 Jy = 1e-26 W m^-2 Hz^-1).
+export pure func sefdJy(areaM2: float, tSysK: float) -> float
+  requires { areaM2 > 0.0, tSysK > 0.0 }
+  ensures { result > 0.0 }
+{
+  sefdWm2Hz(areaM2, tSysK) / janskyWm2Hz()
+}
+
+-- Flux at distance d from a transmitter of the given EIRP, W m^-2:
+-- EIRP / (4 pi d^2).
+export pure func fluxWm2(eirpW: float, distanceM: float) -> float
+  requires { eirpW >= 0.0, distanceM > 0.0 }
+  ensures { result >= 0.0 }
+{
+  eirpW / (4.0 * pi() * distanceM * distanceM)
+}
+
+-- linkSnr for a receiver given by its SEFD: EIRP / (4 pi d^2 x SEFD x B).
+export pure func linkSnrSefd(eirpW: float, distanceM: float, sefd: float, bandwidthHz: float) -> float
+  requires { eirpW >= 0.0, distanceM > 0.0, sefd > 0.0, bandwidthHz > 0.0 }
+  ensures { result >= 0.0 }
+{
+  fluxWm2(eirpW, distanceM) / (sefd * bandwidthHz)
+}
+
+-- The SNR in one channel of width B after one coherence time t = 1/B, for a
+-- signal narrower than the channel (registry §2.6, OB-30):
+--   linkSnr = EIRP / (4 pi d^2 x SEFD x B),  SEFD = 2 k T_sys / A_e
+export pure func linkSnr(eirpW: float, distanceM: float, areaM2: float, bandwidthHz: float, tSysK: float) -> float
+  requires { eirpW >= 0.0, distanceM > 0.0, areaM2 > 0.0, bandwidthHz > 0.0, tSysK > 0.0 }
+  ensures { result >= 0.0 }
+{
+  linkSnrSefd(eirpW, distanceM, sefdWm2Hz(areaM2, tSysK), bandwidthHz)
+}
+
+-- The radiometer equation: SNR(t) = linkSnr x sqrt(n_pol x B x t).
+-- Averaging for t seconds gains sqrt(B t); it needs B t >= 1.
+export pure func integratedSnr(oneChannelSnr: float, nPol: float, bandwidthHz: float, seconds: float) -> float
+  requires { oneChannelSnr >= 0.0, nPol >= 1.0, bandwidthHz > 0.0, bandwidthHz * seconds >= 1.0 }
+  ensures { result >= 0.0 }
+{
+  oneChannelSnr * sqrt(nPol * bandwidthHz * seconds)
+}
+
+-- The distance at which a transmitter reaches a target SNR after t seconds,
+-- metres, for a receiver given by its SEFD:
+--   d = sqrt( EIRP / (4 pi x SNR x SEFD) x sqrt(n_pol x t / B) )
+export pure func reachSefdM(eirpW: float, targetSnr: float, sefd: float, nPol: float, bandwidthHz: float, seconds: float) -> float
+  requires { eirpW >= 0.0, targetSnr > 0.0, sefd > 0.0, nPol >= 1.0, bandwidthHz > 0.0, bandwidthHz * seconds >= 1.0 }
+  ensures { result >= 0.0 }
+{
+  sqrt(eirpW / (4.0 * pi() * targetSnr * sefd) * sqrt(nPol * seconds / bandwidthHz))
+}
+
+-- The same for a receiver given by its effective area and system temperature.
+export pure func reachM(eirpW: float, targetSnr: float, areaM2: float, tSysK: float, nPol: float, bandwidthHz: float, seconds: float) -> float
+  requires { eirpW >= 0.0, targetSnr > 0.0, areaM2 > 0.0, tSysK > 0.0, nPol >= 1.0, bandwidthHz > 0.0, bandwidthHz * seconds >= 1.0 }
+  ensures { result >= 0.0 }
+{
+  reachSefdM(eirpW, targetSnr, sefdWm2Hz(areaM2, tSysK), nPol, bandwidthHz, seconds)
+}
+
+-- EIRP of a broadcast carrier from the station's effective radiated power:
+-- 1.64 (the gain of the half-wave dipole ERP is referred to) x the fraction
+-- of the power in the carrier x ERP (Sullivan & Knowles 1985; OB-34 uses
+-- fraction 0.4 and ERP 1000 kW).
+export pure func eirpFromErpW(erpW: float, carrierFraction: float) -> float
+  requires { erpW >= 0.0, carrierFraction >= 0.0, carrierFraction <= 1.0 }
+  ensures { result >= 0.0 }
+{
+  1.64 * carrierFraction * erpW
+}
+
+-- The ship's starting receiver (registry ruling 3): a 100 m dish of aperture
+-- efficiency 0.70 at T_sys = 25 K. referenceTsysK is also the large array's.
+export pure func referenceDishAreaM2() -> float = dishAreaM2(100.0, 0.70)
+export pure func referenceTsysK() -> float = 25.0
+
+-- The later, large receiver: an effective area of one square kilometre.
+export pure func largeArrayAreaM2() -> float = 1000000.0

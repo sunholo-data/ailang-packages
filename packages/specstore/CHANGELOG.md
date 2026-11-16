@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.3.9
+
+0.3.8 merged with the number fix made on `main` while 0.3.2–0.3.8 were in review (`f9d7359`, `54ecdaf`). Its entry was headed 0.3.2, which the registry already held for a different release, so it is recorded here:
+
+Fix: numbers in specs and pushes. AILANG's `std/json` now decodes an integer literal such as `60` as `JInt(60)`; only fractional and
+exponent literals stay `JNumber`. Older compilers give `JNumber(60.0)` for both.
+`model.str` rendered a number by stripping `JNumber(` from `show`, so an integer spec field such as
+`version: 2` read as `JInt(2` on such a compiler; `qa.valueText` matched only `JNumber`. Both now read
+numbers with `asNumber` and give exactly the 0.3.1 text on every compiler (`2.0`, and `60` for a pushed
+value). Signatures are unchanged.
+
+0.3.8 read a whole-number spec field as `2`; 0.3.9 keeps the earlier `2.0`, as above. Timestamps keep 0.3.8's fix. Tests: `qa_test.ail` (47), `check_test.ail` (16), `view_test.ail` (13).
+
 ## 0.3.8
 
 A skipped step is not a gap. The tag-check engine can mark a step optional (a pick that finds nothing on

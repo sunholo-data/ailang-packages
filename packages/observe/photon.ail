@@ -1,0 +1,351 @@
+-- sunholo/observe/photon — photon budgets: how many photons a star or a
+-- planet sends into an aperture, how faint the planet is beside its star,
+-- the background it is counted against, and how long a given SNR takes.
+--
+-- The formulas are stapledons-design physics/observation.md §2.2–§2.5
+-- (baseline-2026.11); its rows OB-1..OB-27 and OB-41..OB-50 are the tests.
+-- An instrument's reach is the output of these budgets for stated inputs,
+-- never an authored range.
+--
+-- Units: SI. Every parameter name carries its unit: ...M metres, ...K kelvin,
+-- ...S seconds, ...Rad radians, ...Arcsec2 square arcseconds. Rates are
+-- counted photons per second in one resolution element. Distances are metres;
+-- convert with constants.lightYearM() or parsecM().
+--
+-- The model, stated once (registry §5): the star is a blackbody; a band is a
+-- top hat; throughput is grey; the planet is a Lambert sphere with one albedo;
+-- noise is plain Poisson (no factor 2 for background subtraction, no read
+-- noise); the inner working angle is a hard edge.
+
+module sunholo/observe/photon
+
+import std/math (exp, sqrt, sin, cos, pow, intToFloat)
+import ./constants (pi, lightSpeedMs, secondRadiationMK, parsecM, arcsecRad)
+
+-- A top-hat band: every wavelength from loM to hiM counts fully.
+export type Band = { loM: float, hiM: float }
+
+-- A blackbody sphere: effective temperature and radius.
+export type Blackbody = { tempK: float, radiusM: float }
+
+-- A coronagraphic spectrograph, by its physical parameters.
+--   apertureM           unobscured circular aperture diameter D
+--   throughput          tau: fraction of photons entering the aperture that are counted
+--   rawContrast         zeta: starlight left at the planet's position, as a fraction of the star's rate
+--   iwaScales           n_IWA: the inner working angle in units of lambda/D
+--   nPix                detector pixels per resolution element
+--   darkPerPixS         dark current, counts per pixel per second
+--   photApertureScales  X: radius of the photometric aperture in units of lambda/D
+export type Instrument = { apertureM: float, throughput: float, rawContrast: float, iwaScales: float,
+  nPix: float, darkPerPixS: float, photApertureScales: float }
+
+-- Zodiacal light.
+--   localLevel       l: local zodi level (1 = the view from 1 AU in a system like the Sun's; 0 in interstellar space)
+--   localMagArcsec2  z: surface brightness of local zodi, mag arcsec^-2
+--   exoZodis         n: how many zodis of exozodi the target system has
+--   exoMagArcsec2    z1: surface brightness of one zodi of exozodi, mag arcsec^-2
+--   hostAbsMag       M_V: the host star's absolute magnitude (its magnitude from 10 pc)
+export type Zodi = { localLevel: float, localMagArcsec2: float, exoZodis: float, exoMagArcsec2: float, hostAbsMag: float }
+
+-- The three counted rates of §2.4, per second in one resolution element.
+export type Budget = { signal: float, background: float, dark: float }
+
+-- ---------- sources and bands ----------
+
+-- The Sun as the registry's blackbody: nominal R_sun and T_sun (IAU 2015 B3).
+export pure func sunBlackbody() -> Blackbody = { tempK: 5772.0, radiusM: 695700000.0 }
+
+-- The narrowest band float64 can hold: a width of at least 1e-13 of the
+-- centre. Below about 2e-16 of the centre the two edges round to the same
+-- double; 1e-13 leaves three digits of headroom, and is a resolving power of
+-- 1e13, far beyond any spectrograph.
+export pure func narrowBandOk(centreM: float, widthM: float) -> bool = widthM > 0.0 && widthM >= 0.0000000000001 * centreM
+
+-- A top hat of full width widthM centred on centreM. The width must be at
+-- least 1e-13 of the centre (narrowBandOk), so that hiM > loM in float64 and
+-- not only over the reals.
+export pure func bandOf(centreM: float, widthM: float) -> Band
+  requires { widthM > 0.0, centreM > widthM / 2.0, widthM >= 0.0000000000001 * centreM }
+  ensures { result.hiM > result.loM }
+{
+  { loM: centreM - widthM / 2.0, hiM: centreM + widthM / 2.0 }
+}
+
+-- One spectral resolution element at lambda0 and resolving power R: the band
+-- lambda0 +- (lambda0 / R) / 2. R is at most 1e12, which keeps the width
+-- inside bandOf's float64 domain.
+export pure func resolutionElement(lambda0M: float, resolvingPower: float) -> Band
+  requires { lambda0M > 0.0, resolvingPower >= 1.0, resolvingPower <= 1000000000000.0 }
+  ensures { result.hiM > result.loM }
+{
+  bandOf(lambda0M, lambda0M / resolvingPower)
+}
+
+-- G(x) = sum over n >= 1 of exp(-n x) (x^2/n + 2x/n^2 + 2/n^3): the integral
+-- of t^2 / (e^t - 1) from x to infinity. Summed until a term is below 1e-18
+-- of the total, or 2500 terms (enough for x >= 0.02, where the last term
+-- carries e^-50).
+pure func planckTail(x: float, n: int, acc: float) -> float =
+  if n > 2500 then acc
+  else {
+    let fn = intToFloat(n);
+    let term = exp(0.0 - fn * x) * (x * x / fn + 2.0 * x / (fn * fn) + 2.0 / (fn * fn * fn));
+    let total = acc + term;
+    if term < 0.000000000000000001 * total then total else planckTail(x, n + 1, total)
+  }
+
+-- The blackbody photon radiance in a band, photons s^-1 m^-2 sr^-1:
+--   integral over [loM, hiM] of 2c / lambda^4 / (exp(hc/(lambda k T)) - 1)
+--   = 2c (kT/(hc))^3 [G(x_lo) - G(x_hi)],  x = hc/(lambda k T)
+-- by the exact series (registry §2.2). Accurate to a relative 1e-6 against
+-- Simpson's rule over the stated domain: hiM x tempK <= 0.7 m K (x >= 0.02;
+-- at 5772 K that is 121 um, at 30000 K 23 um). Far into the Wien tail the
+-- result underflows to 0.
+export pure func planckPhotonRadiance(tempK: float, band: Band) -> float
+  requires { tempK > 0.0, band.loM > 0.0, band.hiM > band.loM, band.hiM * tempK <= 0.7 }
+  ensures { result >= 0.0 }
+{
+  let c2 = secondRadiationMK();
+  let xHi = c2 / (band.loM * tempK);
+  let xLo = c2 / (band.hiM * tempK);
+  let k = tempK / c2;
+  let g = planckTail(xLo, 1, 0.0) - planckTail(xHi, 1, 0.0);
+  2.0 * lightSpeedMs() * k * k * k * (if g > 0.0 then g else 0.0)
+}
+
+-- Photon flux from a blackbody sphere at distance d, photons s^-1 m^-2:
+-- F = pi (R/d)^2 x the band radiance.
+export pure func photonFlux(src: Blackbody, distanceM: float, band: Band) -> float
+  requires { distanceM > 0.0, src.radiusM > 0.0, src.tempK > 0.0, band.loM > 0.0, band.hiM > band.loM, band.hiM * src.tempK <= 0.7 }
+  ensures { result >= 0.0 }
+{
+  let r = src.radiusM / distanceM;
+  pi() * r * r * planckPhotonRadiance(src.tempK, band)
+}
+
+-- Area of an unobscured circular aperture of diameter D, m^2.
+export pure func apertureAreaM2(apertureM: float) -> float
+  requires { apertureM > 0.0 }
+  ensures { result > 0.0 }
+{
+  pi() * apertureM * apertureM / 4.0
+}
+
+-- Counted photon rate from a blackbody star, photons s^-1:
+-- N = F x (pi D^2 / 4) x tau. throughput is the fraction of photons entering
+-- the aperture that are counted (optics, coronagraph and detector).
+export pure func photonRate(src: Blackbody, distanceM: float, apertureM: float, band: Band, throughput: float) -> float
+  requires { distanceM > 0.0, apertureM > 0.0, throughput >= 0.0, throughput <= 1.0,
+             src.radiusM > 0.0, src.tempK > 0.0, band.loM > 0.0, band.hiM > band.loM, band.hiM * src.tempK <= 0.7 }
+  ensures { result >= 0.0 }
+{
+  photonFlux(src, distanceM, band) * apertureAreaM2(apertureM) * throughput
+}
+
+-- ---------- the planet beside its star ----------
+
+-- The phase function of a Lambert sphere: (sin a + (pi - a) cos a) / pi.
+-- alphaRad is the phase angle star-planet-observer: 0 at full phase (1),
+-- pi/2 at quadrature (1/pi), pi at new (0). A rounding residue outside
+-- [0, 1] (possible within about 1e-8 rad of full or new phase) is returned
+-- as the bound.
+export pure func lambertPhase(alphaRad: float) -> float
+  requires { alphaRad >= 0.0, alphaRad <= 3.1415926535897936 }
+  ensures { result >= 0.0, result <= 1.0 }
+{
+  let f = (sin(alphaRad) + (pi() - alphaRad) * cos(alphaRad)) / pi();
+  if f < 0.0 then 0.0 else if f > 1.0 then 1.0 else f
+}
+
+-- Reflected-light contrast, the planet's brightness over its star's:
+-- C = A_g x Phi(alpha) x (R_p / a)^2. The planet's photon rate is C times
+-- the star's.
+export pure func planetContrast(geomAlbedo: float, planetRadiusM: float, orbitM: float, phaseRad: float) -> float
+  requires { geomAlbedo >= 0.0, planetRadiusM >= 0.0, orbitM > 0.0, phaseRad >= 0.0, phaseRad <= 3.1415926535897936 }  ensures { result >= 0.0 }
+{
+  let r = planetRadiusM / orbitM;
+  geomAlbedo * lambertPhase(phaseRad) * r * r
+}
+
+-- The brightness factor of m magnitudes: 10^(-0.4 m). Five magnitudes
+-- fainter is 100 times dimmer.
+export pure func magFactor(mag: float) -> float
+  ensures { result >= 0.0 }
+{
+  pow(10.0, 0.0 - 0.4 * mag)
+}
+
+-- The noise floor: a planet whose contrast is below 10^(-0.4 deltaMag)
+-- cannot be detected in any integration time.
+export pure func noiseFloorContrast(deltaMag: float) -> float
+  ensures { result >= 0.0 }
+{
+  magFactor(deltaMag)
+}
+
+-- ---------- what the coronagraph can reach ----------
+
+-- The diffraction scale lambda / D, radians.
+export pure func diffractionRad(lambdaM: float, apertureM: float) -> float
+  requires { lambdaM > 0.0, apertureM > 0.0 }
+  ensures { result > 0.0 }
+{
+  lambdaM / apertureM
+}
+
+-- The inner working angle n_IWA x lambda / D, radians: the coronagraph
+-- cannot see a planet closer to its star than this.
+export pure func innerWorkingAngleRad(iwaScales: float, lambdaM: float, apertureM: float) -> float
+  requires { iwaScales >= 0.0, lambdaM > 0.0, apertureM > 0.0 }
+  ensures { result >= 0.0 }
+{
+  iwaScales * lambdaM / apertureM
+}
+
+-- The angle a projected separation subtends at distance d, radians (small
+-- angle: a / d).
+export pure func separationRad(separationM: float, distanceM: float) -> float
+  requires { separationM >= 0.0, distanceM > 0.0 }
+  ensures { result >= 0.0 }
+{
+  separationM / distanceM
+}
+
+-- The largest distance at which a planet at projected separation a clears
+-- the inner working angle: d_max = a / theta_IWA, metres.
+export pure func iwaLimitDistanceM(separationM: float, iwaScales: float, lambdaM: float, apertureM: float) -> float
+  requires { separationM >= 0.0, iwaScales > 0.0, lambdaM > 0.0, apertureM > 0.0 }
+  ensures { result >= 0.0 }
+{
+  separationM / (iwaScales * lambdaM / apertureM)
+}
+
+-- Whether the planet sits at or outside the inner working angle: a/d >= theta_IWA.
+export pure func observable(separationM: float, distanceM: float, iwaScales: float, lambdaM: float, apertureM: float) -> bool
+  requires { separationM >= 0.0, distanceM > 0.0, iwaScales >= 0.0, lambdaM > 0.0, apertureM > 0.0 }
+{
+  separationRad(separationM, distanceM) >= innerWorkingAngleRad(iwaScales, lambdaM, apertureM)
+}
+
+-- ---------- background ----------
+
+-- The photometric aperture Omega = pi (X lambda0 / D)^2, in arcsec^2: the
+-- patch of sky whose light is added up with the planet's.
+export pure func photometricApertureArcsec2(scales: float, lambda0M: float, apertureM: float) -> float
+  requires { scales >= 0.0, lambda0M > 0.0, apertureM > 0.0 }
+  ensures { result >= 0.0 }
+{
+  let r = scales * lambda0M / apertureM / arcsecRad();
+  pi() * r * r
+}
+
+-- N0 = N*(10 pc) x 10^(0.4 M_V): the counted rate of a star of apparent
+-- magnitude 0 with the host's spectrum, through the same instrument and
+-- resolution element. starRateAt10pc is the host's counted rate from 10 pc.
+export pure func zeroMagRate(starRateAt10pc: float, absMag: float) -> float
+  requires { starRateAt10pc >= 0.0 }
+  ensures { result >= 0.0 }
+{
+  starRateAt10pc * pow(10.0, 0.4 * absMag)
+}
+
+-- One zodiacal term, counted photons s^-1: N0 x Omega x level x 10^(-0.4 mag).
+-- Local zodi is (l, z); exozodi is (n, z1).
+export pure func zodiRate(zeroMag: float, omegaArcsec2: float, level: float, magArcsec2: float) -> float
+  requires { zeroMag >= 0.0, omegaArcsec2 >= 0.0, level >= 0.0 }
+  ensures { result >= 0.0 }
+{
+  zeroMag * omegaArcsec2 * level * magFactor(magArcsec2)
+}
+
+-- Z = N0 x Omega x (l x 10^(-0.4 z) + n x 10^(-0.4 z1)): local zodi plus exozodi.
+export pure func zodiTotalRate(zeroMag: float, omegaArcsec2: float, zodi: Zodi) -> float
+  requires { zeroMag >= 0.0, omegaArcsec2 >= 0.0, zodi.localLevel >= 0.0, zodi.exoZodis >= 0.0 }
+  ensures { result >= 0.0 }
+{
+  zeroMag * omegaArcsec2 * (zodi.localLevel * magFactor(zodi.localMagArcsec2) + zodi.exoZodis * magFactor(zodi.exoMagArcsec2))
+}
+
+-- Residual starlight at the planet's position, zeta x N*.
+export pure func residualStarRate(rawContrast: float, starRate: float) -> float
+  requires { rawContrast >= 0.0, starRate >= 0.0 }
+  ensures { result >= 0.0 }
+{
+  rawContrast * starRate
+}
+
+-- The background rate B = zeta x N* + Z.
+export pure func backgroundRate(rawContrast: float, starRate: float, zodiTotal: float) -> float
+  requires { rawContrast >= 0.0, starRate >= 0.0, zodiTotal >= 0.0 }
+  ensures { result >= 0.0 }
+{
+  residualStarRate(rawContrast, starRate) + zodiTotal
+}
+
+-- The dark rate D = n_pix x xi, counts s^-1.
+export pure func darkRate(nPix: float, darkPerPixS: float) -> float
+  requires { nPix >= 0.0, darkPerPixS >= 0.0 }
+  ensures { result >= 0.0 }
+{
+  nPix * darkPerPixS
+}
+
+-- ---------- signal to noise ----------
+
+-- SNR(t) = S t / sqrt((S + B + D) t), plain Poisson noise. Rates in counted
+-- photons per second in one resolution element; 0 when nothing is counted.
+export pure func snr(signalRate: float, backgroundRate: float, darkRate: float, seconds: float) -> float
+  requires { signalRate >= 0.0, backgroundRate >= 0.0, darkRate >= 0.0, seconds >= 0.0 }
+  ensures { result >= 0.0 }
+{
+  let n = (signalRate + backgroundRate + darkRate) * seconds;
+  if n > 0.0 then signalRate * seconds / sqrt(n) else 0.0
+}
+
+-- The integration time to reach a target SNR, seconds:
+-- t = SNR^2 (S + B + D) / S^2.
+export pure func timeToSnrS(targetSnr: float, signalRate: float, backgroundRate: float, darkRate: float) -> float
+  requires { targetSnr >= 0.0, signalRate > 0.0, backgroundRate >= 0.0, darkRate >= 0.0 }
+  ensures { result >= 0.0 }
+{
+  targetSnr * targetSnr * (signalRate + backgroundRate + darkRate) / (signalRate * signalRate)
+}
+
+-- ---------- the registry's reference inputs (§4) ----------
+
+-- The reference instrument: D = 10 m, tau = 0.04, zeta = 1e-10,
+-- n_IWA = 3.5, n_pix = 192, xi = 3e-5 s^-1, X = 0.7.
+export pure func referenceInstrument() -> Instrument =
+  { apertureM: 10.0, throughput: 0.04, rawContrast: 1e-10, iwaScales: 3.5, nPix: 192.0, darkPerPixS: 3e-5, photApertureScales: 0.7 }
+
+-- The registry's zodiacal light: l = 1, z = 23, n = 4.5, z1 = 22, and the
+-- Sun's M_V = 4.81.
+export pure func referenceZodi() -> Zodi =
+  { localLevel: 1.0, localMagArcsec2: 23.0, exoZodis: 4.5, exoMagArcsec2: 22.0, hostAbsMag: 4.81 }
+
+-- No zodiacal light (Z = 0), the comparison of OB-48.
+export pure func noZodi() -> Zodi =
+  { localLevel: 0.0, localMagArcsec2: 23.0, exoZodis: 0.0, exoMagArcsec2: 22.0, hostAbsMag: 4.81 }
+
+-- The three rates for a planet of the given contrast beside a blackbody
+-- star at distance d, in one resolution element at lambda0 and resolving
+-- power R: S = C x N*, B = zeta x N* + Z, D = n_pix x xi. This is the photon
+-- budget only: it does not test the inner working angle (use `observable`)
+-- or the noise floor (compare the contrast with noiseFloorContrast).
+export pure func planetBudget(star: Blackbody, contrast: float, distanceM: float, lambda0M: float, resolvingPower: float,
+                              inst: Instrument, zodi: Zodi) -> Budget
+  requires { contrast >= 0.0, distanceM > 0.0, lambda0M > 0.0, resolvingPower >= 1.0, resolvingPower <= 1000000000000.0,
+             star.radiusM > 0.0, star.tempK > 0.0, lambda0M * (1.0 + 0.5 / resolvingPower) * star.tempK <= 0.7,
+             inst.apertureM > 0.0, inst.throughput >= 0.0, inst.throughput <= 1.0, inst.rawContrast >= 0.0,
+             inst.nPix >= 0.0, inst.darkPerPixS >= 0.0, inst.photApertureScales >= 0.0,
+             zodi.localLevel >= 0.0, zodi.exoZodis >= 0.0 }
+  ensures { result.signal >= 0.0, result.background >= 0.0, result.dark >= 0.0 }
+{
+  let band = resolutionElement(lambda0M, resolvingPower);
+  let starRate = photonRate(star, distanceM, inst.apertureM, band, inst.throughput);
+  let n0 = zeroMagRate(photonRate(star, 10.0 * parsecM(), inst.apertureM, band, inst.throughput), zodi.hostAbsMag);
+  let omega = photometricApertureArcsec2(inst.photApertureScales, lambda0M, inst.apertureM);
+  { signal: contrast * starRate,
+    background: backgroundRate(inst.rawContrast, starRate, zodiTotalRate(n0, omega, zodi)),
+    dark: darkRate(inst.nPix, inst.darkPerPixS) }
+}

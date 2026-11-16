@@ -139,3 +139,13 @@ test "an unknown or misspelt layer or env key is refused; notes are allowed" {
   && parses(layerJson(",\"about\":\"the thud\"")) && parses(layerJson(",\"env\":{\"attack\":0.01}"))
 }
 
+
+-- Integer literals decode as JInt on newer compilers and as JNumber on older ones; the field checks read both alike.
+test "integer literals pass number and integer field checks; fractions still fail integer ones" {
+  let good = \s. match parseRecipes(one(s)) { Ok(_) => true, Err(_) => false };
+  let bad = \s. match parseRecipes(one(s)) { Err(_) => true, Ok(_) => false };
+  good("{\"id\":\"x\",\"seconds\":1,\"rate\":8000,\"layers\":[{\"seed\":2,\"freq\":440,\"amp\":1}]}")
+  && good("{\"id\":\"x\",\"seconds\":1.0,\"rate\":8000.0,\"layers\":[{\"seed\":2.0,\"freq\":440.0}]}")
+  && bad("{\"id\":\"x\",\"seconds\":1,\"rate\":8000.5,\"layers\":[{}]}")
+  && bad("{\"id\":\"x\",\"seconds\":\"1\",\"layers\":[{}]}")
+}
