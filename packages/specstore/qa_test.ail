@@ -6,8 +6,9 @@ import std/yaml (decode as yamlDecode)
 import std/json (Json, JNull, decode)
 import std/list (map, length)
 import ./rules (worstOutcome, visitOutcome)
-import ./model (Std, Spec, toStd, toSpec, str)
-import ./qa (seenOf, outcomeFor, outcomeWith, visitsOf, visitChecks, waitingForRelease, checksGa4, valueText)
+import ./model (Std, Spec, Event, toStd, toSpec, str)
+import ./qa (shortOf, seenOf, outcomeFor, outcomeWith, visitsOf, visitChecks, waitingForRelease, checksGa4, eventCounts, checkOf, roundYaml, visitResults, statusOf, sameValue, pathOf, pagesOf, valueText)
+import std/string (find)
 
 func y(s: string) -> Json = match yamlDecode(s) { Ok(j) => j, Err(_) => JNull }
 
@@ -32,11 +33,8 @@ func seen(status: string, pushes: string, hits: string) -> Json =
   y("{visits: [{id: V01, status: ${status}, reason: r, datalayer: [${pushes}], hits: [${hits}]}]}")
 
 func outcome(sp: Spec, o: Json, n: int) -> int =
-  match sp.events {
-    [] => -1,
-    [x, ..._] => match outcomeFor(std(), visitsOf(sp), seenOf(o), match sp.events { [a, b, c] => if n == 1 then a else if n == 2 then b else c, _ => x }) {
-      (s, _) => s
-    }
+  match outcomeFor(std(), visitsOf(sp), seenOf(o), match sp.events { [a, b, c] => if n == 1 then a else if n == 2 then b else c, _ => firstEvent(sp) }) {
+    (s, _) => s
   }
 
 func v01() -> string = "  - {id: V01, url: /, consent: accept, expects: [E01, E02]}"
@@ -122,6 +120,174 @@ test "site.checks without ga4 turns GA4 off; no checks list keeps it on" {
 
 test "a change not yet live waits for release; a live one is checked" {
   match shop("").events { [a, b] => !waitingForRelease(a) && waitingForRelease(b), _ => false }
+}
+
+-- A spec in these tests always has events; the empty arm only satisfies the exhaustiveness check.
+func noEvent() -> Event = { id: "", description: "", trigger: "", scope: "", eventName: "", dlEvent: "", priority: "",
+  params: [], since: "", changed: "", live: "", note: "" }
+
+func firstEvent(sp: Spec) -> Event = match sp.events { [x, ..._] => x, [] => noEvent() }
+
+func counts(pushes: string) -> (int, int) = {
+  let sp = spec(v01());
+  eventCounts(std(), visitsOf(sp), seenOf(seen("ok", pushes, gaBoth())), firstEvent(sp))
+}
+
+func note(pushes: string) -> string = {
+  let sp = spec(v01());
+  match outcomeFor(std(), visitsOf(sp), seenOf(seen("ok", pushes, gaBoth())), firstEvent(sp)) { (_, n) => n }
+}
+
+test "a full match counts every parameter" { counts(good()) == (2, 2) }
+
+test "one fixed value wrong: one of two parameters matches" {
+  counts("{item: {event: cta_click, cta: {label: Apply, type: secondary}}}") == (1, 2)
+}
+
+test "pushed nowhere: none of the parameters arrived" { counts("{item: {event: other}}") == (0, 2) }
+
+test "a blocked visit counts nothing" {
+  let sp = spec(v01());
+  eventCounts(std(), visitsOf(sp), seenOf(seen("blocked", "", "")), firstEvent(sp)) == (-1, -1)
+}
+
+test "a failure leads with what did match" { find(note("{item: {event: cta_click, cta: {label: Apply}}}"), "V01: 1 of 2 parameters match; ") == 0 }
+
+test "a match says how many parameters it checked" { find(note(good()), "(2 of 2 parameters match)") > 0 }
+
+test "every severity has a written verdict" {
+  checkOf(0) == "matched" && checkOf(1) == "could not check" && checkOf(2) == "gaps found" && checkOf(-1) == "no visit"
+}
+
+test "the round carries the verdict, the counts and each visit as written values" {
+  let r = roundYaml(1, "1.0", "2026-11-12", [("E01", "fail", "gaps found", (1, 2),
+      [{ visit: "V01", check: "gaps found", matched: 1, expected: 2, comment: "1 of 2 parameters match", pages: ["/", "/search"], params: [{ key: "cta.label", status: "as the spec says" }, { key: "cta.type", status: "missing" }] },
+       { visit: "V03", check: "correctly absent", matched: -1, expected: -1, comment: "correctly absent", pages: ["/"], params: [] }], "c")]);
+  find(r, "  - event: E01\n    state: fail\n    check: \"gaps found\"\n    matched: 1\n    expected: 2\n") >= 0 &&
+  find(r, "      - visit: V03\n        check: \"correctly absent\"") > 0 &&
+  find(r, "          - {key: \"cta.label\", status: \"as the spec says\"}") > 0
+}
+
+func both() -> string = "  - {id: V01, url: /, consent: accept, expects: [E01, E02]}\n  - {id: V03, url: /, consent: reject, forbids: [E01]}"
+
+func seen2(pushes: string) -> Json =
+  y("{visits: [{id: V01, status: ok, reason: r, datalayer: [${pushes}], hits: [{en: cta_click}, {en: page_view}]}, {id: V03, status: ok, reason: r, datalayer: [], hits: []}]}")
+
+test "a visit that forbids the event and finds nothing is a line of its own: correctly absent" {
+  let sp = spec(both());
+  match visitResults(std(), true, visitsOf(sp), seenOf(seen2(good())), firstEvent(sp)) {
+    [a, b] => a.visit == "V01" && a.check == "matched" && a.matched == 2 && b.visit == "V03" && b.check == "correctly absent",
+    _ => false
+  }
+}
+
+test "every parameter gets a written status, the good ones included" {
+  let sp = spec(both());
+  match visitResults(std(), true, visitsOf(sp), seenOf(seen2("{item: {event: cta_click, cta: {label: Apply}}}")), firstEvent(sp)) {
+    [a, _] => a.check == "gaps found" && map(\p. p.status, a.params) == ["present", "missing"],
+    _ => false
+  }
+}
+
+test "written statuses: as the spec says, missing, empty, differs" {
+  statusOf([]) == "as the spec says" && statusOf(["a missing"]) == "missing" && statusOf(["a empty"]) == "empty" &&
+  statusOf(["a is \"x\", the spec says \"y\""]) == "differs"
+}
+
+func dictSpec(allowed: string) -> Spec = dictSpecT("text", allowed)
+
+func dictSpecT(typ: string, allowed: string) -> Spec = toSpec(y("spec: {client: C, project: P, owner: Ana, version: \"1.0\", standard: \"0.1\"}
+site: {base_url: \"https://example.com\", consent: {accept: \"#ok\"}}
+events:
+  - {id: E01, eventName: cta_click, priority: high, parameters: [{key: cta.label, value: \"{{ctaLabel}}\"}, {key: cta.type, value: primary}]}
+dictionary:
+  - {name: ctaLabel, definition: d, type: ${typ}, example: Apply, source: s, allowed: [${allowed}]}
+visits:
+  - {id: V01, url: /, consent: accept, expects: [E01]}"), [])
+
+func statuses(sp: Spec, label: string) -> [string] =
+  match visitResults(std(), true, visitsOf(sp), seenOf(seen("ok", "{item: {event: cta_click, cta: {label: ${label}, type: primary}}}", "{en: cta_click}")), firstEvent(sp)) {
+    [a, ..._] => map(\p. p.status, a.params),
+    [] => []
+  }
+
+test "an allowed value is as the spec says; a fixed value too" { statuses(dictSpec("Apply, Buy"), "Apply") == ["as the spec says", "as the spec says"] }
+
+test "a value outside the allowed list is a gap" { statuses(dictSpec("Apply, Buy"), "Other") == ["not an allowed value", "as the spec says"] }
+
+test "a variable without allowed values can only be confirmed present" { statuses(dictSpec(""), "Anything") == ["present", "as the spec says"] }
+
+test "an outside value fails the visit, a present one does not" {
+  let sp = dictSpec("Apply, Buy");
+  match outcomeFor(std(), visitsOf(sp), seenOf(seen("ok", "{item: {event: cta_click, cta: {label: Other, type: primary}}}", "{en: cta_click}")), firstEvent(sp)) { (sev, _) => sev == 2 }
+}
+
+test "numbers compare as numbers where the dictionary says number, text exactly" {
+  sameValue("number", "3", "3.00") && sameValue("number", "2.5", "2.50") && !sameValue("number", "3", "2.50") &&
+  !sameValue("text", "3", "3.00") && sameValue("text", "Apply", "Apply")
+}
+
+test "a number-typed variable: 3.00 is the allowed 3; 2.50 is not; text is not a number" {
+  statuses(dictSpecT("number", "\"1\", \"3\""), "\"3.00\"") == ["as the spec says", "as the spec says"] &&
+  statuses(dictSpecT("number", "\"1\", \"3\""), "\"2.50\"") == ["not an allowed value", "as the spec says"] &&
+  statuses(dictSpecT("number", ""), "abc") == ["differs", "as the spec says"]
+}
+
+test "each visit carries its own comment, without the visit's name in front" {
+  let sp = spec(both());
+  match visitResults(std(), true, visitsOf(sp), seenOf(seen2("{item: {event: cta_click, cta: {label: Apply}}}")), firstEvent(sp)) {
+    [a, b] => find(a.comment, "1 of 2 parameters match; cta.type missing") == 0 && b.comment == "correctly absent",
+    _ => false
+  }
+}
+
+test "a page is its path: no host, no query, no fragment" {
+  pathOf("https://site.example/fr/search?q=ardennes&mail=a@b.c#top") == "/fr/search" && pathOf("https://site.example") == "/" && pathOf("/stay/12") == "/stay/12"
+}
+
+test "a visit's pages in time order, repeats merged, queries dropped" {
+  pagesOf(y("{url: \"https://s.example/\", final_url: \"https://s.example/stay/9?x=1\",
+    datalayer: [{t: 3, url: \"https://s.example/search?q=a\"}, {t: 1, url: \"https://s.example/\"}, {t: 4, url: \"https://s.example/search?q=b\"}],
+    hits: [{t: 5, page: \"https://s.example/stay/9\"}]}")) == ["/", "/search", "/stay/9"]
+}
+
+test "the round lists each visit's pages" {
+  let r = roundYaml(1, "1.0", "2026-11-12", [("E01", "fail", "gaps found", (1, 2),
+      [{ visit: "V01", check: "gaps found", matched: 1, expected: 2, comment: "c", pages: ["/", "/search"], params: [] }], "c")]);
+  find(r, "        pages: [\"/\", \"/search\"]") > 0
+}
+
+func skippedRun(pushes: string) -> Json =
+  y("{visits: [{id: V01, status: ok, reason: r, steps_done: [\"consent accept\", \"pick (skipped, 0 matched a.f)\"], datalayer: [${pushes}], hits: [{en: cta_click}, {en: page_view}]}]}")
+
+test "a visit that skipped a step and never saw the event: could not check, not a gap" {
+  let sp = spec(v01());
+  let o = skippedRun("");
+  outcome(sp, o, 1) == 1 &&
+  (match visitResults(std(), true, visitsOf(sp), seenOf(o), firstEvent(sp)) {
+    [a] => a.check == "could not check" && length(a.params) == 0 && find(a.comment, "skipped a step") >= 0 && find(a.comment, "pick (skipped") > 0,
+    _ => false
+  }) &&
+  (match eventCounts(std(), visitsOf(sp), seenOf(o), firstEvent(sp)) { (m, t) => m == -1 && t == -1 })
+}
+
+test "a visit that skipped a step but saw the event is judged as usual" {
+  let sp = spec(v01());
+  match visitResults(std(), true, visitsOf(sp), seenOf(skippedRun("{item: {event: cta_click, cta: {label: Apply, type: primary}}}")), firstEvent(sp)) {
+    [a] => a.check == "matched" && a.matched == 2,
+    _ => false
+  }
+}
+
+test "without a skipped step, a missing push is still a gap" {
+  let sp = spec(v01());
+  outcome(sp, seen("ok", "", "{en: cta_click}, {en: page_view}"), 1) == 2 &&
+  shortOf(false, false, true, { id: "V01", status: "ok", reason: "", pushes: [], hits: [], pages: [], skipped: [] }) == false
+}
+
+test "whole-number values and timestamps (JInt since AILANG 0.60) read as numbers" {
+  pagesOf(y("{url: \"https://s.example/\", datalayer: [{t: 30, url: \"https://s.example/b\"}, {t: 10, url: \"https://s.example/a\"}], hits: []}")) == ["/", "/a", "/b"] &&
+  (match seenOf(y("{visits: [{id: V01, status: ok, reason: r, datalayer: [{item: {event: e, n: 3}}], hits: []}]}")) { [s] => s.id == "V01", _ => false })
 }
 
 -- Integer literals decode as JInt on newer compilers and as JNumber on older ones; both read the same.

@@ -8,7 +8,7 @@ import std/json (Json)
 import std/option (Option, Some, None)
 import std/io (println)
 import std/list (map, filter, length, nth, foldl, range, any, zip, flatMap)
-import std/string (join, startsWith, trim)
+import std/string (join, startsWith, trim, split)
 import ./qa (visitChecks)
 import ./rules (statusFitsVersion, movesForward, roundTestsKnownVersion, passAllowed)
 import ./model (Field, Rule, Std, Dev, Param, Event, Dict, Hist, Res, Round, Spec, str, arr, strs, obj, loadYaml, toStd, toSpec, toRound, loadSpec, matches, varsIn, parseVersion, keyOf, present, fieldsOf, missingIn, dup)
@@ -16,10 +16,21 @@ export func all(xss: [[(string, string)]]) -> [(string, string)] = flatMap(\xs. 
 
 export func when(ok: bool, rule: string, msg: string) -> [(string, string)] = if ok then [] else [(rule, msg)]
 
+-- Every {{ in a value must open a variable the standard's pattern accepts. One that does not
+-- ({{page_type}} against a camelCase pattern) is otherwise compared as literal text and fails
+-- every run, so the check refuses it rather than let it through.
+export func strayBraces(pVar: string, value: string) -> bool =
+  length(split(value, "{{")) - 1 > length(varsIn(pVar, value))
+
+-- GA4's ecommerce.items is a list: a key through it names every item with [].
+export func itemsWithoutBrackets(key: string) -> bool = startsWith(key, "ecommerce.items.")
+
 export func paramChecks(std: Std, names: [string], e: Event, pr: Param) -> [(string, string)] =
   all([
     when(matches(std.pKey, pr.key), "key-casing", "${e.id}: key \"${pr.key}\" is not camelCase under an object"),
+    when(!itemsWithoutBrackets(pr.key), "arrays", "${e.id}: key \"${pr.key}\" goes through ecommerce.items, which is a list: write ecommerce.items[]"),
     when(!matches(std.pOther, pr.value), "notation", "${e.id}: ${pr.key} is written \"${pr.value}\"; a run-time value is {{name}}"),
+    when(!strayBraces(std.pVar, pr.value), "notation", "${e.id}: ${pr.key} is written \"${pr.value}\", which is not a variable the standard accepts"),
     flatMap(\v. when(any(\n. n == v, names), "dictionary", "${e.id}: {{${v}}} is not in the dictionary"), varsIn(std.pVar, pr.value))
   ])
 

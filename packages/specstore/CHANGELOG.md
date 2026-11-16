@@ -1,6 +1,8 @@
 # Changelog
 
-## 0.3.2
+## 0.3.9
+
+0.3.8 merged with the number fix made on `main` while 0.3.2–0.3.8 were in review (`f9d7359`, `54ecdaf`). Its entry was headed 0.3.2, which the registry already held for a different release, so it is recorded here:
 
 Fix: numbers in specs and pushes. AILANG's `std/json` now decodes an integer literal such as `60` as `JInt(60)`; only fractional and
 exponent literals stay `JNumber`. Older compilers give `JNumber(60.0)` for both.
@@ -8,6 +10,89 @@ exponent literals stay `JNumber`. Older compilers give `JNumber(60.0)` for both.
 `version: 2` read as `JInt(2` on such a compiler; `qa.valueText` matched only `JNumber`. Both now read
 numbers with `asNumber` and give exactly the 0.3.1 text on every compiler (`2.0`, and `60` for a pushed
 value). Signatures are unchanged.
+
+0.3.8 read a whole-number spec field as `2`; 0.3.9 keeps the earlier `2.0`, as above. Timestamps keep 0.3.8's fix. Tests: `qa_test.ail` (47), `check_test.ail` (16), `view_test.ail` (13).
+
+## 0.3.8
+
+A skipped step is not a gap. The tag-check engine can mark a step optional (a pick that finds nothing on
+the page is skipped and written in the visit's `steps_done`). An event the visit expects but never saw,
+on a visit that skipped a step, now reads `could not check`, with the skipped step in its comment, not
+`not pushed`: the visit may have stopped short of it. It gives no parameters and no counts, so totals
+are not pulled down. An event the visit did see is judged as before; visits that forbid an event are
+unchanged. The Read me says so.
+
+Whole numbers in JSON read as numbers again. Since AILANG 0.60 `std/json` decodes a whole number as
+`JInt`; the engine's millisecond timestamps are whole numbers, so every page read as time 0 and a visit's
+pages came out in the order recorded, not the order visited. Timestamps, values and fields now accept
+both. Test helpers given an empty-list arm the stricter compiler requires.
+Tests: `qa_test.ail` (45), `check_test.ail` (16), `view_test.ail` (13).
+
+## 0.3.7
+
+Where each visit went. A round records, for each visit, the pages it went through in time order (paths
+only: no host, no query string, no fragment, since a query can carry a search term or, after a login,
+personal data). The Visits tab shows where a visit starts (from the spec) and the pages it reached in
+the latest run: "4: / → /search → … → /stay/…". Tests: `qa_test.ail` (41), `view_test.ail` (13).
+
+## 0.3.6
+
+Every line describes itself, in every export. Each visit in a round carries its own comment, and the
+sheet's Summary shows it on that visit's line: a consent-reject visit reads "correctly absent", not the
+whole event's comment with every other visit in it. The event's full comment stays in the round and on
+the Spec tab. A variable the dictionary types as `number` is compared as a number (3.00 is 3); a value
+that is not a number is a gap of its own; text is still compared exactly. Observed values are not
+written beside every parameter, since a logged-in visit can push personal data; a value appears only
+where it differs from a fixed or allowed one. The sheet opens on a Read me tab: what each tab
+shows and when to read it, and what every written value in Automatic check, Status and Result means
+(a test keeps it complete). A Visits tab says what each visit does: the page, the consent choice, its
+steps in words (or its `description`, when the spec gives one), and the events it expects and forbids.
+Rounds from earlier versions load as before. Tests: `qa_test.ail` (38), `view_test.ail` (12).
+
+## 0.3.5
+
+A line says only what was checked. A `{{variable}}` whose dictionary entry lists allowed values is now
+checked against them: a value outside the list is a gap, `not an allowed value`. A parameter without
+a gap is `as the spec says` when its value was confirmed (a fixed value, or an allowed one) and
+`present` when the dictionary gives no allowed values, so only "set" can be confirmed. The sheet's
+Parameters tab writes the expected value out: the fixed value, `one of: …`, or `any value (name)`.
+Each parameter carries its variable and allowed values from the spec's dictionary when the spec loads.
+Tests: `qa_test.ail` (35), `view_test.ail` (9).
+
+## 0.3.4
+
+What went right shows as well as what went wrong, so a reader can trust the check. Each round
+result now lists every visit that expects or forbids the event, with its own written verdict
+(matched, gaps found, could not check, did not run; correctly absent, sent although forbidden),
+and on the visit that checked them every parameter with a written status (as the spec says,
+missing, empty, differs, not pushed). The round is written as block YAML. The Summary tab has a
+line per event and visit, so a consent-reject visit that found nothing is a line of its own, and
+counts every visit in its totals; a new Parameters tab lists every parameter with what the spec
+expects and its status. The event's result sits on its first line only. Tests: `qa_test.ail` (31),
+`view_test.ail` (8).
+
+## 0.3.3
+
+Output a person can read at a glance, in written values only: a result is never carried by colour.
+`compare` writes, beside each event's state, a `check` (matched, gaps found, could not check,
+waiting for release, no visit) and the parameter counts (`matched` of `expected`), and leads each
+comment with them: "V01: 93 of 101 parameters match; …". The state still says "not tested" for a
+match, since only a person sets a pass; the check says what the run found. `view` opens on a new
+Summary tab (one written line per event, then the totals and what they were built from) and adds
+Automatic check and Parameters columns to Spec and QA rounds; the Spec tab now shows a match,
+which it hid before. Rounds written by earlier versions load as before, with those fields blank.
+Tests: `qa_test.ail` (28), `view_test.ail` (5).
+
+## 0.3.2
+
+Two ways a spec could pass `check` and then fail every run. A `{{…}}` the standard's variable
+pattern does not accept (`{{page_type}}` against camelCase) was compared as literal text, so each
+such parameter failed on every page; `check` now refuses it under `notation`. A key through
+`ecommerce.items` without `[]` (`ecommerce.items.item_id`) asked the list itself for the field and
+always reported it missing; `check` now refuses it under a new check key, `arrays`, kept apart from
+`key-casing` so a casing deviation does not waive it. The template standard gains an `arrays`
+rule; an existing standard enables it by adding `check: arrays` to its rule on parameters. Found on
+the first scheduled round against a real site. Tests: `check_test.ail` (16).
 
 ## 0.3.1
 
