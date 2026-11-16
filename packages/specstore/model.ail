@@ -5,7 +5,7 @@ module sunholo/specstore/model
 import std/result (Result, Ok, Err)
 import std/option (Option, Some, None)
 import std/yaml (decode as yamlDecode)
-import std/json (Json, JString, JArray, JNull, get, getString, getArray, getInt, getObject)
+import std/json (Json, JString, JArray, JNull, JInt, get, getString, getArray, getInt, getObject)
 import std/fs (readFile, listDir, fileExists)
 import std/list (map, mapE, filter, length, nth, last, sortBy, flatMap, dedup)
 import std/string (split, replace, startsWith, endsWith, stringToInt, trim)
@@ -46,6 +46,7 @@ export func str(j: Json, k: string) -> string =
   match get(j, k) {
     Some(JString(s)) => s,
     Some(JNull) => "",
+    Some(JInt(i)) => show(i),
     Some(v) => match v { JArray(_) => "", _ => trim(replace(replace(show(v), "JNumber(", ""), ")", "")) },
     None => ""
   }

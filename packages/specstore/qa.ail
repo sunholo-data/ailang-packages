@@ -12,7 +12,7 @@ module sunholo/specstore/qa
 
 import std/result (Result, Ok, Err)
 import std/option (Option, Some, None)
-import std/json (Json, JString, JNumber, JBool, JNull, JArray, encode, decode, get, js, ja, jo, kv)
+import std/json (Json, JString, JNumber, JInt, JBool, JNull, JArray, asNumber, encode, decode, get, js, ja, jo, kv)
 import std/fs (readFile, writeFile)
 import std/io (println)
 import std/list (map, filter, length, any, flatMap, foldl, concat, sortBy, last)
@@ -21,7 +21,9 @@ import ./rules (worstOutcome, visitOutcome)
 import ./model (Std, Event, Param, Spec, Round, ParamRes, VisitRes, str, arr, strs, obj, matches, dup, keyOf)
 
 export type Visit = { id: string, url: string, consent: string, expects: [string], forbids: [string], j: Json }
-export type Seen = { id: string, status: string, reason: string, pushes: [Json], hits: [string], pages: [string] }
+-- skipped: the steps the run skipped (a pick marked optional that found nothing on the page), from the
+-- engine's steps_done. A visit that skipped a step may never have reached an event it expects.
+export type Seen = { id: string, status: string, reason: string, pushes: [Json], hits: [string], pages: [string], skipped: [string] }
 
 export func visitsOf(sp: Spec) -> [Visit] =
   map(\v. { id: str(v, "id"), url: str(v, "url"),
@@ -88,7 +90,8 @@ export func pathOf(u: string) -> string {
   }
 }
 
-func stampOf(j: Json) -> float = match get(j, "t") { Some(JNumber(n)) => n, _ => 0.0 }
+-- A whole number is JInt since AILANG 0.60 (the engine writes milliseconds as one): asNumber takes both.
+func stampOf(j: Json) -> float = match get(j, "t") { Some(v) => match asNumber(v) { Some(n) => n, None => 0.0 }, None => 0.0 }
 
 -- Consecutive repeats merged: many pushes on one page are one page.
 export func squeeze(xs: [string]) -> [string] =
@@ -105,7 +108,13 @@ export func pagesOf(v: Json) -> [string] {
 export func seenOf(o: Json) -> [Seen] =
   map(\v. { id: str(v, "id"), status: str(v, "status"), reason: str(v, "reason"),
             pushes: map(\r. obj(r, "item"), arr(v, "datalayer")),
-            hits: map(\h. str(h, "en"), arr(v, "hits")), pages: pagesOf(v) }, arr(o, "visits"))
+            hits: map(\h. str(h, "en"), arr(v, "hits")), pages: pagesOf(v),
+            skipped: filter(\d. find(d, "skipped") >= 0, strs(v, "steps_done")) }, arr(o, "visits"))
+
+-- An expected event the visit did not see, on a visit that skipped a step: the visit may have stopped
+-- short of it, so its absence says nothing about the site.
+export func shortOf(gaOnly: bool, sawPush: bool, sawHit: bool, s: Seen) -> bool =
+  s.status == "ok" && length(s.skipped) > 0 && (if gaOnly then !sawHit else !sawPush)
 
 export func numText(s: string) -> string =
   if endsWith(s, ".0") then substring(s, 0, strLength(s) - 2) else s
@@ -114,6 +123,7 @@ export func valueText(j: Json) -> string =
   match j {
     JString(s) => s,
     JNumber(n) => numText(show(n)),
+    JInt(i) => show(i),
     JBool(b) => if b then "true" else "false",
     JNull => "",
     _ => encode(j)
@@ -211,8 +221,10 @@ export func inVisitWith(std: Std, ga4: bool, e: Event, s: Seen) -> (int, string)
     if !gaOnly && paramFail then firstProbs else [],
     if ga || !ga4 then [] else ["no GA4 hit with en=${e.eventName}"]
   ]);
-  let sev = visitOutcome(true, blocked, length(fails) > 0);
+  let short = shortOf(gaOnly, length(pushes) > 0, ga, s);
+  let sev = if short then 1 else visitOutcome(true, blocked, length(fails) > 0);
   let note = if blocked then "${s.id}: could not check (${s.status}: ${s.reason})"
+    else if short then "${s.id}: could not check (the visit skipped a step, so it may not have reached this event: ${join("; ", s.skipped)})"
     else if length(fails) > 0 then "${s.id}: ${lead}${join("; ", fails)}"
     else if gaOnly then "${s.id}: GA4 hit matches the spec (no dataLayer push expected)"
     else if !ga4 then "${s.id}: dataLayer push matches the spec${tail} (data layer only; GA4 not checked)"
@@ -269,7 +281,7 @@ export func eventCounts(std: Std, vs: [Visit], seen: [Seen], e: Event) -> (int, 
     [] => (-1, -1),
     [s, ..._] => match filter(\x. str(x, "event") == e.dlEvent, s.pushes) {
       [x, ..._] => (paramsMatched(std, e, x), n),
-      [] => (0, n)
+      [] => if length(s.skipped) > 0 then (-1, -1) else (0, n)
     }
   }
 }
@@ -312,6 +324,7 @@ export func visitResults(std: Std, ga4: bool, vs: [Visit], seen: [Seen], e: Even
         let note = match res { (_, n) => ownNote(v.id, n) };
         let ps = paramResults(std, e, s);
         let ok = length(filter(\p. p.status == "as the spec says" || p.status == "present", ps));
+        if sev == 1 then noCounts(v.id, "could not check", note, s.pages) else
         { visit: v.id, check: if sev == 0 then "matched" else "gaps found",
           matched: if length(ps) == 0 then -1 else ok, expected: if length(ps) == 0 then -1 else length(ps), comment: note, pages: s.pages, params: ps }
       }

@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.3.8
+
+A skipped step is not a gap. The tag-check engine can mark a step optional (a pick that finds nothing on
+the page is skipped and written in the visit's `steps_done`). An event the visit expects but never saw,
+on a visit that skipped a step, now reads `could not check`, with the skipped step in its comment, not
+`not pushed`: the visit may have stopped short of it. It gives no parameters and no counts, so totals
+are not pulled down. An event the visit did see is judged as before; visits that forbid an event are
+unchanged. The Read me says so.
+
+Whole numbers in JSON read as numbers again. Since AILANG 0.60 `std/json` decodes a whole number as
+`JInt`; the engine's millisecond timestamps are whole numbers, so every page read as time 0 and a visit's
+pages came out in the order recorded, not the order visited. Timestamps, values and fields now accept
+both. Test helpers given an empty-list arm the stricter compiler requires.
+Tests: `qa_test.ail` (45), `check_test.ail` (16), `view_test.ail` (13).
+
 ## 0.3.7
 
 Where each visit went. A round records, for each visit, the pages it went through in time order (paths

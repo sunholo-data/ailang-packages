@@ -7,7 +7,7 @@ import std/json (Json, JNull)
 import std/list (map, length)
 import ./rules (worstOutcome, visitOutcome)
 import ./model (Std, Spec, Event, toStd, toSpec)
-import ./qa (seenOf, outcomeFor, outcomeWith, visitsOf, visitChecks, waitingForRelease, checksGa4, eventCounts, checkOf, roundYaml, visitResults, statusOf, sameValue, pathOf, pagesOf)
+import ./qa (shortOf, seenOf, outcomeFor, outcomeWith, visitsOf, visitChecks, waitingForRelease, checksGa4, eventCounts, checkOf, roundYaml, visitResults, statusOf, sameValue, pathOf, pagesOf)
 import std/string (find)
 
 func y(s: string) -> Json = match yamlDecode(s) { Ok(j) => j, Err(_) => JNull }
@@ -33,7 +33,7 @@ func seen(status: string, pushes: string, hits: string) -> Json =
   y("{visits: [{id: V01, status: ${status}, reason: r, datalayer: [${pushes}], hits: [${hits}]}]}")
 
 func outcome(sp: Spec, o: Json, n: int) -> int =
-  match outcomeFor(std(), visitsOf(sp), seenOf(o), match sp.events { [a, b, c] => if n == 1 then a else if n == 2 then b else c, _ => match sp.events { [x, ..._] => x } }) {
+  match outcomeFor(std(), visitsOf(sp), seenOf(o), match sp.events { [a, b, c] => if n == 1 then a else if n == 2 then b else c, _ => firstEvent(sp) }) {
     (s, _) => s
   }
 
@@ -122,7 +122,11 @@ test "a change not yet live waits for release; a live one is checked" {
   match shop("").events { [a, b] => !waitingForRelease(a) && waitingForRelease(b), _ => false }
 }
 
-func firstEvent(sp: Spec) -> Event = match sp.events { [x, ..._] => x }
+-- A spec in these tests always has events; the empty arm only satisfies the exhaustiveness check.
+func noEvent() -> Event = { id: "", description: "", trigger: "", scope: "", eventName: "", dlEvent: "", priority: "",
+  params: [], since: "", changed: "", live: "", note: "" }
+
+func firstEvent(sp: Spec) -> Event = match sp.events { [x, ..._] => x, [] => noEvent() }
 
 func counts(pushes: string) -> (int, int) = {
   let sp = spec(v01());
@@ -251,4 +255,37 @@ test "the round lists each visit's pages" {
   let r = roundYaml(1, "1.0", "2026-11-12", [("E01", "fail", "gaps found", (1, 2),
       [{ visit: "V01", check: "gaps found", matched: 1, expected: 2, comment: "c", pages: ["/", "/search"], params: [] }], "c")]);
   find(r, "        pages: [\"/\", \"/search\"]") > 0
+}
+
+func skippedRun(pushes: string) -> Json =
+  y("{visits: [{id: V01, status: ok, reason: r, steps_done: [\"consent accept\", \"pick (skipped, 0 matched a.f)\"], datalayer: [${pushes}], hits: [{en: cta_click}, {en: page_view}]}]}")
+
+test "a visit that skipped a step and never saw the event: could not check, not a gap" {
+  let sp = spec(v01());
+  let o = skippedRun("");
+  outcome(sp, o, 1) == 1 &&
+  (match visitResults(std(), true, visitsOf(sp), seenOf(o), firstEvent(sp)) {
+    [a] => a.check == "could not check" && length(a.params) == 0 && find(a.comment, "skipped a step") >= 0 && find(a.comment, "pick (skipped") > 0,
+    _ => false
+  }) &&
+  (match eventCounts(std(), visitsOf(sp), seenOf(o), firstEvent(sp)) { (m, t) => m == -1 && t == -1 })
+}
+
+test "a visit that skipped a step but saw the event is judged as usual" {
+  let sp = spec(v01());
+  match visitResults(std(), true, visitsOf(sp), seenOf(skippedRun("{item: {event: cta_click, cta: {label: Apply, type: primary}}}")), firstEvent(sp)) {
+    [a] => a.check == "matched" && a.matched == 2,
+    _ => false
+  }
+}
+
+test "without a skipped step, a missing push is still a gap" {
+  let sp = spec(v01());
+  outcome(sp, seen("ok", "", "{en: cta_click}, {en: page_view}"), 1) == 2 &&
+  shortOf(false, false, true, { id: "V01", status: "ok", reason: "", pushes: [], hits: [], pages: [], skipped: [] }) == false
+}
+
+test "whole-number values and timestamps (JInt since AILANG 0.60) read as numbers" {
+  pagesOf(y("{url: \"https://s.example/\", datalayer: [{t: 30, url: \"https://s.example/b\"}, {t: 10, url: \"https://s.example/a\"}], hits: []}")) == ["/", "/a", "/b"] &&
+  (match seenOf(y("{visits: [{id: V01, status: ok, reason: r, datalayer: [{item: {event: e, n: 3}}], hits: []}]}")) { [s] => s.id == "V01", _ => false })
 }

@@ -147,7 +147,7 @@ export func readMeRows(version: string) -> [[(string, int)]] = map(\r. map(\c. (
     ["gaps found", "The event was seen, but at least one parameter is missing, empty or not as the spec says; or it was not seen at all.", "Open the Parameters tab to see which ones"],
     ["correctly absent", "A visit that forbids the event (consent refused, say) did not see it. A good result.", "Nothing"],
     ["sent although forbidden", "A visit that forbids the event saw it: for a consent-refused visit, tracking despite the refusal.", "Raise it: a consent problem on the site"],
-    ["could not check", "The visit stopped before it could check (a step failed).", "Fix the visit first (PROMPT-blocked.md), then run again"],
+    ["could not check", "The visit stopped before it could check (a step failed), or it skipped an optional step and never saw this event, so it may not have got that far. The comment says which.", "Fix the visit first (PROMPT-blocked.md), then run again; a skipped step: run again, the next pick may differ"],
     ["did not run", "The visit was not in this run.", "Run again"],
     ["waiting for release", "The event changed in a version the client has not put live yet. Not checked until it is.", "Nothing until the client releases it"],
     ["no visit", "No visit covers the event, so nothing checked it.", "Add a visit to the spec"],
