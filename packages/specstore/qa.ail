@@ -200,6 +200,18 @@ export func paramProblems(std: Std, e: Event, push: Json) -> [string] = flatMap(
 export func paramsMatched(std: Std, e: Event, push: Json) -> int =
   length(filter(\p. length(oneParam(std, p, push)) == 0, e.params))
 
+-- The push a visit is judged on, when the page pushed the event more than once: the first that matches
+-- the spec in full, else the one that matches most parameters (the first, on a tie). The verdict, the
+-- counts, the comment and every parameter's status all come from this one push, so they agree.
+export func bestPush(std: Std, e: Event, pushes: [Json]) -> Option[Json] =
+  match filter(\x. length(paramProblems(std, e, x)) == 0, pushes) {
+    [x, ..._] => Some(x),
+    [] => foldl(\acc. \x. match acc {
+        None => Some(x),
+        Some(b) => if paramsMatched(std, e, x) > paramsMatched(std, e, b) then Some(x) else acc
+      }, None, pushes)
+  }
+
 -- One event in one visit: (severity, note). Severity as in rules.visitOutcome.
 export func inVisit(std: Std, e: Event, s: Seen) -> (int, string) = inVisitWith(std, true, e, s)
 
@@ -209,13 +221,13 @@ export func inVisitWith(std: Std, ga4: bool, e: Event, s: Seen) -> (int, string)
   let blocked = s.status != "ok";
   let gaOnly = e.dlEvent == "none";
   let pushes = filter(\x. str(x, "event") == e.dlEvent, s.pushes);
-  let probs = map(\x. paramProblems(std, e, x), pushes);
-  let paramFail = length(pushes) > 0 && !any(\ps. length(ps) == 0, probs);
-  let firstProbs = match probs { [ps, ..._] => ps, [] => [] };
+  let best = bestPush(std, e, pushes);
+  let firstProbs = match best { Some(b) => paramProblems(std, e, b), None => [] };
+  let paramFail = length(firstProbs) > 0;
   let ga = any(\en. en == e.eventName, s.hits);
-  let counted = match pushes {
-      [x, ..._] => if gaOnly || length(e.params) == 0 then "" else "${show(paramsMatched(std, e, x))} of ${show(length(e.params))} parameters match",
-      [] => ""
+  let counted = match best {
+      Some(x) => if gaOnly || length(e.params) == 0 then "" else "${show(paramsMatched(std, e, x))} of ${show(length(e.params))} parameters match",
+      None => ""
     };
   let lead = if counted == "" then "" else "${counted}; ";
   let tail = if counted == "" then "" else " (${counted})";
@@ -282,9 +294,9 @@ export func eventCounts(std: Std, vs: [Visit], seen: [Seen], e: Event) -> (int, 
   if e.dlEvent == "none" || n == 0 then (-1, -1)
   else match ran {
     [] => (-1, -1),
-    [s, ..._] => match filter(\x. str(x, "event") == e.dlEvent, s.pushes) {
-      [x, ..._] => (paramsMatched(std, e, x), n),
-      [] => if length(s.skipped) > 0 then (-1, -1) else (0, n)
+    [s, ..._] => match bestPush(std, e, filter(\x. str(x, "event") == e.dlEvent, s.pushes)) {
+      Some(x) => (paramsMatched(std, e, x), n),
+      None => if length(s.skipped) > 0 then (-1, -1) else (0, n)
     }
   }
 }
@@ -303,12 +315,13 @@ export func statusOf(problems: [string]) -> string = match problems {
 export func paramStatus(p: Param, problems: [string]) -> string =
   match problems { [] => if p.variable != "" && length(p.allowed) == 0 then "present" else "as the spec says", _ => statusOf(problems) }
 
--- Every parameter of an event on one visit that ran: from its first dataLayer push, or "not pushed".
+-- Every parameter of an event on one visit that ran: from the push the visit is judged on (bestPush),
+-- or "not pushed".
 export func paramResults(std: Std, e: Event, s: Seen) -> [ParamRes] =
   if e.dlEvent == "none" then []
-  else match filter(\x. str(x, "event") == e.dlEvent, s.pushes) {
-    [x, ..._] => map(\p. { key: p.key, status: paramStatus(p, oneParam(std, p, x)) }, e.params),
-    [] => map(\p. { key: p.key, status: "not pushed" }, e.params)
+  else match bestPush(std, e, filter(\x. str(x, "event") == e.dlEvent, s.pushes)) {
+    Some(x) => map(\p. { key: p.key, status: paramStatus(p, oneParam(std, p, x)) }, e.params),
+    None => map(\p. { key: p.key, status: "not pushed" }, e.params)
   }
 
 func noCounts(v: string, ck: string, c: string, pages: [string]) -> VisitRes = { visit: v, check: ck, matched: -1, expected: -1, comment: c, pages: pages, params: [] }

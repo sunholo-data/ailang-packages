@@ -7,7 +7,7 @@ import std/json (Json, JNull, decode)
 import std/list (map, length)
 import ./rules (worstOutcome, visitOutcome)
 import ./model (Std, Spec, Event, toStd, toSpec, str)
-import ./qa (shortOf, seenOf, outcomeFor, outcomeWith, visitsOf, visitChecks, waitingForRelease, checksGa4, eventCounts, checkOf, roundYaml, visitResults, statusOf, sameValue, pathOf, pagesOf, valueText)
+import ./qa (bestPush, shortOf, seenOf, outcomeFor, outcomeWith, visitsOf, visitChecks, waitingForRelease, checksGa4, eventCounts, checkOf, roundYaml, visitResults, statusOf, sameValue, pathOf, pagesOf, valueText)
 import std/string (find)
 
 func y(s: string) -> Json = match yamlDecode(s) { Ok(j) => j, Err(_) => JNull }
@@ -301,4 +301,24 @@ test "a pushed number reads the same whether it decodes as an integer or a float
 test "a numeric spec field reads as its float text, integer or not" {
   let j = y("version: 2\nrate: 2.5\nname: shop\n");
   str(j, "version") == "2.0" && str(j, "rate") == "2.5" && str(j, "name") == "shop"
+}
+
+test "two pushes, the second right: the verdict, the counts and every parameter agree on the right one" {
+  let sp = spec(v01());
+  let o = seen("ok", "{item: {event: cta_click, cta: {label: Apply, type: secondary}}}, {item: {event: cta_click, cta: {label: Apply, type: primary}}}", "{en: cta_click}, {en: page_view}");
+  outcome(sp, o, 1) == 0 &&
+  (match visitResults(std(), true, visitsOf(sp), seenOf(o), firstEvent(sp)) {
+    [a] => a.check == "matched" && a.matched == 2 && map(\p. p.status, a.params) == ["present", "as the spec says"],
+    _ => false
+  }) &&
+  (match eventCounts(std(), visitsOf(sp), seenOf(o), firstEvent(sp)) { (m, n) => m == 2 && n == 2 })
+}
+
+test "two pushes, both wrong: judged on the one closer to the spec" {
+  let sp = spec(v01());
+  let o = seen("ok", "{item: {event: cta_click, cta: {type: secondary}}}, {item: {event: cta_click, cta: {label: Apply, type: secondary}}}", "{en: cta_click}, {en: page_view}");
+  match visitResults(std(), true, visitsOf(sp), seenOf(o), firstEvent(sp)) {
+    [a] => a.check == "gaps found" && a.matched == 1 && map(\p. p.status, a.params) == ["present", "differs"],
+    _ => false
+  }
 }

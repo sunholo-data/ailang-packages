@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.3.10
+
+One push per verdict. When a page pushed an event more than once, a visit passed if any push matched
+the spec, but the counts, the comment and every parameter's status came from the first push, so the
+sheet could list gaps the verdict had not counted. All of them now come from the same push: the first
+that matches in full, else the one closest to the spec (`bestPush`). Verdicts do not change; counts and
+statuses now agree with them. On a real round of 17 November, two parameters listed as gaps (one
+missing, one empty) were present on a second push. Tests: `qa_test.ail` (49), `check_test.ail` (16),
+`view_test.ail` (13).
+
 ## 0.3.9
 
 0.3.8 merged with the number fix made on `main` while 0.3.2–0.3.8 were in review (`f9d7359`, `54ecdaf`). Its entry was headed 0.3.2, which the registry already held for a different release, so it is recorded here:
