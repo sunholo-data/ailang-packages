@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.4.1
+
+Encode each element once when sorting canonical JSON collections. This reduces
+work in `encodeConfig` and `encodeState` while preserving their byte output.
+
 ## 0.4.0
 
 The host can halt running work. `tasks.halt(config, state, Host, task, reason)`:
