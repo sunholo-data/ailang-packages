@@ -1,7 +1,7 @@
 module sunholo/social_dynamics/wire
 import ./model (Error, Principal, Source, Disposition, Value, Actor, Indicator, Relationship, Resource, Cost, Effect, Recipe, Requirement, Authority, TaskStatus, Task, Relief, Commitment, Evidence, Knowledge, Appraisal, Rule, Condition, Limits, Config, Policies, Accepted, Token, State, Operation, Proposal, Delivery, EventKind, Event, Step, AdvanceResult, InvalidConfig, InvalidSchema, UnsupportedVersion, UnknownId, Unauthorized, UnseenEvidence, StaleRevision, Expired, AlteredDuplicate, InsufficientResource, CapacityExceeded, InvalidPolicyEffect, InvalidTransition, ClockRewind, InvalidBudget, NumericOverflow, PendingAdvance, InvalidContinuation, Host, ActorPrincipal, AI, Authored, ActorInput, Applied, Duplicate, BoundedIndicatorDelta, IndicatorDelta, RelationshipDelta, Allowed, Conditional, Refused, Offered, Working, Completed, Stopped, OfferTask, RaiseConcern, RequestRelief, OfferCommitment, AcceptTask, ResolveRelief, AcceptCommitment, TaskOffered, TaskAccepted, ConcernRaised, ReliefRequested, ReliefResolved, CommitmentOffered, CommitmentAccepted, TaskCompleted, ConditionEntered, ConditionRecovered, ObservationDelivered, ReactionApplied, TaskHalted, Done, Pending, Blocked, validId, unique, sorted, bounded)
 import std/json (Json, JNull, JString, JNumber, JBool, JArray, JObject, encode, decode, js, jint, jb, ja, jo, kv, getString, getInt, getNumber, getBool, getStringArrayStrict, getArray, keys)
-import std/list (map, any, length, sortBy)
+import std/list (map, any, length, sortBy, flatMap)
 import std/string (length as stringLength, contains, chars, trim, startsWith, endsWith)
 import std/result (Result, Ok, Err)
 import std/option (Option, Some, None)
@@ -156,3 +156,23 @@ pure func recipeJson(x: Recipe) -> Json = jo([kv("id",js(x.id)),kv("duration",ji
 pure func ruleJson(x: Rule) -> Json = jo([kv("id",js(x.id)),kv("actor",js(x.actor)),kv("indicator",js(x.indicator)),kv("above",jb(x.above)),kv("threshold",jint(x.threshold)),kv("recovery",jint(x.recovery)),kv("duration",jint(x.duration)),kv("cooldown",jint(x.cooldown))])
 pure func limitsJson(x: Limits) -> Json = jo([kv("actors",jint(x.actors)),kv("tasks",jint(x.tasks)),kv("commitments",jint(x.commitments)),kv("reliefs",jint(x.reliefs)),kv("evidence",jint(x.evidence)),kv("knowledge",jint(x.knowledge)),kv("accepted",jint(x.accepted)),kv("operations",jint(x.operations)),kv("effects",jint(x.effects)),kv("text",jint(x.text)),kv("wire",jint(x.wire))])
 export pure func encodeConfig(c: Config) -> string ensures { contains(result,"\"schema\":\"social_config/1\"") } = encode(jo([kv("schema",js("social_config/1")),kv("id",js(c.id)),kv("version",jint(c.version)),kv("session",js(c.session)),kv("time_unit",js(c.timeUnit)),kv("authority_id",js(c.authorityId)),kv("appraisal_id",js(c.appraisalId)),kv("limits",limitsJson(c.limits)),kv("indicators",sortedJson(map(indicatorJson,c.indicators))),kv("recipes",sortedJson(map(recipeJson,c.recipes))),kv("rules",sortedJson(map(ruleJson,c.rules))),kv("evidence",sortedJson(map(evidenceJson,c.evidence))),kv("knowledge",sortedJson(map(knowledgeJson,c.knowledge))),kv("relationships",sortedJson(map(relationshipJson,c.relationships)))]))
+
+pure func sortedJsonOracle040(xs: [Json]) -> Json = ja(sortBy(\a b. if encode(a)<encode(b) then 0-1 else if encode(a)==encode(b) then 0 else 1,xs))
+pure func agrees040(xs: [Json]) -> bool = encode(sortedJson(xs)) == encode(sortedJsonOracle040(xs))
+pure func insertAll(x: Json, xs: [Json]) -> [[Json]] = match xs {
+  [] => [[x]],
+  y :: rest => [x :: xs] ++ map(\ys. y :: ys, insertAll(x,rest))
+}
+pure func perms(xs: [Json]) -> [[Json]] = match xs { [] => [[]], x :: rest => flatMap(\p. insertAll(x,p), perms(rest)) }
+pure func tieFixture() -> [Json] = [js("a"), jo([kv("id",js("x")),kv("v",jint(1))]), js("a"), jint(1), jo([kv("id",js("x")),kv("v",jint(1))])]
+
+test "sortedJson: empty, singleton and duplicates" { agrees040([]) && agrees040([js("a")]) && agrees040([js("b"),js("a"),js("b")]) }
+test "sortedJson: sorted and reversed strings and ints" { agrees040([js("a"),js("b"),jint(10),jint(9)]) && agrees040([jint(9),jint(10),js("b"),js("a")]) }
+test "sortedJson: nested objects and mixed kinds" { agrees040([jo([kv("array",ja([jint(1)])),kv("object",jo([kv("v",jb(false))]))]),JNull,jb(true),jint(9),jint(10)]) }
+test "sortedJson: escaped strings and encoded order" { agrees040([js("\""),js("\\"),js("\n"),js("\t"),js("é"),js(""),js("a#b"),js("a\"b")]) }
+test "sortedJson: encoded-text order golden" { encode(sortedJson([jint(9),jint(10),js("b"),js("a\"")])) == "[\"a\\\"\",\"b\",10,9]" }
+test "sortedJson: every order of a list with duplicate encodings" {
+  let orders = perms(tieFixture());
+  let expected = encode(sortedJsonOracle040(tieFixture()));
+  length(orders) == 120 && not any(\p. encode(sortedJson(p)) != expected || not agrees040(p), orders)
+}
