@@ -35,6 +35,11 @@ test "actor input source roundtrip and integer endpoints" { let p = {id:"p",conf
 test "trailing JSON garbage rejected" { rejects(concat([golden(),"{}"] )) && rejects(concat([golden()," junk"])) }
 pure func configFixture() -> Config = {id:"c",version:1,session:"s",timeUnit:"day",authorityId:"authority",appraisalId:"appraisal",limits:{actors:128,tasks:64,commitments:64,reliefs:64,evidence:4096,knowledge:4096,accepted:4096,operations:16,effects:64,text:4096,wire:65536},indicators:[{id:"trust",minimum:0,maximum:100},{id:"strain",minimum:0,maximum:100}],recipes:[{id:"repair",duration:2,allocation:1,costs:[{resource:"parts",reserve:2,consume:1}],effects:[IndicatorDelta("a","strain",5)]}],rules:[{id:"strain_high",actor:"a",indicator:"strain",above:true,threshold:70,recovery:60,duration:2,cooldown:3}],evidence:[{id:"e",author:"a",kind:"concern",text:"private",causes:[]}],knowledge:[{observer:"a",evidence:"e"}],relationships:[{from:"a",to:"b",dimension:"trust",value:50}]}
 test "config collections deterministic" { let c=configFixture(); encodeConfig(c) == encodeConfig({c | indicators:[{id:"strain",minimum:0,maximum:100},{id:"trust",minimum:0,maximum:100}]}) }
+test "encodeConfig orders indicators strain then trust for both input orders" {
+  let c = configFixture();
+  let expected = "\"indicators\":[{\"id\":\"strain\",\"minimum\":0,\"maximum\":100},{\"id\":\"trust\",\"minimum\":0,\"maximum\":100}]";
+  contains(encodeConfig(c),expected) && contains(encodeConfig({c | indicators:[{id:"strain",minimum:0,maximum:100},{id:"trust",minimum:0,maximum:100}]}),expected)
+}
 test "config policy limits and mechanics change identity" { let c=configFixture(); encodeConfig(c) != encodeConfig({c | authorityId:"new_authority"}) && encodeConfig(c) != encodeConfig({c | limits:{c.limits | tasks:65}}) && encodeConfig(c) != encodeConfig({c | rules:[{id:"strain_high",actor:"a",indicator:"strain",above:true,threshold:70,recovery:55,duration:2,cooldown:3}]}) }
 test "state carries immutable config identity" { contains(encodeState(stateFixture()),"\"config_body\":\"canonical_config\"") }
 test "single object syntax and trailing guard" { singleObject("  {\"quoted\":\"}\\\"[\",\"nested\":[{}]} \n") && not singleObject("{} {}") && not singleObject("{} junk") && not singleObject("{]") && not singleObject("[{}]") && not singleObject("{bad}") }
