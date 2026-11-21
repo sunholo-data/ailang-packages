@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.4.1
+
+Faster wire framing. `singleObject` (and so `decodeProposal` and every host
+that frames its input with it) checks the object's framing in one left fold
+over the characters. 0.4.0 walked them with a cons pattern, and on the bytecode
+VM each step copies the rest of the list (ailang#1827), so framing cost grew with
+the square of the line's length. A crew host's auto-run spends most of its time
+here: its answer commands carry the proposal as escaped JSON of a few KB.
+
+- New export `framed(text)`: the framing check alone (no JSON decode).
+- Behaviour is unchanged. `framing_test.ail` keeps the 0.4.0 framer as an
+  oracle and checks that both agree on 25 framing cases (escapes, quoted
+  brackets, mismatched closers, trailing data and whitespace).
+
 ## 0.4.0
 
 The host can halt running work. `tasks.halt(config, state, Host, task, reason)`:
