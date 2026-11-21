@@ -74,7 +74,7 @@ export pure func decodeProposal(text: string) -> Result[Proposal, Error] ensures
  else match getArray(j,"operations") { None=>Err(InvalidSchema("operations")), Some(ops)=> if length(ops)==0 || length(ops)>16 then Err(InvalidSchema("operations_size")) else match readOperations(ops) {Err(e)=>Err(e),Ok(xs)=>Ok({id:str(j,"id"),config:str(j,"config_id"),baseRevision:num(j,"base_revision"),principal:str(j,"principal_id"),origin:readSource(str(j,"origin")),expires:num(j,"expires_tick"),causes:ids(j,"causes"),operations:xs})} }
  }
 
-pure func sortedJson(xs: [Json]) -> Json = ja(sortBy(\a b. if encode(a)<encode(b) then 0-1 else if encode(a)==encode(b) then 0 else 1,xs))
+pure func sortedJson(xs: [Json]) -> Json = ja(map(\p. p.j, sortBy(\a b. if a.k<b.k then 0-1 else if a.k==b.k then 0 else 1, map(\x. {k: encode(x), j: x}, xs))))
 pure func taskStatus(t: TaskStatus) -> string = match t { Offered=>"offered",Working=>"working",Completed=>"completed",Stopped=>"stopped" }
 pure func valueJson(x: Value) -> Json = jo([kv("id",js(x.id)),kv("value",jint(x.value))])
 pure func actorJson(x: Actor) -> Json = jo([kv("id",js(x.id)),kv("capacity",jint(x.capacity)),kv("attributes",sortedJson(map(valueJson,x.attributes))),kv("values",sortedJson(map(valueJson,x.values))),kv("indicators",sortedJson(map(valueJson,x.indicators)))])
