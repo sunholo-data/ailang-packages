@@ -201,7 +201,7 @@ pure func score(rs: [ResponseRule], context: Json, total: int) -> Result[int, st
 export type RuleSource = { label: string, phase: string } deriving (Eq)
 
 export pure func ruleSource(p: Policy, phase: string, label: string) -> RuleSource ! {}
-ensures { result.label != "" } =
+ensures { result.label != "" || label == "" } =
   if phase != "duty" || any(\r. r.phase == "duty", p.rules) then { label: label, phase: phase }
   else if label == "carry_on" then { label: "continue", phase: "working" }
   else if label == "stand_down" then { label: "request_relief", phase: "working" }

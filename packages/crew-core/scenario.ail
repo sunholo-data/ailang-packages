@@ -1,7 +1,7 @@
 module sunholo/crew_core/scenario
 import std/result (Result, Ok, Err)
 import std/option (Option, Some, None)
-import std/list (map, length, filter, any, contains, head, flatMap)
+import std/list (map, length, filter, any, contains, head, flatMap, take)
 import std/string (length as stringLength)
 import std/json (Json, decode, encode, keys, asObject, asArray, getString, getInt, get, jo, kv, jint)
 import std/crypto (sha256Hex)
@@ -368,7 +368,7 @@ ensures { result == "stock" || result == "capacity" } =
 
 -- What completing a recipe returns (empty for most work).
 export pure func yieldsOf(s: Scenario, recipe: string) -> [Yield]
-ensures { length(result) <= 4 } = filter(\y. y.recipe == recipe, s.yields)
+ensures { length(result) <= 4 } = take(4, filter(\y. y.recipe == recipe, s.yields))
 
 -- A ship event raised at run time (the `ship_event` command): the same shape
 -- and checks as a scheduled event, against this scenario's resources. `at`
