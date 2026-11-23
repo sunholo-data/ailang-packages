@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.6.1
+
+Fix: two contracts that were false for some inputs. `ailang verify`'s witness replay
+(ailang dev, 2026-11-23) found both by running the functions on the solver's inputs.
+
+- `policy.ruleSource` promised `result.label != ""`, but returns the label unchanged when
+  it is not one of the duty labels, so `label = ""` gave `""` (with `phase = "duty"` and
+  no duty rules). The ensures now states what holds: a non-empty label maps to a
+  non-empty label (`result.label != "" || label == ""`). Behaviour is unchanged.
+- `scenario.yieldsOf` promised at most 4 yields, which `readYields` enforces while
+  decoding a scenario. But a `Scenario` record built directly could hold more, and
+  `yieldsOf` returned them all. It now takes at most 4, so the contract holds for every
+  `Scenario`. Decoded scenarios are unaffected.
+
 ## 0.6.0
 
 Feature: **stand down at the check-in.** Mark's ruling (attended 2026-10-16,
