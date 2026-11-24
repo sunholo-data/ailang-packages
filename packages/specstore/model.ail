@@ -25,7 +25,7 @@ export type Dev = { rule: string, instead: string, approvedBy: string }
 export type Param = { id: string, key: string, value: string, variable: string, allowed: [string], typ: string }
 export type Event = { id: string, description: string, trigger: string, scope: string, eventName: string,
                priority: string, since: string, changed: string, note: string, params: [Param],
-               dlEvent: string, live: string }
+               dlEvent: string, live: string, comment: string }
 export type Dict = { name: string, definition: string, typ: string, example: string, source: string, allowed: [string] }
 export type Hist = { version: string, date: string, author: string, what: string, reader: string, status: string }
 -- check: compare's written verdict (matched, gaps found, could not check, waiting for release, no visit);
@@ -90,7 +90,7 @@ export func toSpec(j: Json, rounds: [Round]) -> Spec {
                       eventName: str(e, "eventName"), priority: str(e, "priority"), since: str(e, "since"),
                       changed: if str(e, "changed") == "" then str(e, "since") else str(e, "changed"), note: str(e, "note"),
                       dlEvent: if str(e, "datalayer_event") == "" then str(e, "eventName") else str(e, "datalayer_event"),
-                      live: str(e, "live"),
+                      live: str(e, "live"), comment: str(e, "comment"),
                       params: map(\p. { id: str(p, "id"), key: str(p, "key"), value: str(p, "value"), variable: variableOf(str(p, "value")),
                                         allowed: allowedFor(variableOf(str(p, "value"))), typ: typeFor(variableOf(str(p, "value"))) }, arr(e, "parameters")) }, arr(j, "events")),
     dict: dict,

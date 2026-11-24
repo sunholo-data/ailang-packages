@@ -6,21 +6,25 @@ module sunholo/specstore/main
 --   specstore view  <standard.yaml> <spec-folder> <out.xlsx>
 --   specstore visits  <standard.yaml> <spec-folder> <visits.json>
 --   specstore compare <standard.yaml> <spec-folder> <observed.json> <round.yaml>
+--   specstore deliver <standard.yaml> <spec-folder> <out-folder> [events=E01-E04 | events=E01,E03 | scope=<scope>] [date=YYYY-MM-DD]
 --
 -- Without the shim: ailang run --quiet --caps IO,FS,Env specstore/main.ail -- <command> …
 
 import std/result (Result, Ok, Err)
 import std/option (Option, Some, None)
-import std/fs (writeFile, readFile)
+import std/fs (writeFile, readFile, mkdirAll)
 import std/env (getArgs)
 import std/io (println)
-import std/list (length, foldl)
+import std/list (length, foldl, filter, nth, map)
 import std/zip (createArchive)
+import std/string (startsWith, substring, length as strLen)
 import ./model (Field, Rule, Std, Dev, Param, Event, Dict, Hist, Res, Round, Spec, str, arr, strs, obj, loadYaml, toStd, toSpec, toRound, loadSpec, matches, varsIn, parseVersion, keyOf, present, fieldsOf, missingIn, dup)
 import ./check (runCheck)
 import ./guide (guide)
 import ./view (view)
 import ./xlsx (workbook)
+import ./docx (document, toMarkdown)
+import ./deliver (toDelivery, missingDelivery, selectEvents, guideBlocks, trackingSheet)
 import ./audit (runAudit)
 import ./qa (planJson, runCompare, visitsOf)
 import std/package (assetPath)
@@ -53,7 +57,12 @@ export func main() -> () ! {IO, FS, Env, Declassify} {
         Err(es) => foldl(\u. \e. println("✗ ${e}"), (), es),
         Ok(sp) => runCompare(std, sp, observed, out)
       }),
-    _ => println("usage: specstore template <out.yaml> | audit <manifest.tsv> <names.txt> | check <standard.yaml> <spec-folder> | guide <standard.yaml> <out.md> | view <standard.yaml> <spec-folder> <out.xlsx> | visits <standard.yaml> <spec-folder> <visits.json> | compare <standard.yaml> <spec-folder> <observed.json> <round.yaml>")
+    ["deliver", stdPath, dir, out, ...opts] => withStd(stdPath, \std. match loadSpec(dir) {
+        Err(es) => foldl(\u. \e. println("✗ ${e}"), (), es),
+        Ok(sp) => if runCheck(std, sp) then runDeliver(sp, out, opts)
+          else println("Nothing written: the spec does not meet the standard.")
+      }),
+    _ => println("usage: specstore template <out.yaml> | audit <manifest.tsv> <names.txt> | check <standard.yaml> <spec-folder> | guide <standard.yaml> <out.md> | view <standard.yaml> <spec-folder> <out.xlsx> | visits <standard.yaml> <spec-folder> <visits.json> | compare <standard.yaml> <spec-folder> <observed.json> <round.yaml> | deliver <standard.yaml> <spec-folder> <out-folder> [events=E01-E04|events=E01,E03|scope=<scope>] [date=YYYY-MM-DD]")
   }
 }
 
@@ -63,3 +72,35 @@ export func withStd(path: string, k: Std -> () ! {IO, FS}) -> () ! {IO, FS} =
     Ok(j) => k(toStd(j))
   }
 
+
+export func optValue(opts: [string], prefix: string) -> string =
+  match filter(\o. startsWith(o, prefix), opts) { [o, ..._] => substring(o, strLen(prefix), strLen(o)), [] => "" }
+
+-- The developer's documents from the spec alone: no QA round, no visit, no live site.
+export func runDeliver(sp: Spec, out: string, opts: [string]) -> () ! {IO, FS} {
+  let d = toDelivery(sp.j);
+  let sel = match filter(\o. startsWith(o, "events=") || startsWith(o, "scope="), opts) { [o, ..._] => o, [] => "" };
+  let lastDate = match nth(sp.hist, length(sp.hist) - 1) { Some(h) => h.date, None => "" };
+  let date = if optValue(opts, "date=") == "" then lastDate else optValue(opts, "date=");
+  let evs = selectEvents(sel, sp.events);
+  let gaps = missingDelivery(d);
+  if length(gaps) > 0 then {
+    println("Nothing written. The spec's delivery block needs, before anything goes to a developer:");
+    foldl(\u. \g. println("  ✗ ${g}"), (), gaps)
+  } else if length(evs) == 0 then println("Nothing written: no event matches ${sel}.")
+  else {
+    let stem = "${sp.client} - v${sp.version}";
+    let sheetFile = "${stem} - Tracking sheet.xlsx";
+    let blocks = guideBlocks(sp, d, evs, sel, date, sheetFile);
+    mkdirAll(out);
+    writeFile("${out}/${stem} - Implementation guide.md", toMarkdown(blocks));
+    match createArchive("${out}/${stem} - Implementation guide.docx", document(blocks)) {
+      Ok(_) => println("✓ wrote ${out}/${stem} - Implementation guide.docx (and .md)"),
+      Err(e) => println("✗ could not write the guide: ${e}")
+    };
+    match createArchive("${out}/${sheetFile}", workbook(trackingSheet(sp, evs))) {
+      Ok(_) => println("✓ wrote ${out}/${sheetFile}: ${show(length(evs))} events, ${show(foldl(\n. \e. n + length(e.params), 0, evs))} parameters"),
+      Err(e) => println("✗ could not write the sheet: ${e}")
+    }
+  }
+}

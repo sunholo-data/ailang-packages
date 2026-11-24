@@ -1,0 +1,210 @@
+module sunholo/specstore/deliver
+-- What a developer gets before the site exists: the implementation guide (Word, and the same as
+-- Markdown) and the tracking sheet (.xlsx), from spec.yaml alone. No QA round, no visit, no live
+-- site: a spec can be delivered the day it is written.
+--
+-- The shapes follow Flying Fish's output rules from the specification prototype (Golden Palace:
+-- "Full implementation package" part 1 and "Tracking sheet"). What a client sees comes only from
+-- fields meant for them: an event's `comment` (not its internal `note`), history rows marked
+-- "Sent to client", and the spec's `delivery` block. Deviations, notes and QA never appear.
+
+import std/json (Json)
+import std/option (Option, Some, None)
+import std/list (map, filter, length, nth, any, concat, flatMap, take, drop, dedup)
+import std/string (join, split, startsWith, endsWith, toUpper, replace, trim, substring, contains, length as strLen)
+import ./model (Spec, Event, Param, Dict, Hist, str, strs, obj)
+import ./check (numberAfterLetter)
+import ./docx (Blk, Title, Subtitle, H1, H2, Para, Bullets, Code, Table)
+import ./xlsx (sheetXml)
+import ./view (expectedText)
+
+-- The spec's `delivery` block: who developers ask, the GTM container, where the site runs.
+export type Delivery = { agency: string, contactName: string, contactRole: string, contactEmail: string,
+                         gtm: string, devUrl: string, uatUrl: string, prodUrl: string, sheetLink: string,
+                         testing: [string] }
+
+export func toDelivery(j: Json) -> Delivery {
+  let d = obj(j, "delivery");
+  let c = obj(d, "contact");
+  let u = obj(d, "urls");
+  { agency: str(d, "agency"), contactName: str(c, "name"), contactRole: str(c, "role"), contactEmail: str(c, "email"),
+    gtm: str(d, "gtm_container"), devUrl: str(u, "dev"), uatUrl: str(u, "uat"), prodUrl: str(u, "prod"),
+    sheetLink: str(d, "sheet_link"), testing: strs(d, "testing") }
+}
+
+-- What must be filled before anything is written. The rules say: no placeholders, ask instead.
+export func missingDelivery(d: Delivery) -> [string] =
+  concat(concat(
+    if d.contactName == "" then ["delivery.contact.name: who developers ask"] else [],
+    if d.contactEmail == "" then ["delivery.contact.email"] else []),
+    if d.gtm == "" then ["delivery.gtm_container: the container confirmed for this site (GTM-XXXXXXX)"]
+    else if !startsWith(d.gtm, "GTM-") then ["delivery.gtm_container: \"${d.gtm}\" is not a container ID (GTM-XXXXXXX)"] else [])
+
+-- Which events: "" all; events=E01-E04 (by number, both ends included); events=E01,E03; scope=<the event's scope>.
+export func selectEvents(sel: string, evs: [Event]) -> [Event] =
+  if startsWith(sel, "scope=") then filter(\e. e.scope == substring(sel, 6, strLen(sel)), evs)
+  else if startsWith(sel, "events=") then {
+    let picked = substring(sel, 7, strLen(sel));
+    match split(picked, "-") {
+      [a, b] => filter(\e. numberAfterLetter(e.id) >= numberAfterLetter(trim(a)) && numberAfterLetter(e.id) <= numberAfterLetter(trim(b)), evs),
+      _ => filter(\e. any(\x. trim(x) == e.id, split(picked, ",")), evs)
+    }
+  }
+  else evs
+
+export func selectionText(sel: string, evs: [Event]) -> string =
+  if sel == "" then "all ${show(length(evs))} events"
+  else if startsWith(sel, "scope=") then "the ${show(length(evs))} events in ${substring(sel, 6, strLen(sel))}"
+  else "events ${join(", ", map(\e. e.id, evs))}"
+
+-- ── The push, as a developer writes it ─────────────────────────────────────
+-- Keys in dot notation become nested objects; a segment ending [] is a list of one object.
+
+export func jsValue(v: string) -> string = "'${replace(v, "'", "\\'")}'"
+
+export func firstSeg(p: [string]) -> string = match p { [x, ..._] => x, [] => "" }
+
+export func renderObj(entries: [([string], string)], ind: string) -> [string] =
+  flatMap(\h. {
+    let sub = filter(\en. match en { (p, _) => firstSeg(p) == h }, entries);
+    let deeper = flatMap(\en. match en { (p, v) => if length(p) > 1 then [(drop(1, p), v)] else [] }, sub);
+    let leaf = flatMap(\en. match en { (p, v) => if length(p) == 1 then [v] else [] }, sub);
+    if length(deeper) == 0 then map(\v. "${ind}${h}: ${jsValue(v)},", take(1, leaf))
+    else if endsWith(h, "[]") then concat(concat(["${ind}${replace(h, "[]", "")}: [{"], renderObj(deeper, "${ind}  ")), ["${ind}}],"])
+    else concat(concat(["${ind}${h}: {"], renderObj(deeper, "${ind}  ")), ["${ind}},"])
+  }, dedup(map(\en. match en { (p, _) => firstSeg(p) }, entries)))
+
+export func pushCode(e: Event) -> string {
+  let entries = map(\p. (split(p.key, "."), p.value), e.params);
+  let named = if e.dlEvent == e.eventName || e.eventName == "" then [] else ["  eventName: ${jsValue(e.eventName)},"];
+  join("\n", concat(concat(concat([
+      "window.dataLayer = window.dataLayer || [];",
+      "// ${toUpper(e.description)}",
+      "window.dataLayer.push({",
+      "  event: ${jsValue(e.dlEvent)},"], named), renderObj(entries, "  ")), ["});"]))
+}
+
+-- Example 1 is a page view if the selection has one, else its first event; example 2 is the next other event.
+export func examples(evs: [Event]) -> [Event] {
+  let pv = filter(\e. e.eventName == "page_view" || contains(e.dlEvent, "page_view"), evs);
+  let first = match pv { [e, ..._] => Some(e), [] => nth(evs, 0) };
+  match first {
+    None => [],
+    Some(a) => match filter(\e. e.id != a.id, evs) { [b, ..._] => [a, b], [] => [a] }
+  }
+}
+
+-- ── The implementation guide ───────────────────────────────────────────────
+
+export func who(d: Delivery) -> string = if d.agency == "" then d.contactName else "${d.contactName}, ${d.agency}"
+
+export func contactLine(d: Delivery) -> string =
+  join(", ", filter(\x. x != "", [d.contactName, d.contactRole, d.contactEmail]))
+
+export func historyRows(sp: Spec, d: Delivery, date: string) -> [[string]] {
+  let sent = filter(\h. h.status == "Sent to client", sp.hist);
+  let rows = match sent { [] => [[date, "Initial version (v${sp.version})", who(d)]], _ => map(\h. [h.date, "v${h.version}: ${h.what}", h.author], sent) };
+  concat(rows, [["", "", ""], ["", "", ""]])
+}
+
+export func gtmHead(id: string) -> string = join("\n", [
+  "<!-- Google Tag Manager -->",
+  "<script>(function(w,d,s,l,i){w[l]=w[l]||[];w[l].push({'gtm.start':",
+  "new Date().getTime(),event:'gtm.js'});var f=d.getElementsByTagName(s)[0],",
+  "j=d.createElement(s),dl=l!='dataLayer'?'&l='+l:'';j.async=true;j.src=",
+  "'https://www.googletagmanager.com/gtm.js?id='+i+dl;f.parentNode.insertBefore(j,f);",
+  "})(window,document,'script','dataLayer','${id}');</script>",
+  "<!-- End Google Tag Manager -->"])
+
+export func gtmBody(id: string) -> string = join("\n", [
+  "<!-- Google Tag Manager (noscript) -->",
+  "<noscript><iframe src=\"https://www.googletagmanager.com/ns.html?id=${id}\"",
+  "height=\"0\" width=\"0\" style=\"display:none;visibility:hidden\"></iframe></noscript>",
+  "<!-- End Google Tag Manager (noscript) -->"])
+
+export func sheetRef(d: Delivery, sheetFile: string) -> string = if d.sheetLink == "" then sheetFile else d.sheetLink
+
+export func referenceRows(d: Delivery, sheetFile: string) -> [[string]] =
+  filter(\r. match r { [_, v] => v != "", _ => false }, [
+    ["DEV URL", d.devUrl], ["UAT URL", d.uatUrl], ["PROD URL", d.prodUrl],
+    ["Tracking Sheet", sheetRef(d, sheetFile)], ["Contact person", contactLine(d)]])
+
+export func guideBlocks(sp: Spec, d: Delivery, evs: [Event], sel: string, date: string, sheetFile: string) -> [Blk] {
+  let exs = examples(evs);
+  let exBlocks = flatMap(\e. [H2("Example: ${e.eventName} (${e.id})"), Code(pushCode(e))], exs);
+  concat(concat([
+    Title(sp.client),
+    Subtitle("DataLayer & Tagging Specifications"),
+    Para("${sp.project} · version ${sp.version} · ${date} · ${selectionText(sel, evs)}"),
+    Table(["Date", "Description", "Who"], historyRows(sp, d, date)),
+
+    H1("1. About this document"),
+    Para("This document describes the technical details of the dataLayer and tagging mechanisms to be implemented on the site. These elements allow measuring user interactions and behaviour."),
+    Para("The dataLayer and tagging mechanism feeds Google Analytics 4 and may also serve other analytics tools or platforms."),
+    Bullets(["Tag Manager script implementation: the Google Tag Manager script to add to all pages, and where to place it.",
+             "dataLayer overview: the principle of the dataLayer, and a high-level view of its structure and push mechanism."]),
+
+    H1("2. GTM container set-up"),
+    H2("2.1 Overview"),
+    Para("Google Tag Manager is used as the primary tag management platform for this project."),
+    H2("2.2 GTM container ID"),
+    Para("Container ID: ${d.gtm} (client-side web container)."),
+    H2("2.3 GTM snippet"),
+    Para("The following code must be present on all pages."),
+    Code(gtmHead(d.gtm)),
+    Para("Paste this code as high in the <head> of the page as possible, after the dataLayer initialisation (if applicable)."),
+    Code(gtmBody(d.gtm)),
+    Para("Paste this code immediately after the opening <body> tag."),
+
+    H1("3. Project references"),
+    Table(["Item", "Value"], referenceRows(d, sheetFile)),
+
+    H1("4. dataLayer overview"),
+    Bullets(["The dataLayer is a JavaScript array where all contextual information is set, including page content, user attributes, event descriptions and more.",
+             "It is a global information object that allows Google Tag Manager to retrieve the required parameters and send them to analytics tools and other platforms.",
+             "dataLayer objects and attributes are added or updated for each type of event with the .push() method. The event's information is pushed when the interaction takes place; Google Tag Manager detects the trigger, assigns the data variables and evaluates its rules."]),
+    Para("The examples below show complete pushes as defined in the specifications. Values in {{double braces}} are dynamic and are described in the variable dictionary.")
+  ], exBlocks), [
+    H1("5. Detailed specifications"),
+    Para("The detailed key-value pairs to be defined in the dataLayer are provided in the accompanying spreadsheet: ${sheetRef(d, sheetFile)}. It contains:"),
+    Bullets(["Events: the dataLayer push to execute for each interaction, one row per event and one column per key.",
+             "Parameters: one row per parameter with its ID (P0003.002 is parameter 2 of event 3), for questions and QA findings that name a single parameter.",
+             "Variable dictionary: the definition, example and allowed values of every dynamic value used."]),
+
+    H1("6. Testing & support"),
+    H2("Testing"),
+    match d.testing { [] => Para("Testing instructions will be provided separately."), ts => Bullets(ts) },
+    H2("Support"),
+    Para("For any question or remark about this document or the tracking specifications, please contact:"),
+    Para(contactLine(d))
+  ])
+}
+
+-- ── The tracking sheet ─────────────────────────────────────────────────────
+
+export func keysOf(evs: [Event]) -> [string] = dedup(flatMap(\e. map(\p. p.key, e.params), evs))
+
+export func valueFor(e: Event, k: string) -> string = match filter(\p. p.key == k, e.params) { [p, ..._] => p.value, [] => "" }
+
+export func eventRows(evs: [Event], ks: [string]) -> [[(string, int)]] =
+  map(\e. concat([(e.id, 0), (e.description, 0), (e.comment, 0), (e.dlEvent, 0), (e.eventName, 0)], map(\k. (valueFor(e, k), 0), ks)), evs)
+
+export func paramRows(evs: [Event]) -> [[(string, int)]] =
+  flatMap(\e. map(\p. [(p.id, 0), (e.id, 0), (e.eventName, 0), (p.key, 0), (p.value, 0), (expectedText(p), 0)], e.params), evs)
+
+export func usedVariables(evs: [Event]) -> [string] =
+  dedup(filter(\v. v != "", flatMap(\e. map(\p. p.variable, e.params), evs)))
+
+export func dictRows(dict: [Dict], used: [string]) -> [[(string, int)]] =
+  map(\d. [(d.name, 0), (d.definition, 0), (d.typ, 0), (d.example, 0), (join(", ", d.allowed), 0), ("", 0)],
+      filter(\d. any(\u. u == d.name, used), dict))
+
+export func trackingSheet(sp: Spec, evs: [Event]) -> [(string, string)] {
+  let ks = keysOf(evs);
+  [("Events", sheetXml(concat(["ID", "Interaction description", "Comments", "event", "eventName"], ks),
+                       eventRows(evs, ks), concat([7, 40, 30, 22, 22], map(\k. 20, ks)))),
+   ("Parameters", sheetXml(["Parameter ID", "Event", "eventName", "Key", "Value", "Expected"],
+                           paramRows(evs), [13, 7, 22, 36, 24, 36])),
+   ("Variable dictionary", sheetXml(["Variable", "Definition", "Type", "Example value", "Allowed values", "Comments"],
+                                    dictRows(sp.dict, usedVariables(evs)), [22, 50, 10, 24, 40, 30]))]
+}
