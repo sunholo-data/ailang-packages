@@ -49,3 +49,11 @@ ensures { result >= a, result >= b, result <= 2, result == a || result == b }
 export pure func visitOutcome(ran: bool, blocked: bool, failed: bool) -> int ! {}
 ensures { result >= 0, result <= 2, (ran && !blocked) || result == 1, !(ran && !blocked) || result == (if failed then 2 else 0) }
 { if !ran || blocked then 1 else if failed then 2 else 0 }
+
+-- A parameter's ID names its event: P<event number>.<parameter number> (P0003.002 is parameter 2
+-- of E03). It fits its event when the event part is that event's own number and the parameter
+-- part is 1–999, so moving a parameter to another event shows as a wrong ID, not a silent one.
+export pure func paramIdFits(eventNum: int, idEvent: int, idParam: int) -> bool ! {}
+requires { eventNum >= 0 }
+ensures { result == (idEvent == eventNum && idParam >= 1 && idParam <= 999) }
+{ idEvent == eventNum && idParam >= 1 && idParam <= 999 }
