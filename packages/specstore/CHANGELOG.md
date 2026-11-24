@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.3.11
+
+Parameter IDs that name their event. A standard that sets `patterns.param_id` and names the
+`param-ids` check in a rule gets three checks on every parameter: it has an ID, the ID has the
+standard's shape, and its event part is the event's own number (P0003.002 is parameter 2 of E03,
+so a parameter moved to another event shows as a wrong ID). A parameter ID used twice in the spec is
+reported. The event-and-parameter rule is proved in `rules.paramIdFits`. A standard without
+`param_id` asks for nothing, so existing standards are unaffected. The sheet shows the ID: a
+"Parameter ID" column on Parameters, and each parameter line on the Spec tab starts with it. The
+event ID message reads "two to four digits", following Flying Fish's standard (E1001 for plans past
+a thousand events); the pattern itself stays the standard's. Tests: `check_test.ail` (23),
+`qa_test.ail` (49), `view_test.ail` (13); `rules.ail` 9 of 9 verified.
+
 ## 0.3.10
 
 One push per verdict. When a page pushed an event more than once, a visit passed if any push matched

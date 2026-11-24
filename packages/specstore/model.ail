@@ -16,13 +16,13 @@ export type Field = { name: string, required: bool, note: string }
 export type Rule = { id: string, status: string, source: string, text: string, check: string }
 export type Std = { name: string, version: string, status: string, owner: string, rules: [Rule],
              qaStates: [string], priorities: [string], types: [string], statuses: [string],
-             pId: string, pEvent: string, pKey: string, pVar: string, pOther: string, j: Json }
+             pId: string, pParamId: string, pEvent: string, pKey: string, pVar: string, pOther: string, j: Json }
 
 export type Dev = { rule: string, instead: string, approvedBy: string }
 -- variable: the {{name}} the value names ("" for a fixed value); allowed: that variable's allowed values
 -- from the dictionary, filled when the spec loads, so a run can check the value and not only that it is set.
 -- typ: the variable's type in the dictionary (text, number, …), so a number is compared as a number.
-export type Param = { key: string, value: string, variable: string, allowed: [string], typ: string }
+export type Param = { id: string, key: string, value: string, variable: string, allowed: [string], typ: string }
 export type Event = { id: string, description: string, trigger: string, scope: string, eventName: string,
                priority: string, since: string, changed: string, note: string, params: [Param],
                dlEvent: string, live: string }
@@ -71,7 +71,7 @@ export func toStd(j: Json) -> Std {
   { name: str(s, "name"), version: str(s, "version"), status: str(s, "status"), owner: str(s, "owner"),
     rules: map(\r. { id: str(r, "id"), status: str(r, "status"), source: str(r, "source"), text: str(r, "text"), check: str(r, "check") }, arr(j, "rules")),
     qaStates: strs(v, "qa_states"), priorities: strs(v, "priority"), types: strs(v, "types"), statuses: strs(v, "statuses"),
-    pId: str(p, "id"), pEvent: str(p, "event_name"), pKey: str(p, "key"), pVar: str(p, "variable"), pOther: str(p, "other_notation"), j: j }
+    pId: str(p, "id"), pParamId: str(p, "param_id"), pEvent: str(p, "event_name"), pKey: str(p, "key"), pVar: str(p, "variable"), pOther: str(p, "other_notation"), j: j }
 }
 
 -- The variable a whole value names: "{{pageType}}" names pageType; anything else names none.
@@ -91,7 +91,7 @@ export func toSpec(j: Json, rounds: [Round]) -> Spec {
                       changed: if str(e, "changed") == "" then str(e, "since") else str(e, "changed"), note: str(e, "note"),
                       dlEvent: if str(e, "datalayer_event") == "" then str(e, "eventName") else str(e, "datalayer_event"),
                       live: str(e, "live"),
-                      params: map(\p. { key: str(p, "key"), value: str(p, "value"), variable: variableOf(str(p, "value")),
+                      params: map(\p. { id: str(p, "id"), key: str(p, "key"), value: str(p, "value"), variable: variableOf(str(p, "value")),
                                         allowed: allowedFor(variableOf(str(p, "value"))), typ: typeFor(variableOf(str(p, "value"))) }, arr(e, "parameters")) }, arr(j, "events")),
     dict: dict,
     hist: map(\h. { version: str(h, "version"), date: str(h, "date"), author: str(h, "author"), what: str(h, "what"),

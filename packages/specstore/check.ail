@@ -8,9 +8,9 @@ import std/json (Json)
 import std/option (Option, Some, None)
 import std/io (println)
 import std/list (map, filter, length, nth, foldl, range, any, zip, flatMap)
-import std/string (join, startsWith, trim, split)
+import std/string (join, startsWith, trim, split, substring, stringToInt, length as strLen)
 import ./qa (visitChecks)
-import ./rules (statusFitsVersion, movesForward, roundTestsKnownVersion, passAllowed)
+import ./rules (statusFitsVersion, movesForward, roundTestsKnownVersion, passAllowed, paramIdFits)
 import ./model (Field, Rule, Std, Dev, Param, Event, Dict, Hist, Res, Round, Spec, str, arr, strs, obj, loadYaml, toStd, toSpec, toRound, loadSpec, matches, varsIn, parseVersion, keyOf, present, fieldsOf, missingIn, dup)
 export func all(xss: [[(string, string)]]) -> [(string, string)] = flatMap(\xs. xs, xss)
 
@@ -25,13 +25,39 @@ export func strayBraces(pVar: string, value: string) -> bool =
 -- GA4's ecommerce.items is a list: a key through it names every item with [].
 export func itemsWithoutBrackets(key: string) -> bool = startsWith(key, "ecommerce.items.")
 
+-- The number in an ID after its letter: E03 is 3, P0003 is 3; -1 when there is none.
+export func numberAfterLetter(s: string) -> int =
+  if strLen(s) < 2 then -1 else match stringToInt(substring(s, 1, strLen(s))) { Some(n) => n, None => -1 }
+
+-- The (event, parameter) numbers in a parameter ID: P0003.002 is (3, 2); (-1, -1) when it has no dot.
+export func paramIdParts(pid: string) -> (int, int) =
+  match split(pid, ".") {
+    [ev, pn] => (numberAfterLetter(ev), match stringToInt(pn) { Some(n) => n, None => -1 }),
+    _ => (-1, -1)
+  }
+
+-- A parameter's ID: present, in the standard's shape, and under its own event (rules.paramIdFits).
+-- An empty param_id pattern means the standard does not ask for one, and nothing is checked.
+export func paramIdChecks(std: Std, e: Event, pr: Param) -> [(string, string)] {
+  let want = "P${repeatZero(4 - strLen(show(numberAfterLetter(e.id))))}${show(numberAfterLetter(e.id))}";
+  if std.pParamId == "" then []
+  else if pr.id == "" then [("param-ids", "${e.id}: ${pr.key} has no ID (${want}.NNN)")]
+  else if !matches(std.pParamId, pr.id) then [("param-ids", "${e.id}: ${pr.key} has ID \"${pr.id}\", which is not P, the event's number in four digits, a dot and three digits (${want}.001)")]
+  else match paramIdParts(pr.id) {
+    (ev, pn) => when(paramIdFits(numberAfterLetter(e.id), ev, pn), "param-ids", "${e.id}: ${pr.key} has ID ${pr.id}; a parameter of ${e.id} starts ${want}. and is numbered 001–999")
+  }
+}
+
+export func repeatZero(n: int) -> string = if n <= 0 then "" else "0${repeatZero(n - 1)}"
+
 export func paramChecks(std: Std, names: [string], e: Event, pr: Param) -> [(string, string)] =
   all([
     when(matches(std.pKey, pr.key), "key-casing", "${e.id}: key \"${pr.key}\" is not camelCase under an object"),
     when(!itemsWithoutBrackets(pr.key), "arrays", "${e.id}: key \"${pr.key}\" goes through ecommerce.items, which is a list: write ecommerce.items[]"),
     when(!matches(std.pOther, pr.value), "notation", "${e.id}: ${pr.key} is written \"${pr.value}\"; a run-time value is {{name}}"),
     when(!strayBraces(std.pVar, pr.value), "notation", "${e.id}: ${pr.key} is written \"${pr.value}\", which is not a variable the standard accepts"),
-    flatMap(\v. when(any(\n. n == v, names), "dictionary", "${e.id}: {{${v}}} is not in the dictionary"), varsIn(std.pVar, pr.value))
+    flatMap(\v. when(any(\n. n == v, names), "dictionary", "${e.id}: {{${v}}} is not in the dictionary"), varsIn(std.pVar, pr.value)),
+    paramIdChecks(std, e, pr)
   ])
 
 export func eventChecks(std: Std, names: [string], known: [string], e: Event, ej: Json) -> [(string, string)] =
@@ -39,7 +65,7 @@ export func eventChecks(std: Std, names: [string], known: [string], e: Event, ej
     missingIn(std, "event", "required", e.id, ej),
     when(e.eventName != "", "event-name", "${e.id}: no eventName"),
     when(e.eventName == "" || matches(std.pEvent, e.eventName), "event-casing", "${e.id}: eventName \"${e.eventName}\" is not snake_case"),
-    when(matches(std.pId, e.id), "ids", "${e.id}: the ID is not a letter and two or three digits"),
+    when(matches(std.pId, e.id), "ids", "${e.id}: the ID is not a letter and two to four digits"),
     when(any(\x. x == e.priority, std.priorities), "priority", "${e.id}: priority \"${e.priority}\" is not one of ${join(", ", std.priorities)}"),
     when(any(\k. k == e.since, known), "versions", "${e.id}: since ${e.since}, which is not in the history"),
     when(any(\k. k == e.changed, known), "versions", "${e.id}: changed in ${e.changed}, which is not in the history"),
@@ -93,6 +119,7 @@ export func checks(std: Std, sp: Spec) -> [(string, string)] {
       ]), sp.deviations),
     flatMap(\p. match p { (e, ej) => eventChecks(std, names, known, e, ej) }, zip(sp.events, arr(sp.j, "events"))),
     map(\i. ("ids", "${i}: the ID is used twice"), dup(ids)),
+    map(\i. ("param-ids", "${i}: the parameter ID is used twice"), dup(filter(\i. i != "", flatMap(\e. map(\p. p.id, e.params), sp.events)))),
     flatMap(\p. match p { (d, dj) => dictChecks(std, d, dj) }, zip(sp.dict, arr(sp.j, "dictionary"))),
     when(sp.version == lastHist, "versions", "spec: version ${sp.version} is not the last row of the history (${lastHist})"),
     flatMap(\p. match p { (h, hj) => histChecks(std, h, hj) }, zip(sp.hist, arr(sp.j, "history"))),

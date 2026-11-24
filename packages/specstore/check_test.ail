@@ -114,3 +114,56 @@ test "ecommerce.items[] keys pass arrays" {
   !any(\f. match f { (_, _, m) => find(m, "which is a list") >= 0 },
        findings(withRule("keys", "arrays"), specK("ecommerce.items[].item_id", "page_view", "{{pageType}}", "Internal", "person", "pass", "")))
 }
+
+-- Parameter IDs (param-ids): P<event, four digits>.<parameter, three digits>, under its own event.
+func stdP() -> Std = toStd(y("standard: {name: T, version: \"0.1\", status: draft, owner: Ana Owner}
+rules:
+  - {id: param-ids, status: decided, source: t, text: t, check: param-ids}
+vocab: {qa_states: [pass, fail], priority: [high], types: [text], statuses: [Internal, Sent to client]}
+patterns:
+  id: \"^[A-Z][0-9]{2,4}$\"
+  param_id: \"^P[0-9]{4}\\\\.[0-9]{3}$\"
+  event_name: \"^[a-z][a-z0-9]*(_[a-z0-9]+)*$\"
+  key: \".*\"
+  variable: \"\\\\{\\\\{([A-Za-z][A-Za-z0-9]*)\\\\}\\\\}\"
+  other_notation: \"x^\"
+fields: {}"))
+
+func specP(params3: string) -> Spec =
+  toSpec(y("spec: {client: C, project: P, owner: Ana, version: \"1.0\", standard: \"0.1\"}
+history:
+  - {version: \"1.0\", date: d, author: Ana, what: w, status: Internal}
+events:
+  - {id: E03, description: d, trigger: t, scope: s, eventName: view_item_list, priority: high, since: \"1.0\",
+     parameters: [${params3}]}
+  - {id: E1001, description: d, trigger: t, scope: s, eventName: login, priority: high, since: \"1.0\",
+     parameters: [{id: P1001.001, key: method, value: \"x\"}]}
+dictionary: []"), [])
+
+func pFindings(params3: string) -> [(string, string, string)] = findings(stdP(), specP(params3))
+
+test "parameter IDs under their own event pass, four-digit events included" {
+  length(pFindings("{id: P0003.001, key: a, value: \"x\"}, {id: P0003.002, key: b, value: \"y\"}")) == 0
+}
+
+test "a missing parameter ID is reported with the prefix it should have" {
+  match pFindings("{key: a, value: \"x\"}") { [(r, _, m)] => r == "param-ids" && find(m, "P0003.NNN") >= 0, _ => false }
+}
+
+test "the old flat P01 is refused" {
+  match pFindings("{id: P01, key: a, value: \"x\"}") { [(r, _, m)] => r == "param-ids" && find(m, "P0003.001") >= 0, _ => false }
+}
+
+test "an ID naming another event is refused" {
+  match pFindings("{id: P0005.002, key: a, value: \"x\"}") { [(r, _, m)] => r == "param-ids" && find(m, "starts P0003.") >= 0, _ => false }
+}
+
+test "parameter 000 is refused" { length(pFindings("{id: P0003.000, key: a, value: \"x\"}")) == 1 }
+
+test "the same parameter ID twice is refused" {
+  match pFindings("{id: P0003.001, key: a, value: \"x\"}, {id: P0003.001, key: b, value: \"y\"}") {
+    [(r, _, m)] => r == "param-ids" && find(m, "used twice") >= 0, _ => false
+  }
+}
+
+test "a standard without param_id asks for no IDs" { length(findings(std(""), clean())) == 0 }

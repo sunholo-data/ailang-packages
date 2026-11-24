@@ -83,7 +83,8 @@ export func expectedText(p: Param) -> string =
 -- ones to decide, so a reader can see the check working, not only failing.
 export func parameterRows(sp: Spec) -> [[(string, int)]] =
   flatMap(\e. match latestCheckFor(e.id, sp.rounds) {
-      Some(k) => flatMap(\v. map(\p. [(e.id, 0), (e.eventName, 0), (v.visit, 0), (p.key, 0),
+      Some(k) => flatMap(\v. map(\p. [(e.id, 0), (e.eventName, 0), (v.visit, 0),
+                                        (match filter(\q. q.key == p.key, e.params) { [q, ..._] => q.id, [] => "" }, 0), (p.key, 0),
                                         (match filter(\q. q.key == p.key, e.params) { [q, ..._] => expectedText(q), [] => "" }, 0),
                                         (p.status, 0)], v.params), k.visits),
       None => []
@@ -175,7 +176,7 @@ export func stateStyle(s: string) -> int = if s == "pass" then 2 else if s == "f
 export func view(sp: Spec) -> [(string, string)] {
   let specRows = map(\e. {
       let base = [(e.id, 0), (e.description, 0), (e.trigger, 0), (e.scope, 0), (e.eventName, 0),
-                  (join("\n", map(\p. "${p.key} = ${p.value}", e.params)), 0), (e.priority, 0), (e.since, 0), (e.changed, 0)];
+                  (join("\n", map(\p. if p.id == "" then "${p.key} = ${p.value}" else "${p.id}  ${p.key} = ${p.value}", e.params)), 0), (e.priority, 0), (e.since, 0), (e.changed, 0)];
       match latestFor(e.id, sp.rounds) {
         None => concat(base, [("—", 0), ("not tested", 4), (checkText(latestCheckFor(e.id, sp.rounds)), 0), (countsText(latestCheckFor(e.id, sp.rounds)), 0), ("", 0), ("yes", 4), (e.note, 0)]),
         Some(l) => {
@@ -193,8 +194,8 @@ export func view(sp: Spec) -> [(string, string)] {
   [ ("Read me", sheetXml(["Read me", "", ""], readMeRows(sp.version), [28, 90, 50])),
     ("Summary", sheetXml(["ID", "eventName", "Priority", "Visit", "Automatic check", "Parameters", "Result", "Comment"],
                          summaryRows(sp), [6, 18, 9, 10, 40, 16, 12, 60])),
-    ("Parameters", sheetXml(["ID", "eventName", "Visit", "Key", "Expected", "Status"],
-                            parameterRows(sp), [6, 18, 8, 34, 24, 18])),
+    ("Parameters", sheetXml(["ID", "eventName", "Visit", "Parameter ID", "Key", "Expected", "Status"],
+                            parameterRows(sp), [6, 18, 8, 12, 34, 24, 18])),
     ("Visits", sheetXml(["Visit", "Starts on", "Consent", "What it does", "Pages reached (latest run)", "Expects", "Forbids"],
                         visitRows(sp), [7, 24, 12, 60, 70, 40, 30])),
     ("Spec v${sp.version}", sheetXml(["ID", "Description", "Trigger", "Scope", "eventName", "Parameters", "Priority", "Since", "Last changed", "Last QA", "Result", "Automatic check", "Parameters", "QA comment", "Retest", "Note"],
