@@ -1,5 +1,30 @@
 # Changelog
 
+## 0.4.0
+
+`specstore deliver`: what a developer gets before the site exists, from `spec.yaml` alone. No QA
+round, no visit, no live site, no Cloud Run job.
+
+    specstore deliver <standard.yaml> <spec-folder> <out-folder> [events=E01-E04 | events=E01,E03 | scope=<scope>] [date=YYYY-MM-DD]
+
+Writes `<client> - v<version> - Implementation guide.docx` (and the same as `.md`) and
+`<client> - v<version> - Tracking sheet.xlsx`. The shapes follow Flying Fish's output rules from their
+specification prototype (Golden Palace, "Full implementation package" part 1 and "Tracking sheet"):
+the guide has the change history, the GTM container and both snippets, project references, a
+dataLayer overview with two complete push examples built from the spec (dot notation nested, `[]` as
+a list of one object), and testing and support; the sheet has Events (one column per key), Parameters
+(one row each, with its ID) and the Variable dictionary, filtered to the variables the selection uses.
+
+A spec gains a `delivery` block (agency, contact name/role/email, `gtm_container`, `urls` dev/uat/prod,
+`sheet_link`, `testing`) and events gain an optional `comment` for developers. Nothing is written until
+the contact and a `GTM-` container are filled in: the rules say no placeholders. Only client-facing
+fields are used: an event's `comment` (never its `note`), history rows marked "Sent to client", and
+the delivery block; deviations and QA never appear, and a test fails if they do.
+
+New modules `docx` (a minimal Word writer: title, headings, paragraphs, bullets, shaded code, tables;
+the same blocks render as Markdown) and `deliver`. Tests: `deliver_test.ail` (10), `check_test.ail`
+(23), `qa_test.ail` (49), `view_test.ail` (13); `rules.ail` 9 of 9 verified.
+
 ## 0.3.11
 
 Parameter IDs that name their event. A standard that sets `patterns.param_id` and names the

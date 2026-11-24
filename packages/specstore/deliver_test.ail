@@ -1,0 +1,83 @@
+-- Tests for the developer's documents (deliver): what is refused, what is selected, how a push is
+-- written, and that nothing internal (notes, internal history, deviations) reaches the client.
+module sunholo/specstore/deliver_test
+
+import std/yaml (decode as yamlDecode)
+import std/json (Json, JNull)
+import std/list (map, length, any, flatMap)
+import std/string (find, join)
+import ./model (Spec, toSpec)
+import ./docx (toMarkdown)
+import ./deliver (toDelivery, missingDelivery, selectEvents, pushCode, examples, guideBlocks, trackingSheet)
+
+func y(s: string) -> Json = match yamlDecode(s) { Ok(j) => j, Err(_) => JNull }
+
+func spec(delivery: string) -> Spec = toSpec(y("spec: {client: Demo, project: Search, owner: Ana, version: \"1.1\", standard: \"0.1\",
+  deviations: [{rule: key-casing, instead: SECRET-DEVIATION, approved_by: Ana}]}
+history:
+  - {version: \"1.0\", date: \"2026-10-01\", author: Ana, what: First release, status: Sent to client}
+  - {version: \"1.1\", date: \"2026-11-01\", author: Ana, what: SECRET-INTERNAL-ROW, status: Internal}
+events:
+  - {id: E01, description: Any page is viewed, trigger: t, scope: Site, eventName: page_view, priority: high, since: \"1.0\",
+     note: SECRET-NOTE, comment: Fire once per page,
+     parameters: [{id: P0001.001, key: page.type, value: \"{{pageType}}\"}, {id: P0001.002, key: page.language, value: fr}]}
+  - {id: E02, description: The visitor searches, trigger: t, scope: Search, eventName: search, priority: high, since: \"1.0\",
+     parameters: [{id: P0002.001, key: \"ecommerce.items[].item_id\", value: \"{{itemId}}\"}, {id: P0002.002, key: ecommerce.currency, value: EUR}]}
+  - {id: E05, description: Login, trigger: t, scope: Account, eventName: login, priority: high, since: \"1.0\", parameters: []}
+dictionary:
+  - {name: pageType, definition: The kind of page, type: text, example: home, source: s}
+  - {name: itemId, definition: The item, type: text, example: A1, source: s}
+  - {name: unused, definition: Not used by any event, type: text, example: x, source: s}
+${delivery}"), [])
+
+func full() -> Spec = spec("delivery: {agency: FF, contact: {name: Val, role: Analyst, email: val@x.be}, gtm_container: GTM-ABC1234}")
+
+func guideMd(sp: Spec) -> string = toMarkdown(guideBlocks(sp, toDelivery(sp.j), sp.events, "", "2026-11-24", "sheet.xlsx"))
+
+func sheetText(sp: Spec) -> string = join("", map(\t. match t { (_, x) => x }, trackingSheet(sp, sp.events)))
+
+test "no delivery block: contact and container are asked for, nothing invented" {
+  length(missingDelivery(toDelivery(spec("").j))) == 3
+}
+
+test "a container that is not GTM-… is refused" {
+  length(missingDelivery(toDelivery(spec("delivery: {contact: {name: V, email: v@x}, gtm_container: ABC}").j))) == 1
+}
+
+test "a complete delivery block passes" { length(missingDelivery(toDelivery(full().j))) == 0 }
+
+test "events by range, by list and by scope" {
+  map(\e. e.id, selectEvents("events=E02-E05", full().events)) == ["E02", "E05"] &&
+  map(\e. e.id, selectEvents("events=E01,E05", full().events)) == ["E01", "E05"] &&
+  map(\e. e.id, selectEvents("scope=Search", full().events)) == ["E02"] &&
+  length(selectEvents("", full().events)) == 3
+}
+
+test "a push nests dot notation and writes [] as a list of one object" {
+  match selectEvents("events=E02", full().events) {
+    [e] => find(pushCode(e), "ecommerce: {\n    items: [{\n      item_id: '{{itemId}}',\n    }],\n    currency: 'EUR',\n  },") >= 0,
+    _ => false
+  }
+}
+
+test "the first example is the page view" { match examples(full().events) { [a, b] => a.id == "E01" && b.id == "E02", _ => false } }
+
+test "the guide carries the container in both snippets and the contact" {
+  let g = guideMd(full());
+  find(g, "'dataLayer','GTM-ABC1234'") >= 0 && find(g, "ns.html?id=GTM-ABC1234") >= 0 && find(g, "Val, Analyst, val@x.be") >= 0
+}
+
+test "only history sent to the client appears, with two empty rows for later" {
+  let g = guideMd(full());
+  find(g, "v1.0: First release") >= 0 && find(g, "SECRET-INTERNAL-ROW") < 0
+}
+
+test "nothing internal reaches the guide or the sheet: notes, internal history, deviations" {
+  let all = "${guideMd(full())}${sheetText(full())}";
+  find(all, "SECRET-NOTE") < 0 && find(all, "SECRET-INTERNAL-ROW") < 0 && find(all, "SECRET-DEVIATION") < 0
+}
+
+test "the sheet carries the comment meant for developers, parameter IDs, and only the variables used" {
+  let s = sheetText(full());
+  find(s, "Fire once per page") >= 0 && find(s, "P0002.001") >= 0 && find(s, "pageType") >= 0 && find(s, "Not used by any event") < 0
+}
