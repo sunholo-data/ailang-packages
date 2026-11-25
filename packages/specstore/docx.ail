@@ -1,12 +1,10 @@
 module sunholo/specstore/docx
--- A minimal .docx writer for the documents specstore hands to people: a title, headings,
--- paragraphs, bullet lists, shaded code blocks and tables. Enough to open cleanly in Word,
--- LibreOffice and Google Docs; no images, no letterhead. The same blocks render as Markdown,
--- so every document also exists as text a person can diff.
+-- The blocks a document specstore hands to people is made of (a title, headings, paragraphs,
+-- bullet lists, code blocks, tables), rendered as Markdown. The Word file is made from that
+-- Markdown by AILANG Parse (main.ail): from 0.4.1, specstore no longer writes WordprocessingML itself.
 
 import std/list (map, length, zip, range, concat)
 import std/string (join, replace, split)
-import ./xlsx (esc, part)
 
 export type Blk = Title(string) | Subtitle(string) | H1(string) | H2(string) | Para(string)
                 | Bullets([string]) | Code(string) | Table([string], [[string]])
@@ -31,73 +29,3 @@ export func mdBlock(b: Blk) -> string =
   }
 
 export func toMarkdown(bs: [Blk]) -> string = "${join("\n\n", map(mdBlock, bs))}\n"
-
--- ── WordprocessingML ───────────────────────────────────────────────────────
-
-export func run(t: string) -> string = "<w:r><w:t xml:space=\"preserve\">${esc(t)}</w:t></w:r>"
-
-export func para(style: string, t: string) -> string =
-  "<w:p>${if style == "" then "" else "<w:pPr><w:pStyle w:val=\"${style}\"/></w:pPr>"}${run(t)}</w:p>"
-
--- A code block keeps its lines: one paragraph per line in the Code style (shaded, monospace).
-export func codeXml(c: string) -> string = join("", map(\l. para("Code", l), split(c, "\n")))
-
-export func tcell(bold: bool, t: string) -> string =
-  "<w:tc><w:tcPr><w:tcW w:w=\"0\" w:type=\"auto\"/></w:tcPr><w:p>${if bold then "<w:pPr><w:pStyle w:val=\"TableHead\"/></w:pPr>" else ""}${run(t)}</w:p></w:tc>"
-
-export func tableXml(hs: [string], rows: [[string]]) -> string =
-  join("", concat([
-      "<w:tbl><w:tblPr><w:tblStyle w:val=\"Grid\"/><w:tblW w:w=\"5000\" w:type=\"pct\"/></w:tblPr>",
-      "<w:tr>${join("", map(\h. tcell(true, h), hs))}</w:tr>"
-    ], concat(map(\r. "<w:tr>${join("", map(\c. tcell(false, c), r))}</w:tr>", rows), ["</w:tbl>", para("", "")])))
-
-export func blockXml(b: Blk) -> string =
-  match b {
-    Title(t) => para("Title", t),
-    Subtitle(t) => para("Subtitle", t),
-    H1(t) => para("Heading1", t),
-    H2(t) => para("Heading2", t),
-    Para(t) => para("", t),
-    Bullets(xs) => join("", map(\x. para("Bullet", "•  ${x}"), xs)),
-    Code(c) => codeXml(c),
-    Table(hs, rows) => tableXml(hs, rows)
-  }
-
-export func documentXml(bs: [Blk]) -> string = join("", [
-  "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>",
-  "<w:document xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\"><w:body>",
-  join("", map(blockXml, bs)),
-  "<w:sectPr><w:pgSz w:w=\"11906\" w:h=\"16838\"/><w:pgMar w:top=\"1134\" w:right=\"1134\" w:bottom=\"1134\" w:left=\"1134\" w:header=\"567\" w:footer=\"567\" w:gutter=\"0\"/></w:sectPr>",
-  "</w:body></w:document>"])
-
-export func style(id: string, name: string, ppr: string, rpr: string) -> string =
-  "<w:style w:type=\"paragraph\" w:styleId=\"${id}\"><w:name w:val=\"${name}\"/><w:basedOn w:val=\"Normal\"/><w:qFormat/><w:pPr>${ppr}</w:pPr><w:rPr>${rpr}</w:rPr></w:style>"
-
-export func stylesXml() -> string = join("", [
-  "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>",
-  "<w:styles xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\">",
-  "<w:docDefaults><w:rPrDefault><w:rPr><w:rFonts w:ascii=\"Arial\" w:hAnsi=\"Arial\" w:cs=\"Arial\"/><w:sz w:val=\"21\"/></w:rPr></w:rPrDefault>",
-  "<w:pPrDefault><w:pPr><w:spacing w:after=\"120\" w:line=\"276\" w:lineRule=\"auto\"/></w:pPr></w:pPrDefault></w:docDefaults>",
-  "<w:style w:type=\"paragraph\" w:default=\"1\" w:styleId=\"Normal\"><w:name w:val=\"Normal\"/><w:qFormat/></w:style>",
-  style("Title", "Title", "<w:spacing w:after=\"60\"/>", "<w:b/><w:sz w:val=\"52\"/>"),
-  style("Subtitle", "Subtitle", "<w:spacing w:after=\"360\"/>", "<w:color w:val=\"595959\"/><w:sz w:val=\"28\"/>"),
-  style("Heading1", "heading 1", "<w:keepNext/><w:spacing w:before=\"360\" w:after=\"120\"/><w:outlineLvl w:val=\"0\"/>", "<w:b/><w:sz w:val=\"32\"/>"),
-  style("Heading2", "heading 2", "<w:keepNext/><w:spacing w:before=\"240\" w:after=\"80\"/><w:outlineLvl w:val=\"1\"/>", "<w:b/><w:sz w:val=\"26\"/>"),
-  style("Bullet", "List Bullet", "<w:ind w:left=\"360\"/><w:spacing w:after=\"60\"/>", ""),
-  style("Code", "Code", "<w:shd w:val=\"clear\" w:color=\"auto\" w:fill=\"F2F2F2\"/><w:spacing w:after=\"0\" w:line=\"240\" w:lineRule=\"auto\"/><w:ind w:left=\"113\" w:right=\"113\"/>",
-        "<w:rFonts w:ascii=\"Consolas\" w:hAnsi=\"Consolas\" w:cs=\"Consolas\"/><w:sz w:val=\"18\"/>"),
-  style("TableHead", "Table Heading", "<w:spacing w:after=\"0\"/>", "<w:b/>"),
-  "<w:style w:type=\"table\" w:styleId=\"Grid\"><w:name w:val=\"Table Grid\"/><w:tblPr><w:tblBorders>",
-  "<w:top w:val=\"single\" w:sz=\"4\" w:space=\"0\" w:color=\"BFBFBF\"/><w:left w:val=\"single\" w:sz=\"4\" w:space=\"0\" w:color=\"BFBFBF\"/>",
-  "<w:bottom w:val=\"single\" w:sz=\"4\" w:space=\"0\" w:color=\"BFBFBF\"/><w:right w:val=\"single\" w:sz=\"4\" w:space=\"0\" w:color=\"BFBFBF\"/>",
-  "<w:insideH w:val=\"single\" w:sz=\"4\" w:space=\"0\" w:color=\"BFBFBF\"/><w:insideV w:val=\"single\" w:sz=\"4\" w:space=\"0\" w:color=\"BFBFBF\"/>",
-  "</w:tblBorders><w:tblCellMar><w:left w:w=\"85\" w:type=\"dxa\"/><w:right w:w=\"85\" w:type=\"dxa\"/></w:tblCellMar></w:tblPr></w:style>",
-  "</w:styles>"])
-
-export func document(bs: [Blk]) -> [{ name: string, content: string }] = [
-  part("[Content_Types].xml", "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?><Types xmlns=\"http://schemas.openxmlformats.org/package/2006/content-types\"><Default Extension=\"rels\" ContentType=\"application/vnd.openxmlformats-package.relationships+xml\"/><Default Extension=\"xml\" ContentType=\"application/xml\"/><Override PartName=\"/word/document.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml\"/><Override PartName=\"/word/styles.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml\"/></Types>"),
-  part("_rels/.rels", "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?><Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\"><Relationship Id=\"rId1\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument\" Target=\"word/document.xml\"/></Relationships>"),
-  part("word/_rels/document.xml.rels", "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?><Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\"><Relationship Id=\"rId1\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles\" Target=\"styles.xml\"/></Relationships>"),
-  part("word/styles.xml", stylesXml()),
-  part("word/document.xml", documentXml(bs))
-]
