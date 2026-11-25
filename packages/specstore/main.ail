@@ -23,7 +23,9 @@ import ./check (runCheck)
 import ./guide (guide)
 import ./view (view)
 import ./xlsx (workbook)
-import ./docx (document, toMarkdown)
+import ./docx (toMarkdown)
+import pkg/sunholo/ailang_parse/services/markdown_parser (parseMarkdown, parseMarkdownMeta)
+import pkg/sunholo/ailang_parse/services/docx_generator (generateDocx)
 import ./deliver (toDelivery, missingDelivery, selectEvents, guideBlocks, trackingSheet)
 import ./audit (runAudit)
 import ./qa (planJson, runCompare, visitsOf)
@@ -94,10 +96,13 @@ export func runDeliver(sp: Spec, out: string, opts: [string]) -> () ! {IO, FS} {
     let blocks = guideBlocks(sp, d, evs, sel, date, sheetFile);
     mkdirAll(out);
     writeFile("${out}/${stem} - Implementation guide.md", toMarkdown(blocks));
-    match createArchive("${out}/${stem} - Implementation guide.docx", document(blocks)) {
-      Ok(_) => println("✓ wrote ${out}/${stem} - Implementation guide.docx (and .md)"),
-      Err(e) => println("✗ could not write the guide: ${e}")
-    };
+    let md = toMarkdown(blocks);
+    let docxPath = "${out}/${stem} - Implementation guide.docx";
+    -- The Word file is AILANG Parse's: its Markdown reader and Word generator (only FS).
+    let made = generateDocx({ format: "markdown", filename: "${stem} - Implementation guide.md",
+                              metadata: parseMarkdownMeta(md), blocks: parseMarkdown(md) }, docxPath);
+    if startsWith(made, "Error") then println("✗ could not write the guide: ${made}")
+    else println("✓ wrote ${docxPath} (and .md)");
     match createArchive("${out}/${sheetFile}", workbook(trackingSheet(sp, evs))) {
       Ok(_) => println("✓ wrote ${out}/${sheetFile}: ${show(length(evs))} events, ${show(foldl(\n. \e. n + length(e.params), 0, evs))} parameters"),
       Err(e) => println("✗ could not write the sheet: ${e}")

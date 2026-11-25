@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.4.1
+
+Fix: the implementation guide's tables were unreadable in Apple Pages (every column one character
+wide). 0.4.0 wrote the Word file with its own minimal writer, whose tables had no column grid and
+"auto" cell widths: Word works widths out, Pages takes them literally. The `.docx` is now made by
+AILANG Parse: `deliver` writes the guide as Markdown, as before, and hands that Markdown to
+`sunholo/ailang_parse` (`services/markdown_parser.parseMarkdown`, `services/docx_generator.generateDocx`).
+Both are file-only, so specstore's effects are unchanged (IO, FS, Env, Declassify). The `docx` module
+now holds only the blocks and their Markdown; the hand-written WordprocessingML is gone. New
+dependency: `sunholo/ailang_parse` 0.59.0. Checked by rendering the demo guide in LibreOffice and
+macOS Quick Look: columns, borders, headings and code all as intended. Tests unchanged: 95 passed.
+
 ## 0.4.0
 
 `specstore deliver`: what a developer gets before the site exists, from `spec.yaml` alone. No QA
