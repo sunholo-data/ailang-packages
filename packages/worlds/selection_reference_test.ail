@@ -11,7 +11,7 @@ module sunholo/worlds/selection_reference_test
 import ./selection (Setting,Band,Between,AtLeast,AtMost,AnyCount,Probability,SelectionError,acceptanceProbability,productTail,priorMeans,sumUniformCdf,sumUniformSurvival)
 import ./baseline (baseline)
 import std/result (Result,Ok,Err)
-import std/math (abs_Float)
+import std/math (absFloat)
 import std/list (foldl,length)
 
 type Cell = {name:string,s:Setting,want:float,mc:float,se:float,hits:int}
@@ -48,7 +48,7 @@ pure func sums() -> [{w:[float],x:float,cdf:float,survival:float}] = [
 pure func named(name:string) -> [Cell] = foldl(\acc c. if c.name==name then acc++[c] else acc,[],cells())
 pure func holds(name:string) -> bool = match named(name) {
  [c] => (match acceptanceProbability(baseline(),c.s,1) {
-  Ok(pr) => abs_Float(pr.p-c.want)+pr.error<=1e-8*c.want && abs_Float(c.mc-pr.p)<=3.0*c.se,
+  Ok(pr) => absFloat(pr.p-c.want)+pr.error<=1e-8*c.want && absFloat(c.mc-pr.p)<=3.0*c.se,
   Err(e) => false
  }),
  _ => false
@@ -67,17 +67,17 @@ test "acceptanceProbability equals the oracle to 1e-8 and its Monte Carlo within
 test "acceptanceProbability equals the oracle to 1e-8 and its Monte Carlo within 3 se: gapAboveRange (p = 6.745e-02)" { holds("gapAboveRange") }
 test "the reference table has 12 cells" { length(cells())==12 }
 pure func tailGap(name:string,threshold:float) -> float = match (named(name),productTail(baseline(),threshold,1)) {
- ([c],Ok(pr)) => (abs_Float(pr.p-c.want)+pr.error)/c.want,
+ ([c],Ok(pr)) => (absFloat(pr.p-c.want)+pr.error)/c.want,
  _ => 1.0
 }
 test "productTail (the three-uniform route) equals the oracle to 1e-8 at 3.2e7 and 1e5" {
  tailGap("product32e6",3.2e7)<=1e-8 && tailGap("product1e5",1e5)<=1e-8
 }
 test "the mean of the life prior equals the oracle to 1e-10" {
- match priorMeans(baseline()) { Ok(m) => abs_Float(m.life-lifeMeanWant())<=1e-10, Err(e) => false }
+ match priorMeans(baseline()) { Ok(m) => absFloat(m.life-lifeMeanWant())<=1e-10, Err(e) => false }
 }
 pure func sumGap(r:{w:[float],x:float,cdf:float,survival:float}) -> float = match (sumUniformCdf(r.w,r.x),sumUniformSurvival(r.w,r.x)) {
- (Ok(f),Ok(s)) => { let a=abs_Float(f-r.cdf)/r.cdf; let b=abs_Float(s-r.survival)/r.survival; if a>b then a else b },
+ (Ok(f),Ok(s)) => { let a=absFloat(f-r.cdf)/r.cdf; let b=absFloat(s-r.survival)/r.survival; if a>b then a else b },
  _ => 1.0
 }
 test "sums of two and three uniforms equal the oracle's clipped areas to 1e-11 of the value, both tails (12 points)" {
@@ -87,5 +87,5 @@ test "sums of two and three uniforms equal the oracle's clipped areas to 1e-11 o
 export pure func referenceProbe() -> string =
  foldl(\acc c. match acceptanceProbability(baseline(),c.s,1) {
   Err(e) => "${acc}${c.name} ERR\n",
-  Ok(pr) => "${acc}${c.name} p ${pr.p} error ${pr.error} oracle ${c.want} gap ${abs_Float(pr.p-c.want)/c.want} mc ${c.mc} se ${c.se} z ${(c.mc-pr.p)/c.se}\n"
+  Ok(pr) => "${acc}${c.name} p ${pr.p} error ${pr.error} oracle ${c.want} gap ${absFloat(pr.p-c.want)/c.want} mc ${c.mc} se ${c.se} z ${(c.mc-pr.p)/c.se}\n"
  },"",cells())

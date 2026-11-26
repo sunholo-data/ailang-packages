@@ -12,7 +12,7 @@
 module sunholo/celestial/ism_test
 
 import std/math (sin, cos, sqrt, intToFloat, floatToInt, log)
-import std/list (sortBy, length, nth_or)
+import std/list (sortBy, length, nthOr)
 import ./kepler (Vec3, absf)
 import ./frames (unitFromAngles)
 import ./ism (Interval, GrainDist, realSphericalHarmonic, realSphericalHarmonicAt, starSurfaceRadius, insideStarSurface, starSurfaceCrossings, starSurfaceChords, rayExitDistance, coneShellChord, insideConeShell, ellipsoidChord, slabChord, nHFromExtinction, healpixRingVec, grainDist, grainsAbove, grainRadiusAt, grainMass, grainMassDensity, grainTailMassFraction, poissonDraw)
@@ -193,7 +193,7 @@ pure func cmpF(a: float, b: float) -> int = if a < b then -1 else if a > b then 
 pure func medianOf(xs: [float]) -> float {
   let s = sortBy(cmpF, xs);
   let n = length(s);
-  if n % 2 == 1 then nth_or(s, n / 2, 0.0) else 0.5 * (nth_or(s, n / 2 - 1, 0.0) + nth_or(s, n / 2, 0.0))
+  if n % 2 == 1 then nthOr(s, n / 2, 0.0) else 0.5 * (nthOr(s, n / 2 - 1, 0.0) + nthOr(s, n / 2, 0.0))
 }
 
 pure func checkTable2() -> bool {
@@ -213,7 +213,7 @@ pure func checkAldebaranCrossing() -> bool {
   let b = scale(lb(180.97, -20.25), 20.43);
   let ts = starSurfaceCrossings(licCentre(), refit(), origin(), b);
   let cs = starSurfaceChords(licCentre(), refit(), origin(), b);
-  length(ts) == 1 && near(nth_or(ts, 0, 0.0), 0.08273949758908711, 0.000000000001)
+  length(ts) == 1 && near(nthOr(ts, 0, 0.0), 0.08273949758908711, 0.000000000001)
   && (match cs { [c] => c.t0 == 0.0 && near(c.t1, 0.08273949758908711, 0.000000000001), _ => false })
 }
 

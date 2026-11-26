@@ -3,7 +3,7 @@ import ./history (History, Mind, PlanetState, Sterile, Microbial, Complex, PreTe
 import ./baseline (baseline)
 import ./dial (Params,applyDial,zeroDial)
 import std/option (Some,None)
-import std/math (intToFloat,abs_Float)
+import std/math (intToFloat,absFloat)
 import std/list (length)
 
 pure func allTech() -> Params = {fLife:1.0,fComplex:1.0,fMinds:1.0,fTech:1.0,lifetimeYr:10000.0,windowYr:5e9,remnantLoYr:1e3,remnantHiYr:1e7}
@@ -42,7 +42,7 @@ pure func checkMany(n:int,valid:bool,alive:int) -> (bool,int) =
  if n==10000 then (valid,alive) else {
   let p={allTech()|lifetimeYr:1e9};
   let h=historyOf(p,true,uniforms(n));
-  let ok=match h.mind {None=>false,Some(m)=>m.preTechT<m.techT && abs_Float(m.endT-m.techT-p.lifetimeYr)<1e-6 && m.tracesUntilT>=m.endT};
+  let ok=match h.mind {None=>false,Some(m)=>m.preTechT<m.techT && absFloat(m.endT-m.techT-p.lifetimeYr)<1e-6 && m.tracesUntilT>=m.endT};
   checkMany(n+1,valid && ok,alive+(if stateAt(h,0.0)==Technological then 1 else 0))
  }
 test "10000 histories preserve order/duration and the closed-form technological share" {
@@ -69,9 +69,9 @@ pure func leadAt(u:float) -> float = match historyOf(allTech(),true,[0.2,0.2,0.2
 }
 test "exported shares and pre-tech lead bounds are the sampler's own constants" {
  collapseShare()==0.75 && ecocideShare()==0.15 && transcendenceShare()==0.10
- && abs_Float(collapseShare()+ecocideShare()+transcendenceShare()-1.0)<1e-15
+ && absFloat(collapseShare()+ecocideShare()+transcendenceShare()-1.0)<1e-15
  && endingAt(0.7499999)==Remnant && endingAt(0.75)==Ecocide
  && endingAt(0.8999999)==Ecocide && endingAt(0.90)==Transcended
  && leadAt(0.0)==preTechLeadLoYr() && leadAt(0.5)>preTechLeadLoYr() && leadAt(0.5)<preTechLeadHiYr()
- && abs_Float(leadAt(0.999999999)-preTechLeadHiYr())<1e-3
+ && absFloat(leadAt(0.999999999)-preTechLeadHiYr())<1e-3
 }

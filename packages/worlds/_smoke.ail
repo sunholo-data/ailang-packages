@@ -10,7 +10,7 @@ import ./selection (drawParams,dialOf,acceptanceProbability,expectedDraws,luckPr
 import ./epoch_statistics (endedShares)
 import std/result (Result,Ok,Err)
 import std/io (println,exit)
-import std/math (abs_Float)
+import std/math (absFloat)
 import std/string (join)
 import std/list (map)
 -- The 0.3.0 additions, in their own function: with them inline, main exceeds
@@ -20,7 +20,7 @@ func selectionSmoke(p:Params,n:float) -> bool ! {IO} {
  let setting={hzWorlds:0.2*n,reach:[{lifetimeYr:1e5,share:1.0}],endedYr:0.0,gapYr:0.0,found:AtLeast(3.0),ended:AnyCount,late:AnyCount};
  let chance=acceptanceProbability(baseline(),setting,1);
  let selected=match (drawn,chance) {
-  (Ok(q),Ok(c)) => (match dialOf(baseline(),q) {Ok(d) => abs_Float(c.p-0.1255402977194)<1e-9 && abs_Float(luckDex(baseline(),d)-0.8992000846277812)<1e-9, Err(e) => false}),
+  (Ok(q),Ok(c)) => (match dialOf(baseline(),q) {Ok(d) => absFloat(c.p-0.1255402977194)<1e-9 && absFloat(luckDex(baseline(),d)-0.8992000846277812)<1e-9, Err(e) => false}),
   _ => false
  };
  match chance {
@@ -52,8 +52,8 @@ export func main() -> () ! {IO} {
  };
  let exact=match propagateExact(certain(Technological),p,867.0) {Ok(b) => b, Err(e) => unknown};
  let refused=propagateExact(certain(Technological),p,3e9)==Err(OutsideExactDomain);
- let ok=refused && validBelief(chain) && validBelief(exact) && abs_Float(exact.technological-0.99133)<1e-12 && abs_Float(n-6698658.214051803)<1e-7 && abs_Float(total-2.9017005327211267)<1e-13
-  && abs_Float(starsWithin(m,half)/starsWithin(m,3000.0)-0.75)<1e-12
+ let ok=refused && validBelief(chain) && validBelief(exact) && absFloat(exact.technological-0.99133)<1e-12 && absFloat(n-6698658.214051803)<1e-7 && absFloat(total-2.9017005327211267)<1e-13
+  && absFloat(starsWithin(m,half)/starsWithin(m,3000.0)-0.75)<1e-12
   && luckDex(baseline(),zeroDial())==0.0 && stateAt(h,0.0)==Technological
   && rates.life==p.fLife && rates.tech>0.0 && rates.mindsWindow>=rates.tech && rates.remnant>0.0;
  println(baselineVersion());

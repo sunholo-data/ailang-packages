@@ -4,8 +4,8 @@ import std/result (Result,Ok,Err)
 import ./history (PlanetState,Sterile,Microbial,Complex,PreTech,Technological,Remnant,Transcended,Ecocide,historyOf,stateAt)
 import ./baseline (baseline)
 import ./dial (Params,applyDial,zeroDial)
-import std/math (exp,log,abs_Float,intToFloat,sqrt)
-import std/list (map,foldl,range,nth_or,length)
+import std/math (exp,log,absFloat,intToFloat,sqrt)
+import std/list (map,foldl,range,nthOr,length)
 
 -- The propagators return Result. These unwrap for the numeric tests; an Err
 -- becomes a belief of -1s (or an invalid generator), which no assertion accepts.
@@ -15,10 +15,10 @@ pure func chainOf(b:Belief,r:Rates,years:float) -> Belief = got(propagate(b,r,ye
 pure func exactOf(b:Belief,p:Params,years:float) -> Belief = got(propagateExact(b,p,years))
 pure func kernelOf(p:Params,s:PlanetState,years:float) -> Belief = got(historyKernel(p,s,years))
 pure func ratesFor(p:Params) -> Rates = match transitionRates(p) {Ok(r) => r, Err(e) => {q:[]}}
-pure func near(a:float,b:float,tol:float) -> bool = abs_Float(a-b)<=tol
+pure func near(a:float,b:float,tol:float) -> bool = absFloat(a-b)<=tol
 pure func toL(b:Belief) -> [float] = [b.sterile,b.microbial,b.complex,b.preTech,b.technological,b.remnant,b.transcended,b.ecocide]
 pure func maxDiff(a:Belief,b:Belief) -> float =
- foldl(\acc i. {let d=abs_Float(nth_or(toL(a),i,0.0)-nth_or(toL(b),i,0.0)); if d>acc then d else acc},0.0,range(0,8))
+ foldl(\acc i. {let d=absFloat(nthOr(toL(a),i,0.0)-nthOr(toL(b),i,0.0)); if d>acc then d else acc},0.0,range(0,8))
 pure func sumOf(b:Belief) -> float = foldl(\acc x. acc+x,0.0,toL(b))
 
 -- Design AC5: two- and three-state constant-rate chains against their
@@ -262,7 +262,7 @@ test "seen Technological with L > W/2: time left uniform on [L-W/2, L]" {
 type Tally = {seed:int,n:int,a:[int],b:[int]}
 pure func nextSeed(s:int) -> int = (s*48271)%2147483647
 pure func unif(s:int) -> float = (intToFloat(s)-0.5)/2147483647.0
-pure func bump(c:[int],i:int) -> [int] = map(\j. nth_or(c,j,0)+(if j==i then 1 else 0),range(0,8))
+pure func bump(c:[int],i:int) -> [int] = map(\j. nthOr(c,j,0)+(if j==i then 1 else 0),range(0,8))
 pure func draw(p:Params,seen:PlanetState,lo:float,hi:float,ya:float,yb:float,t:Tally) -> Tally {
  let s1=nextSeed(t.seed);
  let s2=nextSeed(s1);
@@ -278,8 +278,8 @@ pure func sample(p:Params,seen:PlanetState,lo:float,hi:float,ya:float,yb:float,d
  foldl(\t i. draw(p,seen,lo,hi,ya,yb,t),{seed:20261112,n:0,a:map(\j. 0,range(0,8)),b:map(\j. 0,range(0,8))},range(0,draws))
 pure func agrees(k:Belief,c:[int],n:int) -> bool =
  n>0 && foldl(\ok i. {
-  let q=nth_or(toL(k),i,0.0);
-  ok && abs_Float(intToFloat(nth_or(c,i,0))/intToFloat(n)-q)<=4.0*sqrt(q*(1.0-q)/intToFloat(n))+2.0/intToFloat(n)
+  let q=nthOr(toL(k),i,0.0);
+  ok && absFloat(intToFloat(nthOr(c,i,0))/intToFloat(n)-q)<=4.0*sqrt(q*(1.0-q)/intToFloat(n))+2.0/intToFloat(n)
  },true,range(0,8))
 -- Every lineage: all fractions 1, baseline times (L=1e5, W=5e9, traces 1e3..1e7).
 pure func lineages() -> Params = {lonely()|fLife:1.0,fComplex:1.0,fMinds:1.0,fTech:1.0}
@@ -324,7 +324,7 @@ test "sampler vs propagate: the chain misses the same tolerance at all six linea
 -- Probe for tools/propagate_validation.md: one line per (seen, years, state)
 -- with the sampler's frequency, the exact law and the chain. Not a public export.
 pure func rowsFor(name:string,years:float,c:[int],n:int,x:Belief,m:Belief) -> string =
- foldl(\acc i. "${acc}${name} ${years} n=${n} state${i} sampler ${intToFloat(nth_or(c,i,0))/intToFloat(n)} exact ${nth_or(toL(x),i,0.0)} chain ${nth_or(toL(m),i,0.0)}\n","",range(0,8))
+ foldl(\acc i. "${acc}${name} ${years} n=${n} state${i} sampler ${intToFloat(nthOr(c,i,0))/intToFloat(n)} exact ${nthOr(toL(x),i,0.0)} chain ${nthOr(toL(m),i,0.0)}\n","",range(0,8))
 pure func pairRows(name:string,p:Params,seen:PlanetState,t:Tally,ya:float,yb:float) -> string {
  let r=ratesFor(p);
  let first=rowsFor(name,ya,t.a,t.n,exactOf(certain(seen),p,ya),chainOf(certain(seen),r,ya));

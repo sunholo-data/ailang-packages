@@ -83,8 +83,8 @@ module sunholo/worlds/propagate
 import ./dial (Params)
 import ./history (PlanetState,Sterile,Microbial,Complex,PreTech,Technological,Remnant,Transcended,Ecocide,preTechLeadLoYr,preTechLeadHiYr,collapseShare,ecocideShare,transcendenceShare)
 import ./epoch_statistics (traceCappedMean)
-import std/math (exp,log,abs_Float,intToFloat)
-import std/list (map,foldl,length,nth_or,range,zipWith)
+import std/math (exp,log,absFloat,intToFloat)
+import std/list (map,foldl,length,nthOr,range,zipWith)
 import std/result (Result,Ok,Err)
 
 -- Probabilities of the eight states, in history.PlanetState's order.
@@ -111,29 +111,29 @@ ensures {result>=0,result<=7}
 pure func total(v:[float]) -> float = foldl(\acc x. acc+x,0.0,v)
 pure func unitRow(i:int) -> [float] = map(\j. if j==i then 1.0 else 0.0,range(0,8))
 pure func toList(b:Belief) -> [float] = [b.sterile,b.microbial,b.complex,b.preTech,b.technological,b.remnant,b.transcended,b.ecocide]
-pure func fromList(v:[float]) -> Belief = {sterile:nth_or(v,0,0.0),microbial:nth_or(v,1,0.0),complex:nth_or(v,2,0.0),preTech:nth_or(v,3,0.0),
- technological:nth_or(v,4,0.0),remnant:nth_or(v,5,0.0),transcended:nth_or(v,6,0.0),ecocide:nth_or(v,7,0.0)}
+pure func fromList(v:[float]) -> Belief = {sterile:nthOr(v,0,0.0),microbial:nthOr(v,1,0.0),complex:nthOr(v,2,0.0),preTech:nthOr(v,3,0.0),
+ technological:nthOr(v,4,0.0),remnant:nthOr(v,5,0.0),transcended:nthOr(v,6,0.0),ecocide:nthOr(v,7,0.0)}
 
 -- Non-negative and summing to 1 within 1e-9. NaN fails every comparison.
 export pure func validBelief(b:Belief) -> bool =
- foldl(\ok x. ok && x>=0.0 && x<=1.0+1e-9,true,toList(b)) && abs_Float(total(toList(b))-1.0)<=1e-9
+ foldl(\ok x. ok && x>=0.0 && x<=1.0+1e-9,true,toList(b)) && absFloat(total(toList(b))-1.0)<=1e-9
 export pure func certain(s:PlanetState) -> Belief
 ensures {validBelief(result)}
 {
  fromList(unitRow(stateIndex(s)))
 }
-export pure func probabilityOf(b:Belief,s:PlanetState) -> float = nth_or(toList(b),stateIndex(s),0.0)
+export pure func probabilityOf(b:Belief,s:PlanetState) -> float = nthOr(toList(b),stateIndex(s),0.0)
 
 pure func rowOk(row:[float],i:int) -> bool {
- let exit=0.0-nth_or(row,i,1.0);
+ let exit=0.0-nthOr(row,i,1.0);
  let off=total(row)+exit;
  length(row)==8 && exit>=0.0 && exit<=8e100
- && foldl(\ok j. ok && (j==i || (nth_or(row,j,-1.0)>=0.0 && nth_or(row,j,-1.0)<=1e100)),true,range(0,8))
- && abs_Float(off-exit)<=1e-9*exit
+ && foldl(\ok j. ok && (j==i || (nthOr(row,j,-1.0)>=0.0 && nthOr(row,j,-1.0)<=1e100)),true,range(0,8))
+ && absFloat(off-exit)<=1e-9*exit
 }
 -- Eight rows of eight; off-diagonal rates in [0,1e100]; each row sums to zero.
 export pure func validRates(r:Rates) -> bool =
- length(r.q)==8 && foldl(\ok i. ok && rowOk(nth_or(r.q,i,[]),i),true,range(0,8))
+ length(r.q)==8 && foldl(\ok i. ok && rowOk(nthOr(r.q,i,[]),i),true,range(0,8))
 pure func validEdges(es:[Edge]) -> bool = foldl(\ok e. ok && e.perYr>=0.0 && e.perYr<=1e100,true,es)
 pure func edgeRate(es:[Edge],i:int,j:int) -> float =
  foldl(\acc e. if stateIndex(e.src)==i && stateIndex(e.dst)==j then acc+e.perYr else acc,0.0,es)
@@ -146,11 +146,11 @@ ensures {validRates(result)}
  {q:map(\i. {
    let off=map(\j. if j==i then 0.0 else edgeRate(es,i,j),range(0,8));
    let exit=total(off);
-   map(\j. if j==i then 0.0-exit else nth_or(off,j,0.0),range(0,8))
+   map(\j. if j==i then 0.0-exit else nthOr(off,j,0.0),range(0,8))
   },range(0,8))}
 }
 export pure func rateBetween(r:Rates,src:PlanetState,dst:PlanetState) -> float =
- nth_or(nth_or(r.q,stateIndex(src),[]),stateIndex(dst),0.0)
+ nthOr(nthOr(r.q,stateIndex(src),[]),stateIndex(dst),0.0)
 
 pure func minF(a:float,b:float) -> float = if a<b then a else b
 pure func positive(x:float) -> float = if x>0.0 then x else 0.0
@@ -202,7 +202,7 @@ ensures {okRates(result)}
 
 -- 8x8 products on lists. Every entry stays non-negative, so there is no
 -- cancellation; rows are renormalised after each product.
-pure func column(m:[[float]],j:int) -> [float] = map(\row. nth_or(row,j,0.0),m)
+pure func column(m:[[float]],j:int) -> [float] = map(\row. nthOr(row,j,0.0),m)
 pure func dot(a:[float],b:[float]) -> float = total(zipWith(\x y. x*y,a,b))
 pure func matMul(a:[[float]],b:[[float]]) -> [[float]] {
  let cols=map(\j. column(b,j),range(0,8));
@@ -212,7 +212,7 @@ pure func normRows(m:[[float]]) -> [[float]] =
  map(\row. {let s=total(row); if s>0.0 then map(\x. x/s,row) else row},m)
 pure func identity() -> [[float]] = map(\i. unitRow(i),range(0,8))
 pure func maxExit(r:Rates) -> float =
- foldl(\acc i. {let e=0.0-nth_or(nth_or(r.q,i,[]),i,0.0); if e>acc then e else acc},0.0,range(0,8))
+ foldl(\acc i. {let e=0.0-nthOr(nthOr(r.q,i,[]),i,0.0); if e>acc then e else acc},0.0,range(0,8))
 -- Horner form of sum_n x^n/n! U^n, n<=20. For x<=0.5 the dropped tail is below
 -- 1e-25 of the sum; row normalisation supplies the exp(-x) factor.
 pure func series(u:[[float]],x:float,n:int,acc:[[float]]) -> [[float]] =
@@ -280,7 +280,7 @@ pure func ended(tech:float,pre:float,e:float,rem:float,stay:PlanetState) -> [flo
  let r=minF(positive(rem),collapseShare()*e);
  let other=[0.0,0.0,0.0,pre,tech,r,transcendenceShare()*e,ecocideShare()*e];
  let rest=positive(1.0-total(other));
- map(\j. if j==stateIndex(stay) then nth_or(other,j,0.0)+rest else nth_or(other,j,0.0),range(0,8))
+ map(\j. if j==stateIndex(stay) then nthOr(other,j,0.0)+rest else nthOr(other,j,0.0),range(0,8))
 }
 pure func fromTechnological(p:Params,x:float) -> [float] {
  let span=minF(p.lifetimeYr,p.windowYr/2.0);

@@ -32,7 +32,7 @@
 module sunholo/observe/belief
 
 import std/math (pow, exp, log)
-import std/list (length, nth_or)
+import std/list (length, nthOr)
 
 -- The eight planet states, in the order of sunholo/worlds PlanetState.
 export type State = Sterile | Microbial | Complex | PreTech | Technological | Remnant | Transcended | Ecocide deriving (Eq)
@@ -209,7 +209,7 @@ export pure func likelihoodRow(signal: Signal, host: HostClass) -> [float]
 export pure func likelihood(signal: Signal, host: HostClass, state: State) -> float
   ensures { result > 0.0, result < 1.0 }
 {
-  let p = nth_or(likelihoodRow(signal, host), stateIndex(state), 0.5);
+  let p = nthOr(likelihoodRow(signal, host), stateIndex(state), 0.5);
   if p > 0.0 && p < 1.0 then p else 0.5
 }
 
@@ -348,7 +348,7 @@ export pure func validBelief(p: [float]) -> bool {
   length(p) == 8 && allNonNegative(p) && d <= 0.000000001 && d >= -0.000000001
 }
 
-export pure func probOf(belief: [float], state: State) -> float = nth_or(belief, stateIndex(state), 0.0)
+export pure func probOf(belief: [float], state: State) -> float = nthOr(belief, stateIndex(state), 0.0)
 
 -- P(a living world at last light): every state but Sterile and Ecocide.
 -- Transcended counts as living (a design choice).

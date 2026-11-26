@@ -8,8 +8,8 @@ import ./propagate (Belief,PredictionError,historyKernel,exactDomain)
 import ./history (PlanetState,Complex,PreTech,Technological,Remnant)
 import ./dial (Params)
 import std/result (Result,Ok,Err)
-import std/math (abs_Float)
-import std/list (foldl,range,nth_or,length)
+import std/math (absFloat)
+import std/list (foldl,range,nthOr,length)
 
 type Cell = {name:string,p:Params,seen:PlanetState,years:float,want:[float]}
 pure func base() -> Params = {fLife:1.0,fComplex:1.0,fMinds:1.0,fTech:0.01,lifetimeYr:100000.0,windowYr:5000000000.0,remnantLoYr:1000.0,remnantHiYr:10000000.0}
@@ -72,7 +72,7 @@ pure func fixedTraceCells() -> [Cell] = [
 pure func toL(b:Belief) -> [float] = [b.sterile,b.microbial,b.complex,b.preTech,b.technological,b.remnant,b.transcended,b.ecocide]
 pure func worstGap(c:Cell) -> float = match historyKernel(c.p,c.seen,c.years) {
  Err(e) => 1.0,
- Ok(b) => foldl(\acc i. {let d=abs_Float(nth_or(toL(b),i,9.0)-nth_or(c.want,i,9.0)); if d>acc then d else acc},0.0,range(0,8))
+ Ok(b) => foldl(\acc i. {let d=absFloat(nthOr(toL(b),i,9.0)-nthOr(c.want,i,9.0)); if d>acc then d else acc},0.0,range(0,8))
 }
 pure func allWithin(cells:[Cell]) -> bool = foldl(\ok c. ok && exactDomain(c.p,c.years) && worstGap(c)<=1e-9,true,cells)
 test "historyKernel equals the oracle's exact law to 1e-9: base (19 cells)" { length(baseCells())==19 && allWithin(baseCells()) }

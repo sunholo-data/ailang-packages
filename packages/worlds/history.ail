@@ -2,7 +2,7 @@ module sunholo/worlds/history
 import ./dial (Params)
 import std/option (Option,Some,None)
 import std/math (pow)
-import std/list (length,nth_or,foldl)
+import std/list (length,nthOr,foldl)
 
 export type PlanetState = Sterile | Microbial | Complex | PreTech | Technological | Remnant | Transcended | Ecocide deriving (Eq)
 export type Mind = {preTechT:float,techT:float,endT:float,ending:PlanetState,tracesUntilT:float}
@@ -33,18 +33,18 @@ pure func validParams(p:Params) -> bool =
 export pure func historyOf
 (p:Params,habitable:bool,u:[float]) -> History =
  if not habitable || not validParams(p) || length(u)<8 || not foldl(\valid x. valid && x>=0.0 && x<1.0,true,u) then barren() else {
-  let life=nth_or(u,0,1.0);
-  let rank=nth_or(u,1,1.0);
-  let tech=nth_or(u,3,1.0);
+  let life=nthOr(u,0,1.0);
+  let rank=nthOr(u,1,1.0);
+  let tech=nthOr(u,3,1.0);
   if life<0.0 || life>=1.0 || rank<0.0 || rank>=1.0 || tech<0.0 || tech>=1.0 then barren()
   else if life>=p.fLife then barren() else {
    let bio=if rank<p.fComplex then Complex else Microbial;
    if rank>=p.fMinds || tech>=p.fTech then {biosphere:bio,mind:None}
    else {
-    let onset=(nth_or(u,4,0.5)-0.5)*p.windowYr;
+    let onset=(nthOr(u,4,0.5)-0.5)*p.windowYr;
     let endT=onset+p.lifetimeYr;
-    {biosphere:bio,mind:Some({preTechT:onset-logarithmic(preTechLeadLoYr(),preTechLeadHiYr(),nth_or(u,5,0.5)),techT:onset,endT:endT,
-     ending:ending(nth_or(u,6,0.5)),tracesUntilT:endT+logarithmic(p.remnantLoYr,p.remnantHiYr,nth_or(u,7,0.5))})}
+    {biosphere:bio,mind:Some({preTechT:onset-logarithmic(preTechLeadLoYr(),preTechLeadHiYr(),nthOr(u,5,0.5)),techT:onset,endT:endT,
+     ending:ending(nthOr(u,6,0.5)),tracesUntilT:endT+logarithmic(p.remnantLoYr,p.remnantHiYr,nthOr(u,7,0.5))})}
    }
   }
  }

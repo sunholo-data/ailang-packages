@@ -1,11 +1,11 @@
 module sunholo/worlds/dial_test
 import ./baseline (baseline)
 import ./dial (applyDial, zeroDial, luckDex)
-import std/math (abs_Float,intToFloat)
+import std/math (absFloat,intToFloat)
 
 test "zero dial is exactly the baseline medians and zero effective luck" {
   let p = applyDial(baseline(), zeroDial());
-  abs_Float(p.fLife - 0.632120558828558) < 1e-14 && p.fTech == 0.1
+  absFloat(p.fLife - 0.632120558828558) < 1e-14 && p.fTech == 0.1
   && p.lifetimeYr == 1e5 && p.windowYr == 5e9 && luckDex(baseline(), zeroDial()) == 0.0
 }
 test "fractions saturate and complex life always bounds intelligence" {
@@ -14,7 +14,7 @@ test "fractions saturate and complex life always bounds intelligence" {
   && p.lifetimeYr == 1e7
 }
 test "effective luck sums offsets before clamps and discounts saturated gains" {
-  abs_Float(luckDex(baseline(), {life: -1.0, minds: 0.5, tech: 0.5, lifetime: 2.0}) - 2.0) < 1e-12
+  absFloat(luckDex(baseline(), {life: -1.0, minds: 0.5, tech: 0.5, lifetime: 2.0}) - 2.0) < 1e-12
   && luckDex(baseline(), {life: 10.0, minds: 10.0, tech: 10.0, lifetime: 2.0}) < 5.0
 }
 

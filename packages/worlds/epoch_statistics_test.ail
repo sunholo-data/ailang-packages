@@ -2,9 +2,9 @@ module sunholo/worlds/epoch_statistics_test
 import ./epoch_statistics (traceCappedMean,historyProbabilities)
 import ./baseline (baseline)
 import ./dial (applyDial,zeroDial)
-import std/math (abs_Float,log,intToFloat)
+import std/math (absFloat,log,intToFloat)
 
-pure func near(a:float,b:float) -> bool = abs_Float(a-b)<1e-13
+pure func near(a:float,b:float) -> bool = absFloat(a-b)<1e-13
 pure func fixture() -> {fLife:float,fComplex:float,fMinds:float,fTech:float,lifetimeYr:float,windowYr:float,remnantLoYr:float,remnantHiYr:float} =
  {fLife:0.5,fComplex:0.5,fMinds:0.4,fTech:0.5,lifetimeYr:4.0,windowYr:10.0,remnantLoYr:1.0,remnantHiYr:2.0}
 test "capped log-uniform trace expectation: endpoints, equal bounds and uncapped integral" {

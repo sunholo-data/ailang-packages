@@ -45,8 +45,8 @@ import ./baseline (Factor,Prior,LogUniform,Measured,Fixed,AbiogenesisRate,quanti
 import ./dial (Dial,Params,applyDial)
 import std/result (Result,Ok,Err)
 import std/option (Option,Some,None)
-import std/math (pow,exp,log,log10,abs_Float,intToFloat,floatToInt)
-import std/list (map,foldl,length,nth_or,range,filter,sortBy,flatMap)
+import std/math (pow,exp,log,log10,absFloat,intToFloat,floatToInt)
+import std/list (map,foldl,length,nthOr,range,filter,sortBy,flatMap)
 
 -- Why a value was not computed.
 --   BadUniforms      not four numbers in [0,1].
@@ -120,15 +120,15 @@ export pure func drawParams(b:[Factor],u:[float]) -> Result[Params,SelectionErro
  if length(u)!=4 || not foldl(\ok x. ok && x>=0.0 && x<=1.0,true,u) then Err(BadUniforms) else match readBaseline(b) {
   Err(e) => Err(e),
   Ok(r) => {
-   let fLife=quantileOf(r.life,nth_or(u,0,0.5));
-   let fMinds=quantileOf(r.minds,nth_or(u,1,0.5));
-   let fTech=quantileOf(r.tech,nth_or(u,2,0.5));
-   let years=quantileOf(r.lifetime,nth_or(u,3,0.5));
+   let fLife=quantileOf(r.life,nthOr(u,0,0.5));
+   let fMinds=quantileOf(r.minds,nthOr(u,1,0.5));
+   let fTech=quantileOf(r.tech,nthOr(u,2,0.5));
+   let years=quantileOf(r.lifetime,nthOr(u,3,0.5));
    if okFraction(fLife) && okFraction(fMinds) && okFraction(fTech) && years>0.0 && years<=1e100
    then Ok(paramsOf(r,fLife,fMinds,fTech,years)) else Err(BadBaseline)
   }
  }
-pure func same(a:float,b:float) -> bool = abs_Float(a-b)<=1e-12*abs_Float(b)
+pure func same(a:float,b:float) -> bool = absFloat(a-b)<=1e-12*absFloat(b)
 pure func sameParams(a:Params,b:Params) -> bool =
  same(a.fLife,b.fLife) && same(a.fMinds,b.fMinds) && same(a.fComplex,b.fComplex) && same(a.fTech,b.fTech)
  && same(a.lifetimeYr,b.lifetimeYr) && a.windowYr==b.windowYr && a.remnantLoYr==b.remnantLoYr && a.remnantHiYr==b.remnantHiYr
@@ -368,8 +368,8 @@ pure func shapeOf(b:[Factor]) -> Result[Shape,SelectionError] = match readBaseli
 -- is not a probability (NaN, or outside [0,1] by more than 1e-12) or when the
 -- change exceeds 1e-6 of it. Exported so that the refusal can be tested.
 export pure func converged(coarse:float,fine:float) -> Result[Probability,SelectionError] {
- let change=abs_Float(fine-coarse);
- if not (fine>= -1e-12 && fine<=1.0+1e-12) || not (change<=1e-6*abs_Float(fine)) then Err(NotConverged)
+ let change=absFloat(fine-coarse);
+ if not (fine>= -1e-12 && fine<=1.0+1e-12) || not (change<=1e-6*absFloat(fine)) then Err(NotConverged)
  else Ok({p:if fine<0.0 then 0.0 else if fine>1.0 then 1.0 else fine,error:change})
 }
 pure func doubled(rule:int -> float,n:int) -> Result[Probability,SelectionError] = converged(rule(n),rule(2*n))

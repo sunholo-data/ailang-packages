@@ -1,13 +1,13 @@
 module sunholo/worlds/disc_test
 import ./disc (Disc, starsWithin, radiusQuantile, aliveWithin, existInWindow)
 import ./dial (Params)
-import std/math (abs_Float, pow)
+import std/math (absFloat, pow)
 import std/list (foldl)
 pure func all[a](f: a -> bool, xs:[a]) -> bool = foldl(\acc x. acc && f(x), true, xs)
 
 pure func disc() -> Disc = {rho0Pc3: 0.079, scaleHeightPc: 300.0}
 pure func ref() -> Params = {fLife: 0.3, fComplex: 0.1, fMinds: 0.1, fTech: 0.05, lifetimeYr: 1e4, windowYr: 5e9, remnantLoYr: 1e3, remnantHiYr: 1e7}
-pure func rounded(v: float, want: float, half: float) -> bool = abs_Float(v - want) <= half
+pure func rounded(v: float, want: float, half: float) -> bool = absFloat(v - want) <= half
 
 test "LW-23..27: exponential-disc star counts at printed precision" {
   rounded(starsWithin(disc(), 500.0), 9.92e5, 500.0)
@@ -62,7 +62,7 @@ test "LW-28..33: unrounded references, optimistic and pessimistic reconstruction
 }
 test "inverse CDF, origin, and small radius stable limit" {
  let m=disc();
- all(\u. abs_Float(starsWithin(m,radiusQuantile(m,3000.0,u))/starsWithin(m,3000.0)-u)<1e-12,[0.0,1e-12,0.001,0.1,0.5,0.9,0.999999])
+ all(\u. absFloat(starsWithin(m,radiusQuantile(m,3000.0,u))/starsWithin(m,3000.0)-u)<1e-12,[0.0,1e-12,0.001,0.1,0.5,0.9,0.999999])
  && starsWithin(m,0.0)==0.0 && starsWithin(m,1e-6)>0.0
- && abs_Float(starsWithin(m,1e-6)/(4.0*3.141592653589793*0.079*pow(1e-6/3.26156,3.0)/3.0)-1.0)<1e-8
+ && absFloat(starsWithin(m,1e-6)/(4.0*3.141592653589793*0.079*pow(1e-6/3.26156,3.0)/3.0)-1.0)<1e-8
 }

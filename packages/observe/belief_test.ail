@@ -10,7 +10,7 @@
 
 module sunholo/observe/belief_test
 
-import std/list (length, nth_or)
+import std/list (length, nthOr)
 import pkg/sunholo/relativity/hyper (absf)
 import ./belief (State, Sterile, Microbial, Complex, PreTech, Technological, Remnant, Transcended, Ecocide,
   Signal, O2, O2CH4, RedEdge, Glint, Beacon, Leakage, IndustrialGas, NightLights, WasteHeat, ArtificialTransit,
@@ -55,8 +55,8 @@ test "state and signal indices are the declared order (worlds.PlanetState's orde
 }
 
 test "likelihood reads the table by state" {
-  likelihood(O2, HostFGK, Complex) == nth_or(likelihoodRow(O2, HostFGK), 2, -1.0) &&
-  likelihood(WasteHeat, HostM, Transcended) == nth_or(likelihoodRow(WasteHeat, HostM), 6, -1.0)
+  likelihood(O2, HostFGK, Complex) == nthOr(likelihoodRow(O2, HostFGK), 2, -1.0) &&
+  likelihood(WasteHeat, HostM, Transcended) == nthOr(likelihoodRow(WasteHeat, HostM), 6, -1.0)
 }
 
 test "false positive: abiotic O2 on a sterile world is ten times likelier around an M dwarf" {
@@ -89,9 +89,9 @@ test "most technological worlds are quiet: beacon, leakage, waste heat and megas
 -- lifeOddsGainBound's claim rests on this: a living state is never less
 -- likely than Sterile to show a signal.
 pure func blLivingAbove(row: [float]) -> bool {
-  let s = nth_or(row, 0, 1.0);
-  nth_or(row, 1, 0.0) >= s && nth_or(row, 2, 0.0) >= s && nth_or(row, 3, 0.0) >= s && nth_or(row, 4, 0.0) >= s &&
-  nth_or(row, 5, 0.0) >= s && nth_or(row, 6, 0.0) >= s
+  let s = nthOr(row, 0, 1.0);
+  nthOr(row, 1, 0.0) >= s && nthOr(row, 2, 0.0) >= s && nthOr(row, 3, 0.0) >= s && nthOr(row, 4, 0.0) >= s &&
+  nthOr(row, 5, 0.0) >= s && nthOr(row, 6, 0.0) >= s
 }
 pure func blAllLivingAbove(ss: [Signal]) -> bool =
   match ss { [] => true, s :: rest => blLivingAbove(likelihoodRow(s, HostFGK)) && blLivingAbove(likelihoodRow(s, HostM)) && blAllLivingAbove(rest) }

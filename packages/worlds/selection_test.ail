@@ -4,11 +4,11 @@ import ./baseline (Factor,Prior,LogUniform,Fixed,AbiogenesisRate,baseline,quanti
 import ./dial (Dial,Params,applyDial,zeroDial,luckDex)
 import ./disc (starsWithin,aliveWithin)
 import std/result (Result,Ok,Err)
-import std/math (abs_Float,intToFloat,log10,sqrt)
-import std/list (map,foldl,range,filter,length,nth_or)
+import std/math (absFloat,intToFloat,log10,sqrt)
+import std/list (map,foldl,range,filter,length,nthOr)
 
-pure func near(a:float,b:float,tol:float) -> bool = abs_Float(a-b)<=tol
-pure func rel(a:float,b:float,tol:float) -> bool = abs_Float(a-b)<=tol*abs_Float(b)
+pure func near(a:float,b:float,tol:float) -> bool = absFloat(a-b)<=tol
+pure func rel(a:float,b:float,tol:float) -> bool = absFloat(a-b)<=tol*absFloat(b)
 pure func all[a](f:a -> bool,xs:[a]) -> bool = foldl(\acc x. acc && f(x),true,xs)
 pure func fails[a](r:Result[a,SelectionError],why:SelectionError) -> bool = match r {Err(e) => e==why, Ok(v) => false}
 pure func nowhere() -> Params = {fLife:-1.0,fComplex:-1.0,fMinds:-1.0,fTech:-1.0,lifetimeYr:-1.0,windowYr:-1.0,remnantLoYr:-1.0,remnantHiYr:-1.0}
@@ -21,7 +21,7 @@ pure func errOf(r:Result[Probability,SelectionError]) -> float = match r {Ok(v) 
 -- Nine fixed uniforms; each factor reads its own slot (life, minds, tech,
 -- lifetime), so the vectors below rotate the nine values across the slots.
 pure func nine() -> [float] = [0.0,0.001,0.1,0.25,0.5,0.75,0.9,0.999,1.0]
-pure func at(i:int) -> float = nth_or(nine(),i%9,-1.0)
+pure func at(i:int) -> float = nthOr(nine(),i%9,-1.0)
 pure func vector(i:int) -> [float] = [at(i),at(i+2),at(i+4),at(i+7)]
 pure func drawIsQuantiles(i:int) -> bool {
  let p=drawn(vector(i));
@@ -358,7 +358,7 @@ pure func tally(s:Setting,n:int,a:int,b:int,c:int,d:int,hits:int) -> int =
 pure func frequencyAgrees(s:Setting,n:int) -> bool {
  let p=prob(s);
  let f=intToFloat(tally(s,n,20261112,314159265,271828182,141421356,0))/intToFloat(n);
- p>0.0 && abs_Float(f-p)<=4.0*sqrt(p*(1.0-p)/intToFloat(n))+2.0/intToFloat(n)
+ p>0.0 && absFloat(f-p)<=4.0*sqrt(p*(1.0-p)/intToFloat(n))+2.0/intToFloat(n)
 }
 test "gross-error check, 20000 seeded draws through drawParams and accepts: frequency within 4 se of p, three-band region" {
  frequencyAgrees({hzWorlds:hz1000(),reach:[{lifetimeYr:1e3,share:1.0},{lifetimeYr:1e6,share:0.3},{lifetimeYr:1e8,share:0.05}],endedYr:814270.0,gapYr:2000.0,found:Between(1.0,50.0),ended:Between(0.5,500.0),late:Between(0.01,5.0)},20000)
@@ -378,7 +378,7 @@ pure func notDials(n:int,a:int,b:int,c:int,d:int,hits:int) -> int =
 -- Phi((-100 + log10 0.632)/50) = 0.0225359: a life fraction more than 100 dex
 -- below its median is outside applyDial's domain. Every other draw is a dial.
 test "8000 seeded draws: the share that is not a dial is within 4 se of 2.25 %" {
- abs_Float(intToFloat(notDials(8000,20261112,314159265,271828182,141421356,0))/8000.0-0.0225359)<=4.0*sqrt(0.0225359*0.9774641/8000.0)
+ absFloat(intToFloat(notDials(8000,20261112,314159265,271828182,141421356,0))/8000.0-0.0225359)<=4.0*sqrt(0.0225359*0.9774641/8000.0)
 }
 -- Probe for tools/selection_validation.md: the three statements of luck and
 -- the draw counts for the settings the design names. Not a public export.

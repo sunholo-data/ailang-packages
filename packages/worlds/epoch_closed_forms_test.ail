@@ -8,11 +8,11 @@ import ./baseline (baseline)
 import ./dial (Params,applyDial,zeroDial)
 import ./history (PlanetState,Remnant,Ecocide,Transcended,historyOf,stateAt)
 import std/result (Result,Ok,Err)
-import std/math (abs_Float,intToFloat,exp,sqrt)
+import std/math (absFloat,intToFloat,exp,sqrt)
 import std/list (foldl,range)
 
-pure func near(a:float,b:float,tol:float) -> bool = abs_Float(a-b)<=tol
-pure func rel(a:float,b:float,tol:float) -> bool = abs_Float(a-b)<=tol*abs_Float(b)
+pure func near(a:float,b:float,tol:float) -> bool = absFloat(a-b)<=tol
+pure func rel(a:float,b:float,tol:float) -> bool = absFloat(a-b)<=tol*absFloat(b)
 pure func fails[a](r:Result[a,EpochError],why:EpochError) -> bool = match r {Err(e) => e==why, Ok(v) => false}
 pure func saturated(years:float) -> Params = {fLife:1.0,fComplex:1.0,fMinds:1.0,fTech:1.0,lifetimeYr:years,windowYr:5e9,remnantLoYr:1e3,remnantHiYr:1e7}
 pure func ended(p:Params) -> EndedShares = match endedShares(p) {Ok(v) => v, Err(e) => {remnant:-1.0,ecocide:-1.0,transcended:-1.0}}
@@ -63,7 +63,7 @@ pure func count(n:int,r:int,e:int,t:int) -> (int,int,int) =
   let s=stateAt(historyOf(busy(),true,lattice(n)),0.0);
   count(n+1,if s==Remnant then r+1 else r,if s==Ecocide then e+1 else e,if s==Transcended then t+1 else t)
  }
-pure func within(k:int,p:float) -> bool = abs_Float(intToFloat(k)/20000.0-p)<=4.0*sqrt(p*(1.0-p)/20000.0)
+pure func within(k:int,p:float) -> bool = absFloat(intToFloat(k)/20000.0-p)<=4.0*sqrt(p*(1.0-p)/20000.0)
 test "20000 histories from historyOf: the three ended bins at epoch 0 within 4 standard errors of the closed forms" {
  let e=ended(busy());
  match count(0,0,0,0) {(r,ec,tr) => within(r,e.remnant) && within(ec,e.ecocide) && within(tr,e.transcended) && e.ecocide==0.06 && near(e.transcended,0.04,1e-16) && e.remnant>0.05}

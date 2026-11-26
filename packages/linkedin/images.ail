@@ -98,7 +98,7 @@ export func linkedinUploadImageBytes(uploadUrl: string, imageBytes: bytes)
 -- to be passed to linkedinCreateImagePost.
 --
 -- Note: the caller is responsible for reading + base64-decoding the
--- image bytes (via std/fs.readFileBytes + std/bytes.fromBase64).
+-- image bytes (via std/fs.readFileBase64 + std/bytes.fromBase64, or std/fs.readFileRaw).
 export func linkedinUploadImage(token: string, orgUrn: string, imageBytes: bytes)
   -> Result[string, string]
   ! {Net @limit=2}

@@ -9,7 +9,7 @@ module _smoke
 
 import std/io (println)
 import std/string (contains, startsWith)
-import std/list (length, nth_or)
+import std/list (length, nthOr)
 import std/json (decode, get, getString, asArray)
 import std/option (Some, None, getOrElse)
 import std/result (Ok, Err)
@@ -51,7 +51,7 @@ export func main() -> () ! {IO} {
     + check("urls: v1beta1, global, the id appended", interactionsUrl("p") == "https://aiplatform.googleapis.com/v1beta1/projects/p/locations/global/interactions" && interactionUrl("p", "I") == "https://aiplatform.googleapis.com/v1beta1/projects/p/locations/global/interactions/I" && apiRevision() == "2026-05-20")
     + check("record: status and id", statusRaw(c) == "completed" && statusOf(statusRaw(c)) == "done" && idOf(c) == "FIXTURE-ID")
     + check("record: the report is the model_output text", startsWith(reportOf(c), "# The Gemini Interactions API") && contains(reportOf(c), "[cite: 1]"))
-    + check("record: sources deduplicated, first-seen", length(sourcesOf(c)) == 1 && startsWith(nth_or(sourcesOf(c), 0, ""), "https://blog.google/"))
+    + check("record: sources deduplicated, first-seen", length(sourcesOf(c)) == 1 && startsWith(nthOr(sourcesOf(c), 0, ""), "https://blog.google/"))
     + check("record: usage tokens and searches", usageOf(c).tokens == 60132 && usageOf(c).searches == 4)
     + check("record: no nonce in a record started without one", recordNonce(c) == "")
     + check("failed record: nonce, error, transient", recordNonce(failed()) == "abc123" && errorOf(failed()) == "Internal error encountered." && transient(failed()) && statusOf(statusRaw(failed())) == "failed")

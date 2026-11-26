@@ -22,18 +22,18 @@ import std/net (httpRequest, httpRequestBytes, urlEncode)
 import std/json (encode, decode, getString, getObject, getArray, getInt, jo, ja, kv, js, jint, jb)
 import std/string (length)
 import std/list (map, foldl, length as listLength)
-import std/bytes (slice, length as bytesLength)
+import std/bytes (sliceLen, length as bytesLength)
 import std/option (Option, Some, None, getOrElse)
 import std/result (Result, Ok, Err)
 import pkg/sunholo/linkedin/posts (linkedinHeaders, linkedinEscapeLittleText, linkedinFindHeader, PostResult)
 
 export type VideoPart = { firstByte: int, lastByte: int, uploadUrl: string }
 
--- One part's bytes, [firstByte..lastByte] inclusive. std/bytes `slice` is (bytes, offset, LENGTH), not an end:
+-- One part's bytes, [firstByte..lastByte] inclusive. std/bytes `sliceLen` is (bytes, offset, LENGTH), not an end:
 -- passing lastByte + 1 cut the first part right (offset 0) and every later part asked past the end (None), so
 -- any video over one 4 MB part failed to upload (3 Nov 2026, a 4,660,380-byte film).
 export func linkedinPartBytes(video: bytes, p: VideoPart) -> Option[bytes] {
-  slice(video, p.firstByte, p.lastByte - p.firstByte + 1)
+  sliceLen(video, p.firstByte, p.lastByte - p.firstByte + 1)
 }
 export type VideoUpload = { videoUrn: string, uploadToken: string, parts: [VideoPart] }
 

@@ -1,7 +1,7 @@
 module sunholo/crew_core/cohorts
 import std/result (Result, Ok, Err)
 import std/option (Option, Some, None)
-import std/list (map, length, filter, any, contains, head, flatMap, foldl, take, drop, range, zip, nth_or, reverse)
+import std/list (map, length, filter, any, contains, head, flatMap, foldl, take, drop, range, zip, nthOr, reverse)
 import std/string (substring, charCode, startsWith, length as stringLength)
 import std/json (Json, decode, keys, asObject, asArray, asNumber, asString, getString, getInt, get, jo, kv, jint, js, ja)
 import std/crypto (sha256Hex)
@@ -37,7 +37,7 @@ pure func policies() -> [string] = ["encourage","hold","restrict"]
 pure func all[a](f: a -> bool, xs: [a]) -> bool = not any(\x. not f(x), xs)
 pure func sum(xs: [int]) -> int = foldl(\a x. a + x, 0, xs)
 pure func clamp(lo: int, hi: int, x: int) -> int = if x < lo then lo else if x > hi then hi else x
-pure func at(xs: [int], i: int) -> int = nth_or(xs, i, 0)
+pure func at(xs: [int], i: int) -> int = nthOr(xs, i, 0)
 pure func setAt(xs: [int], i: int, v: int) -> [int] = take(i, xs) ++ [v] ++ drop(i + 1, xs)
 pure func addAt(xs: [int], i: int, d: int) -> [int] = setAt(xs, i, at(xs, i) + d)
 pure func plus(xs: [int], ys: [int]) -> [int] = map(\p. match p { (a, b) => a + b }, zip(xs, ys))

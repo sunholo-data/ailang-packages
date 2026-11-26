@@ -6,16 +6,16 @@
 module sunholo/relativity/photometry
 
 import std/math (pow, sqrt, log10)
-import std/list (length, nth_or)
+import std/list (length, nthOr)
 import ./photometry_table (bpRpNodes, teffNodes, gMinusVNodes, bvNodes, bvTeffNodes, bcTeffNodes, bcVNodes)
 
 -- Interpolate between adjacent colour nodes. The generator guarantees
 -- strictly increasing colours; endpoints are handled by the caller.
 pure func interpolate(x: float, xs: [float], ys: [float], i: int) -> float {
-  let left = nth_or(xs, i, 0.0);
-  let right = nth_or(xs, i + 1, left);
-  let yLeft = nth_or(ys, i, 0.0);
-  let yRight = nth_or(ys, i + 1, yLeft);
+  let left = nthOr(xs, i, 0.0);
+  let right = nthOr(xs, i + 1, left);
+  let yLeft = nthOr(ys, i, 0.0);
+  let yRight = nthOr(ys, i + 1, yLeft);
   if x <= right || i + 2 >= length(xs)
   then yLeft + (x - left) * (yRight - yLeft) / (right - left)
   else interpolate(x, xs, ys, i + 1)
@@ -26,9 +26,9 @@ pure func interpolate(x: float, xs: [float], ys: [float], i: int) -> float {
 -- last, coolest node on both engines.
 pure func tableLookup(x: float, xs: [float], ys: [float]) -> float {
   let last = length(xs) - 1;
-  if not (x == x) then nth_or(ys, last, 0.0)
-  else if x <= nth_or(xs, 0, 0.0) then nth_or(ys, 0, 0.0)
-  else if x >= nth_or(xs, last, 0.0) then nth_or(ys, last, 0.0)
+  if not (x == x) then nthOr(ys, last, 0.0)
+  else if x <= nthOr(xs, 0, 0.0) then nthOr(ys, 0, 0.0)
+  else if x >= nthOr(xs, last, 0.0) then nthOr(ys, last, 0.0)
   else interpolate(x, xs, ys, 0)
 }
 
